@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+.pytest_cache/
+.streamlit/secrets.toml
+sample_data/
+*.xlsx
+*.xls
+*.csv
+!tests/**/*.csv
