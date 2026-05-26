@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}X線分析 - カイロプラクティック紹介状システム{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>レントゲン画像 骨盤分析</h2>
+    <p>骨盤のレントゲン画像をアップロードして、自動で骨盤傾斜・脚長差などを分析します</p>
+</div>
+
+<div class="form-card">
+    <h3>画像アップロード</h3>
+    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click();">
+        <div class="icon">&#128248;</div>
+        <p>クリックまたはドラッグ&ドロップで画像をアップロード</p>
+        <p style="font-size: 0.8rem; margin-top: 0.5rem;">対応形式: JPG, PNG, BMP, DICOM (最大16MB)</p>
+        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+    </div>
+    <img id="previewImage" class="preview-image" alt="プレビュー">
+</div>
+
+<div class="form-card">
+    <h3>分析タイプ</h3>
+    <div class="analysis-options">
+        <div class="analysis-option selected" data-type="pelvis_tilt" onclick="selectAnalysis(this)">
+            <h4>骨盤傾斜</h4>
+            <p>腸骨稜の高さの左右差を測定</p>
+        </div>
+        <div class="analysis-option" data-type="leg_length" onclick="selectAnalysis(this)">
+            <h4>脚長差</h4>
+            <p>大腿骨頭の位置から脚長差を推定</p>
+        </div>
+        <div class="analysis-option" data-type="spine_alignment" onclick="selectAnalysis(this)">
+            <h4>脊椎アライメント</h4>
+            <p>脊椎の側弯・偏位を分析</p>
+        </div>
+    </div>
+    <div class="form-actions">
+        <button class="btn btn-lg" onclick="analyzeImage()" id="analyzeBtn" disabled>分析を実行</button>
+    </div>
+</div>
+
+<div class="loading" id="loading">
+    <div class="spinner"></div>
+    <p>画像を分析中...</p>
+</div>
+
+<div class="results-panel" id="resultsPanel">
+    <div class="form-card">
+        <h3>分析結果</h3>
+        <div class="result-grid">
+            <div class="result-image">
+                <img id="resultImage" alt="分析結果">
+            </div>
+            <div class="result-data">
+                <h3>計測データ</h3>
+                <div id="measurementsList"></div>
+                <div class="note-box">
+                    &#9888; この分析結果は参考値です。臨床判断には必ず専門家の確認を行ってください。
+                    画像の解像度やポジショニングにより精度が変動します。
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedFile = null;
+let analysisType = 'pelvis_tilt';
+
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const previewImage = document.getElementById('previewImage');
+const analyzeBtn = document.getElementById('analyzeBtn');
+
+['dragenter', 'dragover'].forEach(evt => {
+    uploadZone.addEventListener(evt, e => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+});
+
+['dragleave', 'drop'].forEach(evt => {
+    uploadZone.addEventListener(evt, e => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+    });
+});
+
+uploadZone.addEventListener('drop', e => {
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+});
+
+fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+    selectedFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+        previewImage.src = e.target.result;
+        previewImage.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+    analyzeBtn.disabled = false;
+    uploadZone.querySelector('p').textContent = file.name;
+}
+
+function selectAnalysis(el) {
+    document.querySelectorAll('.analysis-option').forEach(o => o.classList.remove('selected'));
+    el.classList.add('selected');
+    analysisType = el.dataset.type;
+}
+
+async function analyzeImage() {
+    if (!selectedFile) return;
+
+    document.getElementById('loading').classList.add('active');
+    document.getElementById('resultsPanel').classList.remove('active');
+
+    const formData = new FormData();
+    formData.append('xray_image', selectedFile);
+    formData.append('analysis_type', analysisType);
+
+    try {
+        const res = await fetch('/xray', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (data.error) {
+            alert(data.error);
+            return;
+        }
+
+        document.getElementById('resultImage').src = 'data:image/png;base64,' + data.image;
+
+        const list = document.getElementById('measurementsList');
+        list.innerHTML = '';
+
+        const labels = {
+            tilt_angle_deg: '骨盤傾斜角度',
+            height_difference_mm_approx: '高さの差（概算mm）',
+            higher_side: '高い側',
+            left_length_px: '左脚長（px）',
+            right_length_px: '右脚長（px）',
+            difference_px: '差（px）',
+            difference_mm_approx: '差（概算mm）',
+            shorter_side: '短い側',
+            max_lateral_deviation_px: '最大側方偏位（px）',
+            max_lateral_deviation_mm_approx: '最大側方偏位（概算mm）',
+            deviation_direction: '偏位方向',
+            cobb_angle_approx_deg: 'Cobb角概算',
+        };
+
+        const m = data.measurements;
+        for (const [key, label] of Object.entries(labels)) {
+            if (m[key] !== undefined) {
+                const div = document.createElement('div');
+                div.className = 'measurement';
+
+                let val = m[key];
+                if (key === 'higher_side' || key === 'shorter_side' || key === 'deviation_direction') {
+                    val = val === 'left' ? '左' : '右';
+                }
+                if (key.includes('deg')) val += '°';
+                if (key.includes('mm')) val += ' mm';
+
+                div.innerHTML = `<span class="label">${label}</span><span class="value">${val}</span>`;
+                list.appendChild(div);
+            }
+        }
+
+        document.getElementById('resultsPanel').classList.add('active');
+    } catch (err) {
+        alert('分析中にエラーが発生しました: ' + err.message);
+    } finally {
+        document.getElementById('loading').classList.remove('active');
+    }
+}
+</script>
+{% endblock %}

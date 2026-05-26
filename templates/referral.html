@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}紹介状作成 - カイロプラクティック紹介状システム{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>紹介状作成</h2>
+    <p>問診票の情報を入力して、整形外科向け紹介状PDFを生成します</p>
+</div>
+
+<form method="POST" action="/referral" id="referralForm">
+    <div class="form-card">
+        <h3>院情報（差出人）</h3>
+        <div class="form-row">
+            <div class="form-group">
+                <label>院名</label>
+                <input type="text" name="clinic_name" placeholder="例: ○○カイロプラクティック院">
+            </div>
+            <div class="form-group">
+                <label>施術者名</label>
+                <input type="text" name="chiropractor_name" placeholder="例: 田中一郎">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>院の住所</label>
+            <input type="text" name="clinic_address" placeholder="例: 東京都渋谷区○○1-2-3">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>電話番号</label>
+                <input type="tel" name="clinic_phone" placeholder="例: 03-1234-5678">
+            </div>
+            <div class="form-group">
+                <label>紹介先病院名</label>
+                <input type="text" name="destination_hospital" placeholder="例: ○○整形外科クリニック">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h3>患者情報</h3>
+        <div class="form-row">
+            <div class="form-group">
+                <label>氏名 <span style="color: var(--danger);">*</span></label>
+                <input type="text" name="patient_name" required placeholder="例: 山田太郎">
+            </div>
+            <div class="form-group">
+                <label>フリガナ</label>
+                <input type="text" name="patient_name_kana" placeholder="例: ヤマダタロウ">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>生年月日</label>
+                <input type="date" name="patient_dob">
+            </div>
+            <div class="form-group">
+                <label>性別</label>
+                <select name="patient_gender">
+                    <option value="">選択してください</option>
+                    <option value="男性">男性</option>
+                    <option value="女性">女性</option>
+                    <option value="その他">その他</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>住所</label>
+            <input type="text" name="patient_address" placeholder="例: 東京都新宿区○○2-3-4">
+        </div>
+        <div class="form-group">
+            <label>電話番号</label>
+            <input type="tel" name="patient_phone" placeholder="例: 090-1234-5678">
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h3>症状・臨床情報</h3>
+        <div class="form-group">
+            <label>主訴（主な症状）<span style="color: var(--danger);">*</span></label>
+            <textarea name="chief_complaint" rows="2" required placeholder="例: 腰痛、右臀部から右下肢にかけてのしびれ"></textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>症状の部位</label>
+                <input type="text" name="symptom_location" placeholder="例: 腰部、右臀部、右大腿後面">
+            </div>
+            <div class="form-group">
+                <label>症状の期間</label>
+                <input type="text" name="symptom_duration" placeholder="例: 約3ヶ月">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>痛みのレベル（1-10）</label>
+            <input type="range" name="pain_level" min="1" max="10" value="5" id="painSlider"
+                   style="width: 100%;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-light);">
+                <span>1 (軽い)</span>
+                <span id="painValue" style="font-weight: bold; color: var(--primary);">5</span>
+                <span>10 (激痛)</span>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>既往歴</label>
+            <textarea name="medical_history" rows="2" placeholder="例: 高血圧（内服中）、2020年に右膝半月板手術"></textarea>
+        </div>
+        <div class="form-group">
+            <label>服用中の薬</label>
+            <textarea name="current_medications" rows="2" placeholder="例: アムロジピン5mg、ロキソプロフェン（頓用）"></textarea>
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h3>紹介目的</h3>
+        <div class="form-group">
+            <label>紹介理由・依頼事項</label>
+            <textarea name="referral_reason" rows="3" placeholder="例: 骨盤・腰椎のX線検査をお願いしたく、ご紹介申し上げます。施術方針決定のため、画像所見をご教示いただけますと幸いです。"></textarea>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-lg">紹介状PDFを生成</button>
+        <button type="button" class="btn btn-lg btn-outline" onclick="fillSampleData()">サンプルデータ入力</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('painSlider').addEventListener('input', function() {
+    document.getElementById('painValue').textContent = this.value;
+});
+
+function fillSampleData() {
+    const data = {
+        clinic_name: 'さくらカイロプラクティック院',
+        chiropractor_name: '佐藤健太',
+        clinic_address: '東京都世田谷区三軒茶屋1-2-3 三茶ビル2F',
+        clinic_phone: '03-5432-1234',
+        destination_hospital: '田中整形外科クリニック',
+        patient_name: '山田太郎',
+        patient_name_kana: 'ヤマダタロウ',
+        patient_dob: '1985-03-15',
+        patient_gender: '男性',
+        patient_address: '東京都世田谷区太子堂4-5-6',
+        patient_phone: '090-1234-5678',
+        chief_complaint: '腰痛、右臀部から右下肢にかけてのしびれ。デスクワーク時に増悪。',
+        symptom_location: '腰部、右臀部、右大腿後面',
+        symptom_duration: '約3ヶ月',
+        medical_history: '特になし',
+        current_medications: 'ロキソプロフェン（頓用）',
+        referral_reason: '骨盤・腰椎のX線検査をお願いしたく、ご紹介申し上げます。骨盤の左右差が触診にて疑われるため、画像所見をご教示いただけますと幸いです。',
+    };
+
+    for (const [key, value] of Object.entries(data)) {
+        const el = document.querySelector(`[name="${key}"]`);
+        if (el) el.value = value;
+    }
+
+    document.getElementById('painSlider').value = 6;
+    document.getElementById('painValue').textContent = '6';
+}
+</script>
+{% endblock %}

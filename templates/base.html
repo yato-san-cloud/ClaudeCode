@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}カイロプラクティック紹介状システム{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Chiro Referral</h1>
+        <a href="/" class="{% if request.path == '/' %}active{% endif %}">ホーム</a>
+        <a href="/referral" class="{% if request.path == '/referral' %}active{% endif %}">紹介状作成</a>
+        <a href="/xray" class="{% if request.path == '/xray' %}active{% endif %}">X線分析</a>
+    </nav>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
