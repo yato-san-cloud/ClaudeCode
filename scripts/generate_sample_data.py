@@ -31,7 +31,12 @@ def _weekday_weights() -> np.ndarray:
     return np.array([1.2, 1.1, 1.0, 1.1, 1.4, 0.6, 0.2])
 
 
-def generate(out_dir: Path, days: int = 90, n_sku: int = 50, n_partner: int = 10, seed: int = 42) -> None:
+def build_frames(days: int = 90, n_sku: int = 50, n_partner: int = 10, seed: int = 42) -> dict[str, pd.DataFrame]:
+    """Build dummy shipment/inbound/inventory DataFrames (WMS-style Japanese columns).
+
+    Returns a dict with keys 'shipments', 'inbound', 'inventory'. Used both by the
+    CLI file generator and by the app's "サンプルで試す" button (in-memory).
+    """
     rng = np.random.default_rng(seed)
     skus, partners = _build_master(rng, n_sku, n_partner)
     end = pd.Timestamp.today().normalize()
@@ -85,6 +90,13 @@ def generate(out_dir: Path, days: int = 90, n_sku: int = 50, n_partner: int = 10
         .assign(基準日=end, ロケーション=lambda df: ["A-" + str(i % 20 + 1).zfill(2) for i in range(len(df))])
         .rename(columns={"sku_code": "SKU", "sku_name": "商品名"})[["基準日", "SKU", "商品名", "ロケーション", "在庫数"]]
     )
+
+    return {"shipments": ship, "inbound": inbound, "inventory": inventory}
+
+
+def generate(out_dir: Path, days: int = 90, n_sku: int = 50, n_partner: int = 10, seed: int = 42) -> None:
+    frames = build_frames(days=days, n_sku=n_sku, n_partner=n_partner, seed=seed)
+    ship, inbound, inventory = frames["shipments"], frames["inbound"], frames["inventory"]
 
     out_dir.mkdir(parents=True, exist_ok=True)
     ship.to_csv(out_dir / "shipments.csv", index=False, encoding="utf-8-sig")
