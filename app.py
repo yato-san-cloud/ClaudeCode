@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from scripts.generate_sample_data import build_frames
-from src import analyses, charts, sql_analyses
+from src import analyses, charts, insights, sql_analyses
 from src.data_io import (
     INBOUND_FIELDS,
     INVENTORY_FIELDS,
@@ -430,6 +430,63 @@ def run_summary(dead_days: int = 60) -> dict:
     return sql_analyses.summary_kpis(catalog, dead_stock_days=dead_days, lo=lo_s, hi=hi_s)
 
 
+def run_anomalies(z: float = 2.0) -> pd.DataFrame:
+    if ss.engine == "pandas":
+        return analyses.daily_anomalies(shipments, z_thresh=z)
+    return sql_analyses.daily_anomalies(catalog, z_thresh=z, lo=lo_s, hi=hi_s)
+
+
+def run_partner_matrix(value: str = "lines") -> pd.DataFrame:
+    if ss.engine == "pandas":
+        return analyses.partner_weekday_matrix(shipments, value=value)
+    return sql_analyses.partner_weekday_matrix(catalog, value=value, lo=lo_s, hi=hi_s)
+
+
+def run_period_compare(period_a, period_b, key: str = "sku", top_n: int = 20) -> pd.DataFrame:
+    if ss.engine == "pandas":
+        return analyses.period_compare(shipments, period_a, period_b, key=key, top_n=top_n)
+    return sql_analyses.period_compare(catalog, period_a, period_b, key=key, top_n=top_n)
+
+
+def _materialize_ship() -> pd.DataFrame | None:
+    """For lifecycle/forecast/portfolio in DuckDB mode: materialize the (small) view."""
+    if ss.engine == "pandas":
+        return shipments
+    v = catalog.view("shipments") if catalog else None
+    if not v:
+        return None
+    sql = f"SELECT * FROM {v}"
+    if lo_s or hi_s:
+        sql += " WHERE " + (f"date >= TIMESTAMP '{lo_s}'" if lo_s else "TRUE")
+        if hi_s:
+            sql += f" AND date < TIMESTAMP '{hi_s}' + INTERVAL 1 DAY"
+    return catalog.query(sql)
+
+
+def run_forecast(horizon: int = 14) -> pd.DataFrame:
+    return analyses.simple_forecast(_materialize_ship(), horizon=horizon)
+
+
+def run_lifecycle() -> pd.DataFrame:
+    return analyses.sku_lifecycle(_materialize_ship())
+
+
+def run_portfolio() -> pd.DataFrame:
+    return analyses.sku_portfolio(run_turnover(60))
+
+
+def run_insights() -> list[insights.Insight]:
+    if ss.engine == "pandas":
+        ship_df, inb_df, inv_df = shipments, inbound, inventory
+    else:
+        ship_df = _materialize_ship()
+        inb_df = catalog.query(f"SELECT * FROM {catalog.view('inbound')}") if catalog and catalog.view("inbound") else None
+        inv_df = catalog.query(f"SELECT * FROM {catalog.view('inventory')}") if catalog and catalog.view("inventory") else None
+    k = run_summary(60)
+    ti = run_turnover(60)
+    return insights.generate_insights(ship_df, inb_df, inv_df, k, ti)
+
+
 def has_data(name: str) -> bool:
     if ss.engine == "pandas":
         local = {"shipments": shipments, "inbound": inbound, "inventory": inventory}[name]
@@ -452,15 +509,49 @@ def _fmt(value, digits: int = 2, suffix: str = "", na: str = "—") -> str:
     return f"{value:,}{suffix}"
 
 
-tab_sum, tab_trend, tab_abc, tab_peak, tab_inv = st.tabs(
-    ["📊 サマリー", "📈 物量推移", "🏷️ ABC 分析", "⏰ ピーク分析", "🔄 在庫回転"]
+tab_sum, tab_trend, tab_abc, tab_peak, tab_inv, tab_fc, tab_pf, tab_cmp = st.tabs(
+    ["📊 サマリー", "📈 物量推移", "🏷️ ABC 分析", "⏰ ピーク分析",
+     "🔄 在庫回転", "🔮 予測", "🧬 SKUポートフォリオ", "🔁 期間対比"]
 )
+
+
+def _insight_card(ins: insights.Insight) -> None:
+    """色付きカードを 1 枚描画。"""
+    color = {"critical": "#FFEBEE", "warning": "#FFF8E1", "info": "#E8F4FD"}[ins.severity]
+    border = {"critical": "#E53935", "warning": "#FB8C00", "info": "#1E88E5"}[ins.severity]
+    metric_html = f"<span style='float:right;font-weight:bold;color:{border}'>{ins.metric}</span>" if ins.metric else ""
+    sug_html = f"<div style='margin-top:4px;font-size:0.85rem'>💬 {ins.suggestion}</div>" if ins.suggestion else ""
+    st.markdown(
+        f"<div style='background:{color};border-left:4px solid {border};"
+        f"padding:8px 12px;margin-bottom:6px;border-radius:4px'>"
+        f"<div style='font-weight:bold'>{ins.icon} {ins.title}{metric_html}</div>"
+        f"<div style='font-size:0.85rem;color:#555'>{ins.detail}</div>{sug_html}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ── サマリー(1枚で 3PL 判断材料を一覧)─────────────────────────────────────
 with tab_sum:
     k = run_summary(dead_days=60)
     st.caption("3PL 運用判断に使う KPI を一覧で確認します。期間フィルタが反映されます。")
+
+    # ── 💡 自動インサイト ─────────────────────────────────────────
+    ins_list = run_insights()
+    if ins_list:
+        st.markdown("##### 💡 自動で見つけた注目ポイント")
+        n_crit = sum(1 for i in ins_list if i.severity == "critical")
+        n_warn = sum(1 for i in ins_list if i.severity == "warning")
+        n_info = sum(1 for i in ins_list if i.severity == "info")
+        st.caption(f"🚨 要対応 {n_crit} 件 / ⚠️ 要注視 {n_warn} 件 / 💡 参考 {n_info} 件")
+        max_show = st.session_state.get("show_all_insights", False)
+        items = ins_list if max_show else ins_list[:6]
+        for ins in items:
+            _insight_card(ins)
+        if len(ins_list) > 6 and not max_show:
+            if st.button(f"さらに {len(ins_list) - 6} 件を表示"):
+                st.session_state.show_all_insights = True
+                st.rerun()
+        st.divider()
 
     # Row 1: ボリューム
     st.markdown("##### 📦 ボリューム")
@@ -562,6 +653,17 @@ with tab_trend:
             charts.trends_line(df_trend, value=value, title=f"{freq_label}の{metric_label}推移"),
             width="stretch",
         )
+
+        st.markdown("##### 🚨 日次異常検知 (z-score)")
+        c_a, c_b = st.columns([3, 1])
+        with c_b:
+            z = st.slider("検出感度 (z)", 1.5, 3.5, 2.0, 0.1, help="平均から ±n σ を外れた日を異常と判定")
+        df_ano = run_anomalies(z=z)
+        c_a.plotly_chart(charts.anomaly_line(df_ano, title=f"日次出荷量と異常日(z≥{z})"), width="stretch")
+        if not df_ano.empty and df_ano["anomaly"].any():
+            with st.expander(f"異常日 {int(df_ano['anomaly'].sum())} 件の詳細"):
+                st.dataframe(df_ano[df_ano["anomaly"]].assign(z=lambda d: d["z"].round(2)), width="stretch", hide_index=True)
+
         if not df_trend.empty:
             with st.expander("集計データを見る"):
                 st.dataframe(df_trend.rename(columns=TREND_COLS), width="stretch", hide_index=True)
@@ -619,6 +721,11 @@ with tab_peak:
             col_b.info("時刻別の分析には「出荷日時」列の割り当てが必要です。")
         if hm is not None and not hm.empty:
             st.plotly_chart(charts.hour_weekday_heatmap(hm), width="stretch")
+        if has_col("shipments", "partner"):
+            st.markdown("##### 🤝 取引先 × 曜日 ヒートマップ")
+            pmx = run_partner_matrix(value=value)
+            if not pmx.empty:
+                st.plotly_chart(charts.partner_heatmap(pmx, title=f"取引先 × 曜日 ({metric_label})"), width="stretch")
 
 # ── 在庫回転 ────────────────────────────────────────────────────────────────
 with tab_inv:
@@ -648,3 +755,105 @@ with tab_inv:
                     st.success("デッドストックはありません。")
                 else:
                     st.dataframe(dead_df.rename(columns=INV_COLS), width="stretch", hide_index=True)
+
+
+# ── 🔮 予測 ────────────────────────────────────────────────────────────────
+with tab_fc:
+    if not has_data("shipments"):
+        st.info("出荷明細を取り込むと、予測が表示されます。")
+    else:
+        st.caption("曜日季節性 + 直近トレンドによる簡易予測。配車・人員計画の早期判断材料に。")
+        c = st.columns(3)
+        with c[0]:
+            horizon = st.slider("予測期間 (日)", 7, 30, 14, 1)
+        df_fc = run_forecast(horizon)
+        st.plotly_chart(charts.forecast_band(df_fc, title=f"出荷予測 ({horizon} 日先)"), width="stretch")
+        fc_only = df_fc[df_fc["kind"] == "forecast"]
+        if not fc_only.empty:
+            total_fc = float(fc_only["qty"].sum())
+            actual_period_avg = float(df_fc[df_fc["kind"] == "actual"]["qty"].tail(horizon).sum())
+            m = st.columns(3)
+            m[0].metric(f"予測合計({horizon}日)", f"{total_fc:,.0f} pcs")
+            m[1].metric(f"直近{horizon}日実績", f"{actual_period_avg:,.0f} pcs")
+            delta_pct = (total_fc - actual_period_avg) / actual_period_avg * 100 if actual_period_avg else 0
+            m[2].metric("予測 vs 直近", f"{delta_pct:+.1f}%")
+            with st.expander("予測明細"):
+                st.dataframe(fc_only.assign(qty=lambda d: d["qty"].round(0)).rename(columns={"date": "日付", "qty": "予測数量", "lower": "下限", "upper": "上限"})[["日付", "予測数量", "下限", "上限"]], width="stretch", hide_index=True)
+
+
+# ── 🧬 SKU ポートフォリオ ──────────────────────────────────────────────────
+with tab_pf:
+    if not has_data("inventory") or not has_data("shipments"):
+        st.info("出荷明細 + 在庫スナップショットを取り込むと表示されます。")
+    else:
+        st.caption("回転率 × 在庫数で 4 象限に分類。優良 / 過剰 / 主力 / 死蔵候補が一目で分かります。")
+        df_pf = run_portfolio()
+        if df_pf.empty:
+            st.warning("分類できる SKU がありません。")
+        else:
+            counts = df_pf["quadrant"].value_counts()
+            cols = st.columns(4)
+            order = ["🟢 優良(高回転・少在庫)", "🔵 主力(高回転・多在庫)", "🟠 過剰(低回転・多在庫)", "⚪ 死蔵候補(低回転・少在庫)"]
+            for i, q in enumerate(order):
+                cols[i].metric(q, f"{int(counts.get(q, 0)):,} 品")
+            st.plotly_chart(charts.sku_portfolio_scatter(df_pf), width="stretch")
+
+            st.markdown("##### 🧬 SKU ライフサイクル分布")
+            df_life = run_lifecycle()
+            cl, cr = st.columns([1, 2])
+            with cl:
+                st.plotly_chart(charts.lifecycle_donut(df_life), width="stretch")
+            with cr:
+                if not df_life.empty:
+                    status_counts = df_life["status"].value_counts().rename_axis("status").reset_index(name="count")
+                    st.dataframe(status_counts, width="stretch", hide_index=True)
+                    st.markdown("**新規 / 成長 SKU 上位**")
+                    grown = df_life[df_life["status"].isin(["新規", "成長"])].sort_values("recent_qty", ascending=False).head(10)
+                    if not grown.empty:
+                        st.dataframe(grown[["sku", "status", "recent_qty", "prev_qty", "change_rate"]].assign(change_rate=lambda d: (d["change_rate"] * 100).round(1)), width="stretch", hide_index=True)
+
+
+# ── 🔁 期間対比 ────────────────────────────────────────────────────────────
+with tab_cmp:
+    if not has_data("shipments"):
+        st.info("出荷明細を取り込むと、期間対比が表示されます。")
+    else:
+        st.caption("2 つの期間を比較し、誰(SKU / 取引先)が変化を主導したかを寄与度で可視化します。")
+        bounds = None
+        if ss.engine == "pandas":
+            bounds = (shipments["date"].min().date(), shipments["date"].max().date())
+        else:
+            db = catalog.date_bounds()
+            if db: bounds = (db[0].date(), db[1].date())
+        if not bounds or bounds[0] == bounds[1]:
+            st.warning("期間が短すぎて対比できません。")
+        else:
+            mid = bounds[0] + (bounds[1] - bounds[0]) / 2
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**期間 A (旧)**")
+                a_range = st.slider("期間 A", min_value=bounds[0], max_value=bounds[1], value=(bounds[0], mid), key="cmp_a")
+            with c2:
+                st.markdown("**期間 B (新)**")
+                b_range = st.slider("期間 B", min_value=bounds[0], max_value=bounds[1], value=(mid, bounds[1]), key="cmp_b")
+            axis_opts = {"SKU": "sku"}
+            if has_col("shipments", "partner"):
+                axis_opts["取引先"] = "partner"
+            axis_label = segmented("分析軸", list(axis_opts), key="cmp_axis")
+            axis = axis_opts[axis_label]
+            df_cmp = run_period_compare(a_range, b_range, key=axis, top_n=20)
+            if df_cmp.empty:
+                st.warning("対比結果が空です。期間を広げてください。")
+            else:
+                total_a = float(df_cmp["qty_a"].sum())
+                total_b = float(df_cmp["qty_b"].sum())
+                delta = total_b - total_a
+                pct = (delta / total_a * 100) if total_a else 0
+                m = st.columns(3)
+                m[0].metric("期間 A 合計", f"{total_a:,.0f}")
+                m[1].metric("期間 B 合計", f"{total_b:,.0f}")
+                m[2].metric("変化", f"{delta:+,.0f}", delta=f"{pct:+.1f}%")
+                st.plotly_chart(charts.contribution_waterfall(df_cmp, key=axis, title=f"{axis_label} 別 寄与度 (期間B - 期間A)"), width="stretch")
+                with st.expander("寄与度 詳細データ"):
+                    cols_show = {axis: axis_label, "qty_a": "期間A数量", "qty_b": "期間B数量", "delta": "変化", "contribution": "寄与度"}
+                    st.dataframe(df_cmp.rename(columns=cols_show), width="stretch", hide_index=True)

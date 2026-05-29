@@ -5,6 +5,7 @@ All inputs use the standardized logical column names produced by data_io.apply_m
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -236,3 +237,192 @@ def summary_kpis(
 
 
 __all__ = ["volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover", "summary_kpis"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 拡張分析 (Keyence 流の「気付き」「対比」「予測」「ポートフォリオ」)
+# ═══════════════════════════════════════════════════════════════════════════
+def daily_anomalies(shipments: pd.DataFrame | None, z_thresh: float = 2.0) -> pd.DataFrame:
+    """日次出荷量に z-score を付与し、しきい値超を flag。
+
+    Returns columns: date, qty, lines, ma7, z, anomaly.
+    """
+    if shipments is None or shipments.empty or "date" not in shipments.columns:
+        return pd.DataFrame(columns=["date", "qty", "lines", "ma7", "z", "anomaly"])
+    g = (
+        shipments.assign(date=shipments["date"].dt.normalize())
+        .groupby("date", as_index=False)
+        .agg(qty=("qty", "sum"), lines=("qty", "size"))
+        .sort_values("date")
+    )
+    g["ma7"] = g["qty"].rolling(7, min_periods=1).mean()
+    mu, sd = g["qty"].mean(), g["qty"].std(ddof=0)
+    g["z"] = (g["qty"] - mu) / sd if sd > 0 else 0.0
+    g["anomaly"] = g["z"].abs() >= z_thresh
+    return g.reset_index(drop=True)
+
+
+def period_compare(
+    shipments: pd.DataFrame | None,
+    period_a: tuple[pd.Timestamp, pd.Timestamp],
+    period_b: tuple[pd.Timestamp, pd.Timestamp],
+    key: str = "sku",
+    top_n: int = 20,
+) -> pd.DataFrame:
+    """期間 A → 期間 B の変化を `key` 別に分解し寄与度を返す。
+
+    Returns columns: key, qty_a, qty_b, delta, contribution.
+    """
+    if shipments is None or shipments.empty or key not in shipments.columns:
+        return pd.DataFrame(columns=[key, "qty_a", "qty_b", "delta", "contribution"])
+
+    def _slice(start, end):
+        m = (shipments["date"] >= pd.Timestamp(start)) & (shipments["date"] <= pd.Timestamp(end))
+        return shipments.loc[m].groupby(key)["qty"].sum()
+
+    a = _slice(*period_a).rename("qty_a")
+    b = _slice(*period_b).rename("qty_b")
+    df = pd.concat([a, b], axis=1).fillna(0)
+    df["delta"] = df["qty_b"] - df["qty_a"]
+    total_delta = df["delta"].sum()
+    df["contribution"] = df["delta"] / total_delta if total_delta != 0 else 0.0
+    df = df.reset_index().sort_values("delta", key=lambda s: s.abs(), ascending=False).head(top_n)
+    return df.reset_index(drop=True)
+
+
+def sku_lifecycle(shipments: pd.DataFrame | None, recent_days: int = 14, slow_days: int = 30) -> pd.DataFrame:
+    """SKU を新規/成長/安定/衰退/停止に分類する。
+
+    Returns columns: sku, qty, first_seen, last_seen, recent_qty, prev_qty,
+                     change_rate, status.
+    """
+    if shipments is None or shipments.empty or "sku" not in shipments.columns:
+        return pd.DataFrame(columns=["sku", "qty", "first_seen", "last_seen", "recent_qty", "prev_qty", "change_rate", "status"])
+
+    max_date = shipments["date"].max().normalize()
+    rec_cut = max_date - pd.Timedelta(days=recent_days)
+    slow_cut = max_date - pd.Timedelta(days=slow_days)
+    new_cut = shipments["date"].min().normalize() + pd.Timedelta(days=recent_days)
+
+    base = shipments.groupby("sku").agg(
+        qty=("qty", "sum"),
+        first_seen=("date", "min"),
+        last_seen=("date", "max"),
+    )
+    recent = (
+        shipments[shipments["date"] > rec_cut]
+        .groupby("sku")["qty"].sum().rename("recent_qty")
+    )
+    prev_window_start = rec_cut - pd.Timedelta(days=recent_days)
+    prev = (
+        shipments[(shipments["date"] > prev_window_start) & (shipments["date"] <= rec_cut)]
+        .groupby("sku")["qty"].sum().rename("prev_qty")
+    )
+    df = base.join(recent, how="left").join(prev, how="left").fillna({"recent_qty": 0, "prev_qty": 0})
+    df["change_rate"] = (df["recent_qty"] - df["prev_qty"]) / df["prev_qty"].replace(0, np.nan)
+
+    def classify(row) -> str:
+        if row["last_seen"] < slow_cut:
+            return "停止"
+        if row["first_seen"] >= new_cut:
+            return "新規"
+        if row["prev_qty"] > 0 and row["change_rate"] >= 0.25:
+            return "成長"
+        if row["prev_qty"] > 0 and row["change_rate"] <= -0.25:
+            return "衰退"
+        return "安定"
+
+    df["status"] = df.apply(classify, axis=1)
+    return df.reset_index()[["sku", "qty", "first_seen", "last_seen", "recent_qty", "prev_qty", "change_rate", "status"]]
+
+
+def partner_weekday_matrix(shipments: pd.DataFrame | None, value: str = "lines", top_n: int = 15) -> pd.DataFrame:
+    """取引先 × 曜日 のヒートマップ。"""
+    if shipments is None or shipments.empty or "partner" not in shipments.columns or "date" not in shipments.columns:
+        return pd.DataFrame()
+    labels = ["月", "火", "水", "木", "金", "土", "日"]
+    work = shipments.copy()
+    work["weekday"] = work["date"].dt.weekday.map(lambda i: labels[int(i)])
+    if value == "qty":
+        m = work.pivot_table(index="partner", columns="weekday", values="qty", aggfunc="sum", fill_value=0)
+    else:
+        m = work.pivot_table(index="partner", columns="weekday", values="qty", aggfunc="size", fill_value=0)
+    m = m.reindex(columns=labels, fill_value=0)
+    m["total"] = m.sum(axis=1)
+    m = m.sort_values("total", ascending=False).head(top_n).drop(columns="total")
+    return m
+
+
+def simple_forecast(shipments: pd.DataFrame | None, horizon: int = 14, history: int = 28) -> pd.DataFrame:
+    """単純な曜日別平均 + トレンドによる出荷予測。
+
+    Returns columns: date, qty, kind ('actual' or 'forecast'), lower, upper.
+    """
+    if shipments is None or shipments.empty or "date" not in shipments.columns:
+        return pd.DataFrame(columns=["date", "qty", "kind", "lower", "upper"])
+    daily = (
+        shipments.groupby(shipments["date"].dt.normalize())["qty"]
+        .sum()
+        .sort_index()
+        .astype(float)
+    )
+    if len(daily) < 7:
+        return pd.DataFrame(columns=["date", "qty", "kind", "lower", "upper"])
+    actual = daily.reset_index()
+    actual.columns = ["date", "qty"]
+    actual["kind"] = "actual"
+    actual["lower"] = actual["qty"]
+    actual["upper"] = actual["qty"]
+
+    hist_tail = daily.iloc[-history:] if len(daily) >= history else daily
+    wd_avg = hist_tail.groupby(hist_tail.index.weekday).mean()
+    if len(hist_tail) >= 14:
+        first_half = hist_tail.iloc[: len(hist_tail) // 2].mean()
+        second_half = hist_tail.iloc[len(hist_tail) // 2 :].mean()
+        trend = (second_half - first_half) / (len(hist_tail) / 2)
+    else:
+        trend = 0.0
+    last_actual_idx = float(len(daily) - 1)
+    resid = hist_tail.values - hist_tail.index.weekday.map(wd_avg.to_dict()).to_numpy()
+    sigma = float(np.std(resid)) if len(resid) > 1 else hist_tail.std()
+
+    rows = []
+    last_date = daily.index[-1]
+    for i in range(1, horizon + 1):
+        d = last_date + pd.Timedelta(days=i)
+        wd = int(d.weekday())
+        base = float(wd_avg.get(wd, hist_tail.mean()))
+        fc = max(0.0, base + trend * i)
+        rows.append({"date": d, "qty": fc, "kind": "forecast", "lower": max(0.0, fc - 1.96 * sigma), "upper": fc + 1.96 * sigma})
+    forecast = pd.DataFrame(rows)
+    return pd.concat([actual, forecast], ignore_index=True)
+
+
+def sku_portfolio(turnover_df: pd.DataFrame | None) -> pd.DataFrame:
+    """SKU を 回転率 × 在庫数 で 4 象限に分類する。
+
+    Returns columns: sku, turnover, stock_qty, shipped_qty, quadrant.
+    優良(高回転×低在庫) / 過剰(低回転×高在庫) / 主力(高回転×高在庫) / 死蔵(低回転×低在庫)。
+    """
+    if turnover_df is None or turnover_df.empty:
+        return pd.DataFrame(columns=["sku", "turnover", "stock_qty", "shipped_qty", "quadrant"])
+    df = turnover_df.copy()
+    t_med = df["turnover"].replace([float("inf")], np.nan).median()
+    s_med = df["stock_qty"].median()
+
+    def quad(row) -> str:
+        hi_t = row["turnover"] >= t_med
+        hi_s = row["stock_qty"] >= s_med
+        if hi_t and not hi_s:
+            return "🟢 優良(高回転・少在庫)"
+        if not hi_t and hi_s:
+            return "🟠 過剰(低回転・多在庫)"
+        if hi_t and hi_s:
+            return "🔵 主力(高回転・多在庫)"
+        return "⚪ 死蔵候補(低回転・少在庫)"
+
+    df["quadrant"] = df.apply(quad, axis=1)
+    return df[["sku", "turnover", "stock_qty", "shipped_qty", "quadrant"]].reset_index(drop=True)
+
+
+__all__ += ["daily_anomalies", "period_compare", "sku_lifecycle", "partner_weekday_matrix", "simple_forecast", "sku_portfolio"]

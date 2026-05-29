@@ -125,6 +125,76 @@ def test_summary_kpis(shipments, inventory):
     assert k["peak_weekday"] in ["月", "火", "水", "木", "金", "土", "日"]
 
 
+def test_daily_anomalies_flags_spike(shipments):
+    # Inject a 10x spike on a fresh day to ensure detection
+    spike_day = shipments["date"].max() + pd.Timedelta(days=1)
+    extra = pd.DataFrame([
+        {"date": spike_day, "timestamp": spike_day, "sku": "A", "qty": 10000, "partner": "P1"}
+        for _ in range(5)
+    ])
+    big = pd.concat([shipments, extra], ignore_index=True)
+    df = analyses.daily_anomalies(big, z_thresh=2.0)
+    assert df["anomaly"].any()
+    assert df.iloc[-1]["anomaly"]
+    assert df.iloc[-1]["z"] > 2
+
+
+def test_simple_forecast_horizon(shipments):
+    fc = analyses.simple_forecast(shipments, horizon=14)
+    assert (fc["kind"] == "forecast").sum() == 14
+    assert (fc["kind"] == "actual").sum() > 0
+    fc_only = fc[fc["kind"] == "forecast"]
+    assert (fc_only["upper"] >= fc_only["qty"]).all()
+    assert (fc_only["lower"] <= fc_only["qty"]).all()
+
+
+def test_sku_lifecycle_classifies(shipments):
+    df = analyses.sku_lifecycle(shipments)
+    assert set(df["status"].unique()).issubset({"新規", "成長", "安定", "衰退", "停止"})
+    assert (df["qty"] > 0).all()
+
+
+def test_period_compare_balances(shipments):
+    mid = shipments["date"].min() + pd.Timedelta(days=3)
+    a = (shipments["date"].min(), mid)
+    b = (mid + pd.Timedelta(days=1), shipments["date"].max())
+    df = analyses.period_compare(shipments, a, b)
+    # Total contribution should sum to 1.0 unless total_delta == 0
+    if df["delta"].sum() != 0:
+        assert abs(df["contribution"].sum() - 1.0) < 1e-6 or len(df) < 20
+
+
+def test_sku_portfolio_quadrants(shipments, inventory):
+    ti = analyses.inventory_turnover(inventory, shipments, dead_stock_days=30)
+    pf = analyses.sku_portfolio(ti)
+    assert set(pf["quadrant"].unique()).issubset({
+        "🟢 優良(高回転・少在庫)", "🔵 主力(高回転・多在庫)",
+        "🟠 過剰(低回転・多在庫)", "⚪ 死蔵候補(低回転・少在庫)",
+    })
+
+
+def test_partner_weekday_matrix_shape(shipments):
+    m = analyses.partner_weekday_matrix(shipments)
+    assert list(m.columns) == ["月", "火", "水", "木", "金", "土", "日"]
+    assert (m.values >= 0).all()
+
+
+def test_insights_generation(shipments, inbound, inventory):
+    from src import insights as ins_mod
+    ti = analyses.inventory_turnover(inventory, shipments)
+    k = analyses.summary_kpis(shipments, inbound, inventory)
+    insights_list = ins_mod.generate_insights(shipments, inbound, inventory, k, ti)
+    # Should produce at least some insights with valid structure
+    for ins in insights_list:
+        assert ins.severity in ("critical", "warning", "info")
+        assert ins.category in ("volume", "sku", "inventory", "peak", "efficiency", "balance")
+        assert ins.title
+        assert ins.detail
+    # Verify severity ordering (critical first)
+    sevs = [{"critical": 0, "warning": 1, "info": 2}[i.severity] for i in insights_list]
+    assert sevs == sorted(sevs)
+
+
 def test_summary_kpis_handles_missing_order_id(shipments):
     k = analyses.summary_kpis(shipments, None, None)
     assert k["total_orders"] == 0

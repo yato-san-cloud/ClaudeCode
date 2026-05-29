@@ -19,8 +19,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `app.py` — Streamlit エントリ。サイドバー上部の **エンジントグル** (pandas / DuckDB) で経路が分岐。pandas は DataFrame、DuckDB は `Catalog` 経由のビュー。共通の `run_volume_trends` / `run_abc` / `run_peak` / `run_turnover` ラッパー越しに各タブが分析を呼ぶ
 - `src/data_io.py` — pandas 経路の CSV/Excel ローダ。`FieldSpec` による論理項目定義、ヒューリスティック自動推定 (`initial_mapping`) と型変換 (`apply_mapping`)
 - `src/duck_io.py` — DuckDB 経路の `Catalog`。`register_path` (CSV/Parquet/glob を `read_csv_auto`/`read_parquet` でスキャン) と `register_dataframe` (Excel・サンプル用) + `apply_mapping` で型キャスト済みビュー `v_<name>` を生成
-- `src/analyses.py` — pandas 純粋関数 5 本: `volume_trends`, `abc_analysis`, `peak_analysis`, `inventory_turnover`, `summary_kpis`。標準化された論理列名 (`date`, `timestamp`, `sku`, `qty`, `partner`, `location`, `order_id`) を入力に取る
-- `src/sql_analyses.py` — 同じ 5 分析の SQL 版。`Catalog` を受け取り、集計後の小さな DataFrame / dict のみを materialize
+- `src/analyses.py` — pandas 純粋関数: `volume_trends`, `abc_analysis`, `peak_analysis`, `inventory_turnover`, `summary_kpis`, `daily_anomalies`, `period_compare`, `sku_lifecycle`, `partner_weekday_matrix`, `simple_forecast`, `sku_portfolio`
+- `src/sql_analyses.py` — SQL 版(`Catalog` を受ける): `volume_trends`, `abc_analysis`, `peak_analysis`, `inventory_turnover`, `summary_kpis`, `daily_anomalies`, `partner_weekday_matrix`, `period_compare`(`forecast`/`lifecycle`/`portfolio` は集計後の小さなフレームに対する後処理のため pandas 関数を再利用)
+- `src/insights.py` — ルールベースの自動インサイトエンジン。`Insight` dataclass と 9 ディテクタ(`detect_volume_trend`, `detect_anomaly_days`, `detect_sku_concentration`, `detect_partner_dependence`, `detect_peak_concentration`, `detect_inbound_outbound_balance`, `detect_dead_stock`, `detect_stockout_risk`, `detect_multi_line_efficiency`) + `generate_insights` 集約関数。severity (critical/warning/info) と suggestion(改善ヒント)付き
 - `src/charts.py` — plotly チャート生成ヘルパ
 - `scripts/generate_sample_data.py` — 曜日/時間帯ピーク偏りを持つダミーデータ生成 (`build_frames` をアプリの「サンプルで試す」が直接利用)
 - `tests/test_analyses.py` — pandas 4 分析のユニットテスト

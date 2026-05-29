@@ -309,4 +309,92 @@ def summary_kpis(
     return out
 
 
-__all__ = ["volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover", "summary_kpis"]
+def daily_anomalies(cat: Catalog, z_thresh: float = 2.0, lo: str | None = None, hi: str | None = None) -> pd.DataFrame:
+    v = cat.view("shipments")
+    if v is None or not cat.has_column("shipments", "date"):
+        return pd.DataFrame(columns=["date", "qty", "lines", "ma7", "z", "anomaly"])
+    where = _date_clause(lo, hi)
+    df = cat.query(
+        f"""
+        SELECT date_trunc('day', date) AS date,
+               CAST(SUM(qty) AS BIGINT) AS qty,
+               COUNT(*) AS lines,
+               AVG(SUM(qty)) OVER (ORDER BY date_trunc('day', date) ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS ma7
+        FROM {v}
+        WHERE {where}
+        GROUP BY 1
+        ORDER BY 1
+        """
+    )
+    if df.empty:
+        return df.assign(z=0.0, anomaly=False)
+    mu, sd = df["qty"].mean(), df["qty"].std(ddof=0)
+    df["z"] = (df["qty"] - mu) / sd if sd > 0 else 0.0
+    df["anomaly"] = df["z"].abs() >= z_thresh
+    return df
+
+
+def partner_weekday_matrix(cat: Catalog, value: str = "lines", top_n: int = 15,
+                           lo: str | None = None, hi: str | None = None) -> pd.DataFrame:
+    v = cat.view("shipments")
+    if v is None or not cat.has_column("shipments", "partner") or not cat.has_column("shipments", "date"):
+        return pd.DataFrame()
+    where = _date_clause(lo, hi)
+    agg = "CAST(SUM(qty) AS BIGINT)" if value == "qty" else "COUNT(*)"
+    df = cat.query(
+        f"""
+        SELECT "partner" AS partner,
+               ((isodow(date) - 1) % 7) AS wd,
+               {agg} AS v
+        FROM {v} WHERE {where} AND "partner" IS NOT NULL
+        GROUP BY 1, 2
+        """
+    )
+    if df.empty:
+        return pd.DataFrame()
+    df["weekday"] = df["wd"].map(lambda i: WEEKDAY_LABELS[int(i)])
+    m = df.pivot_table(index="partner", columns="weekday", values="v", aggfunc="sum", fill_value=0)
+    m = m.reindex(columns=WEEKDAY_LABELS, fill_value=0)
+    m["total"] = m.sum(axis=1)
+    return m.sort_values("total", ascending=False).head(top_n).drop(columns="total")
+
+
+def period_compare(cat: Catalog, period_a: tuple, period_b: tuple, key: str = "sku", top_n: int = 20) -> pd.DataFrame:
+    v = cat.view("shipments")
+    if v is None or not cat.has_column("shipments", key) or not cat.has_column("shipments", "date"):
+        return pd.DataFrame(columns=[key, "qty_a", "qty_b", "delta", "contribution"])
+    a0, a1 = pd.Timestamp(period_a[0]), pd.Timestamp(period_a[1])
+    b0, b1 = pd.Timestamp(period_b[0]), pd.Timestamp(period_b[1])
+    sql = f"""
+    WITH a AS (
+        SELECT "{key}" AS k, CAST(SUM(qty) AS BIGINT) AS qty_a
+        FROM {v} WHERE date BETWEEN TIMESTAMP '{a0}' AND TIMESTAMP '{a1}'
+        GROUP BY 1
+    ),
+    b AS (
+        SELECT "{key}" AS k, CAST(SUM(qty) AS BIGINT) AS qty_b
+        FROM {v} WHERE date BETWEEN TIMESTAMP '{b0}' AND TIMESTAMP '{b1}'
+        GROUP BY 1
+    ),
+    joined AS (
+        SELECT COALESCE(a.k, b.k) AS k,
+               COALESCE(a.qty_a, 0) AS qty_a,
+               COALESCE(b.qty_b, 0) AS qty_b
+        FROM a FULL OUTER JOIN b USING (k)
+    ),
+    tot AS (SELECT SUM(qty_b - qty_a) AS td FROM joined)
+    SELECT k AS "{key}", qty_a, qty_b,
+           (qty_b - qty_a) AS delta,
+           CASE WHEN (SELECT td FROM tot) = 0 THEN 0
+                ELSE (qty_b - qty_a)::DOUBLE / (SELECT td FROM tot) END AS contribution
+    FROM joined
+    ORDER BY ABS(qty_b - qty_a) DESC
+    LIMIT {top_n}
+    """
+    return cat.query(sql)
+
+
+__all__ = [
+    "volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover", "summary_kpis",
+    "daily_anomalies", "partner_weekday_matrix", "period_compare",
+]
