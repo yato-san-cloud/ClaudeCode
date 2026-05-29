@@ -1,0 +1,275 @@
+/* 沼 NUMA — カイジ風の張り詰めた配色（黒×緑×血の赤×金） */
+:root {
+  --bg: #06090a;
+  --bg2: #0c1512;
+  --ink: #e7efe9;
+  --muted: #8aa698;
+  --green: #2fae6b;
+  --green-d: #16382a;
+  --gold: #ffd34d;
+  --blood: #c0392b;
+  --line: rgba(140, 190, 160, 0.18);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: radial-gradient(120% 80% at 50% -10%, #12231b 0%, var(--bg) 60%);
+  color: var(--ink);
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 20px;
+}
+
+/* ---- トップバー ---- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 12px;
+}
+.logo {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  font-family: "Yu Mincho", "Hiragino Mincho ProN", serif;
+  color: var(--gold);
+  text-shadow: 0 0 14px rgba(255, 211, 77, 0.35);
+}
+.logo span {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--muted);
+  margin-left: 8px;
+  font-family: system-ui, sans-serif;
+}
+.mode-wrap { margin-left: auto; }
+.mode-badge {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.3);
+}
+.mode-badge.on {
+  color: #1a0d00;
+  background: var(--gold);
+  border-color: var(--gold);
+  animation: pulse 0.6s infinite alternate;
+}
+@keyframes pulse { to { box-shadow: 0 0 18px rgba(255, 211, 77, 0.8); } }
+
+.icon-btn {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 10px;
+  width: 40px;
+  height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* ---- レイアウト ---- */
+.stage-area {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+@media (max-width: 720px) {
+  .stage-area { flex-direction: column; align-items: center; }
+}
+
+.board-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #04110c;
+  box-shadow: 0 0 0 3px #1d3a2b, 0 18px 40px rgba(0, 0, 0, 0.6),
+    inset 0 0 60px rgba(0, 0, 0, 0.5);
+}
+canvas { display: block; }
+
+/* ---- パネル ---- */
+.panel {
+  flex: 1 1 240px;
+  min-width: 220px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+@media (max-width: 720px) {
+  .panel { width: 100%; max-width: 460px; }
+}
+
+.goal-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.goal-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.goal-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--green), var(--gold));
+  transition: width 0.4s ease;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+}
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat .k { font-size: 11px; color: var(--muted); }
+.stat .v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat.balance { grid-column: 1 / -1; border-top: 1px dashed var(--line); padding-top: 8px; }
+.big { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.plus { color: var(--green); }
+.minus { color: var(--blood); }
+
+/* ---- コントロール ---- */
+.controls { display: flex; flex-direction: column; gap: 12px; }
+.power-label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+input[type="range"] { width: 100%; accent-color: var(--gold); }
+
+.btn-row { display: flex; gap: 10px; }
+button { font-family: inherit; cursor: pointer; }
+.primary {
+  background: linear-gradient(180deg, #34c47a, #1c8a52);
+  color: #042013;
+  border: none;
+  border-radius: 12px;
+  font-weight: 900;
+  font-size: 17px;
+  padding: 14px 16px;
+  box-shadow: 0 6px 0 #0c4a2c, 0 10px 18px rgba(0, 0, 0, 0.4);
+  transition: transform 0.05s;
+}
+.primary:active { transform: translateY(3px); box-shadow: 0 3px 0 #0c4a2c; }
+.big-btn { flex: 1; }
+.ghost {
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 12px 14px;
+}
+.ghost.on { background: var(--gold); color: #1a0d00; border-color: var(--gold); }
+.ghost.small { padding: 8px; font-size: 13px; color: var(--muted); }
+
+.legal { font-size: 10px; line-height: 1.5; color: rgba(138, 166, 152, 0.6); margin: 4px 0 0; }
+
+/* ---- バナー ---- */
+.banner {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  padding: 14px 22px;
+  border-radius: 12px;
+  font-weight: 900;
+  font-size: 20px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.8);
+  border: 2px solid var(--line);
+  color: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  white-space: nowrap;
+  z-index: 5;
+}
+.banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.banner.jackpot, .banner.win {
+  color: #1a0d00;
+  background: var(--gold);
+  border-color: #fff3c4;
+  font-size: 22px;
+  box-shadow: 0 0 40px rgba(255, 211, 77, 0.8);
+  animation: shake 0.4s infinite;
+}
+.banner.round { color: var(--gold); border-color: var(--gold); }
+.banner.lose { color: var(--muted); font-size: 16px; }
+@keyframes shake {
+  0%, 100% { transform: translate(-50%, -50%) rotate(-1deg); }
+  50% { transform: translate(-50%, -50%) rotate(1deg); }
+}
+
+/* ---- ざわ…ざわ… ---- */
+.zawa {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: 4;
+}
+.zawa.active { opacity: 1; }
+.zawa span {
+  position: absolute;
+  font-family: "Yu Mincho", serif;
+  font-weight: 900;
+  color: rgba(255, 211, 77, 0.5);
+  font-size: 22px;
+  animation: float 2.2s infinite;
+}
+.zawa span:nth-child(1) { top: 18%; left: 12%; animation-delay: 0s; }
+.zawa span:nth-child(2) { top: 60%; right: 14%; animation-delay: 0.5s; }
+.zawa span:nth-child(3) { top: 40%; left: 60%; animation-delay: 1s; }
+@keyframes float {
+  0% { opacity: 0; transform: translateY(10px); }
+  30% { opacity: 0.8; }
+  100% { opacity: 0; transform: translateY(-18px); }
+}
+
+/* ---- ゲート / オーバーレイ ---- */
+.gate, .overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 8, 5, 0.92);
+  z-index: 10;
+  text-align: center;
+  padding: 20px;
+}
+.overlay { display: none; }
+.overlay.show { display: flex; }
+.gate.hidden { display: none; }
+.gate-inner h2, .overlay-inner h2 {
+  font-family: "Yu Mincho", serif;
+  font-size: 64px;
+  margin: 0 0 10px;
+  color: var(--gold);
+  text-shadow: 0 0 30px rgba(255, 211, 77, 0.5);
+}
+.overlay.win .overlay-inner h2 { animation: pulse 0.5s infinite alternate; }
+.lead { color: var(--ink); line-height: 1.8; font-size: 15px; margin-bottom: 22px; }
+.lead strong { color: var(--blood); }
+.hint { color: var(--muted); font-size: 12px; margin-top: 14px; }
+#overlay-sub { color: var(--ink); font-size: 18px; margin-bottom: 22px; }

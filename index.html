@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0a1410" />
+    <title>沼 — NUMA / 限定ジャンケン的パチンコ</title>
+    <meta
+      name="description"
+      content="漫画『カイジ』に登場する伝説のパチンコ台「沼」をブラウザで再現。羽根モノ物理シミュレーション。Vゾーンを狙え。"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <h1 class="logo">沼<span>NUMA</span></h1>
+        <div class="mode-wrap">
+          <span id="mode-badge" class="mode-badge">通常</span>
+        </div>
+        <button id="mute" class="icon-btn" title="サウンド切替">🔊</button>
+      </header>
+
+      <main class="stage-area">
+        <div class="board-wrap">
+          <canvas id="board" aria-label="パチンコ盤面 沼"></canvas>
+
+          <!-- 緊張演出 -->
+          <div id="zawa" class="zawa" aria-hidden="true">
+            <span>ざわ…</span><span>ざわ…</span><span>ざわ…</span>
+          </div>
+
+          <!-- 中央バナー -->
+          <div id="banner" class="banner"></div>
+
+          <!-- スタートゲート（音声解禁用） -->
+          <div id="start-gate" class="gate">
+            <div class="gate-inner">
+              <h2>沼</h2>
+              <p class="lead">
+                一発台「沼」。<br />Vゾーンに玉を沈めれば大当たり。<br />
+                だがこの沼は<strong>渋い</strong>……。目標 +¥10,000。
+              </p>
+              <button id="start-btn" class="primary">打ち始める</button>
+              <p class="hint">SPACE / タップで発射・「自動」で連射</p>
+            </div>
+          </div>
+
+          <!-- 結果オーバーレイ -->
+          <div id="overlay" class="overlay">
+            <div class="overlay-inner">
+              <h2 id="overlay-title">勝利</h2>
+              <p id="overlay-sub"></p>
+              <button onclick="document.getElementById('reset').click()" class="primary">
+                もう一度
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <aside class="panel">
+          <div class="goal">
+            <div class="goal-label">目標 +¥10,000</div>
+            <div class="goal-bar"><div id="goal-fill" class="goal-fill"></div></div>
+          </div>
+
+          <div class="stats">
+            <div class="stat"><span class="k">持ち玉</span><span id="stat-tama" class="v">0</span></div>
+            <div class="stat"><span class="k">投資</span><span id="stat-invest" class="v">¥0</span></div>
+            <div class="stat"><span class="k">出玉</span><span id="stat-dejama" class="v">0</span></div>
+            <div class="stat"><span class="k">大当り</span><span id="stat-hits" class="v">0</span></div>
+            <div class="stat balance"><span class="k">収支</span><span id="stat-balance" class="big">¥0</span></div>
+          </div>
+
+          <div class="controls">
+            <label class="power-label">打ち出し強さ
+              <input id="power" type="range" min="0" max="100" value="44" />
+            </label>
+            <div class="btn-row">
+              <button id="fire" class="primary big-btn">発射</button>
+              <button id="auto" class="ghost">自動 ○</button>
+            </div>
+            <button id="reset" class="ghost small">リセット</button>
+          </div>
+
+          <p class="legal">
+            ファンによる二次創作です。原作『賭博黙示録カイジ』(福本伸行) とは無関係。<br />
+            実在の遊技機・賭博とは一切関係ありません。
+          </p>
+        </aside>
+      </main>
+    </div>
+
+    <script src="js/physics.js"></script>
+    <script src="js/audio.js"></script>
+    <script src="js/board.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/main.js"></script>
+  </body>
+</html>

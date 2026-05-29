@@ -1,0 +1,12 @@
+{
+  "name": "numa-pachinko",
+  "version": "1.0.0",
+  "description": "漫画『カイジ』の伝説のパチンコ台「沼」をブラウザで再現した羽根モノ物理シミュレーション（ファン二次創作）",
+  "scripts": {
+    "test": "node test/smoke.js",
+    "start": "python3 -m http.server 8080"
+  },
+  "keywords": ["pachinko", "kaiji", "numa", "game", "canvas"],
+  "license": "MIT",
+  "private": true
+}
