@@ -8,8 +8,20 @@
 - 🏷️ **ABC 分析**: SKU 別・取引先別 Pareto / 累積構成比
 - ⏰ **ピーク分析**: 曜日別棒グラフ + 曜日 × 時間帯ヒートマップ
 - 🔄 **在庫回転**: SKU 別回転率 / 滞留日数 / デッドストック判定
-- CSV (UTF-8 / CP932) と Excel (`.xlsx` / `.xls`) の両対応
+- CSV (UTF-8 / CP932) / Excel / **Parquet** 対応
 - アップロード後に **論理項目 ↔ 実カラムを UI で対話的にマッピング**(ヒューリスティック自動推定付き)
+- スマホブラウザでも崩れにくい縦並びレイアウト
+
+## エンジン切替
+
+サイドバー上部のラジオで処理エンジンを選べます。
+
+| エンジン | 用途 | 仕組み |
+| --- | --- | --- |
+| 💨 **pandas (標準)** | 〜数百MB の Excel / CSV | メモリに全ロードして集計 |
+| 🦆 **DuckDB (巨大データ)** | GB級 CSV / Parquet、glob、サーバ側パス | DuckDB がディスク上のままスキャンし、集計結果のみ pandas へ |
+
+DuckDB モードでは「📁 サーバパス」を選ぶと `/data/wms/shipments_2026-*.parquet` のような glob 指定で直接スキャンできます(アップロード不要)。
 
 ## セットアップ
 
@@ -52,12 +64,14 @@ pytest -q
 ## 構成
 
 ```
-app.py                       Streamlit エントリポイント(タブ UI)
-src/data_io.py               ファイル読込 + 列マッピング
-src/analyses.py              4 分析の純粋関数(DataFrame in/out)
+app.py                       Streamlit エントリポイント(タブ UI / エンジントグル)
+src/data_io.py               pandas ファイル読込 + 列マッピング
+src/duck_io.py               DuckDB Catalog(ファイル直接スキャン + マッピングビュー)
+src/analyses.py              4 分析の純粋関数 (pandas, DataFrame in/out)
+src/sql_analyses.py          同じ 4 分析の SQL 実装 (Catalog in / DataFrame out)
 src/charts.py                plotly チャート
 scripts/generate_sample_data.py  サンプル生成
-tests/test_analyses.py       ユニットテスト
+tests/                       pandas 単体テスト + SQL/pandas パリティテスト
 ```
 
 ## ライセンス
