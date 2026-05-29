@@ -4,11 +4,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Status
 
-This repository is currently uninitialized: no source files, no commits, and no configured tooling. The remote is `yato-san-cloud/ClaudeCode` on a local proxy. When real code is added, this file should be updated with:
+This repository hosts **おションション** — a Notion-style note-taking web app. It is a
+zero-dependency, no-build vanilla web app (HTML / CSS / JavaScript).
 
-- Build, lint, test, and run commands (including how to run a single test)
-- High-level architecture that spans multiple files
-- Important conventions pulled from any README, `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` that gets added later
+### Project layout
+
+- `index.html` — markup and app shell
+- `styles.css` — Notion-like styling, light/dark themes
+- `app.js` — single IIFE: state, block editor, `localStorage` persistence (no deps)
+- `README.md` — user-facing documentation
+
+### Run
+
+There is no build step. Open `index.html` directly, or serve the folder:
+
+```bash
+python3 -m http.server 8000   # → http://localhost:8000
+```
+
+### Lint / test
+
+No test framework is configured. Syntax-check the script with `node --check app.js`.
+Behavior is verified with ad-hoc Playwright smoke scripts driving `file://index.html`
+(Playwright is available globally under `/opt/node22/lib/node_modules`).
+
+### Architecture notes
+
+- A page is `{ id, emoji, title, cover, blocks[] }`; a block is `{ id, type, text, checked }`.
+- The editor is `contenteditable`-based; caret get/set, block split/merge, slash menu,
+  markdown shortcuts, and drag-reorder are all hand-rolled.
+- Two non-obvious gotchas handled in code:
+  - `contenteditable` turns a trailing space into `&nbsp;` (` `) — normalized before
+    matching markdown shortcuts (`# `, `- `, etc.).
+  - The HTML `hidden` attribute is overridden by author `display` rules, so a global
+    `[hidden] { display: none !important; }` rule keeps show/hide toggling correct.
+  - Saves are debounced but flushed on `visibilitychange` / `pagehide` / `beforeunload`.
 
 ## Git Workflow
 

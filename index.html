@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="おションション — Notionみたいなイケてるメモアプリ" />
+  <title>おションション</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar__head">
+        <div class="brand">
+          <span class="brand__logo">📝</span>
+          <span class="brand__name">おションション</span>
+        </div>
+        <button id="collapseBtn" class="icon-btn" title="サイドバーを閉じる" aria-label="サイドバーを閉じる">«</button>
+      </div>
+
+      <div class="sidebar__search">
+        <input id="searchInput" type="text" placeholder="🔍 検索…" aria-label="ページを検索" />
+      </div>
+
+      <button id="newPageBtn" class="new-page-btn">＋ 新しいページ</button>
+
+      <nav id="pageList" class="page-list" aria-label="ページ一覧"></nav>
+
+      <div class="sidebar__foot">
+        <button id="themeBtn" class="foot-btn" title="テーマ切り替え">🌙 テーマ</button>
+        <button id="exportBtn" class="foot-btn" title="現在のページをMarkdownで書き出し">⬇️ 書き出し</button>
+      </div>
+    </aside>
+
+    <button id="expandBtn" class="expand-btn" title="サイドバーを開く" aria-label="サイドバーを開く">»</button>
+
+    <!-- Main editor -->
+    <main id="main" class="main">
+      <div id="emptyState" class="empty-state">
+        <div class="empty-state__art">📝✨</div>
+        <h1>おションションへようこそ</h1>
+        <p>左の「＋ 新しいページ」から書き始めましょう。<br>本文で <kbd>/</kbd> を打つとブロックメニューが開きます。</p>
+        <button id="emptyNewBtn" class="new-page-btn">＋ 最初のページを作る</button>
+      </div>
+
+      <article id="editor" class="editor" hidden>
+        <div class="editor__cover" id="cover"></div>
+        <div class="editor__inner">
+          <div class="title-row">
+            <button id="emojiBtn" class="emoji-btn" title="アイコンを変更">📄</button>
+          </div>
+          <div
+            id="titleInput"
+            class="title-input"
+            contenteditable="true"
+            spellcheck="false"
+            data-placeholder="無題"
+          ></div>
+          <div id="blocks" class="blocks"></div>
+        </div>
+      </article>
+    </main>
+  </div>
+
+  <!-- Slash command menu -->
+  <div id="slashMenu" class="slash-menu" hidden role="menu" aria-label="ブロックの種類"></div>
+
+  <!-- Emoji picker -->
+  <div id="emojiPicker" class="emoji-picker" hidden role="menu" aria-label="アイコンを選択"></div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
