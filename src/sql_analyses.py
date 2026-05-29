@@ -195,4 +195,118 @@ def inventory_turnover(
     return cat.query(sql)
 
 
-__all__ = ["volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover"]
+def summary_kpis(
+    cat: Catalog,
+    dead_stock_days: int = 60,
+    lo: str | None = None,
+    hi: str | None = None,
+) -> dict:
+    """SQL twin of analyses.summary_kpis(). Returns the same dict keys."""
+    nan = float("nan")
+    out: dict = {
+        "total_pcs_out": 0, "total_lines_out": 0, "total_orders": 0,
+        "total_pcs_in": 0, "total_lines_in": 0,
+        "sku_active": 0, "sku_master": 0,
+        "pcs_per_order": nan, "lines_per_order": nan, "pcs_per_line": nan,
+        "orders_per_sku": nan, "multi_line_rate": nan, "top10_sku_share": nan,
+        "avg_turnover": nan, "dead_sku_rate": nan, "dead_sku_count": 0,
+        "peak_weekday": None, "peak_day": None, "peak_day_qty": 0,
+    }
+    v_ship = cat.view("shipments")
+    where = _date_clause(lo, hi)
+
+    if v_ship is not None:
+        row = cat.query(
+            f"SELECT CAST(SUM(qty) AS BIGINT) AS pcs, COUNT(*) AS lines FROM {v_ship} WHERE {where}"
+        ).iloc[0]
+        out["total_pcs_out"] = int(row["pcs"] or 0)
+        out["total_lines_out"] = int(row["lines"] or 0)
+        if out["total_lines_out"]:
+            out["pcs_per_line"] = out["total_pcs_out"] / out["total_lines_out"]
+
+        if cat.has_column("shipments", "order_id"):
+            r = cat.query(
+                f"""
+                WITH per_order AS (
+                    SELECT order_id, COUNT(*) AS line_cnt
+                    FROM {v_ship} WHERE {where} AND order_id IS NOT NULL
+                    GROUP BY 1
+                )
+                SELECT COUNT(*) AS n_orders,
+                       AVG(line_cnt)::DOUBLE AS avg_lines,
+                       AVG(CASE WHEN line_cnt > 1 THEN 1.0 ELSE 0.0 END)::DOUBLE AS multi_rate
+                FROM per_order
+                """
+            ).iloc[0]
+            n_orders = int(r["n_orders"] or 0)
+            out["total_orders"] = n_orders
+            if n_orders > 0:
+                out["pcs_per_order"] = out["total_pcs_out"] / n_orders
+                out["lines_per_order"] = float(r["avg_lines"])
+                out["multi_line_rate"] = float(r["multi_rate"])
+            if cat.has_column("shipments", "sku"):
+                r = cat.query(
+                    f"""
+                    SELECT COUNT(*)::DOUBLE / NULLIF(COUNT(DISTINCT sku), 0) AS ops
+                    FROM (SELECT DISTINCT order_id, sku FROM {v_ship} WHERE {where} AND order_id IS NOT NULL)
+                    """
+                ).iloc[0]
+                if r["ops"] is not None and not pd.isna(r["ops"]):
+                    out["orders_per_sku"] = float(r["ops"])
+
+        if cat.has_column("shipments", "date"):
+            peak = cat.query(
+                f"SELECT date_trunc('day', date) AS d, CAST(SUM(qty) AS BIGINT) AS q "
+                f"FROM {v_ship} WHERE {where} GROUP BY 1 ORDER BY q DESC LIMIT 1"
+            )
+            if not peak.empty:
+                out["peak_day"] = pd.Timestamp(peak.iloc[0]["d"])
+                out["peak_day_qty"] = int(peak.iloc[0]["q"])
+            wd = cat.query(
+                f"SELECT ((isodow(date) - 1) % 7) AS wd, CAST(SUM(qty) AS BIGINT) AS q "
+                f"FROM {v_ship} WHERE {where} GROUP BY 1 ORDER BY q DESC LIMIT 1"
+            )
+            if not wd.empty:
+                out["peak_weekday"] = WEEKDAY_LABELS[int(wd.iloc[0]["wd"])]
+
+        if cat.has_column("shipments", "sku"):
+            sku_qty = cat.query(
+                f'SELECT "sku" AS sku, CAST(SUM(qty) AS BIGINT) AS q '
+                f"FROM {v_ship} WHERE {where} GROUP BY 1 ORDER BY q DESC"
+            )
+            total = sku_qty["q"].sum()
+            if total > 0:
+                n_top = max(1, int(round(len(sku_qty) * 0.10)))
+                out["top10_sku_share"] = float(sku_qty.head(n_top)["q"].sum() / total)
+
+    v_in = cat.view("inbound")
+    if v_in is not None:
+        row = cat.query(
+            f"SELECT CAST(SUM(qty) AS BIGINT) AS pcs, COUNT(*) AS lines FROM {v_in}"
+        ).iloc[0]
+        out["total_pcs_in"] = int(row["pcs"] or 0)
+        out["total_lines_in"] = int(row["lines"] or 0)
+
+    sku_views = [
+        cat.view(n) for n in ("shipments", "inbound")
+        if cat.view(n) and cat.has_column(n, "sku")
+    ]
+    if sku_views:
+        union = " UNION ALL ".join(f"SELECT sku FROM {v}" for v in sku_views)
+        out["sku_active"] = int(cat.query(f"SELECT COUNT(DISTINCT sku) FROM ({union}) WHERE sku IS NOT NULL").iloc[0, 0])
+
+    v_inv = cat.view("inventory")
+    if v_inv is not None and cat.has_column("inventory", "sku"):
+        out["sku_master"] = int(
+            cat.query(f'SELECT COUNT(DISTINCT "sku") FROM {v_inv}').iloc[0, 0]
+        )
+        if v_ship is not None:
+            ti = inventory_turnover(cat, dead_stock_days=dead_stock_days, lo=lo, hi=hi)
+            if not ti.empty:
+                out["avg_turnover"] = float(ti["turnover"].replace([float("inf")], 0).mean())
+                out["dead_sku_count"] = int(ti["dead_stock"].sum())
+                out["dead_sku_rate"] = float(ti["dead_stock"].mean())
+    return out
+
+
+__all__ = ["volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover", "summary_kpis"]

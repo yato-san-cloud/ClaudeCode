@@ -46,23 +46,34 @@ def build_frames(days: int = 90, n_sku: int = 50, n_partner: int = 10, seed: int
     wd_w = _weekday_weights()
 
     ship_rows = []
+    order_seq = 0
+    # Lines-per-order distribution: skewed toward 1-2 lines, long tail to 8.
+    line_choices = [1, 2, 3, 4, 5, 6, 7, 8]
+    line_probs = [0.40, 0.25, 0.15, 0.08, 0.05, 0.03, 0.025, 0.015]
     for d in dates:
-        daily_orders = max(1, int(rng.normal(loc=120 * wd_w[d.weekday()], scale=20)))
+        daily_orders = max(1, int(rng.normal(loc=60 * wd_w[d.weekday()], scale=10)))
         for _ in range(daily_orders):
+            order_seq += 1
+            order_id = f"PS-{d:%Y%m%d}-{order_seq:06d}"
             hour = int(rng.choice(24, p=hour_w))
             minute = int(rng.integers(0, 60))
             ts = d + pd.Timedelta(hours=hour, minutes=minute)
-            sku_idx = int(rng.choice(n_sku, p=skus["popularity"].values))
-            ship_rows.append(
-                {
-                    "出荷日時": ts,
-                    "出荷日": ts.normalize(),
-                    "SKU": skus.loc[sku_idx, "sku_code"],
-                    "商品名": skus.loc[sku_idx, "sku_name"],
-                    "出荷数": int(rng.integers(1, 12)),
-                    "取引先": rng.choice(partners),
-                }
-            )
+            partner = rng.choice(partners)
+            n_lines = int(rng.choice(line_choices, p=line_probs))
+            n_lines = min(n_lines, n_sku)
+            sku_idxs = rng.choice(n_sku, size=n_lines, replace=False, p=skus["popularity"].values)
+            for sidx in sku_idxs:
+                ship_rows.append(
+                    {
+                        "受注番号": order_id,
+                        "出荷日時": ts,
+                        "出荷日": ts.normalize(),
+                        "SKU": skus.loc[int(sidx), "sku_code"],
+                        "商品名": skus.loc[int(sidx), "sku_name"],
+                        "出荷数": int(rng.integers(1, 8)),
+                        "取引先": partner,
+                    }
+                )
     ship = pd.DataFrame(ship_rows)
 
     in_rows = []

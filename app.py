@@ -424,6 +424,12 @@ def run_turnover(dead_days: int) -> pd.DataFrame:
     return sql_analyses.inventory_turnover(catalog, dead_stock_days=dead_days, lo=lo_s, hi=hi_s)
 
 
+def run_summary(dead_days: int = 60) -> dict:
+    if ss.engine == "pandas":
+        return analyses.summary_kpis(shipments, inbound, inventory, dead_stock_days=dead_days)
+    return sql_analyses.summary_kpis(catalog, dead_stock_days=dead_days, lo=lo_s, hi=hi_s)
+
+
 def has_data(name: str) -> bool:
     if ss.engine == "pandas":
         local = {"shipments": shipments, "inbound": inbound, "inventory": inventory}[name]
@@ -438,43 +444,105 @@ def has_col(name: str, col: str) -> bool:
     return catalog is not None and catalog.has_column(name, col)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# KPI バー
-# ═══════════════════════════════════════════════════════════════════════════
-def _scalar(sql: str) -> int:
-    return int(catalog.con.execute(sql).fetchone()[0] or 0) if catalog else 0
+def _fmt(value, digits: int = 2, suffix: str = "", na: str = "—") -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return na
+    if isinstance(value, float):
+        return f"{value:,.{digits}f}{suffix}"
+    return f"{value:,}{suffix}"
 
 
-if ss.engine == "pandas":
-    ship_qty = int(shipments["qty"].sum()) if has_data("shipments") else 0
-    in_qty = int(inbound["qty"].sum()) if has_data("inbound") else 0
-    sku_set = set()
-    for df in (shipments, inbound, inventory):
-        if df is not None and "sku" in df.columns:
-            sku_set |= set(df["sku"].dropna().unique())
-    sku_n = len(sku_set)
-    period_txt = f"{shipments['date'].min():%m/%d} 〜 {shipments['date'].max():%m/%d}" if has_data("shipments") else "—"
-else:
-    ship_qty = _scalar(f"SELECT SUM(qty) FROM {catalog.view('shipments')}") if has_data("shipments") else 0
-    in_qty = _scalar(f"SELECT SUM(qty) FROM {catalog.view('inbound')}") if has_data("inbound") else 0
-    sku_views = [catalog.view(n) for n in ("shipments", "inbound", "inventory") if has_data(n) and catalog.has_column(n, "sku")]
-    sku_n = _scalar(f"SELECT COUNT(DISTINCT sku) FROM (" + " UNION ALL ".join(f"SELECT sku FROM {v}" for v in sku_views) + ")") if sku_views else 0
-    if has_data("shipments"):
-        row = catalog.con.execute(f"SELECT MIN(date), MAX(date) FROM {catalog.view('shipments')}").fetchone()
-        period_txt = f"{pd.Timestamp(row[0]):%m/%d} 〜 {pd.Timestamp(row[1]):%m/%d}" if row[0] else "—"
-    else:
-        period_txt = "—"
-
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("総出荷数", f"{ship_qty:,}")
-k2.metric("総入荷数", f"{in_qty:,}")
-k3.metric("対象 SKU 数", f"{sku_n:,}")
-k4.metric("出荷対象期間", period_txt)
-st.markdown("")
-
-tab_trend, tab_abc, tab_peak, tab_inv = st.tabs(
-    ["📈 物量推移", "🏷️ ABC 分析", "⏰ ピーク分析", "🔄 在庫回転"]
+tab_sum, tab_trend, tab_abc, tab_peak, tab_inv = st.tabs(
+    ["📊 サマリー", "📈 物量推移", "🏷️ ABC 分析", "⏰ ピーク分析", "🔄 在庫回転"]
 )
+
+
+# ── サマリー(1枚で 3PL 判断材料を一覧)─────────────────────────────────────
+with tab_sum:
+    k = run_summary(dead_days=60)
+    st.caption("3PL 運用判断に使う KPI を一覧で確認します。期間フィルタが反映されます。")
+
+    # Row 1: ボリューム
+    st.markdown("##### 📦 ボリューム")
+    c = st.columns(4)
+    c[0].metric("総出荷ピース", _fmt(k["total_pcs_out"]))
+    c[1].metric("総出荷ライン (行)", _fmt(k["total_lines_out"]))
+    c[2].metric("総 PS 数", _fmt(k["total_orders"]),
+                help="受注番号(伝票/ピッキングスリップ)単位の件数。列が未マッピングの場合は 0。")
+    c[3].metric("総入荷ピース", _fmt(k["total_pcs_in"]))
+
+    # Row 2: 効率(3PL特徴量)
+    st.markdown("##### ⚡ 効率指標(3PL 特徴量)")
+    c = st.columns(4)
+    c[0].metric("行 / PS", _fmt(k["lines_per_order"], 2),
+                help="1 オーダーあたりの平均ライン数。マルチピックの複雑さの指標。")
+    c[1].metric("ピース / PS", _fmt(k["pcs_per_order"], 2),
+                help="1 オーダーあたりの平均ピース数。出荷の重さの指標。")
+    c[2].metric("ピース / 行", _fmt(k["pcs_per_line"], 2),
+                help="1 ライン(行)あたりの平均ピース数。バラ/ケース傾向の指標。")
+    c[3].metric("PS / SKU", _fmt(k["orders_per_sku"], 2),
+                help="1 SKU が登場した平均オーダー数。ピック頻度の目安。")
+
+    # Row 3: 偏り・健全性
+    st.markdown("##### 📊 偏り・在庫健全性")
+    c = st.columns(4)
+    c[0].metric("マルチライン PS 率",
+                _fmt((k["multi_line_rate"] or 0) * 100 if k["multi_line_rate"] is not None and not pd.isna(k["multi_line_rate"]) else float("nan"), 1, "%"),
+                help="複数行(マルチピック)を含む PS の比率。")
+    c[1].metric("上位 10% SKU 集中度",
+                _fmt((k["top10_sku_share"] or 0) * 100 if k["top10_sku_share"] is not None and not pd.isna(k["top10_sku_share"]) else float("nan"), 1, "%"),
+                help="物量上位 10% の SKU が占める数量シェア。")
+    c[2].metric("平均回転率", _fmt(k["avg_turnover"], 2),
+                help="期間出荷数 ÷ 在庫数 の SKU 平均。")
+    c[3].metric("デッドストック SKU",
+                f"{k['dead_sku_count']:,} / {k['sku_master']:,}" if k["sku_master"] else "—",
+                delta=_fmt((k["dead_sku_rate"] or 0) * 100 if not pd.isna(k["dead_sku_rate"]) else float("nan"), 1, "%"),
+                delta_color="inverse",
+                help="60 日以上動いていない在庫 SKU 数 / マスタ SKU 数。")
+
+    # Row 4: ピーク / SKU 状況
+    st.markdown("##### 🔥 ピーク / SKU")
+    c = st.columns(4)
+    c[0].metric("ピーク曜日", k["peak_weekday"] or "—")
+    c[1].metric("ピーク日", k["peak_day"].strftime("%Y-%m-%d") if k["peak_day"] is not None else "—",
+                delta=_fmt(k["peak_day_qty"]) + " pcs" if k["peak_day_qty"] else None)
+    c[2].metric("アクティブ SKU", _fmt(k["sku_active"]))
+    c[3].metric("マスタ SKU", _fmt(k["sku_master"]))
+
+    st.divider()
+
+    # ミニチャート
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        df_trend = run_volume_trends("D")
+        st.plotly_chart(charts.trends_line(df_trend, "qty", "日次ピース推移"), width="stretch")
+    with mc2:
+        if has_data("shipments"):
+            by_w, _, _ = run_peak()
+            st.plotly_chart(charts.weekday_bar(by_w, "lines", "曜日別 ライン数"), width="stretch")
+
+    # 注意喚起 / 上位リスト
+    st.markdown("##### 🔍 注目ポイント")
+    cl, cr = st.columns(2)
+    with cl:
+        st.markdown("**出荷数 上位 5 SKU**")
+        if has_data("shipments"):
+            top = run_abc("sku", 0.7, 0.9).head(5).rename(columns=ABC_COLS)
+            st.dataframe(top[["SKU", "数量", "ランク"]], width="stretch", hide_index=True)
+        else:
+            st.caption("出荷データ未取込")
+    with cr:
+        st.markdown("**デッドストック 上位 5 SKU(在庫数 順)**")
+        if has_data("inventory"):
+            ti = run_turnover(60)
+            dead_top = ti[ti["dead_stock"]].head(5).rename(columns=INV_COLS)
+            cols = [c for c in ("SKU", "在庫数", "最終出荷からの経過日数") if c in dead_top.columns]
+            if dead_top.empty:
+                st.success("デッドストックはありません。")
+            else:
+                st.dataframe(dead_top[cols], width="stretch", hide_index=True)
+        else:
+            st.caption("在庫データ未取込")
 
 # ── 物量推移 ────────────────────────────────────────────────────────────────
 with tab_trend:

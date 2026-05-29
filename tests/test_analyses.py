@@ -107,6 +107,32 @@ def test_data_io_guess_column():
     assert mapping["partner"] == "取引先"
 
 
+def test_summary_kpis(shipments, inventory):
+    # Add order_id so order-level KPIs are populated.
+    ship = shipments.copy()
+    # 21 rows, 7 days x 3 SKUs. Group into 7 orders (one per day, all SKUs).
+    ship["order_id"] = "PS-" + ship["date"].dt.strftime("%Y%m%d")
+    k = analyses.summary_kpis(ship, None, inventory, dead_stock_days=30)
+    assert k["total_pcs_out"] == int(ship["qty"].sum())
+    assert k["total_lines_out"] == 21
+    assert k["total_orders"] == 7
+    assert k["lines_per_order"] == 3.0
+    assert k["multi_line_rate"] == 1.0  # all 7 orders have 3 lines
+    assert k["pcs_per_line"] == pytest.approx(k["total_pcs_out"] / 21)
+    assert k["sku_master"] == 4  # inventory has A,B,C,D
+    assert k["dead_sku_count"] == 1  # SKU D never ships
+    assert 0 < k["top10_sku_share"] <= 1
+    assert k["peak_weekday"] in ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def test_summary_kpis_handles_missing_order_id(shipments):
+    k = analyses.summary_kpis(shipments, None, None)
+    assert k["total_orders"] == 0
+    assert pd.isna(k["lines_per_order"])
+    assert pd.isna(k["multi_line_rate"])
+    assert k["total_lines_out"] == 21
+
+
 def test_data_io_apply_mapping_coerces_types():
     df = pd.DataFrame(
         {"出荷日": ["2026-01-01", "2026-01-02"], "コード": ["A", "B"], "数量": ["10", "20"]}

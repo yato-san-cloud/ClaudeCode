@@ -105,3 +105,20 @@ def test_catalog_date_bounds(frames):
     bounds = cat.date_bounds()
     assert bounds is not None
     assert bounds[0] < bounds[1]
+
+
+def test_summary_kpis_parity(frames):
+    ship, inb, inv, cat = frames
+    p = analyses.summary_kpis(ship, inb, inv)
+    s = sql_analyses.summary_kpis(cat)
+    for k in ("total_pcs_out", "total_lines_out", "total_orders",
+              "total_pcs_in", "total_lines_in", "sku_active", "sku_master",
+              "dead_sku_count", "peak_weekday"):
+        assert p[k] == s[k], f"{k}: pandas={p[k]} sql={s[k]}"
+    for k in ("pcs_per_order", "lines_per_order", "pcs_per_line",
+              "orders_per_sku", "multi_line_rate", "top10_sku_share",
+              "avg_turnover", "dead_sku_rate"):
+        if pd.isna(p[k]):
+            assert pd.isna(s[k])
+        else:
+            assert abs(p[k] - s[k]) < 1e-9, f"{k}: pandas={p[k]} sql={s[k]}"

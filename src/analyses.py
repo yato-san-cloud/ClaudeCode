@@ -156,4 +156,83 @@ def inventory_turnover(
     return merged.sort_values("stock_qty", ascending=False).reset_index(drop=True)
 
 
-__all__ = ["volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover"]
+WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def summary_kpis(
+    shipments: pd.DataFrame | None,
+    inbound: pd.DataFrame | None,
+    inventory: pd.DataFrame | None,
+    dead_stock_days: int = 60,
+) -> dict:
+    """Compute 3PL operational KPIs (一覧表示用)。
+
+    出荷側: 総ピース, 総ライン (=行), 総PS数, ピース/PS, 行/PS, ピース/行,
+            マルチラインPS率, 上位10%SKU集中度, アクティブSKU.
+    入荷側: 総ピース, 総ライン.
+    在庫:   マスタSKU数, 平均回転率, デッドストックSKU率.
+    その他: ピーク日, ピーク曜日, ピーク日数量.
+    """
+    nan = float("nan")
+    out: dict = {
+        "total_pcs_out": 0, "total_lines_out": 0, "total_orders": 0,
+        "total_pcs_in": 0, "total_lines_in": 0,
+        "sku_active": 0, "sku_master": 0,
+        "pcs_per_order": nan, "lines_per_order": nan, "pcs_per_line": nan,
+        "orders_per_sku": nan, "multi_line_rate": nan, "top10_sku_share": nan,
+        "avg_turnover": nan, "dead_sku_rate": nan, "dead_sku_count": 0,
+        "peak_weekday": None, "peak_day": None, "peak_day_qty": 0,
+    }
+    if shipments is not None and not shipments.empty:
+        out["total_pcs_out"] = int(shipments["qty"].sum())
+        out["total_lines_out"] = int(len(shipments))
+        out["pcs_per_line"] = out["total_pcs_out"] / out["total_lines_out"]
+        if "order_id" in shipments.columns:
+            n_orders = int(shipments["order_id"].nunique())
+            out["total_orders"] = n_orders
+            if n_orders > 0:
+                out["pcs_per_order"] = out["total_pcs_out"] / n_orders
+                out["lines_per_order"] = out["total_lines_out"] / n_orders
+                lines_per_ps = shipments.groupby("order_id").size()
+                out["multi_line_rate"] = float((lines_per_ps > 1).mean())
+            if "sku" in shipments.columns:
+                ord_sku = shipments.drop_duplicates(["order_id", "sku"])
+                n_sku_in_ship = int(ord_sku["sku"].nunique())
+                if n_sku_in_ship > 0:
+                    out["orders_per_sku"] = len(ord_sku) / n_sku_in_ship
+        if "date" in shipments.columns:
+            daily = shipments.groupby(shipments["date"].dt.normalize())["qty"].sum()
+            if not daily.empty:
+                out["peak_day"] = daily.idxmax()
+                out["peak_day_qty"] = int(daily.max())
+            wd = shipments.groupby(shipments["date"].dt.weekday)["qty"].sum()
+            if not wd.empty:
+                out["peak_weekday"] = WEEKDAY_LABELS[int(wd.idxmax())]
+        if "sku" in shipments.columns:
+            sku_qty = shipments.groupby("sku")["qty"].sum().sort_values(ascending=False)
+            if sku_qty.sum() > 0:
+                n_top = max(1, int(round(len(sku_qty) * 0.10)))
+                out["top10_sku_share"] = float(sku_qty.head(n_top).sum() / sku_qty.sum())
+
+    if inbound is not None and not inbound.empty:
+        out["total_pcs_in"] = int(inbound["qty"].sum())
+        out["total_lines_in"] = int(len(inbound))
+
+    sku_set = set()
+    for df in (shipments, inbound):
+        if df is not None and "sku" in df.columns:
+            sku_set |= set(df["sku"].dropna().unique())
+    out["sku_active"] = len(sku_set)
+
+    if inventory is not None and not inventory.empty and "sku" in inventory.columns:
+        out["sku_master"] = int(inventory["sku"].nunique())
+        if shipments is not None and not shipments.empty:
+            ti = inventory_turnover(inventory, shipments, dead_stock_days=dead_stock_days)
+            if not ti.empty:
+                out["avg_turnover"] = float(ti["turnover"].replace([float("inf")], 0).mean())
+                out["dead_sku_count"] = int(ti["dead_stock"].sum())
+                out["dead_sku_rate"] = float(ti["dead_stock"].mean())
+    return out
+
+
+__all__ = ["volume_trends", "abc_analysis", "peak_analysis", "inventory_turnover", "summary_kpis"]

@@ -24,6 +24,7 @@ SHIPMENT_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("qty", "出荷数量", ("出荷数", "数量", "qty", "quantity", "個数", "ピース")),
     FieldSpec("timestamp", "出荷日時", ("日時", "datetime", "timestamp", "時刻"), required=False),
     FieldSpec("partner", "取引先", ("取引先", "顧客", "得意先", "customer", "partner"), required=False),
+    FieldSpec("order_id", "受注番号 (PS)", ("受注", "オーダー", "伝票", "order", "ピッキング", "ps"), required=False),
 )
 
 INBOUND_FIELDS: tuple[FieldSpec, ...] = (
