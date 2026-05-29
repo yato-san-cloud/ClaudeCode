@@ -1,0 +1,276 @@
+:root {
+  --bg: #0f0524;
+  --bg2: #1a0b3d;
+  --fg: #ffffff;
+  --muted: #b9a8e0;
+  --accent: #f107a3;
+  font-size: 16px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html, body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at 50% 0%, var(--bg2), var(--bg) 70%);
+  color: var(--fg);
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  overflow-y: auto;
+}
+.screen.active { display: flex; }
+
+/* ---------- ホーム ---------- */
+.hero {
+  text-align: center;
+  padding: 2rem 1rem 1rem;
+}
+.logo {
+  font-size: 3.4rem;
+  font-weight: 900;
+  letter-spacing: -2px;
+  background: linear-gradient(135deg, #f107a3, #7b2ff7, #00c9a7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 4px 20px rgba(241,7,163,.4));
+}
+.logo span { -webkit-text-fill-color: #fff; color: #fff; }
+.tagline {
+  color: var(--muted);
+  font-size: .95rem;
+  margin-top: .25rem;
+  letter-spacing: 1px;
+}
+
+.game-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .9rem;
+  padding: 1rem;
+  align-content: start;
+}
+.game-card {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 22px;
+  padding: 1.1rem .8rem;
+  background: linear-gradient(140deg, var(--c1), var(--c2));
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .35rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  transition: transform .12s ease, box-shadow .12s ease;
+  aspect-ratio: 1 / .92;
+  justify-content: center;
+}
+.game-card:active {
+  transform: scale(.94);
+  box-shadow: 0 3px 10px rgba(0,0,0,.4);
+}
+.game-card .emoji { font-size: 2.4rem; line-height: 1; }
+.game-card .name { font-weight: 800; font-size: 1.05rem; }
+.game-card .desc { font-size: .72rem; opacity: .9; }
+
+.home-foot {
+  text-align: center;
+  color: var(--muted);
+  font-size: .8rem;
+  padding: .5rem 1rem 1.5rem;
+}
+
+/* ---------- ゲーム共通 ---------- */
+.back-btn {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + .6rem);
+  left: .8rem;
+  z-index: 20;
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: .5rem 1rem;
+  font-size: .95rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.back-btn:active { background: rgba(255,255,255,.25); }
+
+#gameStage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 1.2rem 2rem;
+  gap: 1rem;
+}
+
+.g-title { font-size: 1.6rem; font-weight: 800; }
+.g-sub { color: var(--muted); font-size: .95rem; max-width: 18rem; }
+.g-big { font-size: 4rem; font-weight: 900; line-height: 1; }
+.g-score { font-size: 1.1rem; color: var(--muted); }
+.hi { color: #f9c80e; font-weight: 800; }
+
+.btn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 1rem 2.4rem;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, #f107a3, #7b2ff7);
+  box-shadow: 0 8px 22px rgba(123,47,247,.45);
+  transition: transform .1s ease;
+}
+.btn:active { transform: scale(.95); }
+.btn.ghost { background: rgba(255,255,255,.12); box-shadow: none; }
+
+/* 反射神経 */
+.reaction-zone {
+  width: 100%;
+  flex: 1;
+  border-radius: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 800;
+  transition: background .05s;
+  text-align: center;
+  padding: 1rem;
+}
+.rz-wait { background: #c0392b; }
+.rz-go { background: #2ecc71; color: #06281a; }
+.rz-idle { background: #2d1b55; }
+.rz-early { background: #e67e22; }
+
+/* 連打 */
+.tap-btn {
+  width: 16rem;
+  max-width: 80vw;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: none;
+  font-size: 2rem;
+  font-weight: 900;
+  color: #fff;
+  background: radial-gradient(circle at 35% 30%, #ff8a5b, #f107a3 70%);
+  box-shadow: 0 12px 30px rgba(241,7,163,.5), inset 0 4px 12px rgba(255,255,255,.35);
+  cursor: pointer;
+}
+.tap-btn:active { transform: scale(.92); }
+.tap-btn:disabled { opacity: .4; }
+
+/* メーター */
+.meter {
+  width: 3.2rem;
+  height: 16rem;
+  background: rgba(255,255,255,.1);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+}
+.meter-fill {
+  width: 100%;
+  background: linear-gradient(to top, #2ecc71, #f9c80e, #ff4d6d);
+  height: 0%;
+  transition: height .08s ease-out;
+}
+
+/* グリッド（記憶ヘビ） */
+.pad-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .9rem;
+  width: 17rem;
+  max-width: 85vw;
+  aspect-ratio: 1;
+}
+.pad {
+  border-radius: 18px;
+  border: none;
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .12s, transform .1s;
+}
+.pad.lit { opacity: 1; transform: scale(1.04); box-shadow: 0 0 30px currentColor; }
+.pad:active { transform: scale(.96); }
+
+/* ガチャ結果 */
+.gacha-card {
+  width: 14rem;
+  max-width: 80vw;
+  aspect-ratio: 3/4;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .6rem;
+  font-weight: 900;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  animation: pop .5s cubic-bezier(.2,1.4,.5,1);
+}
+@keyframes pop { from { transform: scale(.3) rotate(-12deg); opacity: 0; } }
+.gacha-rank { font-size: 4.5rem; }
+.gacha-msg { font-size: 1.1rem; padding: 0 1rem; }
+.rarity-label { font-size: .9rem; letter-spacing: 3px; opacity: .85; }
+
+.flash { animation: flash .4s; }
+@keyframes flash { 50% { background: #fff !important; } }
+
+.confetti {
+  position: fixed;
+  top: -10px;
+  font-size: 1.4rem;
+  pointer-events: none;
+  z-index: 50;
+  animation: fall linear forwards;
+}
+@keyframes fall {
+  to { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+}
+
+.countdown-pill {
+  font-size: 1.3rem;
+  font-weight: 800;
+  background: rgba(255,255,255,.12);
+  padding: .4rem 1.4rem;
+  border-radius: 999px;
+}
