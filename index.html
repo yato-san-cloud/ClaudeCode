@@ -145,9 +145,9 @@
   const GROUND_Y = VH - 32;
   // プラットフォーム {x,y,w,h}
   const platforms = [
-    { x: 0,    y: GROUND_Y, w: 640,  h: 32 },
-    { x: 700,  y: GROUND_Y, w: 500,  h: 32 },
-    { x: 1260, y: GROUND_Y, w: 900,  h: 32 },
+    { x: 0,    y: GROUND_Y, w: 656,  h: 32 },
+    { x: 700,  y: GROUND_Y, w: 516,  h: 32 },
+    { x: 1260, y: GROUND_Y, w: 916,  h: 32 },
     { x: 2220, y: GROUND_Y, w: 700,  h: 32 },
     // 浮き床
     { x: 300,  y: GROUND_Y - 70,  w: 90, h: 14 },
@@ -162,29 +162,50 @@
   const LEVEL_END = 2880;
   const FLAG = { x: 2780, y: GROUND_Y - 120 };
 
+  // 復活地点（各地面ブロックの左寄り）。穴に落ちたら直前のここから再開。
+  const CHECKPOINTS = [30, 730, 1290, 2250];
+  function respawnX(fromX) {
+    let best = CHECKPOINTS[0];
+    for (const c of CHECKPOINTS) if (c <= fromX) best = c;
+    return best;
+  }
+
   // コイン
   let coins = [];
   // 敵（地上をうろつくキャラ）
   let enemies = [];
 
   function resetEntities() {
+    // 高さは走り（-18）または小ジャンプ（-55前後）で確実に取れる範囲に配置
     coins = [
-      {x:320,y:GROUND_Y-100}, {x:500,y:GROUND_Y-140}, {x:540,y:GROUND_Y-140},
-      {x:760,y:GROUND_Y-50}, {x:820,y:GROUND_Y-50},
-      {x:930,y:GROUND_Y-110},{x:1120,y:GROUND_Y-160},
-      {x:1330,y:GROUND_Y-50},{x:1390,y:GROUND_Y-50},{x:1450,y:GROUND_Y-50},
-      {x:1490,y:GROUND_Y-120},{x:1730,y:GROUND_Y-160},
-      {x:1930,y:GROUND_Y-120},{x:2100,y:GROUND_Y-50},
-      {x:2380,y:GROUND_Y-130},{x:2600,y:GROUND_Y-50},{x:2660,y:GROUND_Y-50},
+      {x:110,y:GROUND_Y-18},{x:140,y:GROUND_Y-18},{x:170,y:GROUND_Y-18},
+      {x:300,y:GROUND_Y-55},{x:330,y:GROUND_Y-70},
+      {x:500,y:GROUND_Y-55},{x:530,y:GROUND_Y-70},
+      {x:660,y:GROUND_Y-55},
+      {x:760,y:GROUND_Y-18},{x:790,y:GROUND_Y-18},{x:820,y:GROUND_Y-18},
+      {x:930,y:GROUND_Y-60},
+      {x:1050,y:GROUND_Y-18},{x:1080,y:GROUND_Y-18},
+      {x:1230,y:GROUND_Y-55},
+      {x:1330,y:GROUND_Y-18},{x:1360,y:GROUND_Y-18},{x:1390,y:GROUND_Y-18},
+      {x:1490,y:GROUND_Y-60},
+      {x:1650,y:GROUND_Y-18},{x:1680,y:GROUND_Y-18},
+      {x:1850,y:GROUND_Y-18},{x:1880,y:GROUND_Y-18},
+      {x:2000,y:GROUND_Y-18},{x:2030,y:GROUND_Y-18},
+      {x:2190,y:GROUND_Y-55},
+      {x:2300,y:GROUND_Y-18},{x:2330,y:GROUND_Y-18},
+      {x:2500,y:GROUND_Y-18},{x:2530,y:GROUND_Y-18},{x:2560,y:GROUND_Y-18},
+      {x:2700,y:GROUND_Y-18},
     ].map(c => ({ x:c.x, y:c.y, got:false, t:Math.random()*6 }));
 
+    // ギャップの着地点（700/1260/2220 付近）からは離して配置し、
+    // 着地 → 踏みつけ の流れが成立するようにする
     enemies = [
-      mkEnemy(760, 60, 110),
-      mkEnemy(1350, 100, 90),
-      mkEnemy(1600, 130, 80),
+      mkEnemy(840, 45, 110),
+      mkEnemy(1420, 60, 90),
+      mkEnemy(1650, 110, 80),
       mkEnemy(1950, 90, 70),
       mkEnemy(2450, 110, 90),
-      mkEnemy(2600, 60, 100),
+      mkEnemy(2650, 50, 100),
     ];
   }
   function mkEnemy(x, range, speedBase) {
@@ -226,10 +247,21 @@
     camX = 0; invuln = 0;
     resetEntities();
   }
-  function loseLife() {
+  // ダメージ処理。残機を減らし、0になったらゲームオーバー。
+  // ミスしてもステージ全体はリセットせず、無敵時間を与えてその場継続。
+  function hurt() {
     lives--;
-    if (lives <= 0) { endGame(false); }
-    else { resetLevel(); }
+    if (lives <= 0) { endGame(false); return false; }
+    invuln = 1.6;
+    return true;
+  }
+  // 穴に落ちたとき：直前のチェックポイントへ戻して継続
+  function fellInPit() {
+    if (!hurt()) return;
+    const p = player;
+    p.x = respawnX(p.x);
+    p.y = GROUND_Y - p.h - 40;
+    p.vx = 0; p.vy = 0;
   }
   function endGame(win) {
     state = win ? "clear" : "dead";
@@ -298,8 +330,8 @@
     if (p.onGround && Math.abs(p.vx) > 10) p.walkT += dt * Math.abs(p.vx) * 0.06;
     else p.walkT = 0;
 
-    // 落下死
-    if (p.y > VH + 40) { loseLife(); return; }
+    // 落下：チェックポイントから復活
+    if (p.y > VH + 40) { fellInPit(); return; }
 
     // カメラ
     const target = p.x - VW * 0.35;
@@ -328,8 +360,7 @@
           e.alive = false; e.squash = 0; score += 200;
           p.vy = JUMP_V * 0.6; // 踏んでバウンド
         } else if (invuln <= 0) {
-          invuln = 1.2;
-          loseLife();
+          if (hurt()) p.vy = -200;  // 被弾：その場で小さく弾み、無敵化して継続
           return;
         }
       }
@@ -517,6 +548,21 @@
     ctx.fillText("❤ " + lives, offX + 100*s, offY + 12*s);
     ctx.restore();
   }
+
+  // ===== デバッグ/自動デモ用フック（通常プレイには影響なし） =====
+  window.__game = {
+    player,
+    platforms,
+    FLAG,
+    GROUND_Y,
+    VW,
+    get coins() { return coins; },
+    get enemies() { return enemies; },
+    get camX() { return camX; },
+    get state() { return state; },
+    get score() { return score; },
+    get lives() { return lives; },
+  };
 
   // ===== メインループ =====
   let last = performance.now();
