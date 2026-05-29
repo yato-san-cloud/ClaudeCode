@@ -50,6 +50,19 @@ body {
     color: white;
 }
 
+.install-prompt { margin-left: auto; }
+.btn-install {
+    background: rgba(255,255,255,0.95);
+    color: var(--primary);
+    border: none;
+    border-radius: 6px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn-install:hover { background: white; }
+
 .container {
     max-width: 960px;
     margin: 2rem auto;
@@ -430,6 +443,76 @@ body {
 .workflow-arrow {
     font-size: 1.2rem;
     color: var(--primary);
+}
+
+/* Interactive X-ray editor */
+.editor-wrap {
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    line-height: 0;
+}
+
+#editor {
+    width: 100%;
+    height: auto;
+    display: block;
+    touch-action: none;
+}
+
+#editor .handle:hover {
+    filter: brightness(1.2);
+}
+
+.editor-hint {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 0.5rem;
+    text-align: center;
+}
+
+.calib-box {
+    margin-top: 1rem;
+    padding: 0.9rem;
+    background: #f7f3ff;
+    border: 1px solid #e0d4ff;
+    border-radius: 8px;
+}
+
+.calib-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #6b3fa0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.calib-help {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 0.5rem;
+}
+
+.calib-status {
+    font-size: 0.8rem;
+    color: #8b5fbf;
+    margin-top: 0.4rem;
+}
+
+.attachment-preview {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--accent);
+    border-radius: 8px;
+    text-align: center;
+}
+
+.attachment-preview img {
+    max-width: 100%;
+    max-height: 240px;
+    border-radius: 6px;
 }
 
 @media (max-width: 768px) {

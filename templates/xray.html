@@ -5,59 +5,86 @@
 {% block content %}
 <div class="page-header">
     <h2>レントゲン画像 骨盤分析</h2>
-    <p>骨盤のレントゲン画像をアップロードして、自動で骨盤傾斜・脚長差などを分析します</p>
+    <p>自動検出した基準点を<strong>ドラッグで補正</strong>できます。計測値はリアルタイムで再計算されます。</p>
 </div>
 
 <div class="form-card">
-    <h3>画像アップロード</h3>
+    <h3>1. 画像アップロード</h3>
     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click();">
         <div class="icon">&#128248;</div>
-        <p>クリックまたはドラッグ&ドロップで画像をアップロード</p>
-        <p style="font-size: 0.8rem; margin-top: 0.5rem;">対応形式: JPG, PNG, BMP, DICOM (最大16MB)</p>
+        <p id="uploadLabel">クリックまたはドラッグ&ドロップで画像をアップロード</p>
+        <p style="font-size: 0.8rem; margin-top: 0.5rem;">対応形式: JPG, PNG, BMP (最大16MB)</p>
         <input type="file" id="fileInput" accept="image/*" style="display: none;">
     </div>
-    <img id="previewImage" class="preview-image" alt="プレビュー">
 </div>
 
 <div class="form-card">
-    <h3>分析タイプ</h3>
+    <h3>2. 分析タイプ</h3>
     <div class="analysis-options">
         <div class="analysis-option selected" data-type="pelvis_tilt" onclick="selectAnalysis(this)">
             <h4>骨盤傾斜</h4>
-            <p>腸骨稜の高さの左右差を測定</p>
+            <p>腸骨稜の高さの左右差</p>
         </div>
         <div class="analysis-option" data-type="leg_length" onclick="selectAnalysis(this)">
             <h4>脚長差</h4>
-            <p>大腿骨頭の位置から脚長差を推定</p>
+            <p>大腿骨頭の高さの差</p>
         </div>
         <div class="analysis-option" data-type="spine_alignment" onclick="selectAnalysis(this)">
             <h4>脊椎アライメント</h4>
-            <p>脊椎の側弯・偏位を分析</p>
+            <p>脊椎の側弯・偏位</p>
         </div>
     </div>
     <div class="form-actions">
-        <button class="btn btn-lg" onclick="analyzeImage()" id="analyzeBtn" disabled>分析を実行</button>
+        <button class="btn btn-lg" onclick="runDetection()" id="analyzeBtn" disabled>自動検出を実行</button>
     </div>
 </div>
 
 <div class="loading" id="loading">
     <div class="spinner"></div>
-    <p>画像を分析中...</p>
+    <p>解析中...</p>
 </div>
 
 <div class="results-panel" id="resultsPanel">
     <div class="form-card">
-        <h3>分析結果</h3>
+        <h3>3. 基準点の補正 &amp; 計測</h3>
         <div class="result-grid">
-            <div class="result-image">
-                <img id="resultImage" alt="分析結果">
+            <div>
+                <div class="editor-wrap">
+                    <svg id="editor" xmlns="http://www.w3.org/2000/svg"></svg>
+                </div>
+                <p class="editor-hint">&#128073; 点をドラッグして位置を補正できます</p>
             </div>
             <div class="result-data">
                 <h3>計測データ</h3>
                 <div id="measurementsList"></div>
+
+                <div class="calib-box">
+                    <label class="calib-label">
+                        <input type="checkbox" id="calibToggle" onchange="toggleCalib()">
+                        スケール設定（mm換算）
+                    </label>
+                    <div id="calibFields" style="display:none;">
+                        <p class="calib-help">
+                            画像上の<strong>既知の長さ</strong>（定規・マーカー等）の両端に
+                            紫色の点を合わせ、実寸を入力してください。
+                        </p>
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>既知の実寸 (mm)</label>
+                            <input type="number" id="calibMM" value="100" min="1" step="1"
+                                   oninput="recompute()">
+                        </div>
+                        <div id="calibStatus" class="calib-status"></div>
+                    </div>
+                </div>
+
                 <div class="note-box">
-                    &#9888; この分析結果は参考値です。臨床判断には必ず専門家の確認を行ってください。
-                    画像の解像度やポジショニングにより精度が変動します。
+                    &#9888; 計測値は参考値です。臨床判断には必ず専門家の確認を行ってください。
+                </div>
+
+                <div class="form-actions" style="margin-top:1rem; flex-direction:column; gap:0.6rem;">
+                    <button class="btn" onclick="exportAnnotated()" style="width:100%;">注釈画像を確定生成</button>
+                    <a id="downloadLink" class="btn btn-outline" style="width:100%; display:none;" download="xray_annotated.png">画像をダウンロード</a>
+                    <button class="btn btn-outline" id="attachBtn" onclick="attachToReferral()" style="width:100%; display:none;">この画像を紹介状に添付</button>
                 </div>
             </div>
         </div>
@@ -69,45 +96,27 @@
 <script>
 let selectedFile = null;
 let analysisType = 'pelvis_tilt';
+let state = null; // {width,height,landmarkType,landmarks:[{id,label,x,y,color}], image}
+let calibPoints = null; // [{x,y},{x,y}]
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
 const uploadZone = document.getElementById('uploadZone');
 const fileInput = document.getElementById('fileInput');
-const previewImage = document.getElementById('previewImage');
 const analyzeBtn = document.getElementById('analyzeBtn');
 
-['dragenter', 'dragover'].forEach(evt => {
-    uploadZone.addEventListener(evt, e => {
-        e.preventDefault();
-        uploadZone.classList.add('dragover');
-    });
-});
-
-['dragleave', 'drop'].forEach(evt => {
-    uploadZone.addEventListener(evt, e => {
-        e.preventDefault();
-        uploadZone.classList.remove('dragover');
-    });
-});
-
-uploadZone.addEventListener('drop', e => {
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-});
-
-fileInput.addEventListener('change', e => {
-    if (e.target.files[0]) handleFile(e.target.files[0]);
-});
+['dragenter', 'dragover'].forEach(evt => uploadZone.addEventListener(evt, e => {
+    e.preventDefault(); uploadZone.classList.add('dragover');
+}));
+['dragleave', 'drop'].forEach(evt => uploadZone.addEventListener(evt, e => {
+    e.preventDefault(); uploadZone.classList.remove('dragover');
+}));
+uploadZone.addEventListener('drop', e => { if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
 function handleFile(file) {
     selectedFile = file;
-    const reader = new FileReader();
-    reader.onload = e => {
-        previewImage.src = e.target.result;
-        previewImage.style.display = 'block';
-    };
-    reader.readAsDataURL(file);
     analyzeBtn.disabled = false;
-    uploadZone.querySelector('p').textContent = file.name;
+    document.getElementById('uploadLabel').textContent = file.name;
 }
 
 function selectAnalysis(el) {
@@ -116,68 +125,227 @@ function selectAnalysis(el) {
     analysisType = el.dataset.type;
 }
 
-async function analyzeImage() {
+async function runDetection() {
     if (!selectedFile) return;
-
     document.getElementById('loading').classList.add('active');
     document.getElementById('resultsPanel').classList.remove('active');
 
-    const formData = new FormData();
-    formData.append('xray_image', selectedFile);
-    formData.append('analysis_type', analysisType);
-
+    const fd = new FormData();
+    fd.append('xray_image', selectedFile);
+    fd.append('analysis_type', analysisType);
     try {
-        const res = await fetch('/xray', { method: 'POST', body: formData });
+        const res = await fetch('/xray', { method: 'POST', body: fd });
         const data = await res.json();
-
-        if (data.error) {
-            alert(data.error);
-            return;
-        }
-
-        document.getElementById('resultImage').src = 'data:image/png;base64,' + data.image;
-
-        const list = document.getElementById('measurementsList');
-        list.innerHTML = '';
-
-        const labels = {
-            tilt_angle_deg: '骨盤傾斜角度',
-            height_difference_mm_approx: '高さの差（概算mm）',
-            higher_side: '高い側',
-            left_length_px: '左脚長（px）',
-            right_length_px: '右脚長（px）',
-            difference_px: '差（px）',
-            difference_mm_approx: '差（概算mm）',
-            shorter_side: '短い側',
-            max_lateral_deviation_px: '最大側方偏位（px）',
-            max_lateral_deviation_mm_approx: '最大側方偏位（概算mm）',
-            deviation_direction: '偏位方向',
-            cobb_angle_approx_deg: 'Cobb角概算',
+        if (data.error) { alert(data.error); return; }
+        state = {
+            width: data.width, height: data.height,
+            landmarkType: data.landmark_type,
+            landmarks: data.landmarks, image: data.image,
+            analysisType: data.analysis_type,
         };
-
-        const m = data.measurements;
-        for (const [key, label] of Object.entries(labels)) {
-            if (m[key] !== undefined) {
-                const div = document.createElement('div');
-                div.className = 'measurement';
-
-                let val = m[key];
-                if (key === 'higher_side' || key === 'shorter_side' || key === 'deviation_direction') {
-                    val = val === 'left' ? '左' : '右';
-                }
-                if (key.includes('deg')) val += '°';
-                if (key.includes('mm')) val += ' mm';
-
-                div.innerHTML = `<span class="label">${label}</span><span class="value">${val}</span>`;
-                list.appendChild(div);
-            }
-        }
-
+        calibPoints = null;
+        document.getElementById('calibToggle').checked = false;
+        document.getElementById('calibFields').style.display = 'none';
+        document.getElementById('downloadLink').style.display = 'none';
+        document.getElementById('attachBtn').style.display = 'none';
+        drawEditor();
+        recompute();
         document.getElementById('resultsPanel').classList.add('active');
     } catch (err) {
-        alert('分析中にエラーが発生しました: ' + err.message);
+        alert('解析中にエラーが発生しました: ' + err.message);
     } finally {
         document.getElementById('loading').classList.remove('active');
+    }
+}
+
+function drawEditor() {
+    const svg = document.getElementById('editor');
+    svg.setAttribute('viewBox', `0 0 ${state.width} ${state.height}`);
+    svg.innerHTML = '';
+
+    const img = document.createElementNS(SVG_NS, 'image');
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', state.image);
+    img.setAttribute('href', state.image);
+    img.setAttribute('x', 0); img.setAttribute('y', 0);
+    img.setAttribute('width', state.width); img.setAttribute('height', state.height);
+    svg.appendChild(img);
+
+    const lineGroup = document.createElementNS(SVG_NS, 'g');
+    lineGroup.setAttribute('id', 'lineGroup');
+    svg.appendChild(lineGroup);
+
+    state.landmarks.forEach((lm, i) => addHandle(svg, lm, i, false));
+    drawConnections();
+}
+
+function addHandle(svg, lm, idx, isCalib) {
+    const r = Math.max(state.width, state.height) / 70;
+    const c = document.createElementNS(SVG_NS, 'circle');
+    c.setAttribute('cx', lm.x); c.setAttribute('cy', lm.y);
+    c.setAttribute('r', r);
+    c.setAttribute('fill', isCalib ? '#b14fff' : lm.color);
+    c.setAttribute('stroke', '#fff'); c.setAttribute('stroke-width', r * 0.25);
+    c.style.cursor = 'grab';
+    c.classList.add('handle');
+    svg.appendChild(c);
+    makeDraggable(svg, c, lm, isCalib);
+}
+
+function makeDraggable(svg, circle, lm, isCalib) {
+    let dragging = false;
+    const toSvg = (e) => {
+        const pt = svg.createSVGPoint();
+        pt.x = e.clientX; pt.y = e.clientY;
+        return pt.matrixTransform(svg.getScreenCTM().inverse());
+    };
+    const start = (e) => { dragging = true; circle.style.cursor = 'grabbing'; e.preventDefault(); };
+    const move = (e) => {
+        if (!dragging) return;
+        const ev = e.touches ? e.touches[0] : e;
+        const p = toSvg(ev);
+        lm.x = Math.max(0, Math.min(state.width, p.x));
+        lm.y = Math.max(0, Math.min(state.height, p.y));
+        circle.setAttribute('cx', lm.x); circle.setAttribute('cy', lm.y);
+        drawConnections();
+        recompute();
+    };
+    const end = () => { dragging = false; circle.style.cursor = 'grab'; };
+    circle.addEventListener('mousedown', start);
+    circle.addEventListener('touchstart', start, { passive: false });
+    window.addEventListener('mousemove', move);
+    window.addEventListener('touchmove', move, { passive: false });
+    window.addEventListener('mouseup', end);
+    window.addEventListener('touchend', end);
+}
+
+function drawConnections() {
+    const g = document.getElementById('lineGroup');
+    if (!g) return;
+    g.innerHTML = '';
+    const lm = state.landmarks;
+    const sw = Math.max(state.width, state.height) / 250;
+
+    const line = (x1, y1, x2, y2, color, dash) => {
+        const l = document.createElementNS(SVG_NS, 'line');
+        l.setAttribute('x1', x1); l.setAttribute('y1', y1);
+        l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+        l.setAttribute('stroke', color); l.setAttribute('stroke-width', sw);
+        if (dash) l.setAttribute('stroke-dasharray', sw * 3);
+        g.appendChild(l);
+    };
+
+    if (state.analysisType === 'spine_alignment') {
+        const ordered = [...lm].sort((a, b) => a.y - b.y);
+        for (let i = 1; i < ordered.length; i++)
+            line(ordered[i-1].x, ordered[i-1].y, ordered[i].x, ordered[i].y, '#50c850');
+        line(ordered[0].x, ordered[0].y, ordered[ordered.length-1].x, ordered[ordered.length-1].y, '#cccccc', true);
+    } else {
+        line(lm[0].x, lm[0].y, lm[1].x, lm[1].y, '#00d000');
+        line(0, lm[0].y, state.width, lm[0].y, '#ffd000', true);
+    }
+    if (calibPoints) {
+        line(calibPoints[0].x, calibPoints[0].y, calibPoints[1].x, calibPoints[1].y, '#b14fff');
+    }
+}
+
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function getMMperPX() {
+    if (!calibPoints) return null;
+    const mm = parseFloat(document.getElementById('calibMM').value);
+    const px = dist(calibPoints[0], calibPoints[1]);
+    if (!mm || !px) return null;
+    return mm / px;
+}
+
+function recompute() {
+    if (!state) return;
+    const lm = {};
+    state.landmarks.forEach(p => lm[p.id] = p);
+    const mmpp = getMMperPX();
+    const rows = [];
+    const fmtMM = (px) => mmpp ? (px * mmpp).toFixed(1) + ' mm' : '— (要スケール)';
+
+    if (state.analysisType === 'leg_length') {
+        const d = Math.abs(lm.left_femoral.y - lm.right_femoral.y);
+        rows.push(['高さの差', d.toFixed(0) + ' px']);
+        rows.push(['高さの差', fmtMM(d)]);
+        rows.push(['低い側', lm.left_femoral.y > lm.right_femoral.y ? '左' : '右']);
+    } else if (state.analysisType === 'spine_alignment') {
+        const ordered = [...state.landmarks].sort((a, b) => a.y - b.y);
+        const top = ordered[0], bot = ordered[ordered.length-1];
+        const axis = (top.x + bot.x) / 2;
+        let maxDev = 0;
+        ordered.forEach(p => { if (Math.abs(p.x - axis) > Math.abs(maxDev)) maxDev = p.x - axis; });
+        const mid = ordered[Math.floor(ordered.length/2)];
+        const halfH = Math.max((bot.y - top.y) / 2, 1);
+        const cobb = Math.atan2(Math.abs(mid.x - axis), halfH) * 180 / Math.PI;
+        rows.push(['最大側方偏位', Math.abs(maxDev).toFixed(0) + ' px']);
+        rows.push(['最大側方偏位', fmtMM(Math.abs(maxDev))]);
+        rows.push(['偏位方向', maxDev < 0 ? '左' : '右']);
+        rows.push(['Cobb角(概算)', cobb.toFixed(1) + '°']);
+    } else {
+        const dy = lm.right_iliac.y - lm.left_iliac.y;
+        const dx = lm.right_iliac.x - lm.left_iliac.x;
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        rows.push(['骨盤傾斜角', angle.toFixed(1) + '°']);
+        rows.push(['高さの差', Math.abs(dy).toFixed(0) + ' px']);
+        rows.push(['高さの差', fmtMM(Math.abs(dy))]);
+        rows.push(['高い側', lm.left_iliac.y < lm.right_iliac.y ? '左' : '右']);
+    }
+
+    const list = document.getElementById('measurementsList');
+    list.innerHTML = rows.map(([k, v]) =>
+        `<div class="measurement"><span class="label">${k}</span><span class="value">${v}</span></div>`
+    ).join('');
+}
+
+function toggleCalib() {
+    const on = document.getElementById('calibToggle').checked;
+    document.getElementById('calibFields').style.display = on ? 'block' : 'none';
+    if (on) {
+        // place two calibration handles at default positions
+        calibPoints = [
+            { x: state.width * 0.15, y: state.height * 0.85 },
+            { x: state.width * 0.35, y: state.height * 0.85 },
+        ];
+        const svg = document.getElementById('editor');
+        calibPoints.forEach(p => addHandle(svg, p, 0, true));
+        document.getElementById('calibStatus').textContent =
+            '紫の2点を既知の長さに合わせてください。';
+    } else {
+        calibPoints = null;
+        drawEditor();
+    }
+    drawConnections();
+    recompute();
+}
+
+async function exportAnnotated() {
+    if (!state) return;
+    const res = await fetch('/xray/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            image: state.image,
+            analysis_type: state.analysisType,
+            landmarks: state.landmarks,
+            mm_per_px: getMMperPX(),
+        }),
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    window._annotated = data.image;
+    const dl = document.getElementById('downloadLink');
+    dl.href = data.image; dl.style.display = 'block';
+    document.getElementById('attachBtn').style.display = 'block';
+}
+
+function attachToReferral() {
+    if (!window._annotated) return;
+    sessionStorage.setItem('xray_attachment', window._annotated);
+    if (confirm('紹介状に添付しました。紹介状作成ページへ移動しますか？')) {
+        location.href = '/referral';
     }
 }
 </script>

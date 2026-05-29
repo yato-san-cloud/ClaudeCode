@@ -1,254 +1,280 @@
+"""骨盤・脊椎レントゲンのランドマーク検出と計測。
+
+設計方針:
+- detect_landmarks: 画像から基準点(ランドマーク)を自動推定して返す。描画はしない。
+- compute_measurements: ランドマーク座標から角度・距離を計算する(キャリブレーション対応)。
+- render_annotated: (ユーザー補正後の)ランドマークで注釈画像を描画する。
+
+自動検出はあくまで初期値。フロントで施術者がドラッグ補正し、確定した座標で
+compute / render を呼ぶ「ヒューマン・イン・ザ・ループ」を前提にしている。
+"""
 import cv2
 import numpy as np
-import io
 import math
 
+# 表示色 (フロントのSVGと合わせるため16進も併記)
+COLORS = {
+    "iliac": (59, 59, 255),       # 赤  #ff3b3b
+    "femoral": (255, 199, 0),     # 水  #00c7ff (BGR)
+    "spine": (80, 200, 80),       # 緑  #50c850
+    "line": (0, 200, 0),
+    "guide": (200, 200, 200),
+}
 
-def analyze_pelvis(image_bytes: bytes, analysis_type: str = "pelvis_tilt") -> tuple:
+
+def _decode(image_bytes):
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("画像を読み込めませんでした")
+    return img
 
-    h, w = img.shape[:2]
-    result = img.copy()
 
+def _edges(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
     edges = cv2.Canny(blurred, 30, 100)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    edges = cv2.dilate(edges, kernel, iterations=1)
+    return cv2.dilate(edges, kernel, iterations=1)
 
-    measurements = {}
 
-    if analysis_type == "pelvis_tilt":
-        measurements = _analyze_pelvis_tilt(result, edges, gray, h, w)
-    elif analysis_type == "leg_length":
-        measurements = _analyze_leg_length(result, edges, gray, h, w)
+# --------------------------------------------------------------------------
+# ランドマーク検出 (初期値の推定)
+# --------------------------------------------------------------------------
+def detect_landmarks(image_bytes: bytes, analysis_type: str) -> dict:
+    img = _decode(image_bytes)
+    h, w = img.shape[:2]
+    edges = _edges(img)
+
+    if analysis_type == "leg_length":
+        landmarks = _detect_femoral_heads(edges, h, w)
+        ltype = "points"
     elif analysis_type == "spine_alignment":
-        measurements = _analyze_spine(result, edges, gray, h, w)
+        landmarks = _detect_spine(edges, h, w)
+        ltype = "polyline"
     else:
-        measurements = _analyze_pelvis_tilt(result, edges, gray, h, w)
+        analysis_type = "pelvis_tilt"
+        landmarks = _detect_iliac_crests(edges, h, w)
+        ltype = "points"
 
-    _draw_legend(result, analysis_type)
+    return {
+        "analysis_type": analysis_type,
+        "landmark_type": ltype,
+        "width": w,
+        "height": h,
+        "midline_x": w // 2,
+        "landmarks": landmarks,
+    }
 
-    _, encoded = cv2.imencode(".png", result)
-    return encoded.tobytes(), measurements
 
-
-def _analyze_pelvis_tilt(result, edges, gray, h, w):
-    roi_top = int(h * 0.25)
-    roi_bottom = int(h * 0.65)
+def _detect_iliac_crests(edges, h, w):
+    roi_top, roi_bottom = int(h * 0.25), int(h * 0.65)
     roi = edges[roi_top:roi_bottom, :]
-
     contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    large_contours = [c for c in contours if cv2.contourArea(c) > 500]
-    large_contours.sort(key=cv2.contourArea, reverse=True)
+    large = sorted((c for c in contours if cv2.contourArea(c) > 500),
+                   key=cv2.contourArea, reverse=True)
 
-    left_iliac = None
-    right_iliac = None
     mid_x = w // 2
-
-    for contour in large_contours:
-        contour[:, :, 1] += roi_top
-        M = cv2.moments(contour)
+    left = right = None
+    for c in large:
+        c[:, :, 1] += roi_top
+        M = cv2.moments(c)
         if M["m00"] == 0:
             continue
-        cx = int(M["m10"] / M["m00"])
-        cy = int(M["m01"] / M["m00"])
-
-        if cx < mid_x and left_iliac is None:
-            left_iliac = (cx, cy)
-        elif cx >= mid_x and right_iliac is None:
-            right_iliac = (cx, cy)
-
-        if left_iliac and right_iliac:
+        cx, cy = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+        if cx < mid_x and left is None:
+            left = (cx, cy)
+        elif cx >= mid_x and right is None:
+            right = (cx, cy)
+        if left and right:
             break
 
-    if not left_iliac:
-        left_iliac = (int(w * 0.3), int(h * 0.35))
-    if not right_iliac:
-        right_iliac = (int(w * 0.7), int(h * 0.35))
-
-    cv2.circle(result, left_iliac, 8, (0, 0, 255), -1)
-    cv2.circle(result, right_iliac, 8, (0, 0, 255), -1)
-    cv2.putText(result, "L", (left_iliac[0] - 20, left_iliac[1] - 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-    cv2.putText(result, "R", (right_iliac[0] + 10, right_iliac[1] - 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
-    cv2.line(result, left_iliac, right_iliac, (0, 255, 0), 2)
-
-    cv2.line(result, (0, left_iliac[1]), (w, left_iliac[1]), (255, 255, 0), 1, cv2.LINE_AA)
-
-    dy = right_iliac[1] - left_iliac[1]
-    dx = right_iliac[0] - left_iliac[0]
-    angle = math.degrees(math.atan2(dy, dx))
-
-    height_diff_mm = abs(dy) * 0.5  # approximate px-to-mm
-
-    mid_point = ((left_iliac[0] + right_iliac[0]) // 2,
-                 (left_iliac[1] + right_iliac[1]) // 2)
-    cv2.putText(result, f"Tilt: {angle:.1f} deg", (mid_point[0] - 60, mid_point[1] - 20),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-    sacrum_y = int(h * 0.45)
-    sacrum_x = mid_x
-    cv2.circle(result, (sacrum_x, sacrum_y), 6, (255, 0, 255), -1)
-    cv2.line(result, (sacrum_x, sacrum_y), (sacrum_x, sacrum_y - int(h * 0.2)),
-             (255, 0, 255), 2)
-    cv2.putText(result, "Sacral line", (sacrum_x + 10, sacrum_y - int(h * 0.1)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
-
-    cv2.line(result, (mid_x, 0), (mid_x, h), (200, 200, 200), 1, cv2.LINE_AA)
-
-    higher = "left" if left_iliac[1] < right_iliac[1] else "right"
-
-    return {
-        "tilt_angle_deg": round(angle, 2),
-        "height_difference_mm_approx": round(height_diff_mm, 1),
-        "higher_side": higher,
-        "left_iliac_crest": list(left_iliac),
-        "right_iliac_crest": list(right_iliac),
-        "analysis_note": "自動検出結果です。臨床判断には専門家の確認が必要です。",
-    }
+    left = left or (int(w * 0.30), int(h * 0.35))
+    right = right or (int(w * 0.70), int(h * 0.35))
+    return [
+        {"id": "left_iliac", "label": "左腸骨稜", "x": left[0], "y": left[1], "color": "#ff3b3b"},
+        {"id": "right_iliac", "label": "右腸骨稜", "x": right[0], "y": right[1], "color": "#ff3b3b"},
+    ]
 
 
-def _analyze_leg_length(result, edges, gray, h, w):
+def _detect_femoral_heads(edges, h, w):
     roi_top = int(h * 0.5)
     roi = edges[roi_top:, :]
+    left_x, right_x = int(w * 0.35), int(w * 0.65)
 
-    left_x = int(w * 0.35)
-    right_x = int(w * 0.65)
+    def first_edge(col_x):
+        col = roi[:, col_x]
+        pts = np.where(col > 0)[0]
+        return roi_top + (int(pts[0]) if len(pts) else int(h * 0.1))
 
-    left_col = roi[:, left_x]
-    right_col = roi[:, right_x]
-
-    left_points = np.where(left_col > 0)[0]
-    right_points = np.where(right_col > 0)[0]
-
-    left_femur_head = roi_top + (left_points[0] if len(left_points) > 0 else int(h * 0.1))
-    right_femur_head = roi_top + (right_points[0] if len(right_points) > 0 else int(h * 0.1))
-
-    cv2.circle(result, (left_x, left_femur_head), 10, (0, 255, 255), 2)
-    cv2.circle(result, (right_x, right_femur_head), 10, (0, 255, 255), 2)
-
-    cv2.line(result, (left_x, left_femur_head), (right_x, right_femur_head),
-             (0, 165, 255), 2)
-
-    cv2.line(result, (left_x, left_femur_head), (left_x, h), (255, 200, 0), 1)
-    cv2.line(result, (right_x, right_femur_head), (right_x, h), (255, 200, 0), 1)
-
-    diff = abs(left_femur_head - right_femur_head)
-    diff_mm = diff * 0.5
-
-    cv2.putText(result, f"L: {h - left_femur_head}px",
-                (left_x - 50, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
-    cv2.putText(result, f"R: {h - right_femur_head}px",
-                (right_x - 50, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
-
-    return {
-        "left_length_px": h - left_femur_head,
-        "right_length_px": h - right_femur_head,
-        "difference_px": diff,
-        "difference_mm_approx": round(diff_mm, 1),
-        "shorter_side": "left" if left_femur_head > right_femur_head else "right",
-        "analysis_note": "自動検出結果です。臨床判断には専門家の確認が必要です。",
-    }
+    return [
+        {"id": "left_femoral", "label": "左大腿骨頭", "x": left_x, "y": first_edge(left_x), "color": "#00c7ff"},
+        {"id": "right_femoral", "label": "右大腿骨頭", "x": right_x, "y": first_edge(right_x), "color": "#00c7ff"},
+    ]
 
 
-def _analyze_spine(result, edges, gray, h, w):
+def _detect_spine(edges, h, w):
     mid_x = w // 2
-    strip_w = int(w * 0.15)
-    spine_roi = edges[:, mid_x - strip_w : mid_x + strip_w]
+    strip = int(w * 0.15)
+    spine_roi = edges[:, mid_x - strip: mid_x + strip]
 
-    spine_points = []
-    step = h // 15
-    for i in range(15):
-        row_start = i * step
-        row_end = min((i + 1) * step, h)
-        row_strip = spine_roi[row_start:row_end, :]
-        points = np.where(row_strip > 0)
-        if len(points[1]) > 0:
-            cx = int(np.mean(points[1])) + mid_x - strip_w
-            cy = row_start + int(np.mean(points[0]))
-            spine_points.append((cx, cy))
+    pts = []
+    n = 7
+    step = h // n
+    for i in range(n):
+        r0, r1 = i * step, min((i + 1) * step, h)
+        band = spine_roi[r0:r1, :]
+        ys, xs = np.where(band > 0)
+        if len(xs):
+            cx = int(np.mean(xs)) + mid_x - strip
+            cy = r0 + int(np.mean(ys))
+        else:
+            cx, cy = mid_x, r0 + step // 2
+        pts.append((cx, cy))
 
-    if len(spine_points) < 3:
-        spine_points = [(mid_x + (i % 3 - 1) * 5, int(h * 0.1 + i * h * 0.05))
-                        for i in range(12)]
+    return [
+        {"id": f"spine_{i}", "label": f"椎体{i + 1}", "x": p[0], "y": p[1], "color": "#50c850"}
+        for i, p in enumerate(pts)
+    ]
 
-    for i, pt in enumerate(spine_points):
-        cv2.circle(result, pt, 5, (0, 255, 0), -1)
-        if i > 0:
-            cv2.line(result, spine_points[i - 1], pt, (0, 255, 0), 2)
 
-    cv2.line(result, (mid_x, 0), (mid_x, h), (200, 200, 200), 1, cv2.LINE_AA)
+# --------------------------------------------------------------------------
+# 計測 (キャリブレーション対応)
+# --------------------------------------------------------------------------
+def compute_measurements(landmarks: list, analysis_type: str,
+                         mm_per_px: float = None, midline_x: float = None) -> dict:
+    """ランドマーク座標から計測値を算出。
 
-    deviations = [pt[0] - mid_x for pt in spine_points]
-    max_dev = max(deviations, key=abs) if deviations else 0
-    max_dev_mm = max_dev * 0.5
+    mm_per_px が None の場合は mm 換算せず px のみ返す(キャリブレーション未実施)。
+    """
+    pts = {lm["id"]: (float(lm["x"]), float(lm["y"])) for lm in landmarks}
 
-    if len(spine_points) >= 3:
-        top = spine_points[0]
-        mid = spine_points[len(spine_points) // 2]
-        bottom = spine_points[-1]
+    def mm(px):
+        return round(px * mm_per_px, 1) if mm_per_px else None
 
-        expected_mid_x = (top[0] + bottom[0]) / 2
-        cobb_approx = math.degrees(math.atan2(abs(mid[0] - expected_mid_x),
-                                               (bottom[1] - top[1]) / 2))
-    else:
-        cobb_approx = 0.0
+    note = "自動検出の初期値です。基準点を確認・補正のうえご判断ください。"
+    if not mm_per_px:
+        note += " ※mm換算はスケール未設定のため未表示。"
 
-    cv2.putText(result, f"Max deviation: {max_dev}px ({max_dev_mm:.1f}mm)",
-                (10, h - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    cv2.putText(result, f"Cobb approx: {cobb_approx:.1f} deg",
-                (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    if analysis_type == "leg_length":
+        l, r = pts["left_femoral"], pts["right_femoral"]
+        diff_px = abs(l[1] - r[1])
+        return {
+            "vertical_diff_px": round(diff_px, 1),
+            "vertical_diff_mm": mm(diff_px),
+            "lower_side": "左" if l[1] > r[1] else "右",
+            "calibrated": bool(mm_per_px),
+            "analysis_note": note,
+        }
 
+    if analysis_type == "spine_alignment":
+        ordered = sorted(((lm["id"], pts[lm["id"]]) for lm in landmarks),
+                         key=lambda kv: kv[1][1])
+        coords = [c for _, c in ordered]
+        top, bottom = coords[0], coords[-1]
+        axis_x = (top[0] + bottom[0]) / 2
+        devs = [c[0] - axis_x for c in coords]
+        max_dev = max(devs, key=abs) if devs else 0.0
+        mid = coords[len(coords) // 2]
+        half_h = max((bottom[1] - top[1]) / 2, 1)
+        cobb = math.degrees(math.atan2(abs(mid[0] - axis_x), half_h))
+        return {
+            "max_deviation_px": round(abs(max_dev), 1),
+            "max_deviation_mm": mm(abs(max_dev)),
+            "deviation_direction": "左" if max_dev < 0 else "右",
+            "cobb_angle_approx_deg": round(cobb, 1),
+            "calibrated": bool(mm_per_px),
+            "analysis_note": note,
+        }
+
+    # pelvis_tilt
+    l, r = pts["left_iliac"], pts["right_iliac"]
+    dy, dx = r[1] - l[1], r[0] - l[0]
+    angle = math.degrees(math.atan2(dy, dx))
+    diff_px = abs(dy)
     return {
-        "spine_points": spine_points,
-        "max_lateral_deviation_px": abs(max_dev),
-        "max_lateral_deviation_mm_approx": round(abs(max_dev_mm), 1),
-        "deviation_direction": "left" if max_dev < 0 else "right",
-        "cobb_angle_approx_deg": round(cobb_approx, 1),
-        "analysis_note": "自動検出結果です。臨床判断には専門家の確認が必要です。",
+        "tilt_angle_deg": round(angle, 2),
+        "height_diff_px": round(diff_px, 1),
+        "height_diff_mm": mm(diff_px),
+        "higher_side": "左" if l[1] < r[1] else "右",
+        "calibrated": bool(mm_per_px),
+        "analysis_note": note,
     }
 
 
-def _draw_legend(result, analysis_type):
-    h, w = result.shape[:2]
-    overlay = result.copy()
-    legend_h = 120
-    cv2.rectangle(overlay, (w - 250, 10), (w - 10, 10 + legend_h), (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.6, result, 0.4, 0, result)
+# --------------------------------------------------------------------------
+# 注釈画像の描画 (確定したランドマークで)
+# --------------------------------------------------------------------------
+def render_annotated(image_bytes: bytes, analysis_type: str,
+                     landmarks: list, mm_per_px: float = None) -> tuple:
+    img = _decode(image_bytes)
+    h, w = img.shape[:2]
+    result = img.copy()
+    pts = {lm["id"]: (int(round(float(lm["x"]))), int(round(float(lm["y"])))) for lm in landmarks}
+    m = compute_measurements(landmarks, analysis_type, mm_per_px, w // 2)
 
-    y_start = 30
-    cv2.putText(result, "Analysis Legend", (w - 240, y_start),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    if analysis_type == "leg_length":
+        l, r = pts["left_femoral"], pts["right_femoral"]
+        for p in (l, r):
+            cv2.circle(result, p, 10, COLORS["femoral"], 2)
+            cv2.line(result, (p[0], p[1]), (p[0], h), COLORS["femoral"], 1, cv2.LINE_AA)
+        cv2.line(result, l, r, (0, 165, 255), 2)
+        _label(result, l, "L"), _label(result, r, "R")
+        txt = f"diff: {m['vertical_diff_px']}px"
+        if m["vertical_diff_mm"] is not None:
+            txt += f" / {m['vertical_diff_mm']}mm"
+        _caption(result, txt)
 
-    if analysis_type == "pelvis_tilt":
-        items = [
-            ((0, 0, 255), "Iliac crest points"),
-            ((0, 255, 0), "Pelvic tilt line"),
-            ((255, 0, 255), "Sacral vertical"),
-            ((200, 200, 200), "Midline"),
-        ]
-    elif analysis_type == "leg_length":
-        items = [
-            ((0, 255, 255), "Femoral heads"),
-            ((0, 165, 255), "Hip line"),
-            ((255, 200, 0), "Leg length"),
-        ]
-    else:
-        items = [
-            ((0, 255, 0), "Spine curve"),
-            ((200, 200, 200), "Midline"),
-        ]
+    elif analysis_type == "spine_alignment":
+        ordered = [pts[lm["id"]] for lm in sorted(landmarks, key=lambda lm: float(lm["y"]))]
+        for i, p in enumerate(ordered):
+            cv2.circle(result, p, 5, COLORS["spine"], -1)
+            if i:
+                cv2.line(result, ordered[i - 1], p, COLORS["spine"], 2)
+        top, bottom = ordered[0], ordered[-1]
+        cv2.line(result, top, bottom, COLORS["guide"], 1, cv2.LINE_AA)
+        txt = f"max dev: {m['max_deviation_px']}px"
+        if m["max_deviation_mm"] is not None:
+            txt += f" / {m['max_deviation_mm']}mm"
+        txt += f"  Cobb~{m['cobb_angle_approx_deg']}deg"
+        _caption(result, txt)
 
-    for i, (color, label) in enumerate(items):
-        y = y_start + 20 + i * 20
-        cv2.rectangle(result, (w - 240, y - 5), (w - 225, y + 5), color, -1)
-        cv2.putText(result, label, (w - 220, y + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+    else:  # pelvis_tilt
+        l, r = pts["left_iliac"], pts["right_iliac"]
+        for p in (l, r):
+            cv2.circle(result, p, 8, COLORS["iliac"], -1)
+        cv2.line(result, l, r, COLORS["line"], 2)
+        cv2.line(result, (0, l[1]), (w, l[1]), (255, 255, 0), 1, cv2.LINE_AA)
+        cv2.line(result, (w // 2, 0), (w // 2, h), COLORS["guide"], 1, cv2.LINE_AA)
+        _label(result, l, "L"), _label(result, r, "R")
+        txt = f"tilt: {m['tilt_angle_deg']}deg"
+        if m["height_diff_mm"] is not None:
+            txt += f"  diff: {m['height_diff_mm']}mm"
+        _caption(result, txt)
+
+    ok, encoded = cv2.imencode(".png", result)
+    return encoded.tobytes(), m
+
+
+def _label(img, p, text):
+    cv2.putText(img, text, (p[0] + 10, p[1] - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+
+def _caption(img, text):
+    h, w = img.shape[:2]
+    overlay = img.copy()
+    cv2.rectangle(overlay, (8, h - 34), (8 + 11 * len(text), h - 8), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.55, img, 0.45, 0, img)
+    cv2.putText(img, text, (14, h - 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+
+
+# --------------------------------------------------------------------------
+# 後方互換: 自動検出 → 注釈までを一括 (旧API)
+# --------------------------------------------------------------------------
+def analyze_pelvis(image_bytes: bytes, analysis_type: str = "pelvis_tilt") -> tuple:
+    det = detect_landmarks(image_bytes, analysis_type)
+    return render_annotated(image_bytes, det["analysis_type"], det["landmarks"])

@@ -2,3 +2,13 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.venv/
+
+# PyInstaller 成果物
+build/
+dist/
+*.spec.bak
+
+# Scratch
+_smoke*.py
+_t.py

@@ -118,6 +118,23 @@
         </div>
     </div>
 
+    <div class="form-card">
+        <h3>X線所見の添付（任意）</h3>
+        <p style="color: var(--text-light); font-size: 0.9rem;">
+            「X線分析」ページで「紹介状に添付」した画像、またはここでファイルを選んだ画像を紹介状に添付できます。
+        </p>
+        <div class="form-group" style="margin-top: 0.8rem;">
+            <input type="file" name="xray_attachment" accept="image/*" id="xrayFile">
+        </div>
+        <input type="hidden" name="xray_attachment_b64" id="xrayAttachmentB64">
+        <div class="attachment-preview" id="attachmentPreview" style="display:none;">
+            <img id="attachmentImg" alt="添付X線">
+            <div style="margin-top: 0.6rem;">
+                <button type="button" class="btn btn-outline" onclick="clearAttachment()">添付を解除</button>
+            </div>
+        </div>
+    </div>
+
     <div class="form-actions">
         <button type="submit" class="btn btn-lg">紹介状PDFを生成</button>
         <button type="button" class="btn btn-lg btn-outline" onclick="fillSampleData()">サンプルデータ入力</button>
@@ -160,5 +177,34 @@ function fillSampleData() {
     document.getElementById('painSlider').value = 6;
     document.getElementById('painValue').textContent = '6';
 }
+
+// X線添付の処理 ----------------------------------------------------------
+function showAttachment(dataUrl) {
+    document.getElementById('xrayAttachmentB64').value = dataUrl;
+    document.getElementById('attachmentImg').src = dataUrl;
+    document.getElementById('attachmentPreview').style.display = 'block';
+}
+
+function clearAttachment() {
+    document.getElementById('xrayAttachmentB64').value = '';
+    document.getElementById('xrayFile').value = '';
+    document.getElementById('attachmentPreview').style.display = 'none';
+    sessionStorage.removeItem('xray_attachment');
+}
+
+// X線分析ページから引き継いだ添付画像があれば表示
+window.addEventListener('DOMContentLoaded', () => {
+    const fromXray = sessionStorage.getItem('xray_attachment');
+    if (fromXray) showAttachment(fromXray);
+});
+
+// ファイル選択でも添付可能
+document.getElementById('xrayFile').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => showAttachment(ev.target.result);
+    reader.readAsDataURL(file);
+});
 </script>
 {% endblock %}

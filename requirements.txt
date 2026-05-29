@@ -3,3 +3,7 @@ opencv-python-headless>=4.8
 numpy>=1.24
 Pillow>=10.0
 reportlab>=4.0
+
+# デスクトップアプリ起動用 (任意)
+# 未インストールでも desktop.py はブラウザフォールバックで動きます
+pywebview>=5.0; sys_platform != "linux"

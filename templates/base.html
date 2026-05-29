@@ -3,7 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}カイロプラクティック紹介状システム{% endblock %}</title>
+    <title>{% block title %}カイロ紹介状アプリ{% endblock %}</title>
+    <meta name="theme-color" content="#2c5f7c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="紹介状">
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" href="/static/icons/icon-192.png" type="image/png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -12,10 +18,37 @@
         <a href="/" class="{% if request.path == '/' %}active{% endif %}">ホーム</a>
         <a href="/referral" class="{% if request.path == '/referral' %}active{% endif %}">紹介状作成</a>
         <a href="/xray" class="{% if request.path == '/xray' %}active{% endif %}">X線分析</a>
+        <span id="installPrompt" class="install-prompt" style="display:none;">
+            <button class="btn-install" onclick="installApp()">アプリとしてインストール</button>
+        </span>
     </nav>
     <div class="container">
         {% block content %}{% endblock %}
     </div>
     {% block scripts %}{% endblock %}
+    <script>
+        // Service Worker 登録 (PWA化)
+        if ("serviceWorker" in navigator) {
+            window.addEventListener("load", () => {
+                navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+            });
+        }
+
+        // インストールプロンプト (Chrome/Edge)
+        let deferredPrompt = null;
+        window.addEventListener("beforeinstallprompt", (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById("installPrompt").style.display = "inline-block";
+        });
+        function installApp() {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.finally(() => {
+                deferredPrompt = null;
+                document.getElementById("installPrompt").style.display = "none";
+            });
+        }
+    </script>
 </body>
 </html>

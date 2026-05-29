@@ -1,0 +1,38 @@
+{
+    "name": "カイロ紹介状アプリ",
+    "short_name": "紹介状",
+    "description": "カイロプラクティック院向け 紹介状自動化 & X線骨盤分析",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "background_color": "#f5f7fa",
+    "theme_color": "#2c5f7c",
+    "lang": "ja",
+    "icons": [
+        {
+            "src": "/static/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/static/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "紹介状作成",
+            "url": "/referral",
+            "description": "問診票から紹介状を作る"
+        },
+        {
+            "name": "X線分析",
+            "url": "/xray",
+            "description": "骨盤レントゲンを分析する"
+        }
+    ]
+}
