@@ -1,0 +1,48 @@
+{
+  "template_id": "ecommerce_small",
+  "name": "EC物流・人手ピッキング (small)",
+  "description": "小規模 EC 倉庫。人手シングルピッキング。提案ヒアリングの出発点。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー/時",
+      "type": "float"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        "discrete",
+        "batch",
+        "zone",
+        "wave"
+      ]
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間(秒)",
+      "type": "float"
+    },
+    {
+      "path": "process.walk_speed_mps",
+      "label": "歩行速度(m/s)",
+      "type": "float"
+    }
+  ]
+}

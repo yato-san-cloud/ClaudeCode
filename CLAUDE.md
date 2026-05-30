@@ -2,17 +2,53 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository Status
+## Project: whsim (warehouse simulator)
 
-This repository is currently uninitialized: no source files, no commits, and no configured tooling. The remote is `yato-san-cloud/ClaudeCode` on a local proxy. When real code is added, this file should be updated with:
+A warehouse simulator whose thesis is to **decouple input difficulty from
+computational accuracy**: a non-technical salesperson loosely models a warehouse
+from a template, while a heavyweight discrete-event simulation (SimPy) runs
+underneath and emits a proposal-grade 2D PNG. See `README.md` for the full pitch.
 
-- Build, lint, test, and run commands (including how to run a single test)
-- High-level architecture that spans multiple files
-- Important conventions pulled from any README, `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` that gets added later
+### Architecture (the load-bearing idea)
+
+Everything hangs off **one contract: the canonical schema
+`whsim.schema.WarehouseModel`** (`src/whsim/schema/model.py`). Every field has a
+default, so any model is always valid and always runnable ("never blocks on
+missing data"). Components are pure functions over that schema plus run
+artifacts, so each is independently testable/replaceable:
+
+- `templates.py` — a template is a fully filled-in (provisional) `model.json`.
+- `importer.py` — tolerant ZIP→subtree merge; broken/non-JSON files are skipped,
+  never fatal; partial import is fine.
+- `provenance.py` — tracks each subtree's source (imported/interview/provisional);
+  surfaced in output as "N% your data". First-class, not bookkeeping.
+- `project.py` — persists workspace under `projects/<name>/` (gitignored runtime
+  data); the simulator is the source of truth, the analysis tool just supplies ZIPs.
+- `engine/` — SimPy DES: `routing.py`, `build.py`, `processes.py`, `run.py`.
+- `analytic.py` — closed-form M/M/c estimate; also the engine's sanity oracle in tests.
+- `kpis.py` — event log → KPIs + a plain-language verdict.
+- `render/png2d.py` — proposal PNG (layout + congestion heatmap + verdict + provenance footer).
+
+### Commands
+
+- Install: `pip install -e ".[dev]"`
+- Flow: `whsim new <name> -t ecommerce_small` → `whsim import <name> <zip>` →
+  `whsim run <name>` → `whsim render <name>` (or `whsim simulate <name>` for run+render);
+  `whsim estimate <name>` for the instant analytic estimate.
+- Tests: `pytest -q`; single test e.g. `pytest tests/test_engine.py::test_kpis_are_sane`
+- Lint: `ruff check src`
+- Regenerate template / sample data: `python scripts/gen_template_ecommerce.py`,
+  `python scripts/gen_sample_data.py`
+
+### Conventions
+
+- Python ≥3.10, pydantic v2, SimPy 4, NumPy, Matplotlib (Agg, headless), Typer.
+- Code identifiers/comments in English; user-facing strings and docs in Japanese.
+- Add a new template = add `templates/<id>/{template.json,manifest.json}`; no code change.
 
 ## Git Workflow
 
-- Active development branch for Claude-authored changes: `claude/add-claude-documentation-oNCDe`
+- Active development branch for Claude-authored changes: `claude/warehouse-simulator-qBrf0`
 - Push with `git push -u origin <branch-name>`; retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s) on network errors only
 - Do not open pull requests unless the user explicitly requests one
 - GitHub interactions must go through the `mcp__github__*` tools; `gh` CLI is not available

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whsim"
+version = "0.1.0"
+description = "営業がゆるく組めて、裏で重厚なシミュレーションが走る倉庫シミュレータ (warehouse simulator)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "simpy>=4.0",
+    "pydantic>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "typer>=0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.1"]
+
+[project.scripts]
+whsim = "whsim.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+whsim = ["../../templates/**/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

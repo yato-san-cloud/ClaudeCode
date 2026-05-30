@@ -1,0 +1,183 @@
+"""Canonical warehouse-model schema (the single source of truth / the contract).
+
+Every component in the system -- templates, the ZIP importer, the SimPy engine,
+the KPI layer and the 2D/3D renderers -- reads and writes this one structure.
+Because every field has a default, a model assembled from a template alone is
+always valid and always runnable: the "never blocks on missing data" rule is
+enforced here, by construction.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+SCHEMA_VERSION = "0.1"
+
+ABCClass = Literal["A", "B", "C"]
+ZoneType = Literal[
+    "receiving", "storage", "picking", "packing", "shipping", "staging"
+]
+PickStrategy = Literal["discrete", "batch", "zone", "wave"]
+RoutingPolicy = Literal["s_shape", "return", "nearest"]
+
+
+class Units(BaseModel):
+    length: str = "m"
+    time: str = "s"
+    weight: str = "kg"
+
+
+class Meta(BaseModel):
+    schema_version: str = SCHEMA_VERSION
+    project_id: str = ""
+    name: str = "untitled"
+    units: Units = Field(default_factory=Units)
+
+
+class Bounds(BaseModel):
+    width: float = 80.0  # meters (x)
+    depth: float = 40.0  # meters (y)
+
+
+class Zone(BaseModel):
+    id: str
+    type: ZoneType = "storage"
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 10.0
+    h: float = 10.0
+    color: str | None = None
+
+
+class Layout(BaseModel):
+    bounds: Bounds = Field(default_factory=Bounds)
+    zones: list[Zone] = Field(default_factory=list)
+
+
+class Location(BaseModel):
+    id: str
+    zone: str = "storage"
+    x: float = 0.0
+    y: float = 0.0
+    type: Literal["pallet", "shelf", "bin", "floor"] = "shelf"
+    capacity: int = 100
+    sku: str | None = None
+    qty: int = 0
+
+
+class Item(BaseModel):
+    sku: str
+    name: str = ""
+    abc_class: ABCClass = "C"
+    pick_freq: float = 0.0  # relative pick frequency weight (demand share)
+    ts_per_unit: float = 1.5  # handling seconds per unit
+    case_qty: int = 1
+    default_location: str | None = None
+
+
+class Process(BaseModel):
+    flow: list[str] = Field(
+        default_factory=lambda: ["receive", "putaway", "pick", "pack", "ship"]
+    )
+    pick_strategy: PickStrategy = "discrete"
+    routing_policy: RoutingPolicy = "nearest"
+    batch_size: int = 1
+    walk_speed_mps: float = 1.2
+    pack_time_s: float = 40.0  # mean packing seconds per order
+
+
+class WorkerGroup(BaseModel):
+    id: str = "pickers"
+    role: Literal["picker", "packer"] = "picker"
+    count: int = 6
+    speed_mps: float = 1.2
+
+
+class Equipment(BaseModel):
+    id: str
+    type: Literal["agv", "forklift"] = "agv"
+    count: int = 0
+    speed_mps: float = 1.6
+    capacity: int = 1
+
+
+class Station(BaseModel):
+    id: str = "pack"
+    zone: str = "packing"
+    x: float = 5.0
+    y: float = 5.0
+    count: int = 3
+
+
+class Resources(BaseModel):
+    workers: list[WorkerGroup] = Field(default_factory=lambda: [WorkerGroup()])
+    equipment: list[Equipment] = Field(default_factory=list)
+    stations: list[Station] = Field(default_factory=lambda: [Station()])
+
+
+class OrderLine(BaseModel):
+    sku: str
+    qty: int = 1
+
+
+class Order(BaseModel):
+    order_id: str
+    arrival_s: float = 0.0
+    due_s: float | None = None
+    lines: list[OrderLine] = Field(default_factory=list)
+
+
+class OrderProfile(BaseModel):
+    """Fallback demand generator used when explicit outbound orders are absent."""
+
+    arrival: Literal["poisson"] = "poisson"
+    rate_per_hr: float = 120.0
+    lines_per_order_mean: float = 3.0
+
+
+class Orders(BaseModel):
+    outbound: list[Order] = Field(default_factory=list)
+    inbound: list[Order] = Field(default_factory=list)
+    profile: OrderProfile = Field(default_factory=OrderProfile)
+
+
+class Simulation(BaseModel):
+    duration_s: float = 28800.0  # 8h shift
+    warmup_s: float = 0.0
+    random_seed: int = 42
+    replications: int = 1
+    heatmap_grid_m: float = 1.0
+
+
+class WarehouseModel(BaseModel):
+    """The whole world, in one document."""
+
+    meta: Meta = Field(default_factory=Meta)
+    layout: Layout = Field(default_factory=Layout)
+    locations: list[Location] = Field(default_factory=list)
+    items: list[Item] = Field(default_factory=list)
+    process: Process = Field(default_factory=Process)
+    resources: Resources = Field(default_factory=Resources)
+    orders: Orders = Field(default_factory=Orders)
+    simulation: Simulation = Field(default_factory=Simulation)
+
+    def item_by_sku(self) -> dict[str, Item]:
+        return {it.sku: it for it in self.items}
+
+    def location_by_id(self) -> dict[str, Location]:
+        return {loc.id: loc for loc in self.locations}
+
+
+# Subtrees the importer recognises from dropped files (filename hints below).
+MERGEABLE_SUBTREES: tuple[str, ...] = (
+    "meta",
+    "layout",
+    "locations",
+    "items",
+    "process",
+    "resources",
+    "orders",
+    "simulation",
+)
