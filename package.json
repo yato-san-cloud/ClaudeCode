@@ -1,0 +1,13 @@
+{
+  "name": "voxelcraft",
+  "version": "1.0.0",
+  "description": "A Minecraft-style voxel game in the browser using Three.js — infinite terrain, block break/place, inventory, crafting, day/night, mobs, and saving.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "serve": "node server.js",
+    "test": "node --test"
+  },
+  "keywords": ["minecraft", "voxel", "threejs", "game", "webgl"],
+  "license": "MIT"
+}

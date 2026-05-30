@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoxelCraft — a Minecraft-style voxel game</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Three.js loaded as an ES module from CDN; no build step required. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Crosshair -->
+  <div id="crosshair">+</div>
+
+  <!-- Damage flash overlay -->
+  <div id="damage-flash"></div>
+
+  <!-- HUD top bar -->
+  <div id="hud-top">
+    <div id="clock">&#9728; 06:00</div>
+  </div>
+
+  <!-- Health hearts -->
+  <div id="hearts"></div>
+
+  <!-- Hotbar -->
+  <div id="hotbar"></div>
+
+  <!-- Inventory / crafting screen -->
+  <div id="inventory"></div>
+
+  <!-- Cursor-held item while moving stacks -->
+  <div id="cursor-item"></div>
+
+  <!-- Toast messages -->
+  <div id="toast"></div>
+
+  <!-- Controls help -->
+  <div id="help">
+    <strong>VoxelCraft</strong><br />
+    Click to capture mouse<br />
+    WASD move · Space jump (double-tap = fly)<br />
+    Shift down/sneak · Ctrl sprint<br />
+    Left-click break · Right-click place<br />
+    1–9 / scroll select · E inventory<br />
+    F clear save
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
