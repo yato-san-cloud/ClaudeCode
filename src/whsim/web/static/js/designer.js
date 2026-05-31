@@ -63,6 +63,35 @@ const PICK_STRATS = [
   { value: 'discrete', label: '都度ピック' }, { value: 'batch', label: 'バッチ' },
   { value: 'zone', label: 'ゾーン' }, { value: 'wave', label: 'ウェーブ' },
 ];
+// Work-method 5-axis controls (cf. docs/WORK_METHOD_DESIGN.md). Plain-Japanese
+// labels for a non-expert; the expert term shows as a small sub-label. Only the
+// pick stage exposes all 5 axes; other stages expose just transport (A).
+const WORK_AXES = {
+  // A 搬送主体: who moves — 人が歩く / 物が来る
+  transport: { label: '誰が動く？', sub: '搬送 (transport)', opts: [
+    { value: 'manual', label: '人が歩く' }, { value: 'agv', label: 'AGV/AMRが来る' },
+    { value: 'conveyor', label: 'コンベアで来る' }, { value: 'asrs', label: '自動倉庫が出す' },
+  ] },
+  // C ゾーン分担
+  zoning: { label: 'エリアを分けて並列に採る？', sub: 'ゾーン (zoning)', opts: [
+    { value: 'none', label: '全域を1人で' }, { value: 'sequential', label: 'ゾーンを順に受け渡し' },
+    { value: 'parallel', label: 'ゾーン分担で並列' },
+  ] },
+  // D 採り方: 摘み取り / 種まき
+  consolidation: { label: 'オーダー別？ 総量→仕分け？', sub: '集約 (consolidation)', opts: [
+    { value: 'pick', label: 'オーダー別に採る（摘み取り）' },
+    { value: 'sort', label: '総量を採って後で仕分け（種まき）' },
+  ] },
+  // E 投入: 連続 / ウェーブ
+  release: { label: 'いつ流す？', sub: '投入 (release)', opts: [
+    { value: 'continuous', label: '随時（連続）' }, { value: 'wave', label: '締め単位（ウェーブ）' },
+  ] },
+};
+// Default 5-axis work method (mirrors schema WorkMethod defaults; always valid).
+const DEFAULT_WORK = {
+  transport: 'manual', orders_per_trip: 1, zoning: 'none',
+  consolidation: 'pick', release: 'continuous', wave_interval_s: 1800,
+};
 // 動線 (flow-line) movers: label, schema key, default speed (m/s), polyline color.
 const MOVER_OPTS = [
   { value: 'person', label: '作業員' }, { value: 'forklift', label: 'フォークリフト' },
@@ -102,6 +131,9 @@ export class Designer {
     this.routeMover = 'person';    // active mover for new 動線 routes
     this.routeSpeed = MOVER_SPEED.person; // active speed (m/s) for new routes
     this.routeDraft = null;        // [[x,y],...] while drawing a 動線 polyline
+    this.flowMode = false;         // フロー tool: true = clicking zones lays the flow
+    this.flowCursor = 0;           // index into process.flow currently being placed
+    this.flowMethodStage = null;   // stage id whose method popover is open
     this.drag = null;              // active drag state on the canvas
     this._listeners = [];          // [el, type, fn] for clean dispose()
     this._normalize(model);
@@ -120,9 +152,10 @@ export class Designer {
   }
 
   resize() {
-    if (this.tool === 'flow') return;
+    if (!this.canvas) return;
     this._fitCanvas();
-    this._drawCanvas();
+    if (this.tool === 'flow') this._drawFlowCanvas();
+    else this._drawCanvas();
   }
 
   dispose() {
@@ -165,12 +198,22 @@ export class Designer {
     m.process = m.process || {};
     if (!Array.isArray(m.process.stages) || !m.process.stages.length) {
       m.process.stages = [
-        { id: 'receive', label: '入荷', method: 'manual' },
-        { id: 'putaway', label: '格納', method: 'manual' },
-        { id: 'pick', label: 'ピッキング', method: 'manual' },
-        { id: 'pack', label: '梱包', method: 'manual' },
-        { id: 'ship', label: '出荷', method: 'manual' },
+        { id: 'receive', label: '入荷', method: 'manual', zone: 'receiving' },
+        { id: 'putaway', label: '格納', method: 'manual', zone: 'storage' },
+        { id: 'pick', label: 'ピッキング', method: 'manual', zone: 'picking' },
+        { id: 'pack', label: '梱包', method: 'manual', zone: 'packing' },
+        { id: 'ship', label: '出荷', method: 'manual', zone: 'shipping' },
       ];
+    }
+    // Stage spatial/work fields are optional (always-runnable): keep zone as the
+    // bound zone id (or null) and leave work === null unless explicitly designed.
+    m.process.stages.forEach((st) => {
+      if (st.zone === undefined) st.zone = null;
+      if (st.work === undefined) st.work = null;
+    });
+    // flow = ordered list of stage ids; default to stage order if absent.
+    if (!Array.isArray(m.process.flow) || !m.process.flow.length) {
+      m.process.flow = m.process.stages.map((st) => st.id);
     }
     m.process.pick_strategy = m.process.pick_strategy || 'discrete';
     m.routes = Array.isArray(m.routes) ? m.routes : [];
@@ -230,6 +273,8 @@ export class Designer {
     this.conveyorDraft = null;
     this.wallDraft = null;
     this.routeDraft = null;
+    this.flowMethodStage = null;
+    if (key !== 'flow') this.flowMode = false;
     for (const k in this._toolBtns) {
       const active = k === key;
       const b = this._toolBtns[k];
@@ -810,6 +855,7 @@ export class Designer {
     if (this.tool === 'equip') return this._equipDown(px, py);
     if (this.tool === 'building') return this._buildingDown(px, py);
     if (this.tool === 'route') return this._routeDown(px, py);
+    if (this.tool === 'flow') return this._flowDown(px, py);
   }
 
   // --- layout tool: place (palette) / select / move / resize zones ---
@@ -1204,39 +1250,355 @@ export class Designer {
     this._renderSide(); this._drawCanvas();
   }
 
-  // ---- flow tool: workflow strip + pick strategy ---------------------------
+  // ---- flow tool: spatial flow on the floor plan + workflow strip ----------
+  // The flow is bound to zone ids (process.stages[].zone) and ordered by
+  // process.flow (stage ids). The floor canvas and the DOM strip are two views
+  // of the same process.stages, so an edit in either reflects in the other.
   _renderFlow() {
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-width:0;overflow:auto;padding:14px;';
-    this.body.appendChild(wrap);
+    // left column: a control bar above the floor canvas
+    const left = document.createElement('div');
+    left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
 
-    this._h(wrap, '作業フロー（工程ごとに作業方法を選択）');
-    const strip = document.createElement('div');
-    strip.style.cssText = 'display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin-bottom:18px;';
-    const stages = this.model.process.stages;
-    stages.forEach((st, i) => {
-      const box = document.createElement('div');
-      box.style.cssText = `display:flex;flex-direction:column;gap:8px;min-width:140px;padding:12px;border-radius:10px;border:2px solid ${METHOD_COLOR[st.method] || '#9aa4b0'};background:${hexA(METHOD_COLOR[st.method] || '#9aa4b0', 0.12)};`;
-      const lbl = document.createElement('div');
-      lbl.textContent = st.label || st.id;
-      lbl.style.cssText = 'font-weight:700;font-size:14px;';
-      box.appendChild(lbl);
-      const sel = this._select(box, METHOD_OPTS, st.method);
-      this._on(sel, 'change', () => { st.method = sel.value; this._renderTool(); });
-      box.appendChild(sel);
-      strip.appendChild(box);
-      if (i < stages.length - 1) {
-        const arrow = document.createElement('div');
-        arrow.textContent = '→';
-        arrow.style.cssText = 'display:flex;align-items:center;padding:0 10px;font-size:22px;color:#6b7785;';
-        strip.appendChild(arrow);
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;';
+    // toggle: spatial flow-building mode (click zones in sequence)
+    const flowBtn = this._btn(bar, this.flowMode ? '配置を終了' : '床図でフロー配置', () => {
+      this.flowMode = !this.flowMode;
+      if (this.flowMode) { this.flowCursor = 0; this.flowMethodStage = null; }
+      this._renderFlow();
+    });
+    if (this.flowMode) flowBtn.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;font-weight:700;';
+    // reset all zone bindings (back to "always runnable" unbound state)
+    this._btn(bar, 'ゾーン割当をリセット', () => {
+      this.model.process.stages.forEach((st) => { st.zone = null; });
+      this.flowCursor = 0;
+      this._renderFlow();
+    });
+    this._flowStatus = document.createElement('span');
+    this._flowStatus.style.cssText = 'font-size:12px;color:#6b7785;flex-basis:100%;';
+    bar.appendChild(this._flowStatus);
+    left.appendChild(bar);
+
+    // floor canvas (clickable zones)
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.flowMode ? 'pointer' : 'default'};`;
+    wrap.appendChild(this.canvas);
+    this._flowCanvasHost = wrap;
+    left.appendChild(wrap);
+    this.body.appendChild(left);
+
+    // right column: the workflow strip + pick strategy + (in-context) method panel
+    this.side = document.createElement('div');
+    this.side.style.cssText = 'width:340px;flex:0 0 340px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
+    this.body.appendChild(this.side);
+
+    this.ctx = this.canvas.getContext('2d');
+    this._bindCanvas();
+    this._fitCanvas();
+    this._renderFlowSide();
+    this._drawFlowCanvas();
+  }
+
+  // center of a zone in meters
+  _zoneCenter(z) { return [z.x + z.w / 2, z.y + z.h / 2]; }
+
+  _zoneById(id) { return (this.model.layout.zones || []).find((z) => z.id === id); }
+
+  // the ordered list of stages (process.flow drives order; fall back to stage order)
+  _orderedStages() {
+    const stages = this.model.process.stages || [];
+    const byId = {}; stages.forEach((s) => { byId[s.id] = s; });
+    const flow = Array.isArray(this.model.process.flow) ? this.model.process.flow : [];
+    const seen = new Set();
+    const out = [];
+    for (const id of flow) { if (byId[id] && !seen.has(id)) { out.push(byId[id]); seen.add(id); } }
+    for (const s of stages) { if (!seen.has(s.id)) out.push(s); }
+    return out;
+  }
+
+  _flowStatusText() {
+    if (!this.flowMode) {
+      return 'ゾーンをクリックすると、その工程の作業方法を設定できます。「床図でフロー配置」で工程→ゾーンの割当を引けます。';
+    }
+    const order = this._orderedStages();
+    const st = order[this.flowCursor];
+    if (!st) return 'すべての工程にゾーンを割り当てました。「配置を終了」で完了します。';
+    return `「${st.label || st.id}」の場所をクリックしてください（${this.flowCursor + 1}/${order.length}）。`;
+  }
+
+  // ---- flow floor canvas: zones + directed arrows along the flow -----------
+  _drawFlowCanvas() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, { w, h, sc } = this._view;
+    const b = this.model.layout.bounds;
+    ctx.clearRect(0, 0, w, h);
+    // floor outline
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
+
+    const order = this._orderedStages();
+    const cursorStage = this.flowMode ? order[this.flowCursor] : null;
+
+    // zones (clickable). Highlight the one bound to the open/cursor stage.
+    for (const z of this.model.layout.zones) {
+      const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
+      const isCursorTarget = this.flowMode && cursorStage != null;
+      const boundStage = order.find((st) => st.zone === z.id);
+      const isOpen = this.flowMethodStage && boundStage && boundStage.id === this.flowMethodStage;
+      ctx.fillStyle = hexA(color, isOpen ? 0.5 : (boundStage ? 0.34 : 0.18));
+      ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
+      ctx.strokeStyle = isOpen ? '#1f2733' : (isCursorTarget ? '#1f78b4' : hexA(color, 0.8));
+      ctx.lineWidth = (isOpen || isCursorTarget) ? 2.5 : 1;
+      if (isCursorTarget) ctx.setLineDash([6, 4]);
+      ctx.strokeRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
+      ctx.setLineDash([]);
+      // label: zone type + bound stage name(s)
+      ctx.fillStyle = '#3a4452'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const cx = this._X(z.x + z.w / 2), cy = this._Y(z.y + z.h / 2);
+      ctx.fillText(ZONE_JP[z.type] || z.type, cx, cy - 7);
+      const bound = order.filter((st) => st.zone === z.id).map((st) => st.label || st.id);
+      if (bound.length) {
+        ctx.fillStyle = '#1f2733'; ctx.font = 'bold 11px sans-serif';
+        ctx.fillText(bound.join('・'), cx, cy + 9);
+      }
+    }
+
+    // directed arrows along the flow, between consecutive bound zones.
+    for (let i = 0; i < order.length - 1; i++) {
+      const za = this._zoneById(order[i].zone), zb = this._zoneById(order[i + 1].zone);
+      if (!za || !zb || za.id === zb.id) continue;
+      const [ax, ay] = this._zoneCenter(za), [bx, by] = this._zoneCenter(zb);
+      this._drawArrow(this._X(ax), this._Y(ay), this._X(bx), this._Y(by), '#1f78b4');
+    }
+
+    // numbered step badges on each bound stage's zone, in flow order
+    let step = 0;
+    for (const st of order) {
+      if (!st.zone) continue;
+      const z = this._zoneById(st.zone);
+      if (!z) continue;
+      step += 1;
+      const [zx, zy] = this._zoneCenter(z);
+      const px = this._X(zx), py = this._Y(zy);
+      ctx.fillStyle = '#1f78b4'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(px - 1, py - 24, 10, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(step), px - 1, py - 24);
+    }
+
+    if (this._flowStatus) this._flowStatus.textContent = this._flowStatusText();
+    if (!this.model.layout.zones.length) {
+      ctx.fillStyle = '#9aa4b0'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('レイアウトにゾーンがありません。「レイアウト」タブで配置してください。', w / 2, h / 2);
+    }
+  }
+
+  _drawArrow(ax, ay, bx, by, color) {
+    const ctx = this.ctx;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    const ang = Math.atan2(by - ay, bx - ax);
+    const hl = 11, mx = ax + (bx - ax) * 0.6, my = ay + (by - ay) * 0.6;  // arrowhead at 60%
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(mx - hl * Math.cos(ang - 0.4), my - hl * Math.sin(ang - 0.4));
+    ctx.lineTo(mx - hl * Math.cos(ang + 0.4), my - hl * Math.sin(ang + 0.4));
+    ctx.closePath(); ctx.fill();
+  }
+
+  // --- flow canvas click: place flow (assign zone) OR open the method popover ---
+  _flowDown(px, py) {
+    const mx = this._mx(px), my = this._my(py);
+    const zs = this.model.layout.zones;
+    let hit = null;
+    for (let i = zs.length - 1; i >= 0; i--) {
+      const z = zs[i];
+      if (mx >= z.x && mx <= z.x + z.w && my >= z.y && my <= z.y + z.h) { hit = z; break; }
+    }
+    if (!hit) {
+      if (!this.flowMode) { this.flowMethodStage = null; this._renderFlowSide(); this._drawFlowCanvas(); }
+      return;
+    }
+    if (this.flowMode) {
+      // bind the current cursor stage to the clicked zone, advance the cursor
+      const order = this._orderedStages();
+      const st = order[this.flowCursor];
+      if (st) {
+        st.zone = hit.id;
+        this.flowCursor = Math.min(this.flowCursor + 1, order.length);
+      }
+      this._renderFlowSide(); this._drawFlowCanvas();
+    } else {
+      // open the in-context method popover for the (first) stage bound to this zone
+      const order = this._orderedStages();
+      const st = order.find((s) => s.zone === hit.id);
+      this.flowMethodStage = st ? st.id : null;
+      this._renderFlowSide(); this._drawFlowCanvas();
+      if (!st && this._flowStatus) {
+        this._flowStatus.textContent = `「${ZONE_JP[hit.type] || hit.type}」にはまだ工程が割り当てられていません。「床図でフロー配置」で割り当ててください。`;
+      }
+    }
+  }
+
+  // ---- flow side panel: the workflow strip (synced) + method panel ---------
+  _renderFlowSide() {
+    const s = this.side; if (!s) return;
+    s.innerHTML = '';
+    this._h(s, '作業フロー（工程ごとに作業方法）');
+    this._note(s, '工程をクリックすると作業方法を設定できます。床図のゾーンと同じデータを表示しています。');
+
+    const order = this._orderedStages();
+    const strip = this._div(s, 'display:flex;flex-direction:column;gap:0;margin:8px 0 14px;');
+    order.forEach((st, i) => {
+      const open = this.flowMethodStage === st.id;
+      const box = this._div(strip, `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:9px;cursor:pointer;border:2px solid ${METHOD_COLOR[st.method] || '#9aa4b0'};background:${open ? hexA(METHOD_COLOR[st.method] || '#9aa4b0', 0.28) : hexA(METHOD_COLOR[st.method] || '#9aa4b0', 0.1)};`);
+      this._on(box, 'click', () => {
+        this.flowMethodStage = (this.flowMethodStage === st.id) ? null : st.id;
+        this._renderFlowSide(); this._drawFlowCanvas();
+      });
+      const lblWrap = this._div(box, 'display:flex;flex-direction:column;gap:2px;');
+      const lbl = this._div(lblWrap, 'font-weight:700;font-size:14px;');
+      lbl.textContent = `${i + 1}. ${st.label || st.id}`;
+      const zname = this._div(lblWrap, 'font-size:11px;color:#6b7785;');
+      const z = st.zone ? this._zoneById(st.zone) : null;
+      zname.textContent = z ? `場所: ${ZONE_JP[z.type] || z.type}` : '場所: 未割当';
+      const badge = this._div(box, `font-size:11px;color:#fff;background:${METHOD_COLOR[st.method] || '#9aa4b0'};padding:2px 7px;border-radius:10px;white-space:nowrap;`);
+      badge.textContent = (METHOD_OPTS.find((o) => o.value === st.method) || {}).label || st.method;
+      // arrow connector
+      if (i < order.length - 1) {
+        const arrow = this._div(strip, 'text-align:center;color:#6b7785;font-size:16px;line-height:1;margin:1px 0;');
+        arrow.textContent = '↓';
       }
     });
-    wrap.appendChild(strip);
 
-    this._h(wrap, 'ピッキング戦略');
-    const psSel = this._select(wrap, PICK_STRATS, this.model.process.pick_strategy);
+    // in-context method panel for the open stage
+    const open = this.flowMethodStage
+      ? this.model.process.stages.find((st) => st.id === this.flowMethodStage) : null;
+    if (open) this._renderMethodPanel(s, open);
+
+    this._h(s, 'ピッキング戦略（互換）');
+    const psSel = this._select(s, PICK_STRATS, this.model.process.pick_strategy);
     this._on(psSel, 'change', () => { this.model.process.pick_strategy = psSel.value; });
+    this._note(s, '5軸の作業方法を設定すると、こちらより優先されます。');
+  }
+
+  // ---- in-context method panel -------------------------------------------
+  // The pick stage exposes all 5 axes (with live reverse-name + 推奨); other
+  // stages expose just transport (人が歩く / 物が来る).
+  _renderMethodPanel(s, st) {
+    const isPick = st.id === 'pick';
+    this._h(s, `作業方法: ${st.label || st.id}`);
+
+    if (!isPick) {
+      // non-pick node: just transport (A axis), stored on st.method.
+      this._field(s, '誰が動く？', () => {
+        const sel = this._select(null, METHOD_OPTS, st.method);
+        this._on(sel, 'change', () => { st.method = sel.value; this._renderFlowSide(); this._drawFlowCanvas(); });
+        return sel;
+      });
+      this._note(s, '人手＝人が歩いて運ぶ。AGV/コンベア/自動倉庫＝物が来る。');
+      return;
+    }
+
+    // pick node: ensure a 5-axis work object exists (always valid).
+    if (!st.work) st.work = clone(DEFAULT_WORK);
+    const work = st.work;
+    // keep legacy st.method in sync with transport so the strip color/badge follows.
+    st.method = work.transport;
+
+    // live reverse-name banner (filled by the backend)
+    const banner = this._div(s, 'margin:6px 0 10px;padding:9px 11px;border-radius:9px;background:#eef4fb;border:1px solid #cfe0f2;');
+    this._methodBanner = banner;
+    banner.innerHTML = '<div style="font-weight:700;color:#1f3a5f;">＝ …</div>';
+
+    // 推奨 button
+    const recRow = this._div(s, 'margin-bottom:10px;');
+    this._btn(recRow, '推奨を表示', () => this._recommendWork(st), 'background:#1f78b4;color:#fff;border-color:#1f78b4;font-weight:700;');
+    this._recReason = this._div(s, 'font-size:12px;color:#1a7a3c;line-height:1.5;margin-bottom:8px;');
+
+    // axis A: transport (select)
+    this._methodAxis(s, work, 'transport', () => {
+      st.method = work.transport;  // mirror to legacy
+    });
+    // axis B: orders_per_trip (number, plain label)
+    this._field(s, '1回で何オーダー？', () => this._num(work.orders_per_trip, (v) => {
+      work.orders_per_trip = Math.max(1, Math.round(v));
+      this._refreshMethodBanner(work);
+    }, 1));
+    const sub = this._div(s, 'font-size:11px;color:#9aa4b0;margin:-2px 0 8px;');
+    sub.textContent = 'まとめ度 (orders_per_trip)';
+    // axis C, D, E (selects)
+    this._methodAxis(s, work, 'zoning');
+    this._methodAxis(s, work, 'consolidation');
+    this._methodAxis(s, work, 'release');
+    // wave interval (only meaningful when release == wave)
+    this._field(s, 'ウェーブ間隔（分）', () => this._num(Math.round((work.wave_interval_s || 1800) / 60), (v) => {
+      work.wave_interval_s = Math.max(1, Math.round(v)) * 60;
+      this._refreshMethodBanner(work);
+    }, 1));
+
+    this._refreshMethodBanner(work);
+  }
+
+  // one 5-axis control (select) with plain label + small expert sub-label
+  _methodAxis(s, work, key, after) {
+    const ax = WORK_AXES[key];
+    if (!ax) return;
+    this._field(s, ax.label, () => {
+      const sel = this._select(null, ax.opts, work[key]);
+      this._on(sel, 'change', () => {
+        work[key] = sel.value;
+        if (after) after();
+        this._refreshMethodBanner(work);
+        this._renderFlowSide();  // reflect transport change into strip
+        this._drawFlowCanvas();
+      });
+      return sel;
+    });
+    const sub = this._div(s, 'font-size:11px;color:#9aa4b0;margin:-2px 0 8px;');
+    sub.textContent = ax.sub;
+  }
+
+  // live-call the backend to reverse-name the current 5-axis combination.
+  async _refreshMethodBanner(work) {
+    const banner = this._methodBanner;
+    if (!banner || !this.handlers.workmethodName) return;
+    try {
+      const r = await this.handlers.workmethodName(clone(work));
+      banner.innerHTML = `<div style="font-weight:700;color:#1f3a5f;">＝ ${r.name || ''}</div>`
+        + `<div style="font-size:12px;color:#3a4452;margin-top:3px;">${r.explain || ''}</div>`;
+    } catch (err) {
+      banner.innerHTML = `<div style="font-size:12px;color:#b30000;">方式名の取得に失敗しました</div>`;
+    }
+  }
+
+  // call the recommend endpoint and load the suggested axes + show the reason.
+  async _recommendWork(st) {
+    if (!this.handlers.recommendWork) {
+      if (this._recReason) this._recReason.textContent = '推奨ハンドラがありません。';
+      return;
+    }
+    if (this._recReason) { this._recReason.style.color = '#6b7785'; this._recReason.textContent = '推奨を計算中…'; }
+    try {
+      const r = await this.handlers.recommendWork();
+      if (r && r.work) {
+        st.work = Object.assign(clone(DEFAULT_WORK), r.work);
+        st.method = st.work.transport;
+      }
+      if (this._recReason) {
+        this._recReason.style.color = '#1a7a3c';
+        this._recReason.textContent = `推奨: ${r.name || ''} — ${r.reason || ''}`;
+      }
+      this._renderFlowSide();  // reloads panel with new axis values
+      this._drawFlowCanvas();
+    } catch (err) {
+      if (this._recReason) {
+        this._recReason.style.color = '#b30000';
+        this._recReason.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+      }
+    }
   }
 
   // ---- save ----------------------------------------------------------------

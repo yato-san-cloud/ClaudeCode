@@ -27,6 +27,8 @@ class RunResult:
     n_packers: int
     duration_s: float
     n_agvs: int = 0
+    n_put_wall: int = 0                     # 種まき put-wall stations (consolidation=="sort")
+    consolidation: str = "pick"
     pick_method: str = "manual"
     workers: list[Worker] = field(default_factory=list)
     agvs: list[Worker] = field(default_factory=list)
@@ -70,7 +72,9 @@ def run_once(
         events=world.events, heat=world.heat,
         n_pickers=world.n_pickers, n_packers=world.n_packers,
         duration_s=model.simulation.duration_s,
-        n_agvs=world.n_agvs, pick_method=world.pick_method,
+        n_agvs=world.n_agvs,
+        n_put_wall=(world.put_wall.capacity if world.consolidation == "sort" else 0),
+        consolidation=world.consolidation, pick_method=world.pick_method,
         workers=world.workers, agvs=agvs, forklifts=forklifts,
         replay_window_s=window, cost=_cost_inputs(model),
     )

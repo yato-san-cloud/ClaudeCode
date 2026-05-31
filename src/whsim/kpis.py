@@ -29,6 +29,13 @@ def _one(res: RunResult) -> dict:
     pick_waits = [e.get("wait", 0.0) for e in res.events if e["event"] == "pick_start"]
     agv_util = agv_busy / max(res.n_agvs * res.duration_s, 1e-9) if res.n_agvs else 0.0
 
+    # 種まき(sort) put-wall stage: utilisation and queueing at the wall.
+    sort_events = [e for e in res.events if e["event"] == "sort_done"]
+    sort_busy = sum(e.get("busy", 0.0) for e in sort_events)
+    sort_waits = [e.get("wait", 0.0) for e in sort_events]
+    sort_util = (sort_busy / max(res.n_put_wall * res.duration_s, 1e-9)
+                 if res.n_put_wall else 0.0)
+
     on_time = sum(
         1 for e in completes if e.get("due") is None or e["t"] <= e["due"]
     )
@@ -66,6 +73,10 @@ def _one(res: RunResult) -> dict:
         "packer_utilization": pack_util,
         "agv_utilization": agv_util,
         "n_agvs": res.n_agvs,
+        "sort_utilization": sort_util,
+        "sort_wait_mean_s": statistics.fmean(sort_waits) if sort_waits else 0.0,
+        "n_put_wall": res.n_put_wall,
+        "consolidation": res.consolidation,
         "pick_method": res.pick_method,
         "pick_wait_mean_s": statistics.fmean(pick_waits) if pick_waits else 0.0,
         "walk_total_m": sum(dists),
@@ -96,20 +107,25 @@ def compute(results: list[RunResult]) -> dict:
     agg["n_pickers"] = results[0].n_pickers
     agg["n_packers"] = results[0].n_packers
 
-    # Bottleneck = the busiest stage (pickers, pack stations, or the AGV fleet).
+    # Bottleneck = the busiest stage (pickers, pack stations, AGV fleet, or the
+    # 種まき put wall when total picking is in use).
     stages = {"picking": agg["picker_utilization"], "packing": agg["packer_utilization"]}
     if agg.get("n_agvs"):
         stages["agv"] = agg["agv_utilization"]
+    if agg.get("n_put_wall"):
+        stages["sort"] = agg["sort_utilization"]
     agg["bottleneck"] = max(stages, key=stages.get)
     agg["bottleneck_utilization"] = stages[agg["bottleneck"]]
     agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包",
-                            "agv": "AGV搬送"}[agg["bottleneck"]]
+                            "agv": "AGV搬送", "sort": "種まき仕分け"}[agg["bottleneck"]]
 
     # --- Monte-Carlo robustness across replications -------------------------
     def _rep_bottleneck(p):
         s = {"picking": p["picker_utilization"], "packing": p["packer_utilization"]}
         if p.get("n_agvs"):
             s["agv"] = p["agv_utilization"]
+        if p.get("n_put_wall"):
+            s["sort"] = p["sort_utilization"]
         return max(s.values())
 
     rep_ok = [1.0 if (p["completion_rate"] >= 0.98 and _rep_bottleneck(p) < 0.95)

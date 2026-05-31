@@ -118,6 +118,29 @@ def api_design(name: str, payload: dict):
             "locations": len(model.locations)}
 
 
+@app.post("/api/workmethod/name")
+def api_workmethod_name(payload: dict | None = None):
+    """Reverse-name a 5-axis WorkMethod: return {name, explain}.
+
+    Stateless: the floor-plan editor POSTs the axes a salesperson is turning and
+    immediately shows "＝<name>" plus a plain-language explanation, so a novice
+    sees what the combination is called and an expert recognises it."""
+    from whsim import workmethod
+    from whsim.schema.model import WorkMethod
+    work = WorkMethod.model_validate(payload or {})
+    return {"name": workmethod.method_name(work),
+            "explain": workmethod.explain(work)}
+
+
+@app.get("/api/projects/{name}/workmethod/recommend")
+def api_workmethod_recommend(name: str):
+    """Suggest a work method for the loaded project's order profile."""
+    from whsim import workmethod
+    proj = _open(name)
+    model = proj.load_model()
+    return workmethod.recommend(model).to_dict()
+
+
 @app.post("/api/projects/{name}/import-cad")
 async def api_import_cad(name: str, file: UploadFile):
     """Import a DXF floor plan -> merge its bounds/walls/zones into the layout."""

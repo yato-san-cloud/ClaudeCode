@@ -39,6 +39,7 @@ class World:
     ready_store: simpy.Store                # AGV-fetched totes waiting for a picker
     fork_store: simpy.Store                 # inbound putaway tasks for forklifts
     packers: simpy.Resource
+    put_wall: simpy.Resource                # 種まき put-wall stations (capacity); full => sort queue
     belt: simpy.Resource                    # conveyor capacity (slots); full => jam
     has_conveyor: bool
     conveyor_transit: float                 # seconds end-to-end on the belt
@@ -62,15 +63,36 @@ class World:
     sku_list: list[str]
     grid_m: float
     heat: np.ndarray
+    # 5-axis work method (the engine drives picking from these; see
+    # docs/WORK_METHOD_DESIGN.md). They are derived via Process.effective_work(),
+    # so legacy pick_strategy/batch_size models keep running unchanged.
+    zoning: str = "none"                    # C: "none" | "sequential" | "parallel"
+    consolidation: str = "pick"             # D: "pick" 摘み取り | "sort" 種まき
+    release: str = "continuous"             # E: "continuous" | "wave"
+    wave_interval_s: float = 1800.0
+    sort_time_s: float = 6.0                # 種まき: put-wall seconds per line
+    n_zones: int = 1                        # picking zones for C (spatial bands)
     graph: AisleGraph | None = None         # wall-aware routing (when walls exist)
     use_graph: bool = False
     dist_overrides: dict = field(default_factory=dict)  # (rounded xy pair) -> metres
     workers: list[Worker] = field(default_factory=list)
     events: list[dict] = field(default_factory=list)
     replay_window_s: float = 0.0            # only record keyframes up to this time
+    zone_edges: list[float] = field(default_factory=list)  # x cut points dividing picking zones
 
     def log(self, **kw) -> None:
         self.events.append(kw)
+
+    def zone_of(self, p: tuple[float, float]) -> int:
+        """Which picking zone (0..n_zones-1) a pick point falls in. Zones are
+        spatial x-bands across the storage area, so 'split by zone' (C axis) maps
+        to disjoint regions a picker can own without crossing another's."""
+        x = p[0]
+        z = 0
+        for edge in self.zone_edges:
+            if x >= edge:
+                z += 1
+        return min(z, max(self.n_zones - 1, 0))
 
     @staticmethod
     def _key(a, b):
@@ -135,14 +157,23 @@ def build(
     gh = max(1, math.ceil(model.layout.bounds.depth / grid_m))
     heat = np.zeros((gh, gw), dtype=float)
 
-    # Batch/zone/wave gather several orders per trip; give each strategy a
-    # distinct effective batch so the choice produces a real, correctly-signed
-    # difference (more orders/trip -> less walking per order; wave pools most).
+    # Drive picking from the 5-axis work method. effective_work() derives it
+    # from legacy pick_strategy/batch_size when not set explicitly, so old models
+    # keep running identically. pick_strategy is still surfaced for routing.
+    work = model.process.effective_work()
     strategy = model.process.pick_strategy
-    bs = model.process.batch_size
-    if strategy == "discrete":
+    bs = max(model.process.batch_size, work.orders_per_trip)
+    # orders_per_trip (B) generalises batch_size: how many orders to pull per trip.
+    # When the user left it at 1 but picked a strategy that implies batching,
+    # fall back to a sensible default so the choice produces a real difference
+    # (more orders/trip -> less walking per order; wave pools most).
+    if work.orders_per_trip > 1:
+        batch_size = work.orders_per_trip
+    elif work.consolidation == "sort":
+        batch_size = bs if bs > 1 else 8   # 種まき pools many orders into one sweep
+    elif strategy == "discrete" and work.zoning == "none":
         batch_size = 1
-    elif strategy == "wave":
+    elif work.release == "wave":
         batch_size = bs if bs > 1 else 8
     else:  # batch, zone
         batch_size = bs if bs > 1 else 4
@@ -178,6 +209,26 @@ def build(
             if la and lb:
                 dist_overrides[World._key((la.x, la.y), (lb.x, lb.y))] = float(d)
 
+    # --- Zoning (C): divide the picking area into spatial x-bands -----------
+    # When zoning is on, pickers own disjoint x-bands of the storage region.
+    # We cut the occupied x-range into n_zones equal slices; n_zones tracks the
+    # picker headcount (capped) so 'parallel' actually parallelises across them.
+    zoning = work.zoning
+    n_zones = 1
+    zone_edges: list[float] = []
+    if zoning != "none":
+        xs = [xy[0] for xy in sku_xy.values()]
+        if xs and max(xs) > min(xs):
+            n_zones = max(2, min(n_pickers, 4))
+            lo, hi = min(xs), max(xs)
+            span = (hi - lo) / n_zones
+            zone_edges = [lo + span * (i + 1) for i in range(n_zones - 1)]
+
+    # --- 種まき put wall (D): sortation stations for consolidation=="sort" ---
+    # The wall is a capacitated resource so a slow sort backs up (queue), like a
+    # real DAS / put-to-light wall. One station per pack station by default.
+    put_wall_cap = max(1, n_packers)
+
     has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
     cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
                 if model.resources.conveyors else 0.5) or 0.5
@@ -190,11 +241,16 @@ def build(
         ready_store=simpy.Store(env),
         fork_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
+        put_wall=simpy.Resource(env, capacity=put_wall_cap),
         belt=simpy.Resource(env, capacity=belt_cap),
         has_conveyor=has_conveyor, conveyor_transit=conveyor_transit,
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),
+        zoning=zoning, consolidation=work.consolidation, release=work.release,
+        wave_interval_s=max(work.wave_interval_s, 1.0),
+        sort_time_s=max(model.process.sort_time_s, 0.0),
+        n_zones=n_zones, zone_edges=zone_edges,
         home=home, agv_home=agv_home,
         fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),
         slot_xy=slot_xy, conveyor_points=conveyor_points,

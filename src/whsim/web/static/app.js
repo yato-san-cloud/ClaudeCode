@@ -206,6 +206,13 @@ async function mountDesigner() {
       $('status').textContent = '在庫割付: ' + (s.message || '完了');
       return s;
     },
+    // Reverse-name a 5-axis work method (live, as the user turns the knobs).
+    workmethodName: async (work) => api('/api/workmethod/name', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(work),
+    }),
+    // Suggest a work method from the loaded project's order profile.
+    recommendWork: async () => api(`/api/projects/${S.project}/workmethod/recommend`),
   });
   S.designer.resize();
 }
