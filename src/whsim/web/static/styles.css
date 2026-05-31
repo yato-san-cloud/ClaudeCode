@@ -8,49 +8,67 @@
    ============================================================= */
 
 :root {
-  /* Surfaces & ink */
-  --bg: #eef1f6;
+  /* Surfaces & ink — Notion-like: white content, warm dark-gray text */
+  --bg: #ffffff;
   --panel: #ffffff;
-  --panel-2: #f7f9fc;
-  --ink: #1b2330;
-  --ink-soft: #3a4658;
-  --muted: #697586;
-  --muted-2: #9aa4b2;
-  --line: #e2e8f1;
-  --line-strong: #ccd5e2;
+  --panel-2: #f7f6f3;          /* Notion sidebar / muted surface */
+  --ink: #37352f;              /* Notion primary text (warm near-black) */
+  --ink-soft: #5f5b53;
+  --muted: #8a8780;
+  --muted-2: #a8a49c;
+  --line: rgba(55, 53, 47, 0.10);
+  --line-strong: rgba(55, 53, 47, 0.18);
 
-  /* Brand / accent — a confident, trustworthy indigo-blue */
-  --brand: #1f4fd6;
-  --brand-ink: #1740b8;
-  --brand-deep: #15349a;
-  --accent: #1f4fd6;
-  --accent-hover: #1a45bd;
-  --accent-soft: #eaf0ff;
-  --accent-ring: rgba(31, 79, 214, .35);
+  /* Brand / accent — Notion blue */
+  --brand: #2383e2;
+  --brand-ink: #1a6dc4;
+  --brand-deep: #155aa3;
+  --accent: #2383e2;
+  --accent-hover: #1a6dc4;
+  --accent-soft: #e9f2fb;
+  --accent-ring: rgba(35, 131, 226, 0.28);
 
-  /* Status */
-  --ok: #1a7a3c;
-  --ok-soft: #e7f6ec;
-  --ok-line: #b6e2c4;
-  --bad: #c1271c;
-  --bad-soft: #fdeceb;
-  --bad-line: #f3c4c0;
+  /* Status — Notion palette */
+  --ok: #0f7b6c;
+  --ok-soft: #ddf4ef;
+  --ok-line: #b7e5dc;
+  --bad: #e03e3e;
+  --bad-soft: #fbe4e4;
+  --bad-line: #f4c4c4;
   --warn: #9a6400;
 
-  /* Elevation */
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .05);
-  --shadow-md: 0 4px 12px rgba(16, 24, 40, .08), 0 1px 3px rgba(16, 24, 40, .05);
-  --shadow-lg: 0 10px 30px rgba(16, 24, 40, .12);
+  /* Elevation — very subtle, Notion-soft */
+  --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.05);
+  --shadow-md: 0 2px 6px rgba(15, 15, 15, 0.07);
+  --shadow-lg: 0 8px 24px rgba(15, 15, 15, 0.10);
 
-  /* Radii (8px grid family) */
-  --r-sm: 8px;
-  --r-md: 10px;
-  --r-lg: 12px;
+  /* Radii — Notion uses gentle corners */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
   --r-pill: 999px;
 
-  --header-h: 56px;
+  --header-h: 54px;
   --t-fast: .14s ease;
   --t-med: .22s ease;
+}
+
+/* Inter — Notion's Latin typeface (Japanese falls back to Noto Sans JP) */
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("./vendor/fonts/inter-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("./vendor/fonts/inter-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("./vendor/fonts/inter-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("./vendor/fonts/inter-latin-700-normal.woff2") format("woff2");
 }
 
 * { box-sizing: border-box; }
@@ -59,13 +77,16 @@ html, body { height: 100%; }
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif;
   color: var(--ink);
   background: var(--bg);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
+  letter-spacing: -0.003em;
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
@@ -77,47 +98,46 @@ header {
   align-items: center;
   justify-content: space-between;
   height: var(--header-h);
-  padding: 0 20px;
-  color: #fff;
-  background: linear-gradient(180deg, var(--brand) 0%, var(--brand-ink) 100%);
-  box-shadow: var(--shadow-md);
+  padding: 0 18px;
+  color: var(--ink);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
   position: relative;
   z-index: 5;
 }
 
 .brand {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  font-weight: 800;
-  font-size: 19px;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 16px;
   letter-spacing: -.01em;
+  color: var(--ink);
 }
 .brand::before {
   content: "";
-  width: 10px;
+  width: 18px;
   height: 18px;
-  border-radius: 3px;
-  background: linear-gradient(180deg, #ffffff, #cfe0ff);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, .18);
-  align-self: center;
+  border-radius: 5px;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .35);
 }
 .brand span {
-  font-weight: 500;
+  font-weight: 400;
   font-size: 12px;
-  letter-spacing: .03em;
-  opacity: .82;
+  letter-spacing: 0;
+  color: var(--muted);
 }
 
 .provenance {
   font-size: 12px;
-  font-weight: 600;
-  background: rgba(255, 255, 255, .16);
-  border: 1px solid rgba(255, 255, 255, .22);
-  color: #fff;
-  padding: 5px 12px;
+  font-weight: 500;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  padding: 4px 11px;
   border-radius: var(--r-pill);
-  backdrop-filter: saturate(1.2);
 }
 
 /* ---------- Layout ---------- */
@@ -161,9 +181,9 @@ header {
   font-size: 12px;
   margin: 0 0 14px;
   color: var(--muted);
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .card h2 small {
   font-weight: 600;
@@ -398,22 +418,22 @@ button:not(.primary):disabled:hover {
 }
 .tab {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
-  padding: 7px 16px;
+  padding: 6px 14px;
   border-radius: var(--r-sm);
   box-shadow: none;
 }
 .tab:hover {
-  background: rgba(31, 79, 214, .06);
+  background: rgba(55, 53, 47, .06);
   border-color: transparent;
   color: var(--ink);
 }
 .tab.active {
   background: var(--panel);
-  color: var(--brand-ink);
+  color: var(--ink);
   border-color: var(--line);
   box-shadow: var(--shadow-sm);
 }
