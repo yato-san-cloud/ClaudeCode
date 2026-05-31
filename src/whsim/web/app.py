@@ -146,6 +146,25 @@ async def api_import_cad(name: str, file: UploadFile):
             "stats": res.get("stats", {})}
 
 
+@app.post("/api/projects/{name}/import-distances")
+async def api_import_distances(name: str, file: UploadFile):
+    """Import a measured shelf-to-shelf distance matrix (CSV/JSON) to refine routing."""
+    from whsim import distances
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    data = await file.read()
+    try:
+        res = distances.import_distance_matrix_bytes(data, file.filename or "")
+    except Exception as e:  # noqa: BLE001 — tolerant
+        raise HTTPException(400, f"距離データを解析できませんでした: {e}")
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    md["distance_overrides"] = res.get("pairs", {})
+    proj.save_model(WarehouseModel.model_validate(md))
+    return {"count": res.get("count", 0), "ids": len(res.get("ids", [])),
+            "symmetric": res.get("symmetric", False),
+            "warnings": res.get("warnings", [])}
+
+
 @app.get("/api/projects/{name}/proposal.{fmt}")
 def api_proposal(name: str, fmt: str):
     """Generate an editable PPTX or a PDF proposal from the latest run."""

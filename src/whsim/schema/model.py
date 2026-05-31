@@ -256,6 +256,8 @@ class WarehouseModel(BaseModel):
     orders: Orders = Field(default_factory=Orders)
     simulation: Simulation = Field(default_factory=Simulation)
     routes: list[Route] = Field(default_factory=list)  # manual flow-line studies
+    # measured shelf-to-shelf distances (sparse), keyed "fromLocId|toLocId" -> metres
+    distance_overrides: dict[str, float] = Field(default_factory=dict)
 
     def item_by_sku(self) -> dict[str, Item]:
         return {it.sku: it for it in self.items}

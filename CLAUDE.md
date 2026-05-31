@@ -24,7 +24,9 @@ artifacts, so each is independently testable/replaceable:
   surfaced in output as "N% your data". First-class, not bookkeeping.
 - `project.py` — persists workspace under `projects/<name>/` (gitignored runtime
   data); the simulator is the source of truth, the analysis tool just supplies ZIPs.
-- `engine/` — SimPy DES: `routing.py`, `build.py`, `processes.py`, `run.py`, `scenarios.py`.
+- `engine/` — SimPy DES: `routing.py`, `build.py`, `processes.py`, `run.py`, `scenarios.py`,
+  `graph.py` (wall-aware aisle grid + Dijkstra; `World.dist` = measured override > graph > Manhattan).
+- `distances.py` — tolerant import of a measured shelf-to-shelf distance matrix (CSV/JSON).
   Pickers and AGVs are individual agents (AGV mode is a pipeline: AGV agents fetch totes →
   ready queue → pickers handle), emitting trajectory keyframes for replay. Batch/zone/wave
   pull `batch_size` orders per trip; `peak_factor` scales demand. `scenarios.py` applies

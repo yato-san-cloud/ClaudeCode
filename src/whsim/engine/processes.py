@@ -28,7 +28,7 @@ def _accumulate_heat(world: World, a, b) -> None:
 
 
 def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
-    d = manhattan(frm, to)
+    d = world.dist(frm, to)            # measured override > wall-aware graph > Manhattan
     _accumulate_heat(world, frm, to)
     if world.recording():
         w.kf(world.env.now, frm[0], frm[1], state)
@@ -87,7 +87,7 @@ def forklift_agent(world: World, f: Worker, rng: random.Random):
     while True:
         slot = yield world.fork_store.get()   # waits when there is no inbound work
         trip_start = env.now
-        d1 = manhattan(world.fork_home, slot)
+        d1 = world.dist(world.fork_home, slot)
         _accumulate_heat(world, world.fork_home, slot)
         if world.recording():
             f.kf(env.now, world.fork_home[0], world.fork_home[1], "putaway")
@@ -96,7 +96,7 @@ def forklift_agent(world: World, f: Worker, rng: random.Random):
             f.kf(env.now, slot[0], slot[1], "putaway")
         yield env.timeout(8.0)  # place the pallet
         _accumulate_heat(world, slot, world.fork_home)
-        yield env.timeout(manhattan(slot, world.fork_home) / world.fork_speed)
+        yield env.timeout(world.dist(slot, world.fork_home) / world.fork_speed)
         if world.recording():
             f.kf(env.now, world.fork_home[0], world.fork_home[1], "idle")
         world.log(t=env.now, event="forklift_done", busy=env.now - trip_start,
@@ -129,7 +129,7 @@ def agv_agent(world: World, a: Worker):
         trip_start = env.now
         cur = world.agv_home
         for dest in route:
-            d = manhattan(cur, dest)
+            d = world.dist(cur, dest)
             _accumulate_heat(world, cur, dest)
             if world.recording():
                 a.kf(env.now, cur[0], cur[1], "travel")
@@ -137,7 +137,7 @@ def agv_agent(world: World, a: Worker):
             if world.recording():
                 a.kf(env.now, dest[0], dest[1], "pickup")
             cur = dest
-        d = manhattan(cur, world.agv_home)
+        d = world.dist(cur, world.agv_home)
         _accumulate_heat(world, cur, world.agv_home)
         if world.recording():
             a.kf(env.now, cur[0], cur[1], "dropoff")

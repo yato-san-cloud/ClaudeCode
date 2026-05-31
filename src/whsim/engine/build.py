@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import simpy
 
+from whsim.engine.graph import AisleGraph
+from whsim.engine.routing import manhattan
 from whsim.schema.model import WarehouseModel
 
 
@@ -60,12 +62,31 @@ class World:
     sku_list: list[str]
     grid_m: float
     heat: np.ndarray
+    graph: AisleGraph | None = None         # wall-aware routing (when walls exist)
+    use_graph: bool = False
+    dist_overrides: dict = field(default_factory=dict)  # (rounded xy pair) -> metres
     workers: list[Worker] = field(default_factory=list)
     events: list[dict] = field(default_factory=list)
     replay_window_s: float = 0.0            # only record keyframes up to this time
 
     def log(self, **kw) -> None:
         self.events.append(kw)
+
+    @staticmethod
+    def _key(a, b):
+        return (round(a[0], 1), round(a[1], 1), round(b[0], 1), round(b[1], 1))
+
+    def dist(self, a, b) -> float:
+        """Travel distance a->b: measured override > wall-aware graph > Manhattan."""
+        if self.dist_overrides:
+            d = self.dist_overrides.get(self._key(a, b))
+            if d is None:
+                d = self.dist_overrides.get(self._key(b, a))
+            if d is not None:
+                return d
+        if self.use_graph and self.graph is not None:
+            return self.graph.distance(a, b)
+        return manhattan(a, b)
 
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s
@@ -144,6 +165,19 @@ def build(
         for a, b in zip(cv.points, cv.points[1:]):
             conveyor_len += abs(a[0] - b[0]) + abs(a[1] - b[1])
         conveyor_speed_sum += cv.speed_mps
+    # Wall-aware routing graph (only meaningful when walls exist).
+    graph = AisleGraph.from_model(model)
+    use_graph = graph.enabled
+    # Resolve measured shelf-to-shelf distances to a fast xy-keyed override map.
+    dist_overrides: dict = {}
+    if model.distance_overrides:
+        loc_by_id = model.location_by_id()
+        for key, d in model.distance_overrides.items():
+            a_id, _, b_id = key.partition("|")
+            la, lb = loc_by_id.get(a_id), loc_by_id.get(b_id)
+            if la and lb:
+                dist_overrides[World._key((la.x, la.y), (lb.x, lb.y))] = float(d)
+
     has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
     cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
                 if model.resources.conveyors else 0.5) or 0.5
@@ -167,4 +201,5 @@ def build(
         sku_xy=sku_xy, sku_ts=sku_ts,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
+        graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,
     )

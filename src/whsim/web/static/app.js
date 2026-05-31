@@ -340,6 +340,18 @@ async function uploadZip(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
 }
 
+async function uploadDistances(file) {
+  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
+  const fd = new FormData(); fd.append('file', file);
+  $('importLog').textContent = '棚間距離を取込中…';
+  try {
+    const r = await api(`/api/projects/${S.project}/import-distances`, { method: 'POST', body: fd });
+    const lines = [`<span class="ok">棚間距離: ${r.count}件取込（実測距離で動線を補正）</span>`];
+    for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
+    $('importLog').innerHTML = lines.join('\n');
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
+}
+
 async function uploadCad(file) {
   if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
   const fd = new FormData(); fd.append('file', file);
@@ -414,6 +426,8 @@ function initUI() {
   fi.onchange = () => fi.files[0] && uploadZip(fi.files[0]);
   $('cadBtn').onclick = () => $('cadInput').click();
   $('cadInput').onchange = () => $('cadInput').files[0] && uploadCad($('cadInput').files[0]);
+  $('distBtn').onclick = () => $('distInput').click();
+  $('distInput').onchange = () => $('distInput').files[0] && uploadDistances($('distInput').files[0]);
   ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => {
     e.preventDefault(); dz.classList.add('drag');
   }));
