@@ -36,6 +36,21 @@ def _one(res: RunResult) -> dict:
     pick_util = picker_busy / max(res.n_pickers * res.duration_s, 1e-9)
     pack_util = packer_busy / max(res.n_packers * res.duration_s, 1e-9)
 
+    # --- cost (this run ~ one work shift/day) --------------------------------
+    c = res.cost or {}
+    hours = res.duration_s / 3600.0
+    headcount = res.n_pickers + res.n_packers
+    labour_cost = headcount * hours * c.get("labour_rate_per_hr", 0.0)
+    opex_cost = c.get("opex_per_hr_total", 0.0) * hours
+    months = max(c.get("amortize_months", 36), 1)
+    days = max(c.get("work_days_per_month", 25), 1)
+    monthly_capex = c.get("capex_total", 0.0) / months
+    capex_run = monthly_capex / days
+    total_cost_run = labour_cost + opex_cost + capex_run
+    cost_per_order = total_cost_run / completed if completed else 0.0
+    monthly_opex = (labour_cost + opex_cost) * days   # operating only (no capex)
+    monthly_cost = monthly_opex + monthly_capex
+
     return {
         "orders_arrived": arrived,
         "orders_completed": completed,
@@ -53,6 +68,15 @@ def _one(res: RunResult) -> dict:
         "walk_total_m": sum(dists),
         "walk_per_order_m": statistics.fmean(dists) if dists else 0.0,
         "on_time_rate": on_time / completed if completed else 1.0,
+        "headcount": headcount,
+        "labour_cost_per_order": labour_cost / completed if completed else 0.0,
+        "equipment_cost_per_order": (opex_cost + capex_run) / completed if completed else 0.0,
+        "total_cost_per_order": cost_per_order,
+        "monthly_cost": monthly_cost,
+        "monthly_opex": monthly_opex,
+        "capex_total": c.get("capex_total", 0.0),
+        "labour_rate_per_hr": c.get("labour_rate_per_hr", 0.0),
+        "currency": c.get("currency", "¥"),
     }
 
 

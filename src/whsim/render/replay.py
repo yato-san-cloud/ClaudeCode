@@ -31,6 +31,14 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         {"id": w.id, "role": w.role, "keyframes": w.keyframes}
         for w in res.workers
     ]
+    agvs = [
+        {"id": a.id, "keyframes": a.keyframes}
+        for a in res.agvs
+    ]
+    conveyors = [
+        {"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
+        for c in model.resources.conveyors
+    ]
 
     return {
         "meta": {
@@ -45,5 +53,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "racks": racks,
         "stations": stations,
         "workers": workers,
+        "agvs": agvs,
+        "conveyors": conveyors,
         "kpis": kpis,
     }

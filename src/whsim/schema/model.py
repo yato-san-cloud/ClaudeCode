@@ -131,6 +131,7 @@ class WorkerGroup(BaseModel):
     role: Literal["picker", "packer"] = "picker"
     count: int = 6
     speed_mps: float = 1.2
+    labour_rate_per_hr: float = 2200.0  # ¥/person-hour (JP warehouse default)
 
 
 class Equipment(BaseModel):
@@ -141,6 +142,8 @@ class Equipment(BaseModel):
     capacity: int = 1
     x: float = 0.0  # home / dock position (for placement on the layout)
     y: float = 0.0
+    capex_each: float = 4000000.0  # ¥ per unit (AGV default ~4M JPY)
+    opex_per_hr: float = 150.0     # ¥/hr per unit (power, maintenance)
 
 
 class Conveyor(BaseModel):
@@ -182,6 +185,7 @@ class OrderProfile(BaseModel):
     arrival: Literal["poisson"] = "poisson"
     rate_per_hr: float = 120.0
     lines_per_order_mean: float = 3.0
+    peak_factor: float = 1.0  # demand multiplier for peak-day scenarios (e.g. sale)
 
 
 class Orders(BaseModel):
@@ -196,6 +200,17 @@ class Simulation(BaseModel):
     random_seed: int = 42
     replications: int = 1
     heatmap_grid_m: float = 1.0
+    currency: str = "¥"
+    amortize_capex_months: int = 36  # spread equipment capex over N months
+    work_days_per_month: int = 25    # to scale a one-shift run to a monthly cost
+
+
+class Scenario(BaseModel):
+    """A named what-if: dotted-path edits applied over the base model."""
+
+    name: str
+    description: str = ""
+    edits: dict = Field(default_factory=dict)  # {"orders.profile.peak_factor": 3.0, ...}
 
 
 class WarehouseModel(BaseModel):

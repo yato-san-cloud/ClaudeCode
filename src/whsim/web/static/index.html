@@ -54,6 +54,7 @@
         <button data-tab="view2d" class="tab">2D アニメーション</button>
         <button data-tab="view3d" class="tab">3D</button>
         <button data-tab="viewpng" class="tab">提案PNG</button>
+        <button data-tab="compare" class="tab">比較</button>
       </div>
 
       <div class="stage">
@@ -64,6 +65,13 @@
         <div id="view3d" class="panel"></div>
         <div id="viewpng" class="panel">
           <img id="pngImg" alt="提案PNG（実行後に表示）" />
+        </div>
+        <div id="compare" class="panel">
+          <div class="compare-bar">
+            <button id="runScenariosBtn" class="primary">シナリオを比較（現行 / ピーク日 / AGV導入）</button>
+            <span id="compareStatus" class="status"></span>
+          </div>
+          <div id="compareView"></div>
         </div>
 
         <div class="transport">

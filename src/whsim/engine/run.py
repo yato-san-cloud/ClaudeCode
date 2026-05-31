@@ -9,7 +9,7 @@ import numpy as np
 import simpy
 
 from whsim.engine.build import Worker, build
-from whsim.engine.processes import order_source, picker_agent
+from whsim.engine.processes import agv_agent, order_source, picker_agent
 from whsim.schema.model import WarehouseModel
 
 # Keep the animated replay short enough to stay smooth in the browser, even when
@@ -27,7 +27,9 @@ class RunResult:
     n_agvs: int = 0
     pick_method: str = "manual"
     workers: list[Worker] = field(default_factory=list)
+    agvs: list[Worker] = field(default_factory=list)
     replay_window_s: float = 0.0
+    cost: dict = field(default_factory=dict)
 
 
 def run_once(
@@ -45,6 +47,12 @@ def run_once(
         w = Worker(id=f"picker-{i+1}", role="picker")
         world.workers.append(w)
         env.process(picker_agent(world, w, rng))
+    agvs: list[Worker] = []
+    if world.pick_method == "agv":
+        for i in range(world.n_agvs):
+            a = Worker(id=f"agv-{i+1}", role="agv")
+            agvs.append(a)
+            env.process(agv_agent(world, a))
     env.process(order_source(world, rng))
 
     env.run(until=model.simulation.duration_s)
@@ -53,8 +61,24 @@ def run_once(
         n_pickers=world.n_pickers, n_packers=world.n_packers,
         duration_s=model.simulation.duration_s,
         n_agvs=world.n_agvs, pick_method=world.pick_method,
-        workers=world.workers, replay_window_s=window,
+        workers=world.workers, agvs=agvs, replay_window_s=window,
+        cost=_cost_inputs(model),
     )
+
+
+def _cost_inputs(model: WarehouseModel) -> dict:
+    """Pack the cost parameters the KPI layer needs (kept out of the engine loop)."""
+    rate = (model.resources.workers[0].labour_rate_per_hr
+            if model.resources.workers else 0.0)
+    agvs = [e for e in model.resources.equipment if e.type in ("agv", "asrs")]
+    return {
+        "labour_rate_per_hr": rate,
+        "capex_total": sum(e.capex_each * e.count for e in agvs),
+        "opex_per_hr_total": sum(e.opex_per_hr * e.count for e in agvs),
+        "amortize_months": model.simulation.amortize_capex_months,
+        "work_days_per_month": model.simulation.work_days_per_month,
+        "currency": model.simulation.currency,
+    }
 
 
 def run_replications(model: WarehouseModel) -> tuple[list[RunResult], np.ndarray]:

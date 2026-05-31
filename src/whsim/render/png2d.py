@@ -94,18 +94,25 @@ def render(
         ("ピッカー", f"{kpis['n_pickers']:.0f} 名（稼働率 {kpis['picker_utilization']*100:.0f}%）"),
         ("梱包台", f"{kpis['n_packers']:.0f} 台（稼働率 {kpis['packer_utilization']*100:.0f}%）"),
         ("処理時間 中央値/最悪", f"{kpis['cycle_p50_s']/60:.0f} / {kpis['cycle_p95_s']/60:.0f} 分"),
-        ("平均待ち時間", f"{kpis['pick_wait_mean_s']/60:.1f} 分"),
         ("1件あたり歩行", f"{kpis['walk_per_order_m']:.0f} m"),
     ]
+    cur = kpis.get("currency", "¥")
+    if kpis.get("total_cost_per_order"):
+        rows.append(("1件あたりコスト", f"{cur}{kpis['total_cost_per_order']:,.1f}"))
+    if kpis.get("monthly_cost"):
+        rows.append(("月間コスト", f"{cur}{kpis['monthly_cost']:,.0f}"))
     y = 0.82
     for label, val in rows:
         panel.text(0.0, y, label, fontsize=9, color="#555", va="top")
         panel.text(1.0, y, val, fontsize=9, weight="bold", ha="right", va="top")
         y -= 0.075
 
-    # honesty footer: turns "we assumed values" into a sales follow-up hook
-    panel.text(0.0, 0.04, "概算見積り ／ " + provenance_summary,
-               fontsize=7.5, color="#777", va="bottom", wrap=True)
+    # honesty footer: provenance + the cost assumptions behind the ¥ figures
+    foot = "概算見積り ／ " + provenance_summary
+    if kpis.get("total_cost_per_order"):
+        foot += (f"\n前提: 人件費 {cur}{kpis.get('labour_rate_per_hr', 0):,.0f}/人時"
+                 f"・AGV投資 {cur}{kpis.get('capex_total', 0):,.0f}（36ヶ月償却）")
+    panel.text(0.0, 0.04, foot, fontsize=7.0, color="#777", va="bottom", wrap=True)
 
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)

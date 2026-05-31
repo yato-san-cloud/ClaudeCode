@@ -169,6 +169,55 @@ def api_run(name: str):
     return {"kpis": metrics, "estimate": est, "run": run_dir.name}
 
 
+@app.post("/api/projects/{name}/run-scenarios")
+def api_run_scenarios(name: str, payload: dict | None = None):
+    """Run several what-ifs over the current model and return a comparison."""
+    from whsim.engine.run import DEFAULT_REPLAY_WINDOW_S
+    from whsim.engine.scenarios import (
+        default_scenarios, payback_months, run_scenario,
+    )
+    from whsim.schema.model import Scenario
+    proj = _open(name)
+    base = proj.load_model()
+    window = min(DEFAULT_REPLAY_WINDOW_S, base.simulation.duration_s)
+
+    payload = payload or {}
+    raw = payload.get("scenarios")
+    scenarios = ([Scenario.model_validate(s) for s in raw] if raw
+                 else default_scenarios(base))
+
+    cmp_id = proj.new_run_dir().name.replace("run_", "compare_")
+    cmp_dir = proj.runs_dir / cmp_id
+    cmp_dir.mkdir(parents=True, exist_ok=True)
+    prov = proj.load_provenance().summary()
+
+    from whsim.engine.scenarios import apply_scenario
+    results = []
+    for i, sc in enumerate(scenarios):
+        res, metrics = run_scenario(base, sc, replay_window_s=window)
+        model_i = apply_scenario(base, sc)
+        render_png(model_i, res.heat, metrics, prov, cmp_dir / f"s{i}.png")
+        results.append({"name": sc.name, "description": sc.description,
+                        "kpis": metrics,
+                        "png_url": f"/api/projects/{name}/compare-png/{cmp_id}/{i}"})
+
+    baseline = results[0]
+    alternatives = results[1:]
+    for alt in alternatives:
+        pb = payback_months(baseline["kpis"], alt["kpis"])
+        alt["kpis"]["payback_months"] = pb
+    return {"compare_id": cmp_id, "baseline": baseline, "alternatives": alternatives}
+
+
+@app.get("/api/projects/{name}/compare-png/{cmp}/{i}")
+def api_compare_png(name: str, cmp: str, i: int):
+    proj = _open(name)
+    png = proj.runs_dir / cmp / f"s{i}.png"
+    if not png.is_file():
+        raise HTTPException(404, "no such comparison image")
+    return FileResponse(png)
+
+
 @app.get("/api/projects/{name}/replay")
 def api_replay(name: str):
     proj = _open(name)

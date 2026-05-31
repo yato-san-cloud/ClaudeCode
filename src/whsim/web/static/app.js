@@ -1,6 +1,7 @@
 // whsim frontend: design -> import -> confirm headline -> run -> animated replay.
 import { Scene3D } from './js/view3d.js';
 import { Designer } from './js/designer.js';
+import { CompareView } from './js/compare.js';
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, opts) => {
@@ -16,9 +17,11 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
                   packing: '梱包', shipping: '出荷', staging: '一時保管' };
 
 const S = {
-  project: null, replay: null, scene3d: null, designer: null,
+  project: null, replay: null, scene3d: null, designer: null, compare: null,
   t: 0, window: 1, playing: true, speed: 60, view: 'design',
 };
+const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
+                    dropoff: '#f57f17', charge: '#8e24aa' };
 
 // ---- keyframe interpolation (must match the 3D view) -----------------------
 function interp(keyframes, t) {
@@ -72,6 +75,23 @@ function draw2d() {
     ctx.fillStyle = '#08519c'; ctx.beginPath();
     ctx.arc(X(s.x), Y(s.y), 7, 0, 7); ctx.fill();
   }
+  // conveyors (static)
+  for (const cv of (rep.conveyors || [])) {
+    if (!cv.points || cv.points.length < 2) continue;
+    ctx.strokeStyle = '#8d99ae'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    ctx.beginPath();
+    cv.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+  // AGVs (moving squares, distinct from round workers)
+  for (const ag of (rep.agvs || [])) {
+    const [x, y, st] = interp(ag.keyframes, S.t);
+    ctx.fillStyle = AGV_COLOR[st] || '#1f78b4';
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 0.7;
+    ctx.fillRect(X(x) - 6, Y(y) - 5, 12, 10);
+    ctx.strokeRect(X(x) - 6, Y(y) - 5, 12, 10);
+  }
+  // workers (round)
   for (const wk of rep.workers) {
     const [x, y, st] = interp(wk.keyframes, S.t);
     ctx.fillStyle = STATE_COLOR[st] || '#999';
@@ -219,8 +239,28 @@ function renderKpis(k) {
     ['処理時間 中央値/最悪', `${(k.cycle_p50_s/60).toFixed(0)}/${(k.cycle_p95_s/60).toFixed(0)} 分`],
     ['1件あたり歩行', `${k.walk_per_order_m.toFixed(0)} m`],
   ];
+  const cur = k.currency || '¥';
+  if (k.n_agvs) cards.push(['AGV稼働率', `${k.n_agvs}台 ${(k.agv_utilization*100).toFixed(0)}%`]);
+  if (k.total_cost_per_order) cards.push(['1件あたりコスト', `${cur}${k.total_cost_per_order.toFixed(1)}`]);
+  if (k.monthly_cost) cards.push(['月間コスト', `${cur}${Math.round(k.monthly_cost).toLocaleString()}`]);
   $('kpiBar').innerHTML = `<div class="verdict ${cls}">${k.verdict}</div>` +
     cards.map(([kk, vv]) => `<div class="kpi"><div class="k">${kk}</div><div class="v">${vv}</div></div>`).join('');
+}
+
+async function runScenarios() {
+  if (!S.project) return;
+  $('runScenariosBtn').disabled = true;
+  $('compareStatus').textContent = '3シナリオを重厚シミュレーション中…';
+  try {
+    const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
+    if (S.compare) S.compare.dispose();
+    S.compare = new CompareView($('compareView'), data);
+    $('compareStatus').textContent = '完了。';
+  } catch (e) {
+    $('compareStatus').textContent = 'エラー: ' + e.message;
+  } finally {
+    $('runScenariosBtn').disabled = false;
+  }
 }
 
 function mount3d() {
@@ -265,6 +305,7 @@ function initUI() {
   $('projectSelect').onchange = (e) => { if (e.target.value) openProject(e.target.value); };
   $('applyBtn').onclick = applyHeadline;
   $('runBtn').onclick = runSim;
+  $('runScenariosBtn').onclick = runScenarios;
 
   // tabs
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -273,6 +314,8 @@ function initUI() {
     t.classList.add('active');
     S.view = t.dataset.tab;
     $(S.view).classList.add('active');
+    // Designer sets inline display on #design; override it so the panel hides.
+    $('design').style.display = (S.view === 'design') ? 'flex' : 'none';
     if (S.view === 'design') { mountDesigner(); }
     if (S.view === 'view3d') { mount3d(); }
     if (S.view === 'view2d') fitCanvas();

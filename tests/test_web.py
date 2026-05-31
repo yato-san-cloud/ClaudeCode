@@ -50,4 +50,21 @@ def test_full_flow(client):
 
     rep = client.get("/api/projects/t1/replay").json()
     assert rep["workers"] and rep["workers"][0]["keyframes"]
+    assert "agvs" in rep and "conveyors" in rep  # replay carries equipment tracks
     assert client.get("/api/projects/t1/png").status_code == 200
+
+
+def test_scenario_comparison(client):
+    client.post("/api/projects", json={"name": "s1", "template": "ecommerce_small"})
+    client.post("/api/projects/s1/headline", json={"simulation.duration_s": 1800})
+    r = client.post("/api/projects/s1/run-scenarios")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["baseline"]["name"] == "現行"
+    assert len(data["alternatives"]) == 2
+    # cost KPIs are present and a comparison PNG is served
+    assert data["baseline"]["kpis"]["total_cost_per_order"] >= 0
+    assert client.get(data["baseline"]["png_url"]).status_code == 200
+    # the AGV scenario actually fielded AGVs
+    agv = next(a for a in data["alternatives"] if a["name"] == "AGV導入")
+    assert agv["kpis"]["n_agvs"] == 10

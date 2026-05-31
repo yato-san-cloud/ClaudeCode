@@ -34,14 +34,17 @@ class World:
     env: simpy.Environment
     model: WarehouseModel
     order_store: simpy.Store
+    ready_store: simpy.Store                # AGV-fetched totes waiting for a picker
     packers: simpy.Resource
-    agvs: simpy.Resource
     n_pickers: int
     n_packers: int
     n_agvs: int
     agv_speed: float
     pick_method: str                        # "manual" | "agv" | ...
+    pick_strategy: str                      # "discrete" | "batch" | "zone" | "wave"
+    batch_size: int
     home: tuple[float, float]               # workers start/return here (pack area)
+    agv_home: tuple[float, float]           # AGV dock
     sku_xy: dict[str, tuple[float, float]]
     sku_ts: dict[str, float]
     sku_weights: list[float]
@@ -75,6 +78,8 @@ def build(
     agvs = [e for e in model.resources.equipment if e.type == "agv"]
     n_agvs = sum(e.count for e in agvs)
     agv_speed = (sum(e.speed_mps for e in agvs) / len(agvs)) if agvs else 1.6
+    # AGVs dock at the first AGV's position, else at the pack area.
+    agv_home = (agvs[0].x, agvs[0].y) if agvs and (agvs[0].x or agvs[0].y) else home
     pick_method = model.process.pick_method()
     # AGV picking with no AGVs placed falls back to manual so it still runs.
     if pick_method == "agv" and n_agvs == 0:
@@ -100,14 +105,22 @@ def build(
     gh = max(1, math.ceil(model.layout.bounds.depth / grid_m))
     heat = np.zeros((gh, gw), dtype=float)
 
+    # Batch/zone/wave gather several orders per trip; default to a useful size so
+    # picking a strategy actually changes the result even if batch_size is unset.
+    strategy = model.process.pick_strategy
+    batch_size = model.process.batch_size
+    if strategy != "discrete" and batch_size <= 1:
+        batch_size = 4
+
     return World(
         env=env, model=model,
         order_store=simpy.Store(env),
+        ready_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
-        agvs=simpy.Resource(env, capacity=max(n_agvs, 1)),
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
-        home=home, sku_xy=sku_xy, sku_ts=sku_ts,
+        pick_strategy=strategy, batch_size=max(1, batch_size),
+        home=home, agv_home=agv_home, sku_xy=sku_xy, sku_ts=sku_ts,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
     )
