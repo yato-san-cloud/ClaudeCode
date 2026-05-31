@@ -197,6 +197,15 @@ async function mountDesigner() {
       await openProjectQuiet();  // refresh headline values after re-materialise
       return r;
     },
+    // Slot the loaded inventory onto the created locations (velocity/ABC).
+    assignInventory: async (strategy = 'abc') => {
+      const s = await api(`/api/projects/${S.project}/assign-inventory`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy }),
+      });
+      $('status').textContent = '在庫割付: ' + (s.message || '完了');
+      return s;
+    },
   });
   S.designer.resize();
 }

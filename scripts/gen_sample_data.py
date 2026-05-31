@@ -30,7 +30,9 @@ def main(seed: int = 1, n_orders: int = 2000):
         {"sku": f"SKU{i:04d}", "name": f"Real Item {i}",
          "abc_class": "A" if i < 20 else ("B" if i < 55 else "C"),
          "pick_freq": 6.0 if i < 20 else (2.0 if i < 55 else 1.0),
-         "ts_per_unit": 2.0, "case_qty": 12, "default_location": f"L{i:04d}"}
+         "ts_per_unit": 2.0, "case_qty": 12,
+         "stock": (480 if i < 20 else (200 if i < 55 else 60)),  # on-hand inventory
+         "default_location": f"L{i:04d}"}
         for i in range(99)
     ]
 

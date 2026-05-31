@@ -104,6 +104,7 @@ class Item(BaseModel):
     pick_freq: float = 0.0  # relative pick frequency weight (demand share)
     ts_per_unit: float = 1.5  # handling seconds per unit
     case_qty: int = 1
+    stock: int = 0            # on-hand inventory (units) from loaded data, for slotting
     default_location: str | None = None
 
 

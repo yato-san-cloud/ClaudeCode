@@ -146,6 +146,21 @@ async def api_import_cad(name: str, file: UploadFile):
             "stats": res.get("stats", {})}
 
 
+@app.post("/api/projects/{name}/assign-inventory")
+def api_assign_inventory(name: str, payload: dict | None = None):
+    """Slot the loaded inventory (SKUs) onto the created storage locations."""
+    from whsim import slotting
+    proj = _open(name)
+    model = proj.load_model()
+    strategy = (payload or {}).get("strategy", "abc")
+    summary = slotting.assign_inventory(model, strategy=strategy)
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("locations", Source.INTERVIEW)
+    proj.save_provenance(prov)
+    return summary
+
+
 @app.post("/api/projects/{name}/import-distances")
 async def api_import_distances(name: str, file: UploadFile):
     """Import a measured shelf-to-shelf distance matrix (CSV/JSON) to refine routing."""
