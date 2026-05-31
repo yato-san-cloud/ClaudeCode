@@ -110,22 +110,49 @@ class Item(BaseModel):
 
 StageMethod = Literal["manual", "agv", "conveyor", "asrs"]
 
+# --- Work-method design, generalized to 5 orthogonal axes -------------------
+# The dozen named picking "methods" (single / batch / multi-order / zone / wave
+# / total-sort / goods-to-person ...) are not distinct things: they are
+# combinations of a few orthogonal axes (cf. de Koster et al.'s order-picking
+# taxonomy). whsim configures the axes and reverse-derives the familiar name,
+# so a non-expert turns intuitive knobs while an expert still recognises the
+# result. See docs/WORK_METHOD_DESIGN.md.
+Transport = Literal["manual", "agv", "conveyor", "asrs"]  # A: who moves
+Zoning = Literal["none", "sequential", "parallel"]         # C: area split
+Consolidation = Literal["pick", "sort"]                    # D: 摘み取り / 種まき
+Release = Literal["continuous", "wave"]                    # E: when released
+
+
+class WorkMethod(BaseModel):
+    """The 5-axis generalization of a picking/work method (the minimal common
+    parameter set). Every axis has a default, so it is always runnable."""
+
+    transport: Transport = "manual"        # A 誰が運ぶ: 人が歩く / 物が来る
+    orders_per_trip: int = 1               # B まとめ度: 1トリップに集約するオーダー数
+    zoning: Zoning = "none"                # C ゾーン分担: 全域 / 逐次 / 並列
+    consolidation: Consolidation = "pick"  # D 採り方: 摘み取り / 種まき(後仕分け)
+    release: Release = "continuous"        # E 投入: 連続 / ウェーブ
+    wave_interval_s: float = 1800.0        # ウェーブ締め間隔 (release == "wave")
+
 
 class Stage(BaseModel):
-    """One step of the operation flow, shown in the editor's workflow strip."""
+    """One step of the operation flow, shown in the editor's workflow strip and
+    pinned to a zone on the floor plan (`zone`) so flow can be drawn spatially."""
 
     id: str
     label: str = ""
-    method: StageMethod = "manual"
+    method: StageMethod = "manual"          # legacy per-stage transport (kept)
+    zone: str | None = None                 # geographic binding (zone id) for spatial flow
+    work: WorkMethod | None = None          # 5-axis work design (pick stage; optional)
 
 
 def _default_stages() -> list["Stage"]:
     return [
-        Stage(id="receive", label="入荷", method="manual"),
-        Stage(id="putaway", label="格納", method="manual"),
-        Stage(id="pick", label="ピッキング", method="manual"),
-        Stage(id="pack", label="梱包", method="manual"),
-        Stage(id="ship", label="出荷", method="manual"),
+        Stage(id="receive", label="入荷", method="manual", zone="receiving"),
+        Stage(id="putaway", label="格納", method="manual", zone="storage"),
+        Stage(id="pick", label="ピッキング", method="manual", zone="picking"),
+        Stage(id="pack", label="梱包", method="manual", zone="packing"),
+        Stage(id="ship", label="出荷", method="manual", zone="shipping"),
     ]
 
 
@@ -139,12 +166,36 @@ class Process(BaseModel):
     batch_size: int = 1
     walk_speed_mps: float = 1.2
     pack_time_s: float = 40.0  # mean packing seconds per order
+    sort_time_s: float = 6.0   # 種まき(consolidation=="sort"): seconds to put one line at the wall
 
-    def pick_method(self) -> str:
+    def pick_stage(self) -> "Stage | None":
         for s in self.stages:
             if s.id == "pick":
-                return s.method
-        return "manual"
+                return s
+        return None
+
+    def pick_method(self) -> str:
+        s = self.pick_stage()
+        if s is not None and s.work is not None:
+            return s.work.transport
+        return s.method if s is not None else "manual"
+
+    def effective_work(self) -> "WorkMethod":
+        """The pick stage's 5-axis work design. If it isn't set explicitly,
+        derive it from the legacy pick_strategy/batch_size/method so old models
+        (and the engine) keep working unchanged."""
+        s = self.pick_stage()
+        if s is not None and s.work is not None:
+            return s.work
+        transport = s.method if s is not None else "manual"
+        strat = self.pick_strategy
+        return WorkMethod(
+            transport=transport,
+            orders_per_trip=max(1, self.batch_size) if strat != "discrete" else 1,
+            zoning="sequential" if strat == "zone" else "none",
+            consolidation="pick",
+            release="wave" if strat == "wave" else "continuous",
+        )
 
 
 class WorkerGroup(BaseModel):
