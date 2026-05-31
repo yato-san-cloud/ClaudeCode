@@ -239,8 +239,15 @@ export class ExportView {
 
     bar.appendChild(mk('KPIをCSV出力', () => this._downloadKpiCsv(name)));
     bar.appendChild(mk('動線一覧をCSV出力', () => this._downloadRoutesCsv(name)));
+    // Server-generated, editable proposal documents.
+    bar.appendChild(mk('提案書PPTX', () => {
+      window.open(`/api/projects/${name}/proposal.pptx`, '_blank');
+    }));
+    bar.appendChild(mk('提案書PDF', () => {
+      window.open(`/api/projects/${name}/proposal.pdf`, '_blank');
+    }));
 
-    const printBtn = mk('提案書を印刷/PDF', () => { try { window.print(); } catch (_e) { /* ignore */ } });
+    const printBtn = mk('簡易印刷', () => { try { window.print(); } catch (_e) { /* ignore */ } });
     printBtn.classList.add('export-no-print');
     printBtn.style.background = 'transparent';
     printBtn.style.color = 'var(--brand, #08519c)';

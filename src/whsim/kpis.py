@@ -36,19 +36,22 @@ def _one(res: RunResult) -> dict:
     pick_util = picker_busy / max(res.n_pickers * res.duration_s, 1e-9)
     pack_util = packer_busy / max(res.n_packers * res.duration_s, 1e-9)
 
-    # --- cost (this run ~ one work shift/day) --------------------------------
+    # --- cost (robust to run duration: scale by fraction of a work-day) ------
     c = res.cost or {}
     hours = res.duration_s / 3600.0
+    shift = c.get("shift_hours_per_day", 8.0) or 8.0
+    day_frac = max(hours / shift, 1e-9)          # work-days this run represents
     headcount = res.n_pickers + res.n_packers
-    labour_cost = headcount * hours * c.get("labour_rate_per_hr", 0.0)
+    labour_cost = headcount * hours * c.get("labour_rate_per_hr", 0.0)  # this window
     opex_cost = c.get("opex_per_hr_total", 0.0) * hours
     months = max(c.get("amortize_months", 36), 1)
     days = max(c.get("work_days_per_month", 25), 1)
     monthly_capex = c.get("capex_total", 0.0) / months
-    capex_run = monthly_capex / days
+    capex_run = monthly_capex * (day_frac / days)   # capex attributable to window
     total_cost_run = labour_cost + opex_cost + capex_run
     cost_per_order = total_cost_run / completed if completed else 0.0
-    monthly_opex = (labour_cost + opex_cost) * days   # operating only (no capex)
+    daily_opex = (labour_cost + opex_cost) / day_frac   # one full work-day
+    monthly_opex = daily_opex * days                    # operating only (no capex)
     monthly_cost = monthly_opex + monthly_capex
 
     return {

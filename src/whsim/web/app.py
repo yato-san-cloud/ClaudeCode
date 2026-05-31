@@ -98,6 +98,8 @@ def api_design(name: str, payload: dict):
     proj = _open(name)
     md = json.loads(proj.model_file.read_text("utf-8"))
     prov = proj.load_provenance()
+    if payload.get("routes") is not None:
+        md["routes"] = payload["routes"]  # manual flow-line studies
     for section in ("layout", "resources", "process"):
         if section in payload and payload[section] is not None:
             md[section] = payload[section]
@@ -111,6 +113,55 @@ def api_design(name: str, payload: dict):
     proj.save_provenance(prov)
     return {"ok": True, "provenance_summary": prov.summary(),
             "locations": len(model.locations)}
+
+
+@app.post("/api/projects/{name}/import-cad")
+async def api_import_cad(name: str, file: UploadFile):
+    """Import a DXF floor plan -> merge its bounds/walls/zones into the layout."""
+    from whsim import cad
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    data = await file.read()
+    try:
+        res = cad.import_dxf_bytes(data)
+    except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad drawing
+        raise HTTPException(400, f"DXF を解析できませんでした: {e}")
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    if res.get("bounds"):
+        md["layout"]["bounds"] = res["bounds"]
+    if res.get("walls"):
+        md["layout"]["walls"] = res["walls"]
+    if res.get("zones"):
+        md["layout"]["zones"] = res["zones"]
+    model = WarehouseModel.model_validate(md)
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("layout", Source.IMPORTED)
+    proj.save_provenance(prov)
+    return {"bounds": res.get("bounds"), "walls": len(res.get("walls", [])),
+            "zones": len(res.get("zones", [])), "warnings": res.get("warnings", []),
+            "stats": res.get("stats", {})}
+
+
+@app.get("/api/projects/{name}/proposal.{fmt}")
+def api_proposal(name: str, fmt: str):
+    """Generate an editable PPTX or a PDF proposal from the latest run."""
+    from whsim import export_doc
+    if fmt not in ("pptx", "pdf"):
+        raise HTTPException(404, "unknown format")
+    proj = _open(name)
+    rd = proj.latest_run_dir()
+    if rd is None or not (rd / "kpis.json").is_file():
+        raise HTTPException(404, "no run yet")
+    kpis = json.loads((rd / "kpis.json").read_text("utf-8"))
+    png = rd / "layout_heatmap.png"
+    out = rd / f"proposal.{fmt}"
+    prov = proj.load_provenance().summary()
+    builder = export_doc.build_pptx if fmt == "pptx" else export_doc.build_pdf
+    builder(kpis, proj.meta()["name"], prov, png if png.is_file() else None, out)
+    media = ("application/vnd.openxmlformats-officedocument.presentationml.presentation"
+             if fmt == "pptx" else "application/pdf")
+    return FileResponse(out, media_type=media, filename=f"{name}_提案書.{fmt}")
 
 
 @app.post("/api/projects/{name}/headline")

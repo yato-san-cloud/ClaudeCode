@@ -38,6 +38,71 @@ def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
     return d
 
 
+def _route_order(world: World, start, pts: list) -> list[int]:
+    """Visiting order (indices into `pts`). Strategy shapes the route:
+    discrete/batch/wave use nearest-neighbour; zone walks a strict S-shape by
+    aisle column (no backtracking), modelling disciplined zone/aisle picking."""
+    if world.pick_strategy == "zone" and pts:
+        # rank by actual aisle column (distinct x positions), serpentine in y
+        cols = sorted({round(p[0], 1) for p in pts})
+        rank = {c: r for r, c in enumerate(cols)}
+        return sorted(range(len(pts)),
+                      key=lambda i: (rank[round(pts[i][0], 1)],
+                                     pts[i][1] if rank[round(pts[i][0], 1)] % 2 == 0
+                                     else -pts[i][1]))
+    return nearest_neighbor_route(start, pts)
+
+
+def _nearest_conveyor(world: World, p):
+    if not world.conveyor_points:
+        return None
+    return min(world.conveyor_points, key=lambda q: manhattan(p, q))
+
+
+def putaway_source(world: World, rng: random.Random):
+    """Generate inbound putaway tasks at a rate tied to outbound throughput
+    (replenishment scales with demand) -- so forklift activity is data-driven,
+    not decorative. A pallet covers several order-lines, hence the 0.3 factor."""
+    env = world.env
+    prof = world.model.orders.profile
+    if world.model.orders.outbound:
+        out_per_hr = len(world.model.orders.outbound) / max(
+            world.model.simulation.duration_s / 3600.0, 1e-9)
+    else:
+        out_per_hr = prof.rate_per_hr * max(prof.peak_factor, 0.0)
+    rate_per_s = max(out_per_hr * 0.3, 0.0) / 3600.0
+    if rate_per_s <= 0:
+        return
+    while env.now < world.model.simulation.duration_s:
+        yield env.timeout(rng.expovariate(rate_per_s))
+        yield world.fork_store.put(rng.choice(world.slot_xy))
+
+
+def forklift_agent(world: World, f: Worker, rng: random.Random):
+    """Inbound putaway: pull a task, ferry a pallet dock -> storage slot -> dock."""
+    env = world.env
+    pos = world.fork_home
+    if world.recording():
+        f.kf(env.now, pos[0], pos[1], "idle")
+    while True:
+        slot = yield world.fork_store.get()   # waits when there is no inbound work
+        trip_start = env.now
+        d1 = manhattan(world.fork_home, slot)
+        _accumulate_heat(world, world.fork_home, slot)
+        if world.recording():
+            f.kf(env.now, world.fork_home[0], world.fork_home[1], "putaway")
+        yield env.timeout(d1 / world.fork_speed)
+        if world.recording():
+            f.kf(env.now, slot[0], slot[1], "putaway")
+        yield env.timeout(8.0)  # place the pallet
+        _accumulate_heat(world, slot, world.fork_home)
+        yield env.timeout(manhattan(slot, world.fork_home) / world.fork_speed)
+        if world.recording():
+            f.kf(env.now, world.fork_home[0], world.fork_home[1], "idle")
+        world.log(t=env.now, event="forklift_done", busy=env.now - trip_start,
+                  resource="forklift", worker=f.id)
+
+
 def _order_points(world: World, order: Order):
     pts, qtys, tss = [], [], []
     for line in order.lines:
@@ -85,11 +150,15 @@ def agv_agent(world: World, a: Worker):
 
 
 def _pull_batch(world: World, source, first):
-    """First order plus up to batch_size-1 more already waiting (batch/zone/wave)."""
+    """First order plus up to batch_size-1 more already waiting (batch/zone/wave).
+    Wave picking waits a short release window first to accumulate a fuller batch."""
     batch = [first]
-    if world.pick_strategy != "discrete":
-        while len(batch) < world.batch_size and source.items:
-            batch.append((yield source.get()))
+    if world.pick_strategy == "discrete":
+        return batch
+    if world.pick_strategy == "wave":
+        yield world.env.timeout(30.0)  # release window: let orders pile up
+    while len(batch) < world.batch_size and source.items:
+        batch.append((yield source.get()))
     return batch
 
 
@@ -130,15 +199,19 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             picker_busy = handle_time
         else:
             if points:
-                for idx in nearest_neighbor_route(pos, points):
+                for idx in _route_order(world, pos, points):
                     dest = points[idx]
                     total_dist += yield from _walk(world, w, pos, dest, speed, "travel")
                     pos = dest
                     if world.recording():
                         w.kf(env.now, pos[0], pos[1], "pick")
                     yield env.timeout(qtys[idx] * tss[idx])
-            total_dist += yield from _walk(world, w, pos, world.home, speed, "carry")
-            pos = world.home
+            # carry to pack: a conveyor (if present) takes the long haul, so the
+            # picker only walks to the nearest conveyor pickup point.
+            conv = _nearest_conveyor(world, pos)
+            drop = conv if conv is not None else world.home
+            total_dist += yield from _walk(world, w, pos, drop, speed, "carry")
+            pos = drop
             picker_busy = env.now - busy_start
 
         dist_per_order = total_dist / len(orders)

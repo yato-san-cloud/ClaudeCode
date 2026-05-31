@@ -35,6 +35,15 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         {"id": a.id, "keyframes": a.keyframes}
         for a in res.agvs
     ]
+    forklifts = [
+        {"id": f.id, "keyframes": f.keyframes}
+        for f in getattr(res, "forklifts", [])
+    ]
+    routes = [
+        {"id": r.id, "name": r.name, "mover": r.mover,
+         "speed_mps": r.speed_mps, "points": r.points}
+        for r in model.routes
+    ]
     conveyors = [
         {"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
         for c in model.resources.conveyors
@@ -62,9 +71,11 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "stations": stations,
         "workers": workers,
         "agvs": agvs,
+        "forklifts": forklifts,
         "conveyors": conveyors,
         "equipment": equipment,
         "walls": walls,
         "doors": doors,
+        "routes": routes,
         "kpis": kpis,
     }

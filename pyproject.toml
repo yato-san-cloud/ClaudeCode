@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "ruff>=0.1", "httpx>=0.24"]
 web = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9"]
+docs = ["ezdxf>=1.1", "python-pptx>=0.6", "reportlab>=4.0"]
 
 [project.scripts]
 whsim = "whsim.cli:app"

@@ -35,6 +35,7 @@ class World:
     model: WarehouseModel
     order_store: simpy.Store
     ready_store: simpy.Store                # AGV-fetched totes waiting for a picker
+    fork_store: simpy.Store                 # inbound putaway tasks for forklifts
     packers: simpy.Resource
     n_pickers: int
     n_packers: int
@@ -45,6 +46,11 @@ class World:
     batch_size: int
     home: tuple[float, float]               # workers start/return here (pack area)
     agv_home: tuple[float, float]           # AGV dock
+    fork_home: tuple[float, float]          # forklift / receiving dock
+    n_forklifts: int
+    fork_speed: float
+    slot_xy: list[tuple[float, float]]      # storage slots (forklift putaway targets)
+    conveyor_points: list[tuple[float, float]]  # conveyor pickup points (if any)
     sku_xy: dict[str, tuple[float, float]]
     sku_ts: dict[str, float]
     sku_weights: list[float]
@@ -105,22 +111,45 @@ def build(
     gh = max(1, math.ceil(model.layout.bounds.depth / grid_m))
     heat = np.zeros((gh, gw), dtype=float)
 
-    # Batch/zone/wave gather several orders per trip; default to a useful size so
-    # picking a strategy actually changes the result even if batch_size is unset.
+    # Batch/zone/wave gather several orders per trip; give each strategy a
+    # distinct effective batch so the choice produces a real, correctly-signed
+    # difference (more orders/trip -> less walking per order; wave pools most).
     strategy = model.process.pick_strategy
-    batch_size = model.process.batch_size
-    if strategy != "discrete" and batch_size <= 1:
-        batch_size = 4
+    bs = model.process.batch_size
+    if strategy == "discrete":
+        batch_size = 1
+    elif strategy == "wave":
+        batch_size = bs if bs > 1 else 8
+    else:  # batch, zone
+        batch_size = bs if bs > 1 else 4
+
+    # Forklifts handle inbound putaway (their own moving 動線).
+    forks = [e for e in model.resources.equipment if e.type == "forklift"]
+    n_forklifts = sum(e.count for e in forks)
+    fork_speed = (sum(e.speed_mps for e in forks) / len(forks)) if forks else 2.0
+    recv = next((z for z in model.layout.zones if z.type == "receiving"), None)
+    fork_home = ((recv.x + recv.w / 2, recv.y + recv.h / 2) if recv
+                 else (forks[0].x, forks[0].y) if forks else (0.0, model.layout.bounds.depth / 2))
+    slot_xy = [(loc.x, loc.y) for loc in model.locations] or [home]
+
+    conveyor_points: list[tuple[float, float]] = []
+    for cv in model.resources.conveyors:
+        for p in cv.points:
+            conveyor_points.append((p[0], p[1]))
 
     return World(
         env=env, model=model,
         order_store=simpy.Store(env),
         ready_store=simpy.Store(env),
+        fork_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),
-        home=home, agv_home=agv_home, sku_xy=sku_xy, sku_ts=sku_ts,
+        home=home, agv_home=agv_home,
+        fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),
+        slot_xy=slot_xy, conveyor_points=conveyor_points,
+        sku_xy=sku_xy, sku_ts=sku_ts,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
     )

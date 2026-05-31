@@ -223,6 +223,7 @@ class Simulation(BaseModel):
     currency: str = "¥"
     amortize_capex_months: int = 36  # spread equipment capex over N months
     work_days_per_month: int = 25    # to scale a one-shift run to a monthly cost
+    shift_hours_per_day: float = 8.0  # a work-day's length; makes cost robust to duration
 
 
 class Scenario(BaseModel):
@@ -231,6 +232,16 @@ class Scenario(BaseModel):
     name: str
     description: str = ""
     edits: dict = Field(default_factory=dict)  # {"orders.profile.peak_factor": 3.0, ...}
+
+
+class Route(BaseModel):
+    """A manually-drawn flow line for distance/time study (Logi3D-style 動線)."""
+
+    id: str = "r"
+    name: str = ""
+    mover: Literal["person", "forklift"] = "person"
+    speed_mps: float = 1.2
+    points: list[list[float]] = Field(default_factory=list)  # [[x,y], ...]
 
 
 class WarehouseModel(BaseModel):
@@ -244,6 +255,7 @@ class WarehouseModel(BaseModel):
     resources: Resources = Field(default_factory=Resources)
     orders: Orders = Field(default_factory=Orders)
     simulation: Simulation = Field(default_factory=Simulation)
+    routes: list[Route] = Field(default_factory=list)  # manual flow-line studies
 
     def item_by_sku(self) -> dict[str, Item]:
         return {it.sku: it for it in self.items}

@@ -48,6 +48,13 @@ const PICK_STRATS = [
   { value: 'discrete', label: '都度ピック' }, { value: 'batch', label: 'バッチ' },
   { value: 'zone', label: 'ゾーン' }, { value: 'wave', label: 'ウェーブ' },
 ];
+// 動線 (flow-line) movers: label, schema key, default speed (m/s), polyline color.
+const MOVER_OPTS = [
+  { value: 'person', label: '作業員' }, { value: 'forklift', label: 'フォークリフト' },
+];
+const MOVER_JP = { person: '作業員', forklift: 'フォークリフト' };
+const MOVER_SPEED = { person: 1.2, forklift: 2.0 };
+const MOVER_COLOR = { person: '#e7298a', forklift: '#1b9e77' };
 
 const HANDLE = 12;        // bottom-right resize handle size in px
 const MIN_M = 1;          // smallest zone dimension in meters
@@ -68,13 +75,16 @@ export class Designer {
   constructor(container, model, handlers) {
     this.container = container;
     this.handlers = handlers || {};
-    this.tool = 'layout';          // 'layout' | 'equip' | 'building' | 'flow'
+    this.tool = 'layout';          // 'layout' | 'equip' | 'building' | 'flow' | 'route'
     this.selected = null;          // {kind, id} of selected canvas object
     this.equipBrush = 'agv';       // active palette key in 設備 tool
     this.doorBrush = 'dock';       // active door type in 躯体 tool
     this.buildMode = 'wall';       // 'wall' | 'door' within the 躯体 tool
     this.wallDraft = null;         // [[x,y],...] while drawing a wall polyline
     this.conveyorDraft = null;     // [[x,y],...] while drawing a conveyor
+    this.routeMover = 'person';    // active mover for new 動線 routes
+    this.routeSpeed = MOVER_SPEED.person; // active speed (m/s) for new routes
+    this.routeDraft = null;        // [[x,y],...] while drawing a 動線 polyline
     this.drag = null;              // active drag state on the canvas
     this._listeners = [];          // [el, type, fn] for clean dispose()
     this._normalize(model);
@@ -88,6 +98,7 @@ export class Designer {
     this.selected = null;
     this.conveyorDraft = null;
     this.wallDraft = null;
+    this.routeDraft = null;
     this._renderTool();
   }
 
@@ -145,6 +156,14 @@ export class Designer {
       ];
     }
     m.process.pick_strategy = m.process.pick_strategy || 'discrete';
+    m.routes = Array.isArray(m.routes) ? m.routes : [];
+    m.routes.forEach((rt, i) => {
+      if (!rt.id) rt.id = uid('route');
+      if (!MOVER_JP[rt.mover]) rt.mover = 'person';
+      if (!rt.name) rt.name = `動線${i + 1}`;
+      if (!(+rt.speed_mps > 0)) rt.speed_mps = MOVER_SPEED[rt.mover] || 1.2;
+      rt.points = Array.isArray(rt.points) ? rt.points : [];
+    });
     this.model = m;
   }
 
@@ -159,7 +178,7 @@ export class Designer {
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
     this._toolBtns = {};
-    for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー']]) {
+    for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー'], ['route', '動線']]) {
       const b = document.createElement('button');
       b.textContent = label;
       this._on(b, 'click', () => this._selectTool(key));
@@ -192,6 +211,7 @@ export class Designer {
     this.selected = null;
     this.conveyorDraft = null;
     this.wallDraft = null;
+    this.routeDraft = null;
     for (const k in this._toolBtns) {
       const active = k === key;
       const b = this._toolBtns[k];
@@ -205,6 +225,7 @@ export class Designer {
   _renderTool() {
     this.body.innerHTML = '';
     if (this.tool === 'flow') { this._renderFlow(); return; }
+    if (this.tool === 'route') { this._renderRoute(); return; }
     // canvas-based tools (layout / equip) share the floor view + a side panel
     const wrap = document.createElement('div');
     wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
@@ -222,6 +243,228 @@ export class Designer {
     this._fitCanvas();
     this._renderSide();
     this._drawCanvas();
+  }
+
+  // ---- 動線 tool: floor view + control bar + live distance/time table ------
+  _renderRoute() {
+    // left column: control bar above the floor canvas
+    const left = document.createElement('div');
+    left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
+
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;';
+    // mover selector
+    const moverSel = this._select(bar, MOVER_OPTS, this.routeMover);
+    this._on(moverSel, 'change', () => {
+      this.routeMover = moverSel.value;
+      this.routeSpeed = MOVER_SPEED[this.routeMover] || 1.2;
+      this._renderRoute();
+    });
+    // speed input (m/s)
+    const spLbl = document.createElement('span');
+    spLbl.textContent = '速度(m/s)';
+    spLbl.style.cssText = 'font-size:12px;color:#6b7785;';
+    bar.appendChild(spLbl);
+    const spInp = this._num(this.routeSpeed, (v) => { this.routeSpeed = Math.max(0.1, v); }, 0.1);
+    spInp.style.cssText += ';width:70px;padding:5px 7px;border:1px solid #e3e8ee;border-radius:6px;font-size:13px;';
+    bar.appendChild(spInp);
+    this._btn(bar, '新規ルート', () => {
+      if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
+      this.routeDraft = [];
+      this.selected = null;
+      this._renderRoute();
+    });
+    this._btn(bar, '確定', () => this._finishRoute());
+    this._btn(bar, '削除', () => this._deleteSelectedRoute(), 'color:#b30000;');
+    left.appendChild(bar);
+
+    // floor canvas
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
+    wrap.appendChild(this.canvas);
+    left.appendChild(wrap);
+    this.body.appendChild(left);
+
+    // right column: live 動線一覧 table
+    this.side = document.createElement('div');
+    this.side.style.cssText = 'width:300px;flex:0 0 300px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
+    this.body.appendChild(this.side);
+
+    this.ctx = this.canvas.getContext('2d');
+    this._bindCanvas();
+    this._fitCanvas();
+    this._renderRouteTable();
+    this._drawCanvas();
+  }
+
+  // length of a polyline in meters
+  _routeLength(pts) {
+    if (!Array.isArray(pts) || pts.length < 2) return 0;
+    let d = 0;
+    for (let i = 1; i < pts.length; i++) {
+      d += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    }
+    return d;
+  }
+
+  _renderRouteTable() {
+    const s = this.side; if (!s) return;
+    s.innerHTML = '';
+    this._h(s, '動線一覧');
+    this._note(s, '床をクリックで頂点追加、ダブルクリックか「確定」で完了。ルート付近をクリックで選択。');
+
+    const routes = this.model.routes || [];
+    const table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;';
+    const thead = document.createElement('tr');
+    for (const t of ['名称', '種別', '距離(m)', '所要(秒)']) {
+      const th = document.createElement('th');
+      th.textContent = t;
+      th.style.cssText = 'text-align:left;padding:4px 6px;border-bottom:2px solid #e3e8ee;color:#6b7785;font-weight:700;';
+      thead.appendChild(th);
+    }
+    table.appendChild(thead);
+
+    let totalD = 0, totalT = 0;
+    for (const rt of routes) {
+      const dist = this._routeLength(rt.points);
+      const time = rt.speed_mps > 0 ? dist / rt.speed_mps : 0;
+      totalD += dist; totalT += time;
+      const tr = document.createElement('tr');
+      const selRow = this._isSel('route', rt.id);
+      tr.style.cssText = 'cursor:pointer;' + (selRow ? 'background:#eef2f7;font-weight:700;' : '');
+      this._on(tr, 'click', () => {
+        this.selected = { kind: 'route', id: rt.id };
+        this._renderRouteTable(); this._drawCanvas();
+      });
+      const cells = [
+        rt.name || rt.id,
+        MOVER_JP[rt.mover] || rt.mover,
+        dist.toFixed(1),
+        Math.round(time),
+      ];
+      cells.forEach((c, i) => {
+        const td = document.createElement('td');
+        td.textContent = String(c);
+        td.style.cssText = 'padding:4px 6px;border-bottom:1px solid #eef0f3;'
+          + (i >= 2 ? 'text-align:right;font-variant-numeric:tabular-nums;' : '');
+        if (i === 0) td.style.cssText += `border-left:3px solid ${MOVER_COLOR[rt.mover] || '#777'};`;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    }
+    // total row
+    const tot = document.createElement('tr');
+    for (const [i, c] of [[0, '合計'], [1, ''], [2, totalD.toFixed(1)], [3, String(Math.round(totalT))]]) {
+      const td = document.createElement('td');
+      td.textContent = c;
+      td.style.cssText = 'padding:6px;border-top:2px solid #e3e8ee;font-weight:700;'
+        + (i >= 2 ? 'text-align:right;font-variant-numeric:tabular-nums;' : '');
+      tot.appendChild(td);
+    }
+    table.appendChild(tot);
+    s.appendChild(table);
+    if (!routes.length) this._note(s, '動線がまだありません。「新規ルート」から作図してください。');
+
+    // selected-route editor
+    const rt = this.selected && this.selected.kind === 'route'
+      ? routes.find((q) => q.id === this.selected.id) : null;
+    if (rt) {
+      this._h(s, `選択中: ${rt.name}`);
+      this._field(s, '種別', () => {
+        const sel = this._select(null, MOVER_OPTS, rt.mover);
+        this._on(sel, 'change', () => { rt.mover = sel.value; this._renderRouteTable(); this._drawCanvas(); });
+        return sel;
+      });
+      this._field(s, '速度 (m/s)', () => this._num(rt.speed_mps, (v) => {
+        rt.speed_mps = Math.max(0.1, v); this._renderRouteTable();
+      }, 0.1));
+      this._btn(s, '削除', () => this._deleteSelectedRoute(), 'margin-top:10px;color:#b30000;');
+    }
+  }
+
+  // --- 動線 tool canvas interaction ---
+  _routeDown(px, py) {
+    const mx = snap(this._mx(px)), my = snap(this._my(py));
+    const b = this.model.layout.bounds;
+    const inside = mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth;
+
+    // when not actively drawing, a click near a finished route selects it
+    if (!this.routeDraft || !this.routeDraft.length) {
+      const hit = this._routeHit(px, py);
+      if (hit) {
+        this.selected = { kind: 'route', id: hit.id };
+        this._renderRouteTable(); this._drawCanvas();
+        return;
+      }
+    }
+    if (!inside && (!this.routeDraft || !this.routeDraft.length)) {
+      this.selected = null; this._renderRouteTable(); this._drawCanvas();
+      return;
+    }
+    if (!this.routeDraft) this.routeDraft = [];
+    this.routeDraft.push([clamp(mx, 0, b.width), clamp(my, 0, b.depth)]);
+    this._renderRouteTable(); this._drawCanvas();
+  }
+
+  _routeHit(px, py) {
+    for (let i = this.model.routes.length - 1; i >= 0; i--) {
+      const rt = this.model.routes[i];
+      const pts = rt.points || [];
+      for (let j = 0; j < pts.length - 1; j++) {
+        if (this._distToSeg(px, py, this._X(pts[j][0]), this._Y(pts[j][1]),
+            this._X(pts[j + 1][0]), this._Y(pts[j + 1][1])) <= 7) {
+          return rt;
+        }
+      }
+    }
+    return null;
+  }
+
+  _finishRoute() {
+    if (this.routeDraft && this.routeDraft.length >= 2) {
+      const n = this.model.routes.length + 1;
+      const rt = {
+        id: uid('route'),
+        name: `動線${n}`,
+        mover: this.routeMover,
+        speed_mps: Math.max(0.1, +this.routeSpeed || MOVER_SPEED[this.routeMover] || 1.2),
+        points: this.routeDraft.slice(),
+      };
+      this.model.routes.push(rt);
+      this.selected = { kind: 'route', id: rt.id };
+    }
+    this.routeDraft = null;
+    this._renderRouteTable(); this._drawCanvas();
+  }
+
+  _deleteSelectedRoute() {
+    if (!this.selected || this.selected.kind !== 'route') return;
+    this.model.routes = this.model.routes.filter((q) => q.id !== this.selected.id);
+    this.selected = null;
+    this._renderRouteTable(); this._drawCanvas();
+  }
+
+  _drawRoute(pts, color, draft, name) {
+    if (!pts || pts.length === 0) return;
+    const ctx = this.ctx;
+    ctx.strokeStyle = color; ctx.lineWidth = draft ? 3 : 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (draft) ctx.setLineDash([7, 5]);
+    if (pts.length >= 2) {
+      ctx.beginPath();
+      ctx.moveTo(this._X(pts[0][0]), this._Y(pts[0][1]));
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(this._X(pts[i][0]), this._Y(pts[i][1]));
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    for (const p of pts) { ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3.2, 0, 7); ctx.fill(); }
+    if (name && pts.length) {
+      ctx.fillStyle = color; ctx.font = '12px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.fillText(name, this._X(pts[0][0]) + 6, this._Y(pts[0][1]) - 4);
+    }
   }
 
   // ---- canvas geometry (meters <-> pixels, y flipped) ----------------------
@@ -257,7 +500,7 @@ export class Designer {
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
 
-    const dim = this.tool === 'equip' || this.tool === 'building';   // zones rendered faintly under equipment/walls
+    const dim = this.tool === 'equip' || this.tool === 'building' || this.tool === 'route';   // zones rendered faintly under equipment/walls/routes
     for (const z of this.model.layout.zones) {
       const sel = this.tool === 'layout' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
       const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
@@ -300,6 +543,23 @@ export class Designer {
       for (const w of this.model.layout.walls) this._drawWall(w.points, w.thickness, this._isSel('wall', w.id), false);
       if (this.wallDraft) this._drawWall(this.wallDraft, 0.3, false, true);
       for (const d of this.model.layout.doors) this._drawDoor(d, this._isSel('door', d.id));
+    }
+
+    // 動線 tool: faint walls for context, then colored route polylines
+    if (this.tool === 'route') {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      for (const w of this.model.layout.walls) this._drawWall(w.points, w.thickness, false, false);
+      ctx.restore();
+      for (const rt of this.model.routes) {
+        const sel = this._isSel('route', rt.id);
+        const color = MOVER_COLOR[rt.mover] || '#777';
+        ctx.save();
+        if (!sel) ctx.globalAlpha = 0.85;
+        this._drawRoute(rt.points, sel ? '#1f2733' : color, false, rt.name);
+        ctx.restore();
+      }
+      if (this.routeDraft) this._drawRoute(this.routeDraft, MOVER_COLOR[this.routeMover] || '#e31a1c', true, null);
     }
 
     // hint text
@@ -416,6 +676,7 @@ export class Designer {
     if (this.tool === 'layout') return this._layoutDown(px, py);
     if (this.tool === 'equip') return this._equipDown(px, py);
     if (this.tool === 'building') return this._buildingDown(px, py);
+    if (this.tool === 'route') return this._routeDown(px, py);
   }
 
   // --- layout tool: select / move / resize zones ---
@@ -523,6 +784,7 @@ export class Designer {
   _onDbl(e) {
     if (this.tool === 'equip' && this.equipBrush === 'conveyor') this._finishConveyor();
     if (this.tool === 'building' && this.buildMode === 'wall') this._finishWall();
+    if (this.tool === 'route') this._finishRoute();
   }
 
   _finishConveyor() {
@@ -820,6 +1082,8 @@ export class Designer {
     if (!this.handlers.save) { this._saveMsg.textContent = '保存ハンドラがありません。'; return; }
     if (this.tool === 'equip' && this.conveyorDraft) this._finishConveyor();
     if (this.tool === 'building' && this.wallDraft) this._finishWall();
+    if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
+    this.routeDraft = null;
     this._saveBtn.disabled = true;
     this._saveMsg.style.color = '#6b7785';
     this._saveMsg.textContent = '保存中…';
@@ -828,6 +1092,7 @@ export class Designer {
         layout: clone(this.model.layout),
         resources: clone(this.model.resources),
         process: clone(this.model.process),
+        routes: clone(this.model.routes),
       });
       const prov = r && r.provenance_summary ? ` / ${r.provenance_summary}` : '';
       this._saveMsg.style.color = '#1a7a3c';

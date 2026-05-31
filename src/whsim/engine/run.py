@@ -9,7 +9,9 @@ import numpy as np
 import simpy
 
 from whsim.engine.build import Worker, build
-from whsim.engine.processes import agv_agent, order_source, picker_agent
+from whsim.engine.processes import (
+    agv_agent, forklift_agent, order_source, picker_agent, putaway_source,
+)
 from whsim.schema.model import WarehouseModel
 
 # Keep the animated replay short enough to stay smooth in the browser, even when
@@ -28,6 +30,7 @@ class RunResult:
     pick_method: str = "manual"
     workers: list[Worker] = field(default_factory=list)
     agvs: list[Worker] = field(default_factory=list)
+    forklifts: list[Worker] = field(default_factory=list)
     replay_window_s: float = 0.0
     cost: dict = field(default_factory=dict)
 
@@ -53,6 +56,13 @@ def run_once(
             a = Worker(id=f"agv-{i+1}", role="agv")
             agvs.append(a)
             env.process(agv_agent(world, a))
+    forklifts: list[Worker] = []
+    if world.n_forklifts > 0:
+        for i in range(world.n_forklifts):
+            fk = Worker(id=f"forklift-{i+1}", role="forklift")
+            forklifts.append(fk)
+            env.process(forklift_agent(world, fk, rng))
+        env.process(putaway_source(world, rng))
     env.process(order_source(world, rng))
 
     env.run(until=model.simulation.duration_s)
@@ -61,8 +71,8 @@ def run_once(
         n_pickers=world.n_pickers, n_packers=world.n_packers,
         duration_s=model.simulation.duration_s,
         n_agvs=world.n_agvs, pick_method=world.pick_method,
-        workers=world.workers, agvs=agvs, replay_window_s=window,
-        cost=_cost_inputs(model),
+        workers=world.workers, agvs=agvs, forklifts=forklifts,
+        replay_window_s=window, cost=_cost_inputs(model),
     )
 
 
@@ -77,6 +87,7 @@ def _cost_inputs(model: WarehouseModel) -> dict:
         "opex_per_hr_total": sum(e.opex_per_hr * e.count for e in agvs),
         "amortize_months": model.simulation.amortize_capex_months,
         "work_days_per_month": model.simulation.work_days_per_month,
+        "shift_hours_per_day": model.simulation.shift_hours_per_day,
         "currency": model.simulation.currency,
     }
 

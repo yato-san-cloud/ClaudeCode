@@ -109,6 +109,22 @@ function draw2d() {
     cv.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
     ctx.stroke(); ctx.lineWidth = 1;
   }
+  // manual flow-line routes (動線)
+  for (const rt of (rep.routes || [])) {
+    if (!rt.points || rt.points.length < 2) continue;
+    ctx.strokeStyle = rt.mover === 'forklift' ? '#f57f17' : '#00b8d4';
+    ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.beginPath();
+    rt.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
+    ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+  }
+  // forklifts (moving, orange diamond-ish squares)
+  for (const fk of (rep.forklifts || [])) {
+    const [x, y, st] = interp(fk.keyframes, S.t);
+    ctx.fillStyle = st === 'putaway' ? '#e65100' : '#ffb74d';
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 0.7;
+    ctx.fillRect(X(x) - 7, Y(y) - 5, 14, 10);
+    ctx.strokeRect(X(x) - 7, Y(y) - 5, 14, 10);
+  }
   // AGVs (moving squares, distinct from round workers)
   for (const ag of (rep.agvs || [])) {
     const [x, y, st] = interp(ag.keyframes, S.t);
@@ -320,6 +336,20 @@ async function uploadZip(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
 }
 
+async function uploadCad(file) {
+  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
+  const fd = new FormData(); fd.append('file', file);
+  $('importLog').textContent = 'CAD図面を解析中…';
+  try {
+    const r = await api(`/api/projects/${S.project}/import-cad`, { method: 'POST', body: fd });
+    const lines = [`<span class="ok">図面取込: 壁${r.walls}本 / ゾーン${r.zones}個 / ` +
+      `外形 ${r.bounds ? r.bounds.width.toFixed(0) + '×' + r.bounds.depth.toFixed(0) + 'm' : '—'}</span>`];
+    for (const w of (r.warnings || [])) lines.push(`<span class="warn">! ${w}</span>`);
+    $('importLog').innerHTML = lines.join('\n');
+    if (S.view === 'design') mountDesigner();
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
+}
+
 // ---- wire up ---------------------------------------------------------------
 function initUI() {
   $('createBtn').onclick = async () => {
@@ -378,6 +408,8 @@ function initUI() {
   const dz = $('dropzone'), fi = $('fileInput');
   dz.onclick = () => fi.click();
   fi.onchange = () => fi.files[0] && uploadZip(fi.files[0]);
+  $('cadBtn').onclick = () => $('cadInput').click();
+  $('cadInput').onchange = () => $('cadInput').files[0] && uploadCad($('cadInput').files[0]);
   ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => {
     e.preventDefault(); dz.classList.add('drag');
   }));

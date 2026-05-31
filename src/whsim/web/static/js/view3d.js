@@ -31,6 +31,8 @@ const AGV_Y = 0.2;
 
 // Render / art presets. Each tweaks background, fog, light intensities/colors
 // and tone-mapping exposure ONLY — never static geometry. See setPreset().
+// `shadow`: enable hard cast shadows for this preset; `shadowOpacity` controls
+// how dark the contact shadow reads (lower = softer/lighter).
 const PRESETS = {
   natural: {
     background: 0xeef1f5, fogColor: 0xeef1f5,
@@ -38,6 +40,7 @@ const PRESETS = {
     ambient: 0xffffff, ambientInt: 0.25,
     dirColor: 0xfff4e6, dirInt: 0.85,
     exposure: 1.05, rackEmissive: 0.06,
+    shadow: true, shadowOpacity: 0.9,
   },
   evening: {
     background: 0x2e2438, fogColor: 0x3a2c44,
@@ -45,6 +48,7 @@ const PRESETS = {
     ambient: 0xffe0b0, ambientInt: 0.18,
     dirColor: 0xff9d4d, dirInt: 1.15,
     exposure: 1.15, rackEmissive: 0.1,
+    shadow: true, shadowOpacity: 1.0,
   },
   night: {
     background: 0x0a1020, fogColor: 0x0c1426,
@@ -52,6 +56,7 @@ const PRESETS = {
     ambient: 0x2a3a55, ambientInt: 0.22,
     dirColor: 0xbcd0ff, dirInt: 0.6,
     exposure: 0.95, rackEmissive: 0.35,
+    shadow: false, shadowOpacity: 0.4,
   },
   mono: {
     background: 0xdfe4ea, fogColor: 0xdfe4ea,
@@ -59,8 +64,12 @@ const PRESETS = {
     ambient: 0xc8d0da, ambientInt: 0.45,
     dirColor: 0xc3ccda, dirInt: 0.55,
     exposure: 1.0, rackEmissive: 0.0,
+    shadow: false, shadowOpacity: 0.5,
   },
 };
+
+// Route mover -> bright line color.
+const ROUTE_COLOR = { forklift: 0xff7a00, person: 0x00b8d4 };
 
 // Equipment type -> base color (placed/static equipment models).
 const EQUIP_COLOR = {
@@ -105,7 +114,9 @@ export class Scene3D {
     this._materials = [];
     this._workers = []; // { mesh, keyframes }
     this._agvs = [];    // { mesh, keyframes }
+    this._forklifts = []; // { group, keyframes, prevX, prevZ }
     this._rackMaterials = []; // rack mats (preset tweaks their emissiveIntensity)
+    this._textures = []; // CanvasTextures to dispose
     this._preset = 'natural';
 
     const meta = this.replay.meta || {};
@@ -125,6 +136,9 @@ export class Scene3D {
     }
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
+    // Soft, proposal-grade contact shadows. Map size capped for performance.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
     // Scene + camera.
@@ -156,6 +170,8 @@ export class Scene3D {
     this._buildEquipment();
     this._buildWorkers();
     this._buildAgvs();
+    this._buildForklifts();
+    this._buildRoutes();
 
     // Apply the default art preset (mutates lights/renderer/scene only).
     this.setPreset(this._preset);
@@ -181,23 +197,86 @@ export class Scene3D {
     const ambient = new THREE.AmbientLight(0xffffff, 0.25);
     this.scene.add(ambient);
     this._ambient = ambient;
-    // Key directional light, slightly warm, angled across the floor.
+    // Key directional light, slightly warm, angled across the floor. Casts the
+    // scene's shadows from a fitted orthographic shadow camera.
     const dir = new THREE.DirectionalLight(0xfff4e6, 0.85);
-    dir.position.set(this.bounds.width * 0.8, span * 1.3, this.bounds.depth * 0.3);
+    // Pull the light well above and to the side so shadows rake across the floor.
+    dir.position.set(this.bounds.width * 0.85, span * 1.4 + 8, this.bounds.depth * 0.25);
     dir.target.position.set(this.bounds.width / 2, 0, this.bounds.depth / 2);
+    dir.castShadow = true;
+    dir.shadow.mapSize.set(2048, 2048);
+    // Fit the orthographic shadow frustum to cover the whole floor (+margin) so
+    // every object on it casts/receives crisp shadows without wasting texels.
+    const half = span * 0.75 + 4;
+    const cam = dir.shadow.camera;
+    cam.left = -half; cam.right = half;
+    cam.top = half; cam.bottom = -half;
+    cam.near = 1;
+    cam.far = span * 3.5 + 40;
+    cam.updateProjectionMatrix();
+    dir.shadow.bias = -0.0008;
+    dir.shadow.normalBias = 0.04;
+    dir.shadow.radius = 3; // soften PCF edges
     this.scene.add(dir);
     this.scene.add(dir.target);
     this._dir = dir;
   }
 
+  // Faint procedural floor texture: aisle tile lines on a near-matte base so the
+  // floor reads as a real surface, not a flat fill. Returns a CanvasTexture
+  // tiled to roughly one repeat per `tileM` meters.
+  _makeFloorTexture(tileM) {
+    const S = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = S; canvas.height = S;
+    const ctx = canvas.getContext('2d');
+    // Base with a very subtle vignette toward edges for tonal variation.
+    ctx.fillStyle = '#e9ecf1';
+    ctx.fillRect(0, 0, S, S);
+    const grad = ctx.createRadialGradient(S / 2, S / 2, S * 0.1, S / 2, S / 2, S * 0.75);
+    grad.addColorStop(0, 'rgba(255,255,255,0.10)');
+    grad.addColorStop(1, 'rgba(120,130,145,0.10)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, S, S);
+    // Faint tile grid lines.
+    ctx.strokeStyle = 'rgba(150,160,172,0.45)';
+    ctx.lineWidth = 2;
+    const cells = 4;
+    const step = S / cells;
+    for (let i = 0; i <= cells; i++) {
+      const p = Math.round(i * step) + 0.5;
+      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, S); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(S, p); ctx.stroke();
+    }
+    // A lighter inner hairline per tile for a poured-concrete-joint feel.
+    ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= cells; i++) {
+      const p = Math.round(i * step) + 2.5;
+      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, S); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(S, p); ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    const reps = Math.max(1, Math.round(Math.max(this.bounds.width, this.bounds.depth) / (tileM * cells)));
+    tex.repeat.set(reps, reps);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = this.renderer.capabilities ? this.renderer.capabilities.getMaxAnisotropy() : 1;
+    this._textures.push(tex);
+    return tex;
+  }
+
   _buildFloor() {
     const { width, depth } = this.bounds;
     const geom = new THREE.BoxGeometry(width, 0.1, depth);
+    const tex = this._makeFloorTexture(meta_grid(this.replay));
     const mat = new THREE.MeshStandardMaterial({
-      color: 0xe7eaef, roughness: 0.95, metalness: 0.0,
+      color: 0xeef1f5, roughness: 1.0, metalness: 0.0, map: tex,
     });
     const floor = new THREE.Mesh(geom, mat);
     floor.position.set(width / 2, -0.05, depth / 2);
+    floor.receiveShadow = true; // catches contact shadows of every object
     this.scene.add(floor);
     this._track(geom, mat);
 
@@ -226,6 +305,7 @@ export class Scene3D {
       const mesh = new THREE.Mesh(geom, mat);
       mesh.rotation.x = -Math.PI / 2; // lay flat on the floor
       mesh.position.set((z.x || 0) + w / 2, 0.02, (z.y || 0) + h / 2);
+      mesh.receiveShadow = true;
       this.scene.add(mesh);
       this._track(geom, mat);
     }
@@ -239,11 +319,13 @@ export class Scene3D {
     for (const r of racks) {
       const color = ABC_COLOR[r.abc] || 0xfdcc8a;
       const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.6, metalness: 0.05,
+        color, roughness: 0.78, metalness: 0.08,
         emissive: new THREE.Color(color), emissiveIntensity: 0.06,
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(r.x || 0, 0.6, r.y || 0);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       this.scene.add(mesh);
       this._materials.push(mat);
       this._rackMaterials.push(mat); // preset adjusts emissiveIntensity (night glow)
@@ -261,6 +343,8 @@ export class Scene3D {
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(s.x || 0, 0.7, s.y || 0);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       this.scene.add(mesh);
       this._materials.push(mat);
     }
@@ -294,6 +378,8 @@ export class Scene3D {
           (p0[0] || 0) + dx / 2, yMid, (p0[1] || 0) + dz / 2,
         );
         mesh.rotation.y = -Math.atan2(dz, dx);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
         this.scene.add(mesh);
         this._track(geom, mat);
       }
@@ -336,6 +422,8 @@ export class Scene3D {
           (p0[0] || 0) + dx / 2, WALL_H / 2, (p0[1] || 0) + dz / 2,
         );
         mesh.rotation.y = -Math.atan2(dz, dx);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
         this.scene.add(mesh);
       }
     }
@@ -360,6 +448,7 @@ export class Scene3D {
       this._geometries.push(geom);
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(d.x || 0, DOOR_H / 2, d.y || 0);
+      mesh.castShadow = true;
       this.scene.add(mesh);
     }
   }
@@ -374,8 +463,13 @@ export class Scene3D {
       const x = e.x || 0;
       const y = e.y || 0;
       const base = EQUIP_COLOR[e.type] !== undefined ? EQUIP_COLOR[e.type] : 0x8d949c;
+      // Vehicles/metal hardware read a bit more metallic & polished than racks.
+      const metalish = e.type === 'forklift' || e.type === 'agv' ||
+                       e.type === 'crane' || e.type === 'robot_arm';
       const mat = new THREE.MeshStandardMaterial({
-        color: base, roughness: 0.55, metalness: 0.35,
+        color: base,
+        roughness: metalish ? 0.4 : 0.6,
+        metalness: metalish ? 0.55 : 0.25,
       });
       this._materials.push(mat);
       let group;
@@ -388,6 +482,7 @@ export class Scene3D {
         default:          group = this._makeDock(mat); break;
       }
       group.position.set(x, 0, y);
+      _enableShadows(group);
       this.scene.add(group);
     }
   }
@@ -542,9 +637,13 @@ export class Scene3D {
     if (this._dir) {
       this._dir.color.set(p.dirColor);
       this._dir.intensity = p.dirInt;
+      // Soften/disable harsh raking shadows for the dim/flat presets.
+      this._dir.castShadow = p.shadow !== false;
     }
     if (this.renderer) {
       this.renderer.toneMappingExposure = p.exposure;
+      // Lower-key presets get lighter contact shadows.
+      this.renderer.shadowMap.needsUpdate = true;
     }
     // Rack emissive glow: subtle by day, strong at night.
     for (const m of this._rackMaterials) {
@@ -568,6 +667,7 @@ export class Scene3D {
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(0, 0.7, 0);
+      mesh.castShadow = true;
       this.scene.add(mesh);
       this._materials.push(mat);
       this._workers.push({ mesh, keyframes: wk.keyframes || [] });
@@ -583,13 +683,104 @@ export class Scene3D {
     this._geometries.push(geom);
     for (const a of agvs) {
       const mat = new THREE.MeshStandardMaterial({
-        color: AGV_COLOR.idle, roughness: 0.4, metalness: 0.2,
+        color: AGV_COLOR.idle, roughness: 0.35, metalness: 0.55,
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(0, AGV_Y, 0);
+      mesh.castShadow = true;
       this.scene.add(mesh);
       this._materials.push(mat);
       this._agvs.push({ mesh, keyframes: a.keyframes || [] });
+    }
+  }
+
+  // Moving forklifts: each is a forklift composite (adapted from the static
+  // placed model) interpolated with the SAME sampleKeyframes() helper as
+  // workers/AGVs, and yawed to face its direction of travel. The local model
+  // faces +Z (its forks point +Z), so yaw = atan2(vx, vz). Missing/empty -> ok.
+  _buildForklifts() {
+    const forklifts = this.replay.forklifts || [];
+    if (forklifts.length === 0) return;
+    // Shared geometries/materials across all moving forklifts (perf).
+    const bodyGeom = new THREE.BoxGeometry(1.0, 0.7, 1.6);
+    const cabGeom = new THREE.BoxGeometry(0.85, 0.7, 0.7);
+    const mastGeom = new THREE.BoxGeometry(0.8, 1.8, 0.12);
+    const prongGeom = new THREE.BoxGeometry(0.12, 0.08, 1.0);
+    this._geometries.push(bodyGeom, cabGeom, mastGeom, prongGeom);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xf57c00, roughness: 0.42, metalness: 0.5,
+    });
+    const cabMat = new THREE.MeshStandardMaterial({
+      color: 0x2b2f33, roughness: 0.5, metalness: 0.4,
+    });
+    const forkMat = new THREE.MeshStandardMaterial({
+      color: 0xb0b6bd, roughness: 0.35, metalness: 0.7,
+    });
+    this._materials.push(bodyMat, cabMat, forkMat);
+    for (const f of forklifts) {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(bodyGeom, bodyMat);
+      body.position.set(0, 0.55, 0);
+      g.add(body);
+      const cab = new THREE.Mesh(cabGeom, cabMat);
+      cab.position.set(0, 1.0, -0.4);
+      g.add(cab);
+      const mastMesh = new THREE.Mesh(mastGeom, forkMat);
+      mastMesh.position.set(0, 1.0, 0.9);
+      g.add(mastMesh);
+      for (const dx of [-0.25, 0.25]) {
+        const p = new THREE.Mesh(prongGeom, forkMat);
+        p.position.set(dx, 0.1, 1.4);
+        g.add(p);
+      }
+      _enableShadows(g);
+      this.scene.add(g);
+      this._forklifts.push({ group: g, keyframes: f.keyframes || [], yaw: 0 });
+    }
+  }
+
+  // -- Routes (manual flow lines) -------------------------------------------
+  // Bright tubes on the floor + small node spheres at each vertex. mover
+  // 'forklift' vs 'person' get distinct colors. Defensive against missing arrays.
+  _buildRoutes() {
+    const routes = this.replay.routes || [];
+    if (routes.length === 0) return;
+    const Y = 0.08; // float just above floor so the tube reads clearly
+    // Shared node-marker geometry across all routes.
+    const nodeGeom = new THREE.SphereGeometry(0.22, 12, 10);
+    this._geometries.push(nodeGeom);
+    for (const r of routes) {
+      const raw = r.points || [];
+      const pts = [];
+      for (const p of raw) {
+        if (!p) continue;
+        pts.push(new THREE.Vector3(p[0] || 0, Y, p[1] || 0));
+      }
+      if (pts.length < 2) continue;
+      const color = ROUTE_COLOR[r.mover] !== undefined ? ROUTE_COLOR[r.mover] : 0xffd400;
+      const lineMat = new THREE.MeshStandardMaterial({
+        color, roughness: 0.5, metalness: 0.1,
+        emissive: new THREE.Color(color), emissiveIntensity: 0.6,
+      });
+      const nodeMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, roughness: 0.4, metalness: 0.1,
+        emissive: new THREE.Color(color), emissiveIntensity: 0.45,
+      });
+      this._materials.push(lineMat, nodeMat);
+      // Smooth tube following the polyline.
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.2);
+      const segs = Math.max(8, pts.length * 12);
+      const tubeGeom = new THREE.TubeGeometry(curve, segs, 0.12, 8, false);
+      this._geometries.push(tubeGeom);
+      const tube = new THREE.Mesh(tubeGeom, lineMat);
+      // Routes are flow annotations, not physical objects: no shadows.
+      this.scene.add(tube);
+      // Node markers at each original vertex.
+      for (const v of pts) {
+        const node = new THREE.Mesh(nodeGeom, nodeMat);
+        node.position.copy(v);
+        this.scene.add(node);
+      }
     }
   }
 
@@ -613,11 +804,35 @@ export class Scene3D {
     }
   }
 
+  // Per-frame: interpolate each moving forklift's position (same sampler) and
+  // yaw it toward its direction of travel using a small look-ahead sample.
+  _updateForklifts(t) {
+    for (const f of this._forklifts) {
+      const s = sampleKeyframes(f.keyframes, t);
+      f.group.position.set(s.x, 0, s.y);
+      // Estimate velocity by sampling slightly ahead; fall back to behind.
+      let ahead = sampleKeyframes(f.keyframes, t + 0.25);
+      let vx = ahead.x - s.x;
+      let vz = ahead.y - s.y;
+      if (vx * vx + vz * vz < 1e-6) {
+        const behind = sampleKeyframes(f.keyframes, t - 0.25);
+        vx = s.x - behind.x;
+        vz = s.y - behind.y;
+      }
+      if (vx * vx + vz * vz > 1e-6) {
+        // Model's forks face +Z, so yaw rotates +Z onto (vx, vz).
+        f.yaw = Math.atan2(vx, vz);
+      }
+      f.group.rotation.y = f.yaw;
+    }
+  }
+
   _loop() {
     if (this._disposed) return;
     const t = this.getTime() || 0;
     this._updateWorkers(t);
     this._updateAgvs(t);
+    this._updateForklifts(t);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this._raf = requestAnimationFrame(this._loop);
@@ -639,10 +854,13 @@ export class Scene3D {
     if (this.controls) this.controls.dispose();
     for (const g of this._geometries) { if (g && g.dispose) g.dispose(); }
     for (const m of this._materials) { if (m && m.dispose) m.dispose(); }
+    for (const t of this._textures) { if (t && t.dispose) t.dispose(); }
     this._geometries = [];
     this._materials = [];
+    this._textures = [];
     this._workers = [];
     this._agvs = [];
+    this._forklifts = [];
     this._rackMaterials = [];
     if (this.renderer) {
       this.renderer.dispose();
@@ -656,4 +874,14 @@ export class Scene3D {
 function meta_grid(replay) {
   const g = replay && replay.meta && replay.meta.grid_m;
   return g && g > 0 ? g : 1;
+}
+
+// Flag every mesh under an object3D to cast and receive shadows.
+function _enableShadows(obj) {
+  obj.traverse((child) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+    }
+  });
 }

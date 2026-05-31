@@ -34,6 +34,8 @@ artifacts, so each is independently testable/replaceable:
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict.
 - `design.py` — design-side helpers: `materialize_racks` expands a storage zone's
   parametric rack params into the concrete `locations` grid (re-pegs item SKUs).
+- `cad.py` — tolerant DXF import (ezdxf) → bounds/walls/zones in meters (unit auto-detect).
+- `export_doc.py` — editable PPTX + PDF proposal (python-pptx / reportlab, CJK fonts).
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
 - `render/png2d.py` — proposal PNG (layout + congestion heatmap + verdict + provenance footer).
 - `render/anim2d.py` — server-side animated 2D replay GIF (no browser needed).
