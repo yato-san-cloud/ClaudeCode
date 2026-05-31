@@ -28,18 +28,36 @@
   出力にも「N% your data」と明示。“簡単さ”と“信頼”を両立させ、将来のLLM質問リストにもなる。
 - **プロジェクト（ワークスペース）** にすべてを永続化。分析ツールは供給元、whsim が正の保管庫。
 
-## クイックスタート
+## Web アプリ（営業が触る画面）
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,web]"
+whsim serve                               # http://127.0.0.1:8000
+```
 
+テンプレ選択 → （任意で）顧客ZIPをドラッグ&ドロップ → キー項目を数個確認 →
+「実行」で、**作業員が動く2Dアニメーション**と**three.jsの3Dビュー**、KPI、提案PNG
+が出ます。専門用語は表に出しません。
+
+![2Dアニメーション](docs/screenshots/03_run_2d.png)
+![3Dビュー](docs/screenshots/04_run_3d.png)
+
+| 画面 | 内容 |
+|---|---|
+| 2D アニメーション | レイアウト上を作業員が移動（色＝状態：待機/移動/ピック/運搬/梱包）。再生/一時停止/シーク/速度 |
+| 3D | three.js で立体表示。同じ replay データを別レンダラで描画 |
+| 提案PNG | 1枚で結論（対応可能/要注意＋ボトルネック＋人員＋混雑ヒートマップ） |
+
+## CLI（バックエンド／自動化）
+
+```bash
 whsim templates                          # 利用可能なテンプレ一覧
 whsim new acme --template ecommerce_small  # テンプレからプロジェクト作成（この時点で動く）
 whsim estimate acme                      # 解析的な高速見積り（M/M/c、即答）
 whsim run acme                           # 離散事象シミュレーション実行
-whsim render acme                        # 提案用PNG（layout_heatmap.png）を出力
-# あるいは run + render を一括：
-whsim simulate acme
+whsim render acme                        # 提案用PNG（layout_heatmap.png）
+whsim animate acme                       # 動く2DリプレイGIF（ブラウザ不要）
+whsim simulate acme                      # run + render を一括
 
 # 顧客データ（分析ツールが出したZIP）を取り込む：
 python scripts/gen_sample_data.py        # examples/acme_upload.zip を生成
@@ -49,7 +67,7 @@ whsim simulate acme2
 ```
 
 成果物は `projects/<name>/runs/run_XXXX/` に保存されます
-（`kpis.json` / `heatmap.npy` / `layout_heatmap.png`）。
+（`kpis.json` / `heatmap.npy` / `replay.json` / `layout_heatmap.png` / `replay_2d.gif`）。
 
 ## アーキテクチャ
 
@@ -60,10 +78,13 @@ whsim simulate acme2
 | `whsim/importer.py` | ZIP→サブツリー判定→深いマージ→検証。寛容（壊れても止まらない） |
 | `whsim/provenance.py` | 出所追跡（imported / interview / provisional）と信頼度 |
 | `whsim/project.py` | ワークスペース永続化・実行管理 |
-| `whsim/engine/` | SimPy 離散事象エンジン（経路・プロセス・実行） |
+| `whsim/engine/` | SimPy 離散事象エンジン。作業員は**個体エージェント**で、軌跡（キーフレーム）を出力 |
 | `whsim/analytic.py` | M/M/c による即時見積り。エンジンのサニティ・オラクルも兼ねる |
 | `whsim/kpis.py` | イベントログ→KPI＋平易な判定文 |
+| `whsim/render/replay.py` | リプレイ契約（2D/3D 両ビューが消費する軌跡データ） |
 | `whsim/render/png2d.py` | 提案用2D PNG（レイアウト＋混雑ヒートマップ＋判定＋出所フッター） |
+| `whsim/render/anim2d.py` | 動く2DリプレイGIF（サーバサイド、ブラウザ不要） |
+| `whsim/web/` | FastAPI バックエンド＋SPA フロント（2Dキャンバス＋three.js 3D） |
 | `whsim/cli.py` | `whsim` コマンド |
 
 ## 開発

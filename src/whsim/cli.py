@@ -66,6 +66,9 @@ def run(name: str):
     (run_dir / "config.json").write_text(model.simulation.model_dump_json(indent=2), "utf-8")
     (run_dir / "kpis.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), "utf-8")
     np.save(run_dir / "heatmap.npy", heat)
+    from whsim.render.replay import build_replay
+    replay = build_replay(model, results[0], metrics)
+    (run_dir / "replay.json").write_text(json.dumps(replay, ensure_ascii=False), "utf-8")
 
     typer.echo(f"run -> {run_dir.name}")
     typer.echo("  verdict: " + metrics["verdict"])
@@ -83,6 +86,28 @@ def render(name: str, run: str = typer.Option("latest", "--run")):
     out = render_png(proj.load_model(), heat, metrics,
                      proj.load_provenance().summary(), run_dir / "layout_heatmap.png")
     typer.echo(f"png -> {out}")
+
+
+@app.command()
+def animate(name: str, run: str = typer.Option("latest", "--run")):
+    """Render an animated 2D replay GIF for a run (no browser needed)."""
+    import json as _json
+
+    from whsim.render.anim2d import render_gif
+    proj = Project.open(name)
+    run_dir = proj.latest_run_dir() if run == "latest" else proj.runs_dir / run
+    if run_dir is None or not (run_dir / "replay.json").is_file():
+        raise typer.BadParameter("no replay found; call `whsim run` first")
+    replay = _json.loads((run_dir / "replay.json").read_text("utf-8"))
+    out = render_gif(replay, run_dir / "replay_2d.gif")
+    typer.echo(f"gif -> {out}")
+
+
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8000):
+    """Launch the web app (template -> import -> run -> animated 2D/3D replay)."""
+    import uvicorn
+    uvicorn.run("whsim.web.app:app", host=host, port=port)
 
 
 @app.command()

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>whsim — 倉庫シミュレータ</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">whsim<span>倉庫シミュレータ</span></div>
+    <div class="provenance" id="provenance">— your data</div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="card">
+        <h2>1. プロジェクト</h2>
+        <div class="row">
+          <select id="projectSelect"><option value="">（新規作成）</option></select>
+        </div>
+        <div class="row new-proj">
+          <input id="newName" placeholder="プロジェクト名 例: acme" />
+          <select id="templateSelect"></select>
+          <button id="createBtn" class="primary">作成</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>2. 顧客データ取り込み <small>任意</small></h2>
+        <div id="dropzone" class="dropzone">
+          <strong>ZIP をドラッグ&ドロップ</strong>
+          <span>商品マスタ / 出荷 / 入荷 …（足りない分は仮値で補完）</span>
+          <input type="file" id="fileInput" accept=".zip" hidden />
+        </div>
+        <div id="importLog" class="log"></div>
+      </section>
+
+      <section class="card">
+        <h2>3. キー項目</h2>
+        <div id="headline" class="headline"></div>
+        <button id="applyBtn">反映</button>
+      </section>
+
+      <section class="card">
+        <button id="runBtn" class="primary big" disabled>▶ シミュレーション実行</button>
+        <div id="status" class="status"></div>
+      </section>
+    </aside>
+
+    <main class="main">
+      <div class="tabs">
+        <button data-tab="view2d" class="tab active">2D アニメーション</button>
+        <button data-tab="view3d" class="tab">3D</button>
+        <button data-tab="viewpng" class="tab">提案PNG</button>
+      </div>
+
+      <div class="stage">
+        <div id="view2d" class="panel active">
+          <canvas id="canvas2d"></canvas>
+        </div>
+        <div id="view3d" class="panel"></div>
+        <div id="viewpng" class="panel">
+          <img id="pngImg" alt="提案PNG（実行後に表示）" />
+        </div>
+
+        <div class="transport">
+          <button id="playBtn">⏸</button>
+          <input type="range" id="scrub" min="0" max="1000" value="0" />
+          <span id="clock" class="clock">0.0 min</span>
+          <label class="speed">速度
+            <select id="speed">
+              <option value="30">30×</option>
+              <option value="60" selected>60×</option>
+              <option value="120">120×</option>
+            </select>
+          </label>
+          <span class="legend">
+            <i style="background:#9e9e9e"></i>待機
+            <i style="background:#1f78b4"></i>移動
+            <i style="background:#33a02c"></i>ピック
+            <i style="background:#6a3d9a"></i>運搬
+            <i style="background:#e31a1c"></i>梱包
+          </span>
+        </div>
+      </div>
+
+      <div id="kpiBar" class="kpibar"></div>
+    </main>
+  </div>
+
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.js" } }
+  </script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

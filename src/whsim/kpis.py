@@ -67,15 +67,16 @@ def compute(results: list[RunResult]) -> dict:
     else:
         agg["bottleneck"] = "picking"
         agg["bottleneck_utilization"] = agg["picker_utilization"]
+    agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包"}[agg["bottleneck"]]
 
     can_handle = agg["completion_rate"] >= 0.98 and agg["bottleneck_utilization"] < 0.95
     agg["can_handle_demand"] = can_handle
+    util_pct = round(agg["bottleneck_utilization"] * 100)
+    done_pct = round(agg["completion_rate"] * 100)
     agg["verdict"] = (
-        f"Yes — handles demand at {round(agg['bottleneck_utilization']*100)}% "
-        f"on the {agg['bottleneck']} stage"
+        f"対応可能 — {agg['bottleneck_jp']}工程の稼働率 {util_pct}% で需要をさばけます"
         if can_handle else
-        f"At risk — {agg['bottleneck']} is the constraint "
-        f"({round(agg['bottleneck_utilization']*100)}% busy), "
-        f"{round(agg['completion_rate']*100)}% of orders completed"
+        f"要注意 — {agg['bottleneck_jp']}がボトルネック（稼働率 {util_pct}%）。"
+        f"オーダーの {done_pct}% しか出荷完了しません"
     )
     return agg

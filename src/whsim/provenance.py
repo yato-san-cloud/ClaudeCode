@@ -13,6 +13,19 @@ from enum import Enum
 from whsim.schema.model import MERGEABLE_SUBTREES
 
 
+# Business-facing Japanese labels for schema subtrees (no raw identifiers to users).
+_JP = {
+    "meta": "基本情報",
+    "layout": "レイアウト",
+    "locations": "ロケーション",
+    "items": "商品マスタ",
+    "process": "オペレーション",
+    "resources": "人員・設備",
+    "orders": "出荷・入荷データ",
+    "simulation": "実行条件",
+}
+
+
 class Source(str, Enum):
     IMPORTED = "imported"        # came from the customer's dropped data
     INTERVIEW = "interview"      # the salesperson confirmed/typed it
@@ -45,13 +58,15 @@ class Provenance:
         return real / len(self.subtrees)
 
     def summary(self) -> str:
-        imported = [k for k, v in self.subtrees.items() if v is Source.IMPORTED]
-        provisional = [k for k, v in self.subtrees.items() if v is Source.PROVISIONAL]
+        imported = [_JP.get(k, k) for k, v in self.subtrees.items()
+                    if v is Source.IMPORTED]
+        provisional = [_JP.get(k, k) for k, v in self.subtrees.items()
+                       if v is Source.PROVISIONAL]
         pct = round(self.confidence() * 100)
         return (
-            f"{pct}% your data — "
-            f"imported: {', '.join(imported) or 'none'}; "
-            f"template assumptions: {', '.join(provisional) or 'none'}"
+            f"実データ {pct}% ／ "
+            f"取り込み済み: {('・'.join(imported)) or 'なし'} ／ "
+            f"テンプレ仮値: {('・'.join(provisional)) or 'なし'}"
         )
 
     def to_dict(self) -> dict:

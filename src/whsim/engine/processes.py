@@ -1,10 +1,17 @@
-"""The discrete-event processes: demand generation and the pick->pack flow."""
+"""Discrete-event processes (agent-based).
+
+Demand flows into an order store. Each picker is its own SimPy process that
+pulls an order, walks a nearest-neighbour route (recording trajectory
+keyframes), carries it to a pack station, occupies the station for packing,
+then returns home for the next order. Queueing at the (limited) pack stations
+is what produces the packing bottleneck.
+"""
 
 from __future__ import annotations
 
 import random
 
-from whsim.engine.build import World
+from whsim.engine.build import World, Worker
 from whsim.engine.routing import leg_cells, manhattan, nearest_neighbor_route
 from whsim.schema.model import Order, OrderLine
 
@@ -16,66 +23,78 @@ def _accumulate_heat(world: World, a, b) -> None:
             world.heat[gy, gx] += 1.0
 
 
-def pick_order(world: World, order: Order, rng: random.Random):
+def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
+    """Move a worker from->to, recording heat + trajectory keyframes."""
+    d = manhattan(frm, to)
+    _accumulate_heat(world, frm, to)
+    if world.recording():
+        w.kf(world.env.now, frm[0], frm[1], state)
+    yield world.env.timeout(d / speed)
+    if world.recording():
+        w.kf(world.env.now, to[0], to[1], state)
+    return d
+
+
+def picker_agent(world: World, w: Worker, rng: random.Random):
     env = world.env
     speed = max(world.model.process.walk_speed_mps, 0.1)
     pack_time = max(world.model.process.pack_time_s, 0.0)
+    pos = world.home
+    if world.recording():
+        w.kf(env.now, pos[0], pos[1], "idle")
 
-    env_order_arrival = env.now
-    world.log(t=env.now, event="order_arrive", order_id=order.order_id)
+    while True:
+        item = yield world.order_store.get()
+        order: Order = item["order"]
+        arrival = item["arrival"]
+        world.log(t=env.now, event="pick_start", order_id=order.order_id,
+                  wait=env.now - arrival, resource="picker", worker=w.id)
+        busy_start = env.now
 
-    # --- pick stage: seize a picker, then walk a nearest-neighbour route -------
-    req = world.pickers.request()
-    yield req
-    pick_wait = env.now - env_order_arrival
-    world.log(t=env.now, event="pick_start", order_id=order.order_id,
-              wait=pick_wait, resource="picker")
-    busy_start = env.now
+        points, qtys, tss = [], [], []
+        for line in order.lines:
+            xy = world.sku_xy.get(line.sku)
+            if xy is None:
+                continue
+            points.append(xy)
+            qtys.append(line.qty)
+            tss.append(world.sku_ts.get(line.sku, 1.5))
 
-    points, qtys, tss = [], [], []
-    for line in order.lines:
-        xy = world.sku_xy.get(line.sku)
-        if xy is None:
-            continue
-        points.append(xy)
-        qtys.append(line.qty)
-        tss.append(world.sku_ts.get(line.sku, 1.5))
+        total_dist = 0.0
+        if points:
+            for idx in nearest_neighbor_route(pos, points):
+                dest = points[idx]
+                total_dist += yield from _walk(world, w, pos, dest, speed, "travel")
+                pos = dest
+                if world.recording():
+                    w.kf(env.now, pos[0], pos[1], "pick")
+                yield env.timeout(qtys[idx] * tss[idx])   # pick dwell
 
-    cur = world.depot
-    total_dist = 0.0
-    if points:
-        for idx in nearest_neighbor_route(cur, points):
-            dest = points[idx]
-            d = manhattan(cur, dest)
-            total_dist += d
-            _accumulate_heat(world, cur, dest)
-            yield env.timeout(d / speed)           # travel
-            yield env.timeout(qtys[idx] * tss[idx])  # handle (pick)
-            cur = dest
-    # return to pack/depot
-    d = manhattan(cur, world.depot)
-    total_dist += d
-    _accumulate_heat(world, cur, world.depot)
-    yield env.timeout(d / speed)
+        # carry to a pack station
+        total_dist += yield from _walk(world, w, pos, world.home, speed, "carry")
+        pos = world.home
+        world.log(t=env.now, event="pick_done", order_id=order.order_id,
+                  busy=env.now - busy_start, dist=total_dist,
+                  resource="picker", worker=w.id)
 
-    world.pickers.release(req)
-    world.log(t=env.now, event="pick_done", order_id=order.order_id,
-              busy=env.now - busy_start, dist=total_dist, resource="picker")
+        # pack (contend for a station)
+        pack_req_t = env.now
+        preq = world.packers.request()
+        yield preq
+        pack_seize = env.now
+        world.log(t=env.now, event="pack_start", order_id=order.order_id,
+                  wait=pack_seize - pack_req_t, resource="packer", worker=w.id)
+        if world.recording():
+            w.kf(env.now, pos[0], pos[1], "pack")
+        yield env.timeout(pack_time)
+        world.packers.release(preq)
+        world.log(t=env.now, event="pack_done", order_id=order.order_id,
+                  busy=env.now - pack_seize, resource="packer", worker=w.id)
 
-    # --- pack stage ----------------------------------------------------------
-    preq = world.packers.request()
-    yield preq
-    pack_seize = env.now
-    world.log(t=env.now, event="pack_start", order_id=order.order_id,
-              wait=env.now - busy_start - (env.now - pack_seize), resource="packer")
-    yield env.timeout(pack_time)
-    world.packers.release(preq)
-    world.log(t=env.now, event="pack_done", order_id=order.order_id,
-              busy=env.now - pack_seize, resource="packer")
-
-    cycle = env.now - env_order_arrival
-    world.log(t=env.now, event="order_complete", order_id=order.order_id,
-              cycle=cycle, dist=total_dist, due=order.due_s)
+        world.log(t=env.now, event="order_complete", order_id=order.order_id,
+                  cycle=env.now - arrival, dist=total_dist, due=order.due_s)
+        if world.recording():
+            w.kf(env.now, pos[0], pos[1], "idle")
 
 
 def _sample_order(world: World, rng: random.Random, idx: int, t: float) -> Order:
@@ -83,16 +102,16 @@ def _sample_order(world: World, rng: random.Random, idx: int, t: float) -> Order
     n_lines = max(1, int(rng.expovariate(1.0 / max(prof.lines_per_order_mean, 0.5))))
     lines = []
     for _ in range(n_lines):
-        sku = rng.choices(world.sku_list, weights=world.sku_weights, k=1)[0] \
-            if world.sku_list else None
-        if sku is None:
-            continue
+        if not world.sku_list:
+            break
+        sku = rng.choices(world.sku_list, weights=world.sku_weights, k=1)[0]
         lines.append(OrderLine(sku=sku, qty=rng.randint(1, 3)))
-    return Order(order_id=f"G{idx:06d}", arrival_s=t, lines=lines)
+    o = Order(order_id=f"G{idx:06d}", arrival_s=t, lines=lines)
+    return o
 
 
 def order_source(world: World, rng: random.Random):
-    """Replay explicit outbound orders, else generate from the demand profile."""
+    """Feed the order store: replay explicit orders, else generate from profile."""
     env = world.env
     explicit = world.model.orders.outbound
 
@@ -101,10 +120,10 @@ def order_source(world: World, rng: random.Random):
             delay = max(0.0, o.arrival_s - env.now)
             if delay:
                 yield env.timeout(delay)
-            env.process(pick_order(world, o, rng))
+            world.log(t=env.now, event="order_arrive", order_id=o.order_id)
+            yield world.order_store.put({"order": o, "arrival": env.now})
         return
 
-    # Poisson arrivals from the profile, for the whole sim duration.
     prof = world.model.orders.profile
     rate_per_s = max(prof.rate_per_hr, 0.0) / 3600.0
     duration = world.model.simulation.duration_s
@@ -115,5 +134,7 @@ def order_source(world: World, rng: random.Random):
         yield env.timeout(rng.expovariate(rate_per_s))
         if env.now >= duration:
             break
-        env.process(pick_order(world, _sample_order(world, rng, idx, env.now), rng))
+        o = _sample_order(world, rng, idx, env.now)
+        world.log(t=env.now, event="order_arrive", order_id=o.order_id)
+        yield world.order_store.put({"order": o, "arrival": env.now})
         idx += 1

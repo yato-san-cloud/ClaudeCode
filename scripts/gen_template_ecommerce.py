@@ -102,13 +102,24 @@ def build():
             "orders": "data", "simulation": "interview",
         },
         # The <=5 headline fields the salesperson confirms on the first screen.
+        # `scale` lets the UI show a friendly unit (hours) while the schema keeps
+        # SI (seconds); `choices` may carry {value,label} so no raw enums leak.
         "headline_fields": [
-            {"path": "resources.workers.0.count", "label": "ピッカー人数", "type": "int"},
-            {"path": "orders.profile.rate_per_hr", "label": "出荷オーダー/時", "type": "float"},
-            {"path": "process.pick_strategy", "label": "ピッキング方式",
-             "type": "choice", "choices": ["discrete", "batch", "zone", "wave"]},
-            {"path": "simulation.duration_s", "label": "稼働時間(秒)", "type": "float"},
-            {"path": "process.walk_speed_mps", "label": "歩行速度(m/s)", "type": "float"},
+            {"path": "resources.workers.0.count", "label": "ピッカー人数", "type": "int",
+             "unit": "名"},
+            {"path": "orders.profile.rate_per_hr", "label": "出荷オーダー", "type": "float",
+             "unit": "件/時"},
+            {"path": "process.pick_strategy", "label": "ピッキング方式", "type": "choice",
+             "choices": [
+                 {"value": "discrete", "label": "都度ピック"},
+                 {"value": "batch", "label": "バッチ"},
+                 {"value": "zone", "label": "ゾーン"},
+                 {"value": "wave", "label": "ウェーブ"},
+             ]},
+            {"path": "simulation.duration_s", "label": "稼働時間", "type": "float",
+             "unit": "時間", "scale": 3600},
+            {"path": "process.walk_speed_mps", "label": "歩行速度", "type": "float",
+             "unit": "m/s"},
         ],
     }
     return model, manifest

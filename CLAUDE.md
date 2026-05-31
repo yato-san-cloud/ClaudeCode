@@ -24,17 +24,23 @@ artifacts, so each is independently testable/replaceable:
   surfaced in output as "N% your data". First-class, not bookkeeping.
 - `project.py` — persists workspace under `projects/<name>/` (gitignored runtime
   data); the simulator is the source of truth, the analysis tool just supplies ZIPs.
-- `engine/` — SimPy DES: `routing.py`, `build.py`, `processes.py`, `run.py`.
+- `engine/` — SimPy DES: `routing.py`, `build.py`, `processes.py`, `run.py`. Pickers are
+  individual agents; the run emits per-worker trajectory keyframes for replay.
 - `analytic.py` — closed-form M/M/c estimate; also the engine's sanity oracle in tests.
-- `kpis.py` — event log → KPIs + a plain-language verdict.
+- `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict.
+- `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
 - `render/png2d.py` — proposal PNG (layout + congestion heatmap + verdict + provenance footer).
+- `render/anim2d.py` — server-side animated 2D replay GIF (no browser needed).
+- `web/` — FastAPI backend + single-page frontend (`static/`, with `js/view3d.js` three.js view).
+  three.js is vendored under `static/vendor/`.
 
 ### Commands
 
-- Install: `pip install -e ".[dev]"`
+- Install: `pip install -e ".[dev]"` (add `,web` for the web app: `pip install -e ".[dev,web]"`)
 - Flow: `whsim new <name> -t ecommerce_small` → `whsim import <name> <zip>` →
   `whsim run <name>` → `whsim render <name>` (or `whsim simulate <name>` for run+render);
-  `whsim estimate <name>` for the instant analytic estimate.
+  `whsim estimate <name>` for the instant analytic estimate; `whsim animate <name>` for a
+  replay GIF; `whsim serve` for the web app at http://127.0.0.1:8000.
 - Tests: `pytest -q`; single test e.g. `pytest tests/test_engine.py::test_kpis_are_sane`
 - Lint: `ruff check src`
 - Regenerate template / sample data: `python scripts/gen_template_ecommerce.py`,

@@ -16,10 +16,15 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
-from whsim.render.heatmap import blur
+from whsim.render.fonts import setup_jp_font  # noqa: E402
+from whsim.render.heatmap import blur  # noqa: E402
 from whsim.schema.model import WarehouseModel  # noqa: E402
 
 ABC_COLOR = {"A": "#d7301f", "B": "#fc8d59", "C": "#fdcc8a"}
+ZONE_JP = {"receiving": "入荷", "storage": "保管", "picking": "ピッキング",
+           "packing": "梱包", "shipping": "出荷", "staging": "一時保管"}
+
+setup_jp_font()
 
 
 def render(
@@ -44,7 +49,8 @@ def render(
     for z in model.layout.zones:
         ax.add_patch(Rectangle((z.x, z.y), z.w, z.h, facecolor=z.color or "#eee",
                                alpha=0.35, edgecolor="#bbb", lw=0.8))
-        ax.text(z.x + z.w / 2, z.y + z.h / 2, z.type, ha="center", va="center",
+        ax.text(z.x + z.w / 2, z.y + z.h / 2, ZONE_JP.get(z.type, z.type),
+                ha="center", va="center",
                 fontsize=8, color="#555")
     # locations by ABC class
     by_sku = model.item_by_sku()
@@ -64,7 +70,7 @@ def render(
                        origin="lower", cmap="hot", alpha=0.45, zorder=4,
                        aspect="auto")
         cbar = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.01)
-        cbar.set_label("congestion (visits)", fontsize=8)
+        cbar.set_label("混雑度（通過回数）", fontsize=8)
 
     ax.set_xlim(-1, bounds.width + 1)
     ax.set_ylim(-1, bounds.depth + 1)
@@ -76,20 +82,20 @@ def render(
     # --- verdict + KPI panel --------------------------------------------------
     can = kpis.get("can_handle_demand", False)
     headline_color = "#1a7a3c" if can else "#b30000"
-    panel.text(0.0, 1.0, "Can this warehouse handle the demand?",
-               fontsize=11, weight="bold", va="top")
+    panel.text(0.0, 1.0, "この倉庫で需要をさばけるか？",
+               fontsize=12, weight="bold", va="top")
     panel.text(0.0, 0.93, kpis.get("verdict", ""), fontsize=11,
                color=headline_color, weight="bold", va="top", wrap=True)
 
     rows = [
-        ("Throughput", f"{kpis['throughput_per_hr']:.0f} orders/hr"),
-        ("Orders completed", f"{kpis['orders_completed']:.0f} / {kpis['orders_arrived']:.0f}"),
-        ("Bottleneck", f"{kpis['bottleneck']} ({kpis['bottleneck_utilization']*100:.0f}% busy)"),
-        ("Pickers", f"{kpis['n_pickers']:.0f}  ({kpis['picker_utilization']*100:.0f}% util)"),
-        ("Pack stations", f"{kpis['n_packers']:.0f}  ({kpis['packer_utilization']*100:.0f}% util)"),
-        ("Order cycle p50/p95", f"{kpis['cycle_p50_s']/60:.0f} / {kpis['cycle_p95_s']/60:.0f} min"),
-        ("Avg pick wait", f"{kpis['pick_wait_mean_s']/60:.1f} min"),
-        ("Walking / order", f"{kpis['walk_per_order_m']:.0f} m"),
+        ("スループット", f"{kpis['throughput_per_hr']:.0f} 件/時"),
+        ("出荷完了", f"{kpis['orders_completed']:.0f} / {kpis['orders_arrived']:.0f} 件"),
+        ("ボトルネック", f"{kpis.get('bottleneck_jp','')}（稼働率 {kpis['bottleneck_utilization']*100:.0f}%）"),
+        ("ピッカー", f"{kpis['n_pickers']:.0f} 名（稼働率 {kpis['picker_utilization']*100:.0f}%）"),
+        ("梱包台", f"{kpis['n_packers']:.0f} 台（稼働率 {kpis['packer_utilization']*100:.0f}%）"),
+        ("処理時間 中央値/最悪", f"{kpis['cycle_p50_s']/60:.0f} / {kpis['cycle_p95_s']/60:.0f} 分"),
+        ("平均待ち時間", f"{kpis['pick_wait_mean_s']/60:.1f} 分"),
+        ("1件あたり歩行", f"{kpis['walk_per_order_m']:.0f} m"),
     ]
     y = 0.82
     for label, val in rows:
@@ -98,7 +104,7 @@ def render(
         y -= 0.075
 
     # honesty footer: turns "we assumed values" into a sales follow-up hook
-    panel.text(0.0, 0.04, "Directional estimate — " + provenance_summary,
+    panel.text(0.0, 0.04, "概算見積り ／ " + provenance_summary,
                fontsize=7.5, color="#777", va="bottom", wrap=True)
 
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
