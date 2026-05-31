@@ -35,8 +35,12 @@ class World:
     model: WarehouseModel
     order_store: simpy.Store
     packers: simpy.Resource
+    agvs: simpy.Resource
     n_pickers: int
     n_packers: int
+    n_agvs: int
+    agv_speed: float
+    pick_method: str                        # "manual" | "agv" | ...
     home: tuple[float, float]               # workers start/return here (pack area)
     sku_xy: dict[str, tuple[float, float]]
     sku_ts: dict[str, float]
@@ -68,6 +72,14 @@ def build(
     n_packers = (station.count if station else 1) or 1
     home = (station.x, station.y) if station else (0.0, 0.0)
 
+    agvs = [e for e in model.resources.equipment if e.type == "agv"]
+    n_agvs = sum(e.count for e in agvs)
+    agv_speed = (sum(e.speed_mps for e in agvs) / len(agvs)) if agvs else 1.6
+    pick_method = model.process.pick_method()
+    # AGV picking with no AGVs placed falls back to manual so it still runs.
+    if pick_method == "agv" and n_agvs == 0:
+        pick_method = "manual"
+
     loc_by_id = model.location_by_id()
     sku_xy: dict[str, tuple[float, float]] = {}
     for it in model.items:
@@ -92,7 +104,9 @@ def build(
         env=env, model=model,
         order_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
+        agvs=simpy.Resource(env, capacity=max(n_agvs, 1)),
         n_pickers=n_pickers, n_packers=n_packers,
+        n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         home=home, sku_xy=sku_xy, sku_ts=sku_ts,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,

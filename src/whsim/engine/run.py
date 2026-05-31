@@ -24,6 +24,8 @@ class RunResult:
     n_pickers: int
     n_packers: int
     duration_s: float
+    n_agvs: int = 0
+    pick_method: str = "manual"
     workers: list[Worker] = field(default_factory=list)
     replay_window_s: float = 0.0
 
@@ -50,6 +52,7 @@ def run_once(
         events=world.events, heat=world.heat,
         n_pickers=world.n_pickers, n_packers=world.n_packers,
         duration_s=model.simulation.duration_s,
+        n_agvs=world.n_agvs, pick_method=world.pick_method,
         workers=world.workers, replay_window_s=window,
     )
 

@@ -1,0 +1,682 @@
+// designer.js — interactive, structured/parametric warehouse design editor.
+//
+// Three sub-tools share one container and one deep-copied model:
+//   (1) レイアウト  — Canvas2D floor view; select/move/resize zones, edit type
+//                     and rack spacing, add/delete zones.
+//   (2) 設備        — same floor view; click-to-place AGV / 自動倉庫 / 梱包台,
+//                     draw コンベア polylines; edit count/speed; delete.
+//   (3) フロー      — DOM workflow strip of stages with per-stage method
+//                     dropdowns + a pick-strategy selector.
+//
+// Pure DOM / Canvas2D — no imports. Mutates an internal deep copy of `model`
+// and only writes back to the host via handlers.save({layout, resources, process}).
+
+// ---- constants -------------------------------------------------------------
+const ZONE_JP = {
+  receiving: '入荷', storage: '保管', picking: 'ピッキング',
+  packing: '梱包', shipping: '出荷', staging: '一時保管',
+};
+const ZONE_TYPES = ['receiving', 'storage', 'picking', 'packing', 'shipping', 'staging'];
+const ZONE_DEFAULT_COLOR = {
+  receiving: '#74add1', storage: '#fdae61', picking: '#a6d96a',
+  packing: '#f46d43', shipping: '#5e4fa2', staging: '#d9d9d9',
+};
+// Equipment palette: label, schema type, fill color.
+const EQUIP_PALETTE = [
+  { key: 'agv', label: 'AGV(搬送ロボ)', type: 'agv', color: '#1f78b4' },
+  { key: 'conveyor', label: 'コンベア', type: 'conveyor', color: '#33a02c' },
+  { key: 'asrs', label: '自動倉庫', type: 'asrs', color: '#6a3d9a' },
+  { key: 'station', label: '梱包台', type: 'station', color: '#08519c' },
+];
+const METHOD_OPTS = [
+  { value: 'manual', label: '人手' }, { value: 'agv', label: 'AGV' },
+  { value: 'conveyor', label: 'コンベア' }, { value: 'asrs', label: '自動倉庫' },
+];
+const METHOD_COLOR = {
+  manual: '#9aa4b0', agv: '#1f78b4', conveyor: '#33a02c', asrs: '#6a3d9a',
+};
+const PICK_STRATS = [
+  { value: 'discrete', label: '都度ピック' }, { value: 'batch', label: 'バッチ' },
+  { value: 'zone', label: 'ゾーン' }, { value: 'wave', label: 'ウェーブ' },
+];
+
+const HANDLE = 12;        // bottom-right resize handle size in px
+const MIN_M = 1;          // smallest zone dimension in meters
+const SNAP = 0.5;         // grid snap in meters
+
+// ---- small helpers ---------------------------------------------------------
+const clone = (o) => JSON.parse(JSON.stringify(o || {}));
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const snap = (v) => Math.round(v / SNAP) * SNAP;
+const uid = (p) => `${p}_${Math.random().toString(36).slice(2, 7)}`;
+function hexA(hex, a) {                       // "#rrggbb" -> rgba()
+  if (!hex || hex[0] !== '#') hex = '#cccccc';
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+export class Designer {
+  constructor(container, model, handlers) {
+    this.container = container;
+    this.handlers = handlers || {};
+    this.tool = 'layout';          // 'layout' | 'equip' | 'flow'
+    this.selected = null;          // {kind, id} of selected canvas object
+    this.equipBrush = 'agv';       // active palette key in 設備 tool
+    this.conveyorDraft = null;     // [[x,y],...] while drawing a conveyor
+    this.drag = null;              // active drag state on the canvas
+    this._listeners = [];          // [el, type, fn] for clean dispose()
+    this._normalize(model);
+    this._buildShell();
+    this._selectTool('layout');
+  }
+
+  // ---- public API ----------------------------------------------------------
+  setModel(model) {
+    this._normalize(model);
+    this.selected = null;
+    this.conveyorDraft = null;
+    this._renderTool();
+  }
+
+  resize() {
+    if (this.tool === 'flow') return;
+    this._fitCanvas();
+    this._drawCanvas();
+  }
+
+  dispose() {
+    for (const [el, type, fn] of this._listeners) el.removeEventListener(type, fn);
+    this._listeners = [];
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this.container.innerHTML = '';
+  }
+
+  // ---- model normalization (defensive against missing fields) --------------
+  _normalize(model) {
+    const m = clone(model);
+    m.layout = m.layout || {};
+    m.layout.bounds = m.layout.bounds || { width: 80, depth: 40 };
+    m.layout.bounds.width = +m.layout.bounds.width || 80;
+    m.layout.bounds.depth = +m.layout.bounds.depth || 40;
+    m.layout.zones = Array.isArray(m.layout.zones) ? m.layout.zones : [];
+    m.layout.zones.forEach((z, i) => { if (!z.id) z.id = uid('zone'); if (!z.type) z.type = 'storage'; });
+    m.resources = m.resources || {};
+    m.resources.workers = m.resources.workers || [];
+    m.resources.equipment = Array.isArray(m.resources.equipment) ? m.resources.equipment : [];
+    m.resources.conveyors = Array.isArray(m.resources.conveyors) ? m.resources.conveyors : [];
+    m.resources.stations = Array.isArray(m.resources.stations) ? m.resources.stations : [];
+    m.resources.equipment.forEach((e) => { if (!e.id) e.id = uid('eq'); });
+    m.resources.conveyors.forEach((c) => { if (!c.id) c.id = uid('cv'); if (!Array.isArray(c.points)) c.points = []; });
+    m.resources.stations.forEach((s) => { if (!s.id) s.id = uid('st'); });
+    m.process = m.process || {};
+    if (!Array.isArray(m.process.stages) || !m.process.stages.length) {
+      m.process.stages = [
+        { id: 'receive', label: '入荷', method: 'manual' },
+        { id: 'putaway', label: '格納', method: 'manual' },
+        { id: 'pick', label: 'ピッキング', method: 'manual' },
+        { id: 'pack', label: '梱包', method: 'manual' },
+        { id: 'ship', label: '出荷', method: 'manual' },
+      ];
+    }
+    m.process.pick_strategy = m.process.pick_strategy || 'discrete';
+    this.model = m;
+  }
+
+  // ---- shell: top tool tabs, body, save row --------------------------------
+  _buildShell() {
+    const c = this.container;
+    c.innerHTML = '';
+    c.classList.add('designer-root');
+    c.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;font-size:13px;';
+
+    // tool switch bar
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+    this._toolBtns = {};
+    for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['flow', 'フロー']]) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      this._on(b, 'click', () => this._selectTool(key));
+      bar.appendChild(b);
+      this._toolBtns[key] = b;
+    }
+    const spacer = document.createElement('div');
+    spacer.style.flex = '1';
+    bar.appendChild(spacer);
+    const save = document.createElement('button');
+    save.className = 'primary';
+    save.textContent = '適用（保存）';
+    save.style.fontWeight = '700';
+    this._on(save, 'click', () => this._save());
+    bar.appendChild(save);
+    this._saveBtn = save;
+    this._saveMsg = document.createElement('span');
+    this._saveMsg.style.cssText = 'font-size:12px;color:#6b7785;max-width:340px;';
+    bar.appendChild(this._saveMsg);
+    c.appendChild(bar);
+
+    // body: canvas area + side editor (filled per tool)
+    this.body = document.createElement('div');
+    this.body.style.cssText = 'flex:1;min-height:0;display:flex;gap:8px;';
+    c.appendChild(this.body);
+  }
+
+  _selectTool(key) {
+    this.tool = key;
+    this.selected = null;
+    this.conveyorDraft = null;
+    for (const k in this._toolBtns) {
+      const active = k === key;
+      const b = this._toolBtns[k];
+      b.style.cssText = active
+        ? 'background:#1f2733;color:#fff;border-color:#1f2733;font-weight:700;'
+        : '';
+    }
+    this._renderTool();
+  }
+
+  _renderTool() {
+    this.body.innerHTML = '';
+    if (this.tool === 'flow') { this._renderFlow(); return; }
+    // canvas-based tools (layout / equip) share the floor view + a side panel
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:default;';
+    wrap.appendChild(this.canvas);
+    this.body.appendChild(wrap);
+
+    this.side = document.createElement('div');
+    this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
+    this.body.appendChild(this.side);
+
+    this.ctx = this.canvas.getContext('2d');
+    this._bindCanvas();
+    this._fitCanvas();
+    this._renderSide();
+    this._drawCanvas();
+  }
+
+  // ---- canvas geometry (meters <-> pixels, y flipped) ----------------------
+  _fitCanvas() {
+    if (!this.canvas) return;
+    const r = this.canvas.parentElement.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.width = Math.max(1, r.width * dpr);
+    this.canvas.height = Math.max(1, r.height * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = r.width, h = r.height, pad = 18;
+    const b = this.model.layout.bounds;
+    const sc = Math.min((w - 2 * pad) / b.width, (h - 2 * pad) / b.depth) || 1;
+    this._view = {
+      w, h, sc,
+      ox: (w - b.width * sc) / 2,
+      oy: (h - b.depth * sc) / 2,
+    };
+  }
+  _X(x) { return this._view.ox + x * this._view.sc; }
+  _Y(y) { return this._view.h - this._view.oy - y * this._view.sc; }      // flip y
+  _mx(px) { return (px - this._view.ox) / this._view.sc; }                // px -> meters x
+  _my(py) { return (this._view.h - this._view.oy - py) / this._view.sc; } // px -> meters y
+
+  // ---- drawing -------------------------------------------------------------
+  _drawCanvas() {
+    if (!this.ctx) return;
+    const ctx = this.ctx, { w, h, sc } = this._view;
+    const b = this.model.layout.bounds;
+    ctx.clearRect(0, 0, w, h);
+
+    // floor
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
+
+    const dim = this.tool === 'equip';   // zones rendered faintly under equipment
+    for (const z of this.model.layout.zones) {
+      const sel = this.tool === 'layout' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
+      const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
+      ctx.fillStyle = hexA(color, dim ? 0.12 : (sel ? 0.42 : 0.3));
+      ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
+      ctx.strokeStyle = sel ? '#1f2733' : hexA(color, 0.8);
+      ctx.lineWidth = sel ? 2 : 1;
+      ctx.strokeRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
+      // rack preview grid for storage zones
+      if (z.type === 'storage' && z.rack) this._drawRack(z);
+      // label
+      ctx.fillStyle = dim ? '#aab2bd' : '#3a4452';
+      ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(ZONE_JP[z.type] || z.type, this._X(z.x + z.w / 2), this._Y(z.y + z.h / 2));
+      // resize handle when selected in layout tool
+      if (sel) {
+        ctx.fillStyle = '#1f2733';
+        ctx.fillRect(this._X(z.x + z.w) - HANDLE, this._Y(z.y) - HANDLE, HANDLE, HANDLE);
+      }
+    }
+
+    // conveyors (under markers)
+    for (const cv of this.model.resources.conveyors) this._drawConveyor(cv.points, '#33a02c', false);
+    if (this.conveyorDraft) this._drawConveyor(this.conveyorDraft, '#e31a1c', true);
+
+    // equipment markers
+    for (const e of this.model.resources.equipment) {
+      const p = EQUIP_PALETTE.find((x) => x.type === e.type);
+      this._marker(e.x, e.y, p ? p.color : '#777', (p ? p.label.split('(')[0] : e.type) + `×${e.count ?? 0}`,
+        this._isSel('equip', e.id));
+    }
+    // pack stations as blue stars
+    for (const s of this.model.resources.stations) {
+      this._star(this._X(s.x), this._Y(s.y), '#08519c', this._isSel('station', s.id));
+      this._label(this._X(s.x), this._Y(s.y) + 16, `梱包台×${s.count ?? 0}`);
+    }
+
+    // hint text
+    if (this.tool === 'equip') {
+      ctx.fillStyle = '#9aa4b0'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const hint = this.equipBrush === 'conveyor'
+        ? 'コンベア: 床をクリックで頂点追加、ダブルクリックか「確定」で完了'
+        : '床をクリックして設置 / マーカーをクリックで選択';
+      ctx.fillText(hint, 8, 8);
+    }
+  }
+
+  _drawRack(z) {
+    const ctx = this.ctx, r = z.rack;
+    const cs = +r.col_spacing || 4, rs = +r.row_spacing || 3, mg = +r.margin || 0;
+    if (z.w - 2 * mg <= 0 || z.h - 2 * mg <= 0) return;
+    ctx.fillStyle = 'rgba(60,72,90,0.5)';
+    for (let cx = z.x + mg; cx <= z.x + z.w - mg + 1e-6; cx += cs) {
+      for (let cy = z.y + mg; cy <= z.y + z.h - mg + 1e-6; cy += rs) {
+        ctx.fillRect(this._X(cx) - 1.5, this._Y(cy) - 1.5, 3, 3);
+      }
+    }
+  }
+
+  _drawConveyor(pts, color, draft) {
+    if (!pts || pts.length === 0) return;
+    const ctx = this.ctx;
+    ctx.strokeStyle = color; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (draft) ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(this._X(pts[0][0]), this._Y(pts[0][1]));
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(this._X(pts[i][0]), this._Y(pts[i][1]));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    for (const p of pts) { ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3.5, 0, 7); ctx.fill(); }
+  }
+
+  _marker(x, y, color, label, sel) {
+    const ctx = this.ctx, px = this._X(x), py = this._Y(y);
+    ctx.fillStyle = color; ctx.strokeStyle = sel ? '#1f2733' : '#fff'; ctx.lineWidth = sel ? 2.5 : 1.5;
+    ctx.beginPath(); ctx.arc(px, py, 9, 0, 7); ctx.fill(); ctx.stroke();
+    this._label(px, py + 16, label);
+  }
+  _star(px, py, color, sel) {
+    const ctx = this.ctx;
+    ctx.fillStyle = color; ctx.strokeStyle = sel ? '#1f2733' : '#fff'; ctx.lineWidth = sel ? 2.5 : 1.2;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 4 : 9;
+      const fx = px + Math.cos(a) * r, fy = py + Math.sin(a) * r;
+      i ? ctx.lineTo(fx, fy) : ctx.moveTo(fx, fy);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  _label(px, py, text) {
+    const ctx = this.ctx;
+    ctx.fillStyle = '#3a4452'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(text, px, py);
+  }
+  _isSel(kind, id) { return this.selected && this.selected.kind === kind && this.selected.id === id; }
+
+  // ---- canvas event handling ----------------------------------------------
+  _bindCanvas() {
+    this._on(this.canvas, 'mousedown', (e) => this._onDown(e));
+    this._on(window, 'mousemove', (e) => this._onMove(e));
+    this._on(window, 'mouseup', () => this._onUp());
+    this._on(this.canvas, 'dblclick', (e) => this._onDbl(e));
+  }
+  _pt(e) {
+    const r = this.canvas.getBoundingClientRect();
+    return { px: e.clientX - r.left, py: e.clientY - r.top };
+  }
+
+  _onDown(e) {
+    const { px, py } = this._pt(e);
+    if (this.tool === 'layout') return this._layoutDown(px, py);
+    if (this.tool === 'equip') return this._equipDown(px, py);
+  }
+
+  // --- layout tool: select / move / resize zones ---
+  _layoutDown(px, py) {
+    // resize handle of the currently selected zone?
+    const zs = this.model.layout.zones;
+    if (this.selected && this.selected.kind === 'zone') {
+      const z = zs.find((q) => q.id === this.selected.id);
+      if (z) {
+        const hx = this._X(z.x + z.w), hy = this._Y(z.y);
+        if (px >= hx - HANDLE && px <= hx && py >= hy - HANDLE && py <= hy) {
+          this.drag = { mode: 'resize', id: z.id };
+          return;
+        }
+      }
+    }
+    // hit-test zones top-most first
+    for (let i = zs.length - 1; i >= 0; i--) {
+      const z = zs[i];
+      const mx = this._mx(px), my = this._my(py);
+      if (mx >= z.x && mx <= z.x + z.w && my >= z.y && my <= z.y + z.h) {
+        this.selected = { kind: 'zone', id: z.id };
+        this.drag = { mode: 'move', id: z.id, dx: mx - z.x, dy: my - z.y };
+        this._renderSide(); this._drawCanvas();
+        return;
+      }
+    }
+    this.selected = null; this._renderSide(); this._drawCanvas();
+  }
+
+  // --- equipment tool: place / select ---
+  _equipDown(px, py) {
+    const mx = snap(this._mx(px)), my = snap(this._my(py));
+    const b = this.model.layout.bounds;
+    const inside = mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth;
+
+    // first: hit-test existing equipment & stations for selection/move
+    const hitEq = this.model.resources.equipment.find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 11);
+    const hitSt = this.model.resources.stations.find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 11);
+    if (this.equipBrush !== 'conveyor' && (hitEq || hitSt)) {
+      const o = hitEq || hitSt;
+      this.selected = { kind: hitEq ? 'equip' : 'station', id: o.id };
+      this.drag = { mode: 'moveObj', kind: this.selected.kind, id: o.id };
+      this._renderSide(); this._drawCanvas();
+      return;
+    }
+    if (!inside) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
+
+    if (this.equipBrush === 'conveyor') {
+      if (!this.conveyorDraft) this.conveyorDraft = [];
+      this.conveyorDraft.push([mx, my]);
+      this._drawCanvas(); this._renderSide();
+    } else if (this.equipBrush === 'station') {
+      const s = { id: uid('st'), zone: 'packing', x: mx, y: my, count: 1 };
+      this.model.resources.stations.push(s);
+      this.selected = { kind: 'station', id: s.id };
+      this._renderSide(); this._drawCanvas();
+    } else { // agv / asrs
+      const e = { id: uid('eq'), type: this.equipBrush, count: 5, speed_mps: 1.6, x: mx, y: my };
+      this.model.resources.equipment.push(e);
+      this.selected = { kind: 'equip', id: e.id };
+      this._renderSide(); this._drawCanvas();
+    }
+  }
+
+  _onMove(e) {
+    if (!this.drag || !this.canvas) return;
+    const { px, py } = this._pt(e);
+    const b = this.model.layout.bounds;
+    if (this.drag.mode === 'move' || this.drag.mode === 'resize') {
+      const z = this.model.layout.zones.find((q) => q.id === this.drag.id);
+      if (!z) return;
+      if (this.drag.mode === 'move') {
+        z.x = clamp(snap(this._mx(px) - this.drag.dx), 0, b.width - z.w);
+        z.y = clamp(snap(this._my(py) - this.drag.dy), 0, b.depth - z.h);
+      } else {
+        z.w = clamp(snap(this._mx(px) - z.x), MIN_M, b.width - z.x);
+        z.h = clamp(snap(this._my(py) - z.y), MIN_M, b.depth - z.y);
+      }
+    } else if (this.drag.mode === 'moveObj') {
+      const arr = this.drag.kind === 'equip' ? this.model.resources.equipment : this.model.resources.stations;
+      const o = arr.find((q) => q.id === this.drag.id);
+      if (!o) return;
+      o.x = clamp(snap(this._mx(px)), 0, b.width);
+      o.y = clamp(snap(this._my(py)), 0, b.depth);
+    }
+    this._drawCanvas();
+  }
+
+  _onUp() {
+    if (this.drag) { this.drag = null; this._renderSide(); }
+  }
+
+  _onDbl(e) {
+    if (this.tool === 'equip' && this.equipBrush === 'conveyor') this._finishConveyor();
+  }
+
+  _finishConveyor() {
+    if (this.conveyorDraft && this.conveyorDraft.length >= 2) {
+      const cv = { id: uid('cv'), points: this.conveyorDraft.slice(), speed_mps: 0.5 };
+      this.model.resources.conveyors.push(cv);
+    }
+    this.conveyorDraft = null;
+    this._renderSide(); this._drawCanvas();
+  }
+
+  // ---- side editor panels (layout + equip tools) ---------------------------
+  _renderSide() {
+    if (!this.side) return;
+    const s = this.side; s.innerHTML = '';
+    if (this.tool === 'layout') this._sideLayout(s);
+    else this._sideEquip(s);
+  }
+
+  _sideLayout(s) {
+    const head = this._h(s, 'ゾーン');
+    // add-zone control
+    const addRow = this._div(s, 'display:flex;gap:6px;margin-bottom:8px;');
+    const typeSel = this._select(addRow, ZONE_TYPES.map((t) => ({ value: t, label: ZONE_JP[t] })), 'storage');
+    const addBtn = this._btn(addRow, 'ゾーン追加', () => this._addZone(typeSel.value));
+    addBtn.style.flex = '0 0 auto';
+
+    const z = this.selected && this.selected.kind === 'zone'
+      ? this.model.layout.zones.find((q) => q.id === this.selected.id) : null;
+    if (!z) { this._note(s, 'ゾーンをクリックして選択すると編集できます。'); return; }
+
+    this._h(s, '選択中のゾーン');
+    // type
+    this._field(s, '種別', () => {
+      const sel = this._select(null, ZONE_TYPES.map((t) => ({ value: t, label: ZONE_JP[t] })), z.type);
+      this._on(sel, 'change', () => {
+        z.type = sel.value;
+        if (z.type === 'storage' && !z.rack) z.rack = { col_spacing: 4, row_spacing: 3, margin: 2 };
+        if (z.type !== 'storage') z.rack = null;
+        this._renderSide(); this._drawCanvas();
+      });
+      return sel;
+    });
+    // position / size (numeric, parametric)
+    for (const [label, key, max] of [['X (m)', 'x', this.model.layout.bounds.width],
+                                     ['Y (m)', 'y', this.model.layout.bounds.depth],
+                                     ['幅 (m)', 'w', this.model.layout.bounds.width],
+                                     ['奥行 (m)', 'h', this.model.layout.bounds.depth]]) {
+      this._field(s, label, () => this._num(z[key], (v) => {
+        z[key] = clamp(v, key === 'w' || key === 'h' ? MIN_M : 0, max);
+        if (z.x + z.w > this.model.layout.bounds.width) z.x = Math.max(0, this.model.layout.bounds.width - z.w);
+        if (z.y + z.h > this.model.layout.bounds.depth) z.y = Math.max(0, this.model.layout.bounds.depth - z.h);
+        this._drawCanvas();
+      }));
+    }
+    // rack spacing (storage only) — live updates the preview grid
+    if (z.type === 'storage') {
+      if (!z.rack) z.rack = { col_spacing: 4, row_spacing: 3, margin: 2 };
+      this._h(s, 'ラック（保管棚）');
+      for (const [label, key] of [['列間隔 (m)', 'col_spacing'], ['段間隔 (m)', 'row_spacing'], ['余白 (m)', 'margin']]) {
+        this._field(s, label, () => this._num(z.rack[key], (v) => { z.rack[key] = Math.max(0.1, v); this._drawCanvas(); }));
+      }
+    }
+    this._btn(s, '削除', () => this._deleteZone(z.id), 'margin-top:10px;color:#b30000;');
+  }
+
+  _sideEquip(s) {
+    this._h(s, '設備パレット');
+    const pal = this._div(s, 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;');
+    for (const p of EQUIP_PALETTE) {
+      const b = this._btn(pal, p.label, () => { this.equipBrush = p.key; this.conveyorDraft = null; this._renderSide(); this._drawCanvas(); });
+      if (this.equipBrush === p.key) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;';
+    }
+    if (this.equipBrush === 'conveyor') {
+      this._btn(s, '確定（コンベア完了）', () => this._finishConveyor(), 'margin-bottom:8px;');
+      this._note(s, `頂点 ${this.conveyorDraft ? this.conveyorDraft.length : 0} 点。床をクリックで追加。`);
+    }
+
+    // selected object editor
+    const sel = this.selected;
+    if (sel && sel.kind === 'equip') {
+      const e = this.model.resources.equipment.find((q) => q.id === sel.id);
+      if (e) {
+        const p = EQUIP_PALETTE.find((x) => x.type === e.type);
+        this._h(s, `選択中: ${p ? p.label : e.type}`);
+        this._field(s, '台数', () => this._num(e.count, (v) => { e.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
+        this._field(s, '速度 (m/s)', () => this._num(e.speed_mps, (v) => { e.speed_mps = Math.max(0, v); }));
+        this._btn(s, '削除', () => { this.model.resources.equipment = this.model.resources.equipment.filter((q) => q.id !== e.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
+      }
+    } else if (sel && sel.kind === 'station') {
+      const st = this.model.resources.stations.find((q) => q.id === sel.id);
+      if (st) {
+        this._h(s, '選択中: 梱包台');
+        this._field(s, '台数', () => this._num(st.count, (v) => { st.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
+        this._btn(s, '削除', () => { this.model.resources.stations = this.model.resources.stations.filter((q) => q.id !== st.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
+      }
+    } else {
+      this._note(s, '床をクリックして設置、または既存マーカーをクリックして編集します。');
+    }
+
+    if (this.model.resources.conveyors.length) {
+      this._h(s, `コンベア (${this.model.resources.conveyors.length})`);
+      const last = this.model.resources.conveyors[this.model.resources.conveyors.length - 1];
+      this._btn(s, '最後のコンベアを削除', () => { this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
+    }
+  }
+
+  _addZone(type) {
+    const b = this.model.layout.bounds;
+    const w = Math.min(12, b.width / 2), h = Math.min(8, b.depth / 2);
+    const z = {
+      id: uid('zone'), type, x: clamp(2, 0, b.width - w), y: clamp(2, 0, b.depth - h),
+      w, h, color: ZONE_DEFAULT_COLOR[type] || null,
+      rack: type === 'storage' ? { col_spacing: 4, row_spacing: 3, margin: 2 } : null,
+    };
+    this.model.layout.zones.push(z);
+    this.selected = { kind: 'zone', id: z.id };
+    this._renderSide(); this._drawCanvas();
+  }
+
+  _deleteZone(id) {
+    this.model.layout.zones = this.model.layout.zones.filter((z) => z.id !== id);
+    this.selected = null;
+    this._renderSide(); this._drawCanvas();
+  }
+
+  // ---- flow tool: workflow strip + pick strategy ---------------------------
+  _renderFlow() {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:1;min-width:0;overflow:auto;padding:14px;';
+    this.body.appendChild(wrap);
+
+    this._h(wrap, '作業フロー（工程ごとに作業方法を選択）');
+    const strip = document.createElement('div');
+    strip.style.cssText = 'display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin-bottom:18px;';
+    const stages = this.model.process.stages;
+    stages.forEach((st, i) => {
+      const box = document.createElement('div');
+      box.style.cssText = `display:flex;flex-direction:column;gap:8px;min-width:140px;padding:12px;border-radius:10px;border:2px solid ${METHOD_COLOR[st.method] || '#9aa4b0'};background:${hexA(METHOD_COLOR[st.method] || '#9aa4b0', 0.12)};`;
+      const lbl = document.createElement('div');
+      lbl.textContent = st.label || st.id;
+      lbl.style.cssText = 'font-weight:700;font-size:14px;';
+      box.appendChild(lbl);
+      const sel = this._select(box, METHOD_OPTS, st.method);
+      this._on(sel, 'change', () => { st.method = sel.value; this._renderTool(); });
+      box.appendChild(sel);
+      strip.appendChild(box);
+      if (i < stages.length - 1) {
+        const arrow = document.createElement('div');
+        arrow.textContent = '→';
+        arrow.style.cssText = 'display:flex;align-items:center;padding:0 10px;font-size:22px;color:#6b7785;';
+        strip.appendChild(arrow);
+      }
+    });
+    wrap.appendChild(strip);
+
+    this._h(wrap, 'ピッキング戦略');
+    const psSel = this._select(wrap, PICK_STRATS, this.model.process.pick_strategy);
+    this._on(psSel, 'change', () => { this.model.process.pick_strategy = psSel.value; });
+  }
+
+  // ---- save ----------------------------------------------------------------
+  async _save() {
+    if (!this.handlers.save) { this._saveMsg.textContent = '保存ハンドラがありません。'; return; }
+    if (this.tool === 'equip' && this.conveyorDraft) this._finishConveyor();
+    this._saveBtn.disabled = true;
+    this._saveMsg.style.color = '#6b7785';
+    this._saveMsg.textContent = '保存中…';
+    try {
+      const r = await this.handlers.save({
+        layout: clone(this.model.layout),
+        resources: clone(this.model.resources),
+        process: clone(this.model.process),
+      });
+      const prov = r && r.provenance_summary ? ` / ${r.provenance_summary}` : '';
+      this._saveMsg.style.color = '#1a7a3c';
+      this._saveMsg.textContent = '保存しました' + prov;
+    } catch (err) {
+      this._saveMsg.style.color = '#b30000';
+      this._saveMsg.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+    } finally {
+      this._saveBtn.disabled = false;
+    }
+  }
+
+  // ---- tiny DOM builders ---------------------------------------------------
+  _on(el, type, fn) { el.addEventListener(type, fn); this._listeners.push([el, type, fn]); }
+  _div(parent, css) { const d = document.createElement('div'); if (css) d.style.cssText = css; if (parent) parent.appendChild(d); return d; }
+  _h(parent, text) {
+    const h = document.createElement('div');
+    h.textContent = text;
+    h.style.cssText = 'font-size:12px;font-weight:700;color:#6b7785;margin:10px 0 6px;';
+    parent.appendChild(h); return h;
+  }
+  _note(parent, text) {
+    const n = document.createElement('div');
+    n.textContent = text;
+    n.style.cssText = 'font-size:12px;color:#9aa4b0;line-height:1.5;';
+    parent.appendChild(n); return n;
+  }
+  _field(parent, label, makeInput) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;';
+    const l = document.createElement('label');
+    l.textContent = label;
+    l.style.cssText = 'font-size:12px;flex:1;';
+    row.appendChild(l);
+    const inp = makeInput();
+    inp.style.cssText += ';width:96px;padding:5px 7px;border:1px solid #e3e8ee;border-radius:6px;font-size:13px;';
+    row.appendChild(inp);
+    parent.appendChild(row);
+    return inp;
+  }
+  _num(value, onChange, step) {
+    const i = document.createElement('input');
+    i.type = 'number'; i.step = step ? String(step) : 'any';
+    i.value = value == null ? '' : String(value);
+    this._on(i, 'change', () => { const v = parseFloat(i.value); if (!Number.isNaN(v)) onChange(v); });
+    return i;
+  }
+  _select(parent, opts, value) {
+    const sel = document.createElement('select');
+    sel.style.cssText = 'padding:5px 7px;border:1px solid #e3e8ee;border-radius:6px;font-size:13px;background:#fff;';
+    for (const o of opts) {
+      const op = document.createElement('option');
+      op.value = o.value; op.textContent = o.label;
+      if (o.value === value) op.selected = true;
+      sel.appendChild(op);
+    }
+    if (parent) parent.appendChild(sel);
+    return sel;
+  }
+  _btn(parent, text, onClick, css) {
+    const b = document.createElement('button');
+    b.textContent = text;
+    b.style.cssText = 'padding:6px 10px;border:1px solid #e3e8ee;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;' + (css || '');
+    this._on(b, 'click', onClick);
+    if (parent) parent.appendChild(b);
+    return b;
+  }
+}

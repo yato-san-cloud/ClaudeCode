@@ -82,6 +82,37 @@ def api_model(name: str):
     }
 
 
+@app.get("/api/projects/{name}/full")
+def api_full(name: str):
+    """The full model document, for the interactive design editor."""
+    proj = _open(name)
+    return JSONResponse(json.loads(proj.model_file.read_text("utf-8")))
+
+
+@app.post("/api/projects/{name}/design")
+def api_design(name: str, payload: dict):
+    """Apply design edits (layout / resources / process). Re-materialises racks
+    from storage zones so a layout change immediately affects routing & KPIs."""
+    from whsim.design import materialize_racks
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    prov = proj.load_provenance()
+    for section in ("layout", "resources", "process"):
+        if section in payload and payload[section] is not None:
+            md[section] = payload[section]
+            prov.mark(section, Source.INTERVIEW)
+            if section == "layout":
+                prov.mark("locations", Source.INTERVIEW)
+    model = WarehouseModel.model_validate(md)
+    if "layout" in payload:
+        materialize_racks(model)
+    proj.save_model(model)
+    proj.save_provenance(prov)
+    return {"ok": True, "provenance_summary": prov.summary(),
+            "locations": len(model.locations)}
+
+
 @app.post("/api/projects/{name}/headline")
 def api_headline(name: str, payload: dict):
     proj = _open(name)

@@ -28,11 +28,15 @@ artifacts, so each is independently testable/replaceable:
   individual agents; the run emits per-worker trajectory keyframes for replay.
 - `analytic.py` — closed-form M/M/c estimate; also the engine's sanity oracle in tests.
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict.
+- `design.py` — design-side helpers: `materialize_racks` expands a storage zone's
+  parametric rack params into the concrete `locations` grid (re-pegs item SKUs).
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
 - `render/png2d.py` — proposal PNG (layout + congestion heatmap + verdict + provenance footer).
 - `render/anim2d.py` — server-side animated 2D replay GIF (no browser needed).
-- `web/` — FastAPI backend + single-page frontend (`static/`, with `js/view3d.js` three.js view).
-  three.js is vendored under `static/vendor/`.
+- `web/` — FastAPI backend + single-page frontend (`static/`). `js/view3d.js` (three.js
+  replay) and `js/designer.js` (interactive layout/equipment/flow editor) are self-contained
+  ES modules mounted by `app.js`. three.js is vendored under `static/vendor/`.
+  The editor saves via `POST /design`; the engine honours per-stage method (manual vs AGV).
 
 ### Commands
 

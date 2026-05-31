@@ -50,13 +50,15 @@
 
     <main class="main">
       <div class="tabs">
-        <button data-tab="view2d" class="tab active">2D アニメーション</button>
+        <button data-tab="design" class="tab active">設計</button>
+        <button data-tab="view2d" class="tab">2D アニメーション</button>
         <button data-tab="view3d" class="tab">3D</button>
         <button data-tab="viewpng" class="tab">提案PNG</button>
       </div>
 
       <div class="stage">
-        <div id="view2d" class="panel active">
+        <div id="design" class="panel active"></div>
+        <div id="view2d" class="panel">
           <canvas id="canvas2d"></canvas>
         </div>
         <div id="view3d" class="panel"></div>

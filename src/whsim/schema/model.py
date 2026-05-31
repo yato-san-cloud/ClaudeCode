@@ -41,6 +41,15 @@ class Bounds(BaseModel):
     depth: float = 40.0  # meters (y)
 
 
+class RackFill(BaseModel):
+    """Parametric rack layout for a storage zone: the editor sets spacing, and
+    `design.materialize_racks` regenerates the locations grid to fill the zone."""
+
+    col_spacing: float = 4.0   # meters between rack columns (aisles)
+    row_spacing: float = 3.0   # meters between slots along a column
+    margin: float = 2.0        # inset from the zone edge
+
+
 class Zone(BaseModel):
     id: str
     type: ZoneType = "storage"
@@ -49,6 +58,7 @@ class Zone(BaseModel):
     w: float = 10.0
     h: float = 10.0
     color: str | None = None
+    rack: RackFill | None = None  # storage zones only; None => not auto-racked
 
 
 class Layout(BaseModel):
@@ -77,15 +87,43 @@ class Item(BaseModel):
     default_location: str | None = None
 
 
+StageMethod = Literal["manual", "agv", "conveyor", "asrs"]
+
+
+class Stage(BaseModel):
+    """One step of the operation flow, shown in the editor's workflow strip."""
+
+    id: str
+    label: str = ""
+    method: StageMethod = "manual"
+
+
+def _default_stages() -> list["Stage"]:
+    return [
+        Stage(id="receive", label="入荷", method="manual"),
+        Stage(id="putaway", label="格納", method="manual"),
+        Stage(id="pick", label="ピッキング", method="manual"),
+        Stage(id="pack", label="梱包", method="manual"),
+        Stage(id="ship", label="出荷", method="manual"),
+    ]
+
+
 class Process(BaseModel):
     flow: list[str] = Field(
         default_factory=lambda: ["receive", "putaway", "pick", "pack", "ship"]
     )
+    stages: list[Stage] = Field(default_factory=_default_stages)
     pick_strategy: PickStrategy = "discrete"
     routing_policy: RoutingPolicy = "nearest"
     batch_size: int = 1
     walk_speed_mps: float = 1.2
     pack_time_s: float = 40.0  # mean packing seconds per order
+
+    def pick_method(self) -> str:
+        for s in self.stages:
+            if s.id == "pick":
+                return s.method
+        return "manual"
 
 
 class WorkerGroup(BaseModel):
@@ -97,10 +135,18 @@ class WorkerGroup(BaseModel):
 
 class Equipment(BaseModel):
     id: str
-    type: Literal["agv", "forklift"] = "agv"
+    type: Literal["agv", "forklift", "asrs"] = "agv"
     count: int = 0
     speed_mps: float = 1.6
     capacity: int = 1
+    x: float = 0.0  # home / dock position (for placement on the layout)
+    y: float = 0.0
+
+
+class Conveyor(BaseModel):
+    id: str
+    points: list[list[float]] = Field(default_factory=list)  # [[x,y], ...]
+    speed_mps: float = 0.5
 
 
 class Station(BaseModel):
@@ -114,6 +160,7 @@ class Station(BaseModel):
 class Resources(BaseModel):
     workers: list[WorkerGroup] = Field(default_factory=lambda: [WorkerGroup()])
     equipment: list[Equipment] = Field(default_factory=list)
+    conveyors: list[Conveyor] = Field(default_factory=list)
     stations: list[Station] = Field(default_factory=lambda: [Station()])
 
 

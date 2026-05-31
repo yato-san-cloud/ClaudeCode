@@ -1,5 +1,6 @@
-// whsim frontend: template -> import -> confirm headline -> run -> animated replay.
+// whsim frontend: design -> import -> confirm headline -> run -> animated replay.
 import { Scene3D } from './js/view3d.js';
+import { Designer } from './js/designer.js';
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, opts) => {
@@ -15,8 +16,8 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
                   packing: '梱包', shipping: '出荷', staging: '一時保管' };
 
 const S = {
-  project: null, replay: null, scene3d: null,
-  t: 0, window: 1, playing: true, speed: 60, view: 'view2d',
+  project: null, replay: null, scene3d: null, designer: null,
+  t: 0, window: 1, playing: true, speed: 60, view: 'design',
 };
 
 // ---- keyframe interpolation (must match the 3D view) -----------------------
@@ -115,7 +116,31 @@ async function openProject(name) {
   renderHeadline(m.headline_fields, m.headline_values);
   $('provenance').textContent = m.provenance_summary;
   $('runBtn').disabled = false;
-  $('status').textContent = `プロジェクト「${name}」を開きました。実行できます。`;
+  $('status').textContent = `プロジェクト「${name}」を開きました。設計を調整して実行できます。`;
+  if (S.view === 'design') mountDesigner();
+}
+
+async function mountDesigner() {
+  if (!S.project) return;
+  const model = await api(`/api/projects/${S.project}/full`);
+  if (S.designer) S.designer.dispose();
+  S.designer = new Designer($('design'), model, {
+    save: async (sections) => {
+      const r = await api(`/api/projects/${S.project}/design`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sections),
+      });
+      $('provenance').textContent = r.provenance_summary;
+      $('status').textContent = '設計を保存しました。「実行」で検証できます。';
+      await openProjectQuiet();  // refresh headline values after re-materialise
+      return r;
+    },
+  });
+  S.designer.resize();
+}
+async function openProjectQuiet() {
+  const m = await api(`/api/projects/${S.project}/model`);
+  renderHeadline(m.headline_fields, m.headline_values);
 }
 function renderHeadline(fields, values) {
   const el = $('headline'); el.innerHTML = '';
@@ -248,6 +273,7 @@ function initUI() {
     t.classList.add('active');
     S.view = t.dataset.tab;
     $(S.view).classList.add('active');
+    if (S.view === 'design') { mountDesigner(); }
     if (S.view === 'view3d') { mount3d(); }
     if (S.view === 'view2d') fitCanvas();
   });
@@ -288,6 +314,7 @@ function initUI() {
   window.addEventListener('resize', () => {
     fitCanvas();
     if (S.scene3d) S.scene3d.resize();
+    if (S.designer) S.designer.resize();
   });
   $('playBtn').disabled = true; $('scrub').disabled = true; // until a run exists
   fitCanvas();

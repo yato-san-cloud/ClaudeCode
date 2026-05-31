@@ -61,20 +61,44 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             tss.append(world.sku_ts.get(line.sku, 1.5))
 
         total_dist = 0.0
-        if points:
-            for idx in nearest_neighbor_route(pos, points):
-                dest = points[idx]
-                total_dist += yield from _walk(world, w, pos, dest, speed, "travel")
-                pos = dest
+        handle_time = sum(q * ts for q, ts in zip(qtys, tss))
+        if world.pick_method == "agv":
+            # Goods-to-person: AGVs ferry totes (a round trip per pick location);
+            # the picker only handles, so its labour falls and the AGV fleet becomes
+            # the constraint. Picker "busy" is handling time only.
+            route = [points[i] for i in nearest_neighbor_route(world.home, points)]
+            cur = world.home
+            for dest in route:
+                total_dist += 2 * manhattan(cur, dest)
+                _accumulate_heat(world, cur, dest)
+                cur = dest
+            if route:
+                areq = world.agvs.request()
+                yield areq
                 if world.recording():
                     w.kf(env.now, pos[0], pos[1], "pick")
-                yield env.timeout(qtys[idx] * tss[idx])   # pick dwell
+                yield env.timeout(total_dist / world.agv_speed)   # AGV transport
+                world.agvs.release(areq)
+                world.log(t=env.now, event="agv_done", order_id=order.order_id,
+                          busy=total_dist / world.agv_speed, resource="agv")
+            yield env.timeout(handle_time)                         # picker handling
+            picker_busy = handle_time
+        else:
+            if points:
+                for idx in nearest_neighbor_route(pos, points):
+                    dest = points[idx]
+                    total_dist += yield from _walk(world, w, pos, dest, speed, "travel")
+                    pos = dest
+                    if world.recording():
+                        w.kf(env.now, pos[0], pos[1], "pick")
+                    yield env.timeout(qtys[idx] * tss[idx])   # pick dwell
+            # carry to a pack station
+            total_dist += yield from _walk(world, w, pos, world.home, speed, "carry")
+            pos = world.home
+            picker_busy = env.now - busy_start
 
-        # carry to a pack station
-        total_dist += yield from _walk(world, w, pos, world.home, speed, "carry")
-        pos = world.home
         world.log(t=env.now, event="pick_done", order_id=order.order_id,
-                  busy=env.now - busy_start, dist=total_dist,
+                  busy=picker_busy, dist=total_dist,
                   resource="picker", worker=w.id)
 
         # pack (contend for a station)

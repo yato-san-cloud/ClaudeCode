@@ -25,7 +25,9 @@ def _one(res: RunResult) -> dict:
     dists = [e.get("dist", 0.0) for e in completes]
     picker_busy = sum(e.get("busy", 0.0) for e in res.events if e["event"] == "pick_done")
     packer_busy = sum(e.get("busy", 0.0) for e in res.events if e["event"] == "pack_done")
+    agv_busy = sum(e.get("busy", 0.0) for e in res.events if e["event"] == "agv_done")
     pick_waits = [e.get("wait", 0.0) for e in res.events if e["event"] == "pick_start"]
+    agv_util = agv_busy / max(res.n_agvs * res.duration_s, 1e-9) if res.n_agvs else 0.0
 
     on_time = sum(
         1 for e in completes if e.get("due") is None or e["t"] <= e["due"]
@@ -44,6 +46,9 @@ def _one(res: RunResult) -> dict:
         "cycle_p95_s": _pct(cycles, 0.95),
         "picker_utilization": pick_util,
         "packer_utilization": pack_util,
+        "agv_utilization": agv_util,
+        "n_agvs": res.n_agvs,
+        "pick_method": res.pick_method,
         "pick_wait_mean_s": statistics.fmean(pick_waits) if pick_waits else 0.0,
         "walk_total_m": sum(dists),
         "walk_per_order_m": statistics.fmean(dists) if dists else 0.0,
@@ -54,20 +59,24 @@ def _one(res: RunResult) -> dict:
 def compute(results: list[RunResult]) -> dict:
     """Average per-replication KPIs and add a plain-language verdict."""
     per = [_one(r) for r in results]
-    keys = per[0].keys()
-    agg = {k: statistics.fmean(p[k] for p in per) for k in keys}
+    agg = {}
+    for k in per[0]:
+        if isinstance(per[0][k], (int, float)):
+            agg[k] = statistics.fmean(p[k] for p in per)
+        else:
+            agg[k] = per[0][k]  # non-numeric (e.g. pick_method): take first
     agg["replications"] = len(results)
     agg["n_pickers"] = results[0].n_pickers
     agg["n_packers"] = results[0].n_packers
 
-    # Bottleneck = the busiest stage.
-    if agg["packer_utilization"] >= agg["picker_utilization"]:
-        agg["bottleneck"] = "packing"
-        agg["bottleneck_utilization"] = agg["packer_utilization"]
-    else:
-        agg["bottleneck"] = "picking"
-        agg["bottleneck_utilization"] = agg["picker_utilization"]
-    agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包"}[agg["bottleneck"]]
+    # Bottleneck = the busiest stage (pickers, pack stations, or the AGV fleet).
+    stages = {"picking": agg["picker_utilization"], "packing": agg["packer_utilization"]}
+    if agg.get("n_agvs"):
+        stages["agv"] = agg["agv_utilization"]
+    agg["bottleneck"] = max(stages, key=stages.get)
+    agg["bottleneck_utilization"] = stages[agg["bottleneck"]]
+    agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包",
+                            "agv": "AGV搬送"}[agg["bottleneck"]]
 
     can_handle = agg["completion_rate"] >= 0.98 and agg["bottleneck_utilization"] < 0.95
     agg["can_handle_demand"] = can_handle

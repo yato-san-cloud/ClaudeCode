@@ -27,7 +27,8 @@ def build():
         {"id": "receiving", "type": "receiving", "x": 0, "y": 22, "w": 12, "h": 8,
          "color": "#fdd0a2"},
         {"id": "storage", "type": "storage", "x": 14, "y": 1, "w": 45, "h": 28,
-         "color": "#d9d9d9"},
+         "color": "#d9d9d9",
+         "rack": {"col_spacing": 4.0, "row_spacing": 3.0, "margin": 2.0}},
     ]
 
     locations, items = [], []
