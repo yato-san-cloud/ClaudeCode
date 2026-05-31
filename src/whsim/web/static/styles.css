@@ -1075,3 +1075,11 @@ input[type="range"]::-moz-range-track {
   #playBtn:hover { background: #fff; color: var(--bg-app); border-color: #fff; }
   .brand::before { background: var(--ink-primary); color: var(--bg-app); }
 }
+
+/* ---- polish pass: fix cramped text wrapping & density ---- */
+.headline .field { gap: 10px; align-items: center; }
+.headline .field label { white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.kpibar { gap: 10px; }
+.kpi { min-width: 138px; flex: 1 1 auto; }
+.kpi .v { white-space: nowrap; font-size: 19px; line-height: 1.25; }
+.kpi .k { white-space: nowrap; }
