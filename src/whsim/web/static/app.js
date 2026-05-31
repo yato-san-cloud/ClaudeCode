@@ -2,6 +2,11 @@
 import { Scene3D } from './js/view3d.js';
 import { Designer } from './js/designer.js';
 import { CompareView } from './js/compare.js';
+import { ExportView } from './js/export.js';
+
+const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
+                   robot_arm: 'ロボットアーム', crane: 'クレーン' };
+const DOOR_COLOR = { dock: '#1f78b4', personnel: '#33a02c', shutter: '#8d99ae' };
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, opts) => {
@@ -18,6 +23,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
+  export: null, preset: 'natural',
   t: 0, window: 1, playing: true, speed: 60, view: 'design',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -74,6 +80,26 @@ function draw2d() {
   for (const s of rep.stations) {
     ctx.fillStyle = '#08519c'; ctx.beginPath();
     ctx.arc(X(s.x), Y(s.y), 7, 0, 7); ctx.fill();
+  }
+  // building shell: walls + doors (躯体)
+  for (const wl of (rep.walls || [])) {
+    if (!wl.points || wl.points.length < 2) continue;
+    ctx.strokeStyle = '#6b7785'; ctx.lineWidth = Math.max(2, (wl.thickness || 0.2) * sc);
+    ctx.lineCap = 'round'; ctx.beginPath();
+    wl.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
+    ctx.stroke(); ctx.lineWidth = 1;
+  }
+  for (const dr of (rep.doors || [])) {
+    ctx.fillStyle = DOOR_COLOR[dr.type] || '#1f78b4';
+    ctx.fillRect(X(dr.x) - (dr.w * sc) / 2, Y(dr.y) - 3, dr.w * sc, 6);
+  }
+  // placed equipment (static markers, labelled)
+  for (const eq of (rep.equipment || [])) {
+    ctx.fillStyle = '#444'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.fillRect(X(eq.x) - 7, Y(eq.y) - 7, 14, 14);
+    ctx.strokeRect(X(eq.x) - 7, Y(eq.y) - 7, 14, 14);
+    ctx.fillStyle = '#555'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(EQUIP_JP[eq.type] || eq.type, X(eq.x), Y(eq.y) - 10);
   }
   // conveyors (static)
   for (const cv of (rep.conveyors || [])) {
@@ -210,6 +236,7 @@ async function runSim() {
     renderKpis(r.kpis);
     await loadReplay();
     $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
+    if (S.export) S.export.refresh();
     $('status').textContent = `完了（${r.run}）。`;
   } catch (e) {
     $('status').textContent = 'エラー: ' + e.message;
@@ -268,7 +295,14 @@ function mount3d() {
   if (!S.replay) return;
   if (S.scene3d) S.scene3d.dispose();
   S.scene3d = new Scene3D(el, S.replay, () => S.t);
+  if (S.preset && S.scene3d.setPreset) S.scene3d.setPreset(S.preset);
   S.scene3d.resize();
+}
+
+function mountExport() {
+  if (S.export) { S.export.refresh(); return; }
+  S.export = new ExportView($('export'), { getProjectName: () => S.project });
+  S.export.refresh();
 }
 
 // ---- import ----------------------------------------------------------------
@@ -319,7 +353,13 @@ function initUI() {
     if (S.view === 'design') { mountDesigner(); }
     if (S.view === 'view3d') { mount3d(); }
     if (S.view === 'view2d') fitCanvas();
+    if (S.view === 'export') mountExport();
   });
+
+  $('presetSelect').onchange = (e) => {
+    S.preset = e.target.value;
+    if (S.scene3d) S.scene3d.setPreset(S.preset);
+  };
 
   // transport
   $('playBtn').onclick = () => {

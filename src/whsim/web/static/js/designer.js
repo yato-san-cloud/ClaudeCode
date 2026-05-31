@@ -27,7 +27,16 @@ const EQUIP_PALETTE = [
   { key: 'conveyor', label: 'コンベア', type: 'conveyor', color: '#33a02c' },
   { key: 'asrs', label: '自動倉庫', type: 'asrs', color: '#6a3d9a' },
   { key: 'station', label: '梱包台', type: 'station', color: '#08519c' },
+  { key: 'robot_arm', label: 'ロボットアーム', type: 'robot_arm', color: '#e6550d' },
+  { key: 'crane', label: 'ホイストクレーン', type: 'crane', color: '#8c564b' },
 ];
+// Door palette for the 躯体 (building) tool: label, schema type, marker color.
+const DOOR_PALETTE = [
+  { type: 'dock', label: 'ドックドア', color: '#1f78b4' },
+  { type: 'personnel', label: '通用口', color: '#33a02c' },
+  { type: 'shutter', label: 'シャッター', color: '#888888' },
+];
+const DOOR_JP = { dock: 'ドックドア', personnel: '通用口', shutter: 'シャッター' };
 const METHOD_OPTS = [
   { value: 'manual', label: '人手' }, { value: 'agv', label: 'AGV' },
   { value: 'conveyor', label: 'コンベア' }, { value: 'asrs', label: '自動倉庫' },
@@ -59,9 +68,12 @@ export class Designer {
   constructor(container, model, handlers) {
     this.container = container;
     this.handlers = handlers || {};
-    this.tool = 'layout';          // 'layout' | 'equip' | 'flow'
+    this.tool = 'layout';          // 'layout' | 'equip' | 'building' | 'flow'
     this.selected = null;          // {kind, id} of selected canvas object
     this.equipBrush = 'agv';       // active palette key in 設備 tool
+    this.doorBrush = 'dock';       // active door type in 躯体 tool
+    this.buildMode = 'wall';       // 'wall' | 'door' within the 躯体 tool
+    this.wallDraft = null;         // [[x,y],...] while drawing a wall polyline
     this.conveyorDraft = null;     // [[x,y],...] while drawing a conveyor
     this.drag = null;              // active drag state on the canvas
     this._listeners = [];          // [el, type, fn] for clean dispose()
@@ -75,6 +87,7 @@ export class Designer {
     this._normalize(model);
     this.selected = null;
     this.conveyorDraft = null;
+    this.wallDraft = null;
     this._renderTool();
   }
 
@@ -100,6 +113,19 @@ export class Designer {
     m.layout.bounds.depth = +m.layout.bounds.depth || 40;
     m.layout.zones = Array.isArray(m.layout.zones) ? m.layout.zones : [];
     m.layout.zones.forEach((z, i) => { if (!z.id) z.id = uid('zone'); if (!z.type) z.type = 'storage'; });
+    m.layout.walls = Array.isArray(m.layout.walls) ? m.layout.walls : [];
+    m.layout.walls.forEach((w) => {
+      if (!w.id) w.id = uid('wall');
+      if (!Array.isArray(w.points)) w.points = [];
+      if (!(+w.thickness > 0)) w.thickness = 0.3;
+    });
+    m.layout.doors = Array.isArray(m.layout.doors) ? m.layout.doors : [];
+    m.layout.doors.forEach((d) => {
+      if (!d.id) d.id = uid('door');
+      if (!DOOR_JP[d.type]) d.type = 'dock';
+      d.x = +d.x || 0; d.y = +d.y || 0;
+      if (!(+d.w > 0)) d.w = d.type === 'dock' ? 3 : d.type === 'shutter' ? 4 : 1;
+    });
     m.resources = m.resources || {};
     m.resources.workers = m.resources.workers || [];
     m.resources.equipment = Array.isArray(m.resources.equipment) ? m.resources.equipment : [];
@@ -133,7 +159,7 @@ export class Designer {
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
     this._toolBtns = {};
-    for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['flow', 'フロー']]) {
+    for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー']]) {
       const b = document.createElement('button');
       b.textContent = label;
       this._on(b, 'click', () => this._selectTool(key));
@@ -165,6 +191,7 @@ export class Designer {
     this.tool = key;
     this.selected = null;
     this.conveyorDraft = null;
+    this.wallDraft = null;
     for (const k in this._toolBtns) {
       const active = k === key;
       const b = this._toolBtns[k];
@@ -230,7 +257,7 @@ export class Designer {
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
 
-    const dim = this.tool === 'equip';   // zones rendered faintly under equipment
+    const dim = this.tool === 'equip' || this.tool === 'building';   // zones rendered faintly under equipment/walls
     for (const z of this.model.layout.zones) {
       const sel = this.tool === 'layout' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
       const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
@@ -268,6 +295,13 @@ export class Designer {
       this._label(this._X(s.x), this._Y(s.y) + 16, `梱包台×${s.count ?? 0}`);
     }
 
+    // building tool: walls + doors (drawn above the faint zones)
+    if (this.tool === 'building') {
+      for (const w of this.model.layout.walls) this._drawWall(w.points, w.thickness, this._isSel('wall', w.id), false);
+      if (this.wallDraft) this._drawWall(this.wallDraft, 0.3, false, true);
+      for (const d of this.model.layout.doors) this._drawDoor(d, this._isSel('door', d.id));
+    }
+
     // hint text
     if (this.tool === 'equip') {
       ctx.fillStyle = '#9aa4b0'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
@@ -275,7 +309,44 @@ export class Designer {
         ? 'コンベア: 床をクリックで頂点追加、ダブルクリックか「確定」で完了'
         : '床をクリックして設置 / マーカーをクリックで選択';
       ctx.fillText(hint, 8, 8);
+    } else if (this.tool === 'building') {
+      ctx.fillStyle = '#9aa4b0'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const hint = this.buildMode === 'door'
+        ? 'ドア: 床をクリックして配置 / マーカーをクリックで選択'
+        : '壁: 床をクリックで頂点追加、ダブルクリックか「壁を確定」で完了';
+      ctx.fillText(hint, 8, 8);
     }
+  }
+
+  _drawWall(pts, thickness, sel, draft) {
+    if (!pts || pts.length === 0) return;
+    const ctx = this.ctx;
+    const wpx = Math.max(3, (+thickness || 0.3) * this._view.sc);
+    ctx.strokeStyle = sel ? '#1f2733' : (draft ? '#e31a1c' : '#5a6472');
+    ctx.lineWidth = wpx; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (draft) ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(this._X(pts[0][0]), this._Y(pts[0][1]));
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(this._X(pts[i][0]), this._Y(pts[i][1]));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // vertices
+    ctx.fillStyle = sel ? '#1f2733' : (draft ? '#e31a1c' : '#5a6472');
+    for (const p of pts) { ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3, 0, 7); ctx.fill(); }
+  }
+
+  _drawDoor(d, sel) {
+    const ctx = this.ctx, px = this._X(d.x), py = this._Y(d.y);
+    const pal = DOOR_PALETTE.find((x) => x.type === d.type);
+    const color = pal ? pal.color : '#888888';
+    const half = Math.max(6, (+d.w || 1) * this._view.sc / 2);
+    ctx.fillStyle = hexA(color, 0.55);
+    ctx.strokeStyle = sel ? '#1f2733' : color;
+    ctx.lineWidth = sel ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.rect(px - half, py - 6, half * 2, 12);
+    ctx.fill(); ctx.stroke();
+    this._label(px, py + 12, `${DOOR_JP[d.type] || d.type} ${(+d.w || 1)}m`);
   }
 
   _drawRack(z) {
@@ -344,6 +415,7 @@ export class Designer {
     const { px, py } = this._pt(e);
     if (this.tool === 'layout') return this._layoutDown(px, py);
     if (this.tool === 'equip') return this._equipDown(px, py);
+    if (this.tool === 'building') return this._buildingDown(px, py);
   }
 
   // --- layout tool: select / move / resize zones ---
@@ -401,8 +473,14 @@ export class Designer {
       this.model.resources.stations.push(s);
       this.selected = { kind: 'station', id: s.id };
       this._renderSide(); this._drawCanvas();
-    } else { // agv / asrs
-      const e = { id: uid('eq'), type: this.equipBrush, count: 5, speed_mps: 1.6, x: mx, y: my };
+    } else { // agv / asrs / robot_arm / crane
+      const fast = this.equipBrush === 'agv';
+      const e = {
+        id: uid('eq'), type: this.equipBrush,
+        count: fast ? 5 : 1,
+        speed_mps: fast ? 1.6 : 1.0,
+        x: mx, y: my,
+      };
       this.model.resources.equipment.push(e);
       this.selected = { kind: 'equip', id: e.id };
       this._renderSide(); this._drawCanvas();
@@ -429,6 +507,11 @@ export class Designer {
       if (!o) return;
       o.x = clamp(snap(this._mx(px)), 0, b.width);
       o.y = clamp(snap(this._my(py)), 0, b.depth);
+    } else if (this.drag.mode === 'moveDoor') {
+      const o = this.model.layout.doors.find((q) => q.id === this.drag.id);
+      if (!o) return;
+      o.x = clamp(snap(this._mx(px)), 0, b.width);
+      o.y = clamp(snap(this._my(py)), 0, b.depth);
     }
     this._drawCanvas();
   }
@@ -439,6 +522,7 @@ export class Designer {
 
   _onDbl(e) {
     if (this.tool === 'equip' && this.equipBrush === 'conveyor') this._finishConveyor();
+    if (this.tool === 'building' && this.buildMode === 'wall') this._finishWall();
   }
 
   _finishConveyor() {
@@ -450,12 +534,143 @@ export class Designer {
     this._renderSide(); this._drawCanvas();
   }
 
+  // --- building tool: walls (polyline) + doors (markers) ---
+  _buildingDown(px, py) {
+    const mx = snap(this._mx(px)), my = snap(this._my(py));
+    const b = this.model.layout.bounds;
+    const inside = mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth;
+
+    if (this.buildMode === 'door') {
+      // hit-test existing doors first for selection / move
+      const hit = this.model.layout.doors.find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 12);
+      if (hit) {
+        this.selected = { kind: 'door', id: hit.id };
+        this.drag = { mode: 'moveDoor', id: hit.id };
+        this._renderSide(); this._drawCanvas();
+        return;
+      }
+      if (!inside) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
+      const pal = DOOR_PALETTE.find((x) => x.type === this.doorBrush) || DOOR_PALETTE[0];
+      const w = pal.type === 'dock' ? 3 : pal.type === 'shutter' ? 4 : 1;
+      const d = { id: uid('door'), type: pal.type, x: mx, y: my, w };
+      this.model.layout.doors.push(d);
+      this.selected = { kind: 'door', id: d.id };
+      this._renderSide(); this._drawCanvas();
+      return;
+    }
+
+    // wall mode: hit-test walls for selection, else extend draft polyline
+    if (!this.wallDraft) {
+      const hit = this._wallHit(px, py);
+      if (hit) {
+        this.selected = { kind: 'wall', id: hit.id };
+        this._renderSide(); this._drawCanvas();
+        return;
+      }
+    }
+    if (!inside && !this.wallDraft) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
+    if (!this.wallDraft) this.wallDraft = [];
+    this.wallDraft.push([mx, my]);
+    this._renderSide(); this._drawCanvas();
+  }
+
+  _wallHit(px, py) {
+    for (let i = this.model.layout.walls.length - 1; i >= 0; i--) {
+      const w = this.model.layout.walls[i];
+      const pts = w.points || [];
+      for (let j = 0; j < pts.length - 1; j++) {
+        if (this._distToSeg(px, py, this._X(pts[j][0]), this._Y(pts[j][1]),
+            this._X(pts[j + 1][0]), this._Y(pts[j + 1][1])) <= Math.max(6, (w.thickness || 0.3) * this._view.sc / 2 + 4)) {
+          return w;
+        }
+      }
+    }
+    return null;
+  }
+
+  _distToSeg(px, py, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = clamp(t, 0, 1);
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  _finishWall() {
+    if (this.wallDraft && this.wallDraft.length >= 2) {
+      const w = { id: uid('wall'), points: this.wallDraft.slice(), thickness: 0.3 };
+      this.model.layout.walls.push(w);
+      this.selected = { kind: 'wall', id: w.id };
+    }
+    this.wallDraft = null;
+    this._renderSide(); this._drawCanvas();
+  }
+
   // ---- side editor panels (layout + equip tools) ---------------------------
   _renderSide() {
     if (!this.side) return;
     const s = this.side; s.innerHTML = '';
     if (this.tool === 'layout') this._sideLayout(s);
+    else if (this.tool === 'building') this._sideBuilding(s);
     else this._sideEquip(s);
+  }
+
+  _sideBuilding(s) {
+    this._h(s, '躯体（建屋）');
+    // mode switch: walls vs doors
+    const modeRow = this._div(s, 'display:flex;gap:6px;margin-bottom:8px;');
+    for (const [m, label] of [['wall', '壁'], ['door', 'ドア']]) {
+      const b = this._btn(modeRow, label, () => {
+        this.buildMode = m;
+        if (m !== 'wall') this.wallDraft = null;
+        this.selected = null;
+        this._renderSide(); this._drawCanvas();
+      });
+      b.style.flex = '1';
+      if (this.buildMode === m) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;';
+    }
+
+    if (this.buildMode === 'wall') {
+      this._btn(s, '壁を確定', () => this._finishWall(), 'margin-bottom:8px;');
+      this._note(s, `頂点 ${this.wallDraft ? this.wallDraft.length : 0} 点。床をクリックで追加、ダブルクリックか「壁を確定」で完了。`);
+      const w = this.selected && this.selected.kind === 'wall'
+        ? this.model.layout.walls.find((q) => q.id === this.selected.id) : null;
+      if (w) {
+        this._h(s, '選択中の壁');
+        this._field(s, '厚さ (m)', () => this._num(w.thickness, (v) => { w.thickness = Math.max(0.05, v); this._drawCanvas(); }));
+        this._note(s, `頂点 ${(w.points || []).length} 点。`);
+        this._btn(s, '削除', () => {
+          this.model.layout.walls = this.model.layout.walls.filter((q) => q.id !== w.id);
+          this.selected = null; this._renderSide(); this._drawCanvas();
+        }, 'margin-top:10px;color:#b30000;');
+      } else {
+        this._note(s, '壁をクリックして選択すると編集・削除できます。');
+      }
+    } else {
+      this._h(s, 'ドアの種類');
+      const pal = this._div(s, 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;');
+      for (const p of DOOR_PALETTE) {
+        const b = this._btn(pal, p.label, () => { this.doorBrush = p.type; this._renderSide(); this._drawCanvas(); });
+        if (this.doorBrush === p.type) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;';
+      }
+      const d = this.selected && this.selected.kind === 'door'
+        ? this.model.layout.doors.find((q) => q.id === this.selected.id) : null;
+      if (d) {
+        this._h(s, `選択中: ${DOOR_JP[d.type] || d.type}`);
+        this._field(s, '種別', () => {
+          const sel = this._select(null, DOOR_PALETTE.map((p) => ({ value: p.type, label: p.label })), d.type);
+          this._on(sel, 'change', () => { d.type = sel.value; this._renderSide(); this._drawCanvas(); });
+          return sel;
+        });
+        this._field(s, '幅 (m)', () => this._num(d.w, (v) => { d.w = Math.max(0.3, v); this._drawCanvas(); }));
+        this._btn(s, '削除', () => {
+          this.model.layout.doors = this.model.layout.doors.filter((q) => q.id !== d.id);
+          this.selected = null; this._renderSide(); this._drawCanvas();
+        }, 'margin-top:10px;color:#b30000;');
+      } else {
+        this._note(s, '建屋の縁をクリックしてドアを配置、または既存のドアをクリックして編集します。');
+      }
+    }
   }
 
   _sideLayout(s) {
@@ -604,6 +819,7 @@ export class Designer {
   async _save() {
     if (!this.handlers.save) { this._saveMsg.textContent = '保存ハンドラがありません。'; return; }
     if (this.tool === 'equip' && this.conveyorDraft) this._finishConveyor();
+    if (this.tool === 'building' && this.wallDraft) this._finishWall();
     this._saveBtn.disabled = true;
     this._saveMsg.style.color = '#6b7785';
     this._saveMsg.textContent = '保存中…';

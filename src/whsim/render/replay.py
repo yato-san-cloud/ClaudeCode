@@ -39,6 +39,14 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         {"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
         for c in model.resources.conveyors
     ]
+    equipment = [
+        {"id": e.id, "type": e.type, "x": e.x, "y": e.y, "count": e.count}
+        for e in model.resources.equipment
+    ]
+    walls = [{"id": w.id, "points": w.points, "thickness": w.thickness}
+             for w in model.layout.walls]
+    doors = [{"id": d.id, "type": d.type, "x": d.x, "y": d.y, "w": d.w}
+             for d in model.layout.doors]
 
     return {
         "meta": {
@@ -55,5 +63,8 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "workers": workers,
         "agvs": agvs,
         "conveyors": conveyors,
+        "equipment": equipment,
+        "walls": walls,
+        "doors": doors,
         "kpis": kpis,
     }

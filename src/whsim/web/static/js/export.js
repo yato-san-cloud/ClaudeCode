@@ -1,0 +1,511 @@
+// export.js — proposal / export panel for a finished run.
+//
+// Inspired by Megasoft Logi3D's "見積もりを3DCG化した営業ツール" and its
+// 動線一覧CSV: turn a completed simulation into client-ready outputs —
+// KPI CSV, a 動線一覧 (flow-line) CSV, and a printable 提案書 (proposal)
+// preview built from the proposal PNG + KPI summary.
+//
+// Public API:
+//   new ExportView(container, { getProjectName })  — build UI into `container`
+//   view.refresh()                                  — re-read state, re-render
+//   view.dispose()                                  — tear down + detach
+//
+// Self-contained ES module, no imports. Defensive throughout: missing fields
+// render as "—"; absent project/run shows a friendly placeholder; empty
+// keyframes contribute 0.
+
+// ---- formatting helpers ----------------------------------------------------
+
+function isNum(v) {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+// Yen with thousands separators.
+function yen(v, decimals = 0) {
+  if (!isNum(v)) return '—';
+  const fixed = v.toFixed(decimals);
+  const [intPart, frac] = fixed.split('.');
+  const sign = intPart.startsWith('-') ? '-' : '';
+  const digits = sign ? intPart.slice(1) : intPart;
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return '¥' + sign + grouped + (frac ? '.' + frac : '');
+}
+
+function pct(v, decimals = 0) {
+  if (!isNum(v)) return '—';
+  // completion_rate / utilization may arrive as fraction (0–1) or already %.
+  const scaled = Math.abs(v) <= 1.0 ? v * 100 : v;
+  return scaled.toFixed(decimals) + '%';
+}
+
+function num(v, decimals = 0) {
+  if (!isNum(v)) return '—';
+  return v.toFixed(decimals);
+}
+
+function minutes(seconds, decimals = 1) {
+  if (!isNum(seconds)) return '—';
+  return (seconds / 60).toFixed(decimals) + '分';
+}
+
+// Headcount: explicit `headcount`, else sum of staffing counts.
+function headcountOf(k) {
+  if (isNum(k.headcount)) return k.headcount;
+  const parts = [k.n_pickers, k.n_packers, k.n_agvs].filter(isNum);
+  if (!parts.length) return null;
+  return parts.reduce((a, b) => a + b, 0);
+}
+
+// completion_rate as a fraction (0–1) if derivable, else null.
+function completionFraction(k) {
+  if (isNum(k.completion_rate)) return Math.abs(k.completion_rate) <= 1 ? k.completion_rate : k.completion_rate / 100;
+  if (isNum(k.orders_completed) && isNum(k.orders_arrived) && k.orders_arrived > 0) {
+    return k.orders_completed / k.orders_arrived;
+  }
+  return null;
+}
+
+// ---- CSV building -----------------------------------------------------------
+
+// Quote a CSV field per RFC 4180 when it contains comma/quote/newline.
+function csvField(v) {
+  const s = v == null ? '' : String(v);
+  if (/[",\n\r]/.test(s)) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function csvRow(cells) {
+  return cells.map(csvField).join(',');
+}
+
+// Manhattan distance between two keyframes [t,x,y,state].
+function manhattan(a, b) {
+  const ax = isNum(a && a[1]) ? a[1] : 0;
+  const ay = isNum(a && a[2]) ? a[2] : 0;
+  const bx = isNum(b && b[1]) ? b[1] : 0;
+  const by = isNum(b && b[2]) ? b[2] : 0;
+  return Math.abs(bx - ax) + Math.abs(by - ay);
+}
+
+// Per-mover flow-line stats from a list of keyframes.
+function moverStats(keyframes) {
+  const kf = Array.isArray(keyframes) ? keyframes : [];
+  if (!kf.length) return { distance: 0, duration: 0, legs: 0 };
+  let distance = 0;
+  let legs = 0;
+  for (let i = 1; i < kf.length; i += 1) {
+    const d = manhattan(kf[i - 1], kf[i]);
+    if (d > 0) {
+      distance += d;
+      legs += 1;
+    }
+  }
+  const first = kf[0];
+  const last = kf[kf.length - 1];
+  const t0 = isNum(first && first[0]) ? first[0] : 0;
+  const t1 = isNum(last && last[0]) ? last[0] : 0;
+  return { distance, duration: Math.max(0, t1 - t0), legs };
+}
+
+// ---- view -------------------------------------------------------------------
+
+export class ExportView {
+  constructor(container, opts) {
+    this.container = container;
+    this.opts = opts && typeof opts === 'object' ? opts : {};
+    this.root = null;
+    this.replay = null;
+    this.pngUrl = null;
+    this._objectUrls = [];
+    this._reqToken = 0;
+    this.refresh();
+  }
+
+  _projectName() {
+    try {
+      const fn = this.opts.getProjectName;
+      const n = typeof fn === 'function' ? fn() : null;
+      return (typeof n === 'string' && n.trim()) ? n.trim() : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  refresh() {
+    const name = this._projectName();
+    const token = (this._reqToken += 1);
+
+    this._clearRoot();
+    const root = document.createElement('div');
+    root.className = 'export-view';
+    root.style.fontFamily = 'inherit';
+    root.style.color = 'var(--ink, #1f2733)';
+    this.container.appendChild(root);
+    this.root = root;
+
+    if (!name) {
+      this._renderPlaceholder('実行後にエクスポートできます。');
+      return;
+    }
+
+    this._renderLoading();
+
+    fetch(`/api/projects/${encodeURIComponent(name)}/replay`, { headers: { Accept: 'application/json' } })
+      .then((res) => {
+        if (!res.ok) throw new Error('no-run');
+        return res.json();
+      })
+      .then((replay) => {
+        if (token !== this._reqToken) return; // superseded by a newer refresh
+        this.replay = replay && typeof replay === 'object' ? replay : {};
+        this.pngUrl = `/api/projects/${encodeURIComponent(name)}/png`;
+        this._render(name);
+      })
+      .catch(() => {
+        if (token !== this._reqToken) return;
+        this.replay = null;
+        this._renderPlaceholder('実行後にエクスポートできます。');
+      });
+  }
+
+  _clearRoot() {
+    if (this.root && this.root.parentNode === this.container) {
+      this.container.removeChild(this.root);
+    }
+    this.root = null;
+    this._revokeUrls();
+  }
+
+  _revokeUrls() {
+    this._objectUrls.forEach((u) => {
+      try { URL.revokeObjectURL(u); } catch (_e) { /* ignore */ }
+    });
+    this._objectUrls = [];
+  }
+
+  _renderPlaceholder(message) {
+    const p = document.createElement('p');
+    p.className = 'export-empty';
+    p.style.color = 'var(--muted, #6b7785)';
+    p.style.padding = '16px';
+    p.textContent = message;
+    this.root.appendChild(p);
+  }
+
+  _renderLoading() {
+    const p = document.createElement('p');
+    p.className = 'export-loading';
+    p.style.color = 'var(--muted, #6b7785)';
+    p.style.padding = '16px';
+    p.textContent = '読み込み中…';
+    this.root.appendChild(p);
+  }
+
+  _render(name) {
+    // Clear loading text but keep root.
+    this.root.textContent = '';
+    this.root.appendChild(this._buildToolbar(name));
+    this.root.appendChild(this._buildProposal(name));
+  }
+
+  // ---- toolbar ----
+
+  _buildToolbar(name) {
+    const bar = document.createElement('div');
+    bar.className = 'export-toolbar';
+    bar.style.display = 'flex';
+    bar.style.flexWrap = 'wrap';
+    bar.style.gap = '8px';
+    bar.style.margin = '4px 0 14px';
+
+    const mk = (label, handler) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'export-btn';
+      btn.textContent = label;
+      btn.style.cursor = 'pointer';
+      btn.style.padding = '8px 14px';
+      btn.style.fontSize = '13px';
+      btn.style.fontWeight = '600';
+      btn.style.color = '#fff';
+      btn.style.background = 'var(--brand, #08519c)';
+      btn.style.border = '1px solid var(--brand, #08519c)';
+      btn.style.borderRadius = '8px';
+      btn.addEventListener('click', handler);
+      return btn;
+    };
+
+    bar.appendChild(mk('KPIをCSV出力', () => this._downloadKpiCsv(name)));
+    bar.appendChild(mk('動線一覧をCSV出力', () => this._downloadRoutesCsv(name)));
+
+    const printBtn = mk('提案書を印刷/PDF', () => { try { window.print(); } catch (_e) { /* ignore */ } });
+    printBtn.classList.add('export-no-print');
+    printBtn.style.background = 'transparent';
+    printBtn.style.color = 'var(--brand, #08519c)';
+    bar.appendChild(printBtn);
+
+    // Hide the toolbar when printing.
+    bar.classList.add('export-no-print');
+    return bar;
+  }
+
+  // ---- KPI CSV ----
+
+  _kpiRows() {
+    const k = (this.replay && this.replay.kpis && typeof this.replay.kpis === 'object') ? this.replay.kpis : {};
+    const compFrac = completionFraction(k);
+    const rows = [
+      ['判定', (typeof k.verdict === 'string' && k.verdict) ? k.verdict : '—'],
+      ['需要対応', k.can_handle_demand === true ? '可' : (k.can_handle_demand === false ? '不可' : '—')],
+      ['スループット(件/時)', isNum(k.throughput_per_hr) ? num(k.throughput_per_hr, 1) : '—'],
+      ['出荷完了数(件)', isNum(k.orders_completed) ? num(k.orders_completed, 0) : '—'],
+      ['受注数(件)', isNum(k.orders_arrived) ? num(k.orders_arrived, 0) : '—'],
+      ['出荷完了率(%)', compFrac != null ? (compFrac * 100).toFixed(1) : '—'],
+      ['ボトルネック工程', (typeof k.bottleneck_jp === 'string' && k.bottleneck_jp) ? k.bottleneck_jp : '—'],
+      ['ボトルネック稼働率(%)', isNum(k.bottleneck_utilization) ? pctVal(k.bottleneck_utilization, 1) : '—'],
+      ['ピッカー稼働率(%)', isNum(k.picker_utilization) ? pctVal(k.picker_utilization, 1) : '—'],
+      ['梱包稼働率(%)', isNum(k.packer_utilization) ? pctVal(k.packer_utilization, 1) : '—'],
+      ['AGV稼働率(%)', isNum(k.agv_utilization) ? pctVal(k.agv_utilization, 1) : '—'],
+      ['ピッカー数(名)', isNum(k.n_pickers) ? num(k.n_pickers, 0) : '—'],
+      ['梱包員数(名)', isNum(k.n_packers) ? num(k.n_packers, 0) : '—'],
+      ['AGV台数(台)', isNum(k.n_agvs) ? num(k.n_agvs, 0) : '—'],
+      ['必要人員(名)', isNum(headcountOf(k)) ? num(headcountOf(k), 0) : '—'],
+      ['サイクル中央値(秒)', isNum(k.cycle_p50_s) ? num(k.cycle_p50_s, 1) : '—'],
+      ['サイクル95%ile(秒)', isNum(k.cycle_p95_s) ? num(k.cycle_p95_s, 1) : '—'],
+      ['1件あたり歩行(m)', isNum(k.walk_per_order_m) ? num(k.walk_per_order_m, 1) : '—'],
+      ['1件あたりコスト(円)', isNum(k.total_cost_per_order) ? num(k.total_cost_per_order, 1) : '—'],
+      ['月間コスト(円)', isNum(k.monthly_cost) ? num(k.monthly_cost, 0) : '—'],
+      ['人件費単価(円/人時)', isNum(k.labour_rate_per_hr) ? num(k.labour_rate_per_hr, 0) : '—'],
+      ['初期投資(円)', isNum(k.capex_total) ? num(k.capex_total, 0) : '—'],
+    ];
+    return rows;
+  }
+
+  _downloadKpiCsv(name) {
+    const lines = ['項目,値'];
+    this._kpiRows().forEach((r) => { lines.push(csvRow(r)); });
+    this._triggerDownload(lines.join('\r\n'), `${name}_kpi.csv`);
+  }
+
+  // ---- 動線一覧 CSV ----
+
+  _routeData() {
+    const r = this.replay || {};
+    const workers = Array.isArray(r.workers) ? r.workers : [];
+    const agvs = Array.isArray(r.agvs) ? r.agvs : [];
+    const rows = [];
+    let tDist = 0;
+    let tDur = 0;
+    let tLegs = 0;
+
+    const collect = (list, kindJp, prefix) => {
+      list.forEach((m, i) => {
+        const mm = m && typeof m === 'object' ? m : {};
+        const id = (mm.id != null && mm.id !== '') ? String(mm.id) : `${prefix}${i + 1}`;
+        const s = moverStats(mm.keyframes);
+        tDist += s.distance;
+        tDur = Math.max(tDur, s.duration);
+        tLegs += s.legs;
+        rows.push([id, kindJp, s.distance.toFixed(1), s.duration.toFixed(1), String(s.legs)]);
+      });
+    };
+
+    collect(workers, '作業員', 'W');
+    collect(agvs, 'AGV', 'A');
+    return { rows, total: { tDist, tDur, tLegs } };
+  }
+
+  _downloadRoutesCsv(name) {
+    const { rows, total } = this._routeData();
+    const lines = ['ID,種別,総移動距離(m),移動時間(秒),移動回数'];
+    rows.forEach((r) => { lines.push(csvRow(r)); });
+    lines.push(csvRow(['合計', '', total.tDist.toFixed(1), total.tDur.toFixed(1), String(total.tLegs)]));
+    this._triggerDownload(lines.join('\r\n'), `${name}_routes.csv`);
+  }
+
+  // ---- download plumbing ----
+
+  _triggerDownload(text, filename) {
+    // UTF-8 BOM so Excel renders Japanese correctly.
+    const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Defer revocation so the download can start.
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_e) { /* ignore */ } }, 4000);
+  }
+
+  // ---- 提案書 preview ----
+
+  _buildProposal(name) {
+    const r = this.replay || {};
+    const meta = (r.meta && typeof r.meta === 'object') ? r.meta : {};
+    const k = (r.kpis && typeof r.kpis === 'object') ? r.kpis : {};
+
+    const sheet = document.createElement('section');
+    sheet.className = 'export-proposal proposal-sheet';
+    sheet.style.background = '#fff';
+    sheet.style.color = '#1f2733';
+    sheet.style.maxWidth = '794px'; // ~A4 at 96dpi
+    sheet.style.margin = '0 auto';
+    sheet.style.padding = '28px 32px';
+    sheet.style.border = '1px solid var(--line, #e3e8ee)';
+    sheet.style.borderRadius = '10px';
+    sheet.style.boxShadow = '0 1px 4px rgba(0,0,0,.06)';
+
+    // Title
+    const whName = (typeof meta.name === 'string' && meta.name.trim()) ? meta.name.trim() : name;
+    const title = document.createElement('h1');
+    title.className = 'proposal-title';
+    title.textContent = `${whName} 倉庫運用 提案書`;
+    title.style.fontSize = '22px';
+    title.style.fontWeight = '700';
+    title.style.margin = '0 0 6px';
+    sheet.appendChild(title);
+
+    const sub = document.createElement('p');
+    sub.className = 'proposal-subtitle';
+    sub.style.fontSize = '12px';
+    sub.style.color = 'var(--muted, #6b7785)';
+    sub.style.margin = '0 0 16px';
+    const dur = isNum(meta.duration_s) ? `シミュレーション ${(meta.duration_s / 3600).toFixed(1)}時間相当` : '';
+    sub.textContent = dur;
+    sheet.appendChild(sub);
+
+    // Verdict headline
+    const verdict = document.createElement('div');
+    verdict.className = 'proposal-verdict';
+    const ok = k.can_handle_demand;
+    const good = ok === true || (ok == null && false);
+    const bad = ok === false;
+    verdict.textContent = (typeof k.verdict === 'string' && k.verdict) ? k.verdict : '—';
+    verdict.style.fontSize = '17px';
+    verdict.style.fontWeight = '700';
+    verdict.style.padding = '12px 14px';
+    verdict.style.borderRadius = '8px';
+    verdict.style.margin = '0 0 18px';
+    if (bad) {
+      verdict.style.color = 'var(--bad, #b30000)';
+      verdict.style.background = 'rgba(179,0,0,.07)';
+      verdict.style.border = '1px solid rgba(179,0,0,.25)';
+    } else if (good) {
+      verdict.style.color = 'var(--ok, #1a7a3c)';
+      verdict.style.background = 'rgba(26,122,60,.07)';
+      verdict.style.border = '1px solid rgba(26,122,60,.25)';
+    } else {
+      verdict.style.color = 'var(--ink, #1f2733)';
+      verdict.style.background = 'var(--surface, #f5f7fa)';
+      verdict.style.border = '1px solid var(--line, #e3e8ee)';
+    }
+    sheet.appendChild(verdict);
+
+    // KPI summary table
+    sheet.appendChild(this._buildSummaryTable(k));
+
+    // Proposal PNG
+    if (this.pngUrl) {
+      const fig = document.createElement('figure');
+      fig.className = 'proposal-figure';
+      fig.style.margin = '20px 0 0';
+      const img = document.createElement('img');
+      img.className = 'proposal-image';
+      img.src = this.pngUrl;
+      img.alt = `${whName} の提案図`;
+      img.style.maxWidth = '100%';
+      img.style.display = 'block';
+      img.style.border = '1px solid var(--line, #e3e8ee)';
+      img.style.borderRadius = '6px';
+      img.addEventListener('error', () => { fig.style.display = 'none'; });
+      fig.appendChild(img);
+      sheet.appendChild(fig);
+    }
+
+    // Footer assumptions
+    const footer = document.createElement('p');
+    footer.className = 'proposal-footer';
+    footer.style.fontSize = '11px';
+    footer.style.color = 'var(--muted, #6b7785)';
+    footer.style.marginTop = '18px';
+    footer.style.paddingTop = '10px';
+    footer.style.borderTop = '1px solid var(--line, #e3e8ee)';
+    const labour = isNum(k.labour_rate_per_hr) ? yen(k.labour_rate_per_hr, 0) + '/人時' : '—';
+    const capex = isNum(k.capex_total) ? yen(k.capex_total, 0) : '—';
+    footer.textContent = `前提: 人件費 ${labour}、AGV投資 ${capex}。本提案書はシミュレーション結果に基づく試算です。`;
+    sheet.appendChild(footer);
+
+    return sheet;
+  }
+
+  _buildSummaryTable(k) {
+    const compFrac = completionFraction(k);
+    const bnName = (typeof k.bottleneck_jp === 'string' && k.bottleneck_jp) ? k.bottleneck_jp : null;
+    const bnUtil = isNum(k.bottleneck_utilization) ? pct(k.bottleneck_utilization, 0) : null;
+    const hc = headcountOf(k);
+
+    const items = [
+      ['スループット', isNum(k.throughput_per_hr) ? num(k.throughput_per_hr, 1) + ' 件/時' : '—'],
+      ['出荷完了率', compFrac != null ? pct(compFrac, 1) : '—'],
+      ['ボトルネック', bnName ? (bnName + (bnUtil ? ' ' + bnUtil : '')) : '—'],
+      ['必要人員', isNum(hc) ? num(hc, 0) + ' 名' : '—'],
+      ['1件あたりコスト', yen(k.total_cost_per_order, 1)],
+      ['月間コスト', yen(k.monthly_cost, 0)],
+    ];
+    if (isNum(k.payback_months) && k.payback_months > 0) {
+      items.push(['投資回収', num(k.payback_months, 1) + ' ヶ月']);
+    }
+
+    const table = document.createElement('table');
+    table.className = 'proposal-kpis';
+    table.style.borderCollapse = 'collapse';
+    table.style.width = '100%';
+    table.style.fontSize = '13px';
+
+    const tbody = document.createElement('tbody');
+    items.forEach(([label, value]) => {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.scope = 'row';
+      th.textContent = label;
+      th.style.textAlign = 'left';
+      th.style.fontWeight = '600';
+      th.style.padding = '8px 12px';
+      th.style.width = '40%';
+      th.style.background = 'var(--surface, #f5f7fa)';
+      th.style.border = '1px solid var(--line, #e3e8ee)';
+      const td = document.createElement('td');
+      td.textContent = value;
+      td.style.textAlign = 'right';
+      td.style.padding = '8px 12px';
+      td.style.fontWeight = '700';
+      td.style.border = '1px solid var(--line, #e3e8ee)';
+      tr.appendChild(th);
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  dispose() {
+    this._reqToken += 1; // invalidate any in-flight fetch
+    this._clearRoot();
+    this.replay = null;
+    this.pngUrl = null;
+    this.container = null;
+  }
+}
+
+// Utility kept outside the class: percent value as a bare number string
+// (no % sign) for CSV cells. Accepts fraction or already-% input.
+function pctVal(v, decimals = 1) {
+  if (!isNum(v)) return '—';
+  const scaled = Math.abs(v) <= 1.0 ? v * 100 : v;
+  return scaled.toFixed(decimals);
+}

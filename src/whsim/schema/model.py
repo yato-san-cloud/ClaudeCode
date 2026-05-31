@@ -61,9 +61,29 @@ class Zone(BaseModel):
     rack: RackFill | None = None  # storage zones only; None => not auto-racked
 
 
+class Wall(BaseModel):
+    """A building wall segment (躯体). Points are a polyline in meters."""
+
+    id: str = "w"
+    points: list[list[float]] = Field(default_factory=list)  # [[x,y], ...]
+    thickness: float = 0.2
+
+
+class Door(BaseModel):
+    """A door / dock opening on the building shell."""
+
+    id: str = "d"
+    type: Literal["dock", "personnel", "shutter"] = "dock"
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 3.0
+
+
 class Layout(BaseModel):
     bounds: Bounds = Field(default_factory=Bounds)
     zones: list[Zone] = Field(default_factory=list)
+    walls: list[Wall] = Field(default_factory=list)
+    doors: list[Door] = Field(default_factory=list)
 
 
 class Location(BaseModel):
@@ -136,7 +156,7 @@ class WorkerGroup(BaseModel):
 
 class Equipment(BaseModel):
     id: str
-    type: Literal["agv", "forklift", "asrs"] = "agv"
+    type: Literal["agv", "forklift", "asrs", "robot_arm", "crane"] = "agv"
     count: int = 0
     speed_mps: float = 1.6
     capacity: int = 1

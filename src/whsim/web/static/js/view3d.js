@@ -29,6 +29,48 @@ const AGV_COLOR = {
 // Height (m) at which AGV boxes ride, centered on their thin body.
 const AGV_Y = 0.2;
 
+// Render / art presets. Each tweaks background, fog, light intensities/colors
+// and tone-mapping exposure ONLY — never static geometry. See setPreset().
+const PRESETS = {
+  natural: {
+    background: 0xeef1f5, fogColor: 0xeef1f5,
+    hemiSky: 0xffffff, hemiGround: 0xb7c0cc, hemiInt: 0.85,
+    ambient: 0xffffff, ambientInt: 0.25,
+    dirColor: 0xfff4e6, dirInt: 0.85,
+    exposure: 1.05, rackEmissive: 0.06,
+  },
+  evening: {
+    background: 0x2e2438, fogColor: 0x3a2c44,
+    hemiSky: 0xffd9a0, hemiGround: 0x40303a, hemiInt: 0.55,
+    ambient: 0xffe0b0, ambientInt: 0.18,
+    dirColor: 0xff9d4d, dirInt: 1.15,
+    exposure: 1.15, rackEmissive: 0.1,
+  },
+  night: {
+    background: 0x0a1020, fogColor: 0x0c1426,
+    hemiSky: 0x4a6080, hemiGround: 0x05080f, hemiInt: 0.4,
+    ambient: 0x2a3a55, ambientInt: 0.22,
+    dirColor: 0xbcd0ff, dirInt: 0.6,
+    exposure: 0.95, rackEmissive: 0.35,
+  },
+  mono: {
+    background: 0xdfe4ea, fogColor: 0xdfe4ea,
+    hemiSky: 0xf2f4f7, hemiGround: 0xaeb6c2, hemiInt: 0.95,
+    ambient: 0xc8d0da, ambientInt: 0.45,
+    dirColor: 0xc3ccda, dirInt: 0.55,
+    exposure: 1.0, rackEmissive: 0.0,
+  },
+};
+
+// Equipment type -> base color (placed/static equipment models).
+const EQUIP_COLOR = {
+  agv:       0x3949ab,
+  forklift:  0xf57c00,
+  asrs:      0x8d949c,
+  robot_arm: 0x9aa3ad,
+  crane:     0x424a52,
+};
+
 // Sample [t, x, y, state] from a worker's sorted keyframe array (see spec).
 function sampleKeyframes(keyframes, t) {
   if (!keyframes || keyframes.length === 0) return { x: 0, y: 0, state: 'idle' };
@@ -63,6 +105,8 @@ export class Scene3D {
     this._materials = [];
     this._workers = []; // { mesh, keyframes }
     this._agvs = [];    // { mesh, keyframes }
+    this._rackMaterials = []; // rack mats (preset tweaks their emissiveIntensity)
+    this._preset = 'natural';
 
     const meta = this.replay.meta || {};
     const bounds = meta.bounds || { width: 20, depth: 20 };
@@ -86,7 +130,8 @@ export class Scene3D {
     // Scene + camera.
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xeef1f5);
-    // Gentle distance fog keeps the far edge of large floors soft.
+    // Gentle distance fog keeps the far edge of large floors soft. The actual
+    // colors/exposure are set by applyPreset(); near/far distances are fixed.
     const fogStart = Math.max(this.bounds.width, this.bounds.depth) * 2.0;
     this.scene.fog = new THREE.Fog(0xeef1f5, fogStart, fogStart * 2.5);
 
@@ -103,12 +148,17 @@ export class Scene3D {
 
     this._buildLights();
     this._buildFloor();
+    this._buildShell();
     this._buildZones();
     this._buildRacks();
     this._buildStations();
     this._buildConveyors();
+    this._buildEquipment();
     this._buildWorkers();
     this._buildAgvs();
+
+    // Apply the default art preset (mutates lights/renderer/scene only).
+    this.setPreset(this._preset);
 
     this._loop = this._loop.bind(this);
     this._raf = requestAnimationFrame(this._loop);
@@ -122,18 +172,22 @@ export class Scene3D {
 
   _buildLights() {
     const span = Math.max(this.bounds.width, this.bounds.depth);
-    // Sky/ground hemisphere for soft, even ambient fill.
+    // Sky/ground hemisphere for soft, even ambient fill. Refs kept for presets.
     const hemi = new THREE.HemisphereLight(0xffffff, 0xb7c0cc, 0.85);
     hemi.position.set(this.bounds.width / 2, span, this.bounds.depth / 2);
     this.scene.add(hemi);
+    this._hemi = hemi;
     // A touch of pure ambient so shadowed sides never go fully flat-dark.
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+    const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+    this.scene.add(ambient);
+    this._ambient = ambient;
     // Key directional light, slightly warm, angled across the floor.
     const dir = new THREE.DirectionalLight(0xfff4e6, 0.85);
     dir.position.set(this.bounds.width * 0.8, span * 1.3, this.bounds.depth * 0.3);
     dir.target.position.set(this.bounds.width / 2, 0, this.bounds.depth / 2);
     this.scene.add(dir);
     this.scene.add(dir.target);
+    this._dir = dir;
   }
 
   _buildFloor() {
@@ -192,6 +246,7 @@ export class Scene3D {
       mesh.position.set(r.x || 0, 0.6, r.y || 0);
       this.scene.add(mesh);
       this._materials.push(mat);
+      this._rackMaterials.push(mat); // preset adjusts emissiveIntensity (night glow)
     }
   }
 
@@ -243,6 +298,263 @@ export class Scene3D {
         this._track(geom, mat);
       }
     }
+  }
+
+  // -- Building shell --------------------------------------------------------
+  // Walls: thin tall boxes along each polyline segment. Doors: short colored
+  // frame markers. Both defensive against missing/empty arrays.
+  _buildShell() {
+    this._buildWalls();
+    this._buildDoors();
+  }
+
+  _buildWalls() {
+    const walls = this.replay.walls || [];
+    if (walls.length === 0) return;
+    const WALL_H = 3.0;     // wall height (m)
+    const DEFAULT_T = 0.2;  // default wall thickness (m)
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xd6d9dd, roughness: 0.9, metalness: 0.02,
+    });
+    this._materials.push(mat);
+    for (const wall of walls) {
+      const pts = wall.points || [];
+      const t = wall.thickness > 0 ? wall.thickness : DEFAULT_T;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i];
+        const p1 = pts[i + 1];
+        if (!p0 || !p1) continue;
+        const dx = (p1[0] || 0) - (p0[0] || 0);
+        const dz = (p1[1] || 0) - (p0[1] || 0);
+        const len = Math.hypot(dx, dz);
+        if (len <= 0) continue;
+        // Local X = segment length; thin in Z; rotate about Y to align.
+        const geom = new THREE.BoxGeometry(len, WALL_H, t);
+        this._geometries.push(geom);
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.set(
+          (p0[0] || 0) + dx / 2, WALL_H / 2, (p0[1] || 0) + dz / 2,
+        );
+        mesh.rotation.y = -Math.atan2(dz, dx);
+        this.scene.add(mesh);
+      }
+    }
+  }
+
+  _buildDoors() {
+    const doors = this.replay.doors || [];
+    if (doors.length === 0) return;
+    const DOOR_COLOR = { dock: 0x1f78b4, personnel: 0x33a02c, shutter: 0x9aa3ad };
+    const DOOR_H = 2.6;  // door frame height (m)
+    const FRAME_T = 0.12;
+    for (const d of doors) {
+      const w = d.w > 0 ? d.w : 1.5;
+      const color = DOOR_COLOR[d.type] !== undefined ? DOOR_COLOR[d.type] : DOOR_COLOR.shutter;
+      const mat = new THREE.MeshStandardMaterial({
+        color, roughness: 0.5, metalness: 0.15,
+        emissive: new THREE.Color(color), emissiveIntensity: 0.25,
+      });
+      this._materials.push(mat);
+      // A thin slab marking the door opening: wide as the door, full height.
+      const geom = new THREE.BoxGeometry(w, DOOR_H, FRAME_T);
+      this._geometries.push(geom);
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.position.set(d.x || 0, DOOR_H / 2, d.y || 0);
+      this.scene.add(mesh);
+    }
+  }
+
+  // -- Placed equipment models ----------------------------------------------
+  // Static, recognizable primitive composites at (x, 0, y). Distinct from the
+  // moving AGV agents in replay.agvs. Each model is one THREE.Group.
+  _buildEquipment() {
+    const equipment = this.replay.equipment || [];
+    if (equipment.length === 0) return;
+    for (const e of equipment) {
+      const x = e.x || 0;
+      const y = e.y || 0;
+      const base = EQUIP_COLOR[e.type] !== undefined ? EQUIP_COLOR[e.type] : 0x8d949c;
+      const mat = new THREE.MeshStandardMaterial({
+        color: base, roughness: 0.55, metalness: 0.35,
+      });
+      this._materials.push(mat);
+      let group;
+      switch (e.type) {
+        case 'forklift':  group = this._makeForklift(mat); break;
+        case 'asrs':      group = this._makeAsrs(mat); break;
+        case 'robot_arm': group = this._makeRobotArm(mat); break;
+        case 'crane':     group = this._makeCrane(mat); break;
+        case 'agv':       group = this._makeDock(mat); break;
+        default:          group = this._makeDock(mat); break;
+      }
+      group.position.set(x, 0, y);
+      this.scene.add(group);
+    }
+  }
+
+  // Small body box + two fork prongs + a vertical mast (orange via mat).
+  _makeForklift(mat) {
+    const g = new THREE.Group();
+    const body = new THREE.BoxGeometry(1.0, 0.7, 1.6);
+    this._geometries.push(body);
+    const bodyMesh = new THREE.Mesh(body, mat);
+    bodyMesh.position.set(0, 0.55, 0);
+    g.add(bodyMesh);
+    // Vertical mast at the front.
+    const mast = new THREE.BoxGeometry(0.8, 1.8, 0.12);
+    this._geometries.push(mast);
+    const mastMesh = new THREE.Mesh(mast, mat);
+    mastMesh.position.set(0, 1.0, 0.9);
+    g.add(mastMesh);
+    // Two fork prongs sticking out forward at floor level.
+    const prong = new THREE.BoxGeometry(0.12, 0.08, 1.0);
+    this._geometries.push(prong);
+    for (const dx of [-0.25, 0.25]) {
+      const p = new THREE.Mesh(prong, mat);
+      p.position.set(dx, 0.1, 1.4);
+      g.add(p);
+    }
+    return g;
+  }
+
+  // 自動倉庫: tall multi-level rack tower (gray), taller than normal racks,
+  // with horizontal shelf lines.
+  _makeAsrs(mat) {
+    const g = new THREE.Group();
+    const H = 6.0;
+    const tower = new THREE.BoxGeometry(2.4, H, 1.6);
+    this._geometries.push(tower);
+    const towerMesh = new THREE.Mesh(tower, mat);
+    towerMesh.position.set(0, H / 2, 0);
+    g.add(towerMesh);
+    // Horizontal shelf lines: thin darker slabs banding the tower.
+    const shelfMat = new THREE.MeshStandardMaterial({
+      color: 0x5a6068, roughness: 0.6, metalness: 0.3,
+    });
+    this._materials.push(shelfMat);
+    const shelf = new THREE.BoxGeometry(2.5, 0.08, 1.7);
+    this._geometries.push(shelf);
+    const levels = 6;
+    for (let i = 1; i < levels; i++) {
+      const s = new THREE.Mesh(shelf, shelfMat);
+      s.position.set(0, (H / levels) * i, 0);
+      g.add(s);
+    }
+    return g;
+  }
+
+  // Base cylinder + 2 jointed arm segments (boxes) angled up (metallic).
+  _makeRobotArm(mat) {
+    const g = new THREE.Group();
+    const base = new THREE.CylinderGeometry(0.6, 0.7, 0.5, 16);
+    this._geometries.push(base);
+    const baseMesh = new THREE.Mesh(base, mat);
+    baseMesh.position.set(0, 0.25, 0);
+    g.add(baseMesh);
+    // First segment: rises from the base, tilted back.
+    const seg1 = new THREE.BoxGeometry(0.25, 1.8, 0.25);
+    this._geometries.push(seg1);
+    const s1 = new THREE.Mesh(seg1, mat);
+    s1.position.set(0, 1.3, 0);
+    s1.rotation.z = 0.35;
+    g.add(s1);
+    // Second segment: jointed off the top of the first, angled forward.
+    const seg2 = new THREE.BoxGeometry(0.2, 1.4, 0.2);
+    this._geometries.push(seg2);
+    const s2 = new THREE.Mesh(seg2, mat);
+    s2.position.set(-0.55, 2.25, 0.45);
+    s2.rotation.z = -0.6;
+    s2.rotation.x = 0.4;
+    g.add(s2);
+    return g;
+  }
+
+  // ホイストクレーン: overhead gantry beam on two legs spanning a few meters.
+  _makeCrane(mat) {
+    const g = new THREE.Group();
+    const SPAN = 5.0;   // beam length (m)
+    const LEG_H = 4.0;  // leg height (m)
+    // Two legs at the ends of the span.
+    const leg = new THREE.BoxGeometry(0.3, LEG_H, 0.3);
+    this._geometries.push(leg);
+    for (const dx of [-SPAN / 2, SPAN / 2]) {
+      const l = new THREE.Mesh(leg, mat);
+      l.position.set(dx, LEG_H / 2, 0);
+      g.add(l);
+    }
+    // Overhead beam spanning the legs.
+    const beam = new THREE.BoxGeometry(SPAN + 0.3, 0.4, 0.5);
+    this._geometries.push(beam);
+    const beamMesh = new THREE.Mesh(beam, mat);
+    beamMesh.position.set(0, LEG_H, 0);
+    g.add(beamMesh);
+    // A hoist block hanging from the beam.
+    const hoist = new THREE.BoxGeometry(0.5, 0.6, 0.5);
+    this._geometries.push(hoist);
+    const h = new THREE.Mesh(hoist, mat);
+    h.position.set(0, LEG_H - 0.8, 0);
+    g.add(h);
+    return g;
+  }
+
+  // Placed AGV dock: a low charging-dock pad with a small upright marker.
+  _makeDock(mat) {
+    const g = new THREE.Group();
+    const pad = new THREE.BoxGeometry(1.6, 0.12, 1.6);
+    this._geometries.push(pad);
+    const padMesh = new THREE.Mesh(pad, mat);
+    padMesh.position.set(0, 0.06, 0);
+    g.add(padMesh);
+    // Upright charging post at the back edge.
+    const post = new THREE.BoxGeometry(0.2, 0.8, 0.2);
+    this._geometries.push(post);
+    const postMesh = new THREE.Mesh(post, mat);
+    postMesh.position.set(0, 0.4, -0.7);
+    g.add(postMesh);
+    return g;
+  }
+
+  // -- Render / art presets --------------------------------------------------
+  // Adjust background, fog color, light intensities/colors, rack emissive glow,
+  // and tone-mapping exposure ONLY. Never rebuilds static geometry.
+  setPreset(name) {
+    const p = PRESETS[name] || PRESETS.natural;
+    this._preset = PRESETS[name] ? name : 'natural';
+    if (this.scene) {
+      if (this.scene.background && this.scene.background.set) {
+        this.scene.background.set(p.background);
+      } else {
+        this.scene.background = new THREE.Color(p.background);
+      }
+      if (this.scene.fog && this.scene.fog.color) {
+        this.scene.fog.color.set(p.fogColor);
+      }
+    }
+    if (this._hemi) {
+      this._hemi.color.set(p.hemiSky);
+      this._hemi.groundColor.set(p.hemiGround);
+      this._hemi.intensity = p.hemiInt;
+    }
+    if (this._ambient) {
+      this._ambient.color.set(p.ambient);
+      this._ambient.intensity = p.ambientInt;
+    }
+    if (this._dir) {
+      this._dir.color.set(p.dirColor);
+      this._dir.intensity = p.dirInt;
+    }
+    if (this.renderer) {
+      this.renderer.toneMappingExposure = p.exposure;
+    }
+    // Rack emissive glow: subtle by day, strong at night.
+    for (const m of this._rackMaterials) {
+      if (m) m.emissiveIntensity = p.rackEmissive;
+    }
+  }
+
+  // Currently active preset name.
+  getPreset() {
+    return this._preset;
   }
 
   _buildWorkers() {
@@ -331,6 +643,7 @@ export class Scene3D {
     this._materials = [];
     this._workers = [];
     this._agvs = [];
+    this._rackMaterials = [];
     if (this.renderer) {
       this.renderer.dispose();
       const el = this.renderer.domElement;

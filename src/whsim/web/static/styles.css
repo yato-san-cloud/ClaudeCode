@@ -747,3 +747,16 @@ input[type="range"]::-moz-range-track {
 .compare-better { color: var(--ok); }
 .compare-worse { color: var(--bad); }
 .compare-headline td { font-size: 16px; font-weight: 800; background: var(--accent-soft); }
+
+/* ---------- 3D preset control + export panel (integration) ---------- */
+.preset-ctl { margin-left: auto; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); }
+.preset-ctl select { padding: 5px 8px; }
+#export { flex-direction: column; overflow: auto; gap: 12px; padding: 4px; }
+.export-toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.proposal-block { background: #fff; color: #1b2330; padding: 20px; border-radius: 10px;
+  border: 1px solid var(--line); max-width: 900px; }
+@media print {
+  header, .sidebar, .tabs, .transport, .kpibar, .export-toolbar { display: none !important; }
+  .proposal-block { border: none; max-width: none; }
+}

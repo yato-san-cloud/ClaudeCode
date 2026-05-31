@@ -55,6 +55,15 @@
         <button data-tab="view3d" class="tab">3D</button>
         <button data-tab="viewpng" class="tab">提案PNG</button>
         <button data-tab="compare" class="tab">比較</button>
+        <button data-tab="export" class="tab">エクスポート</button>
+        <label class="preset-ctl" title="3D表現">3D表現
+          <select id="presetSelect">
+            <option value="natural">ナチュラル</option>
+            <option value="evening">夕</option>
+            <option value="night">夜</option>
+            <option value="mono">モノ</option>
+          </select>
+        </label>
       </div>
 
       <div class="stage">
@@ -73,6 +82,7 @@
           </div>
           <div id="compareView"></div>
         </div>
+        <div id="export" class="panel"></div>
 
         <div class="transport">
           <button id="playBtn">⏸</button>
