@@ -35,6 +35,19 @@ pip install -e ".[dev,web]"
 whsim serve                               # http://127.0.0.1:8000
 ```
 
+### Windows（ワンクリック起動）
+
+リポジトリ直下の **`start.bat` をダブルクリック**するだけ。初回は依存を自動インストールし、
+サーバ起動後にブラウザで http://127.0.0.1:8000 を開きます（停止は Ctrl+C）。
+手動で起動する場合（`whsim` が PATH に無い時）：
+
+```bat
+python -m pip install -e ".[web,docs]"
+python -m uvicorn whsim.web.app:app --port 8000
+```
+
+> 提案書 PNG/PPTX の日本語は、Windows の Meiryo / 游ゴシック / MS ゴシックを自動で使用します。
+
 **設計（ハーネス）→ 検証**のループで使います。テンプレから始め、「設計」画面で
 レイアウト・検証設備・作業フローをインタラクティブに編集 → （任意で）顧客ZIPを
 ドラッグ&ドロップ → 「実行」で、**作業員が動く2Dアニメーション**と**three.jsの3Dビュー**、
