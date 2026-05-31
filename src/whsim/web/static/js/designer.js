@@ -30,6 +30,21 @@ const EQUIP_PALETTE = [
   { key: 'robot_arm', label: 'ロボットアーム', type: 'robot_arm', color: '#e6550d' },
   { key: 'crane', label: 'ホイストクレーン', type: 'crane', color: '#8c564b' },
 ];
+// Layout object palette (PPT-like): pick an object, then click the floor to place it.
+//   key       — palette/brush id (also a tooltip for the cursor)
+//   label     — Japanese button label
+//   zoneType  — schema zone type to create
+//   w,h       — default footprint in meters
+//   rack      — if set, the new zone is created with this parametric rack fill
+const LAYOUT_PALETTE = [
+  { key: 'shelf_block', label: '棚ブロック', zoneType: 'storage', w: 12, h: 8,
+    rack: { col_spacing: 4, row_spacing: 3, margin: 2 } },
+  { key: 'pack_station', label: '梱包台', zoneType: 'packing', w: 6, h: 4 },
+  { key: 'receiving', label: '入荷ゾーン', zoneType: 'receiving', w: 10, h: 6 },
+  { key: 'picking', label: 'ピッキングゾーン', zoneType: 'picking', w: 10, h: 6 },
+  { key: 'shipping', label: '出荷ゾーン', zoneType: 'shipping', w: 10, h: 6 },
+  { key: 'staging', label: '一時保管ゾーン', zoneType: 'staging', w: 8, h: 5 },
+];
 // Door palette for the 躯体 (building) tool: label, schema type, marker color.
 const DOOR_PALETTE = [
   { type: 'dock', label: 'ドックドア', color: '#1f78b4' },
@@ -77,6 +92,8 @@ export class Designer {
     this.handlers = handlers || {};
     this.tool = 'layout';          // 'layout' | 'equip' | 'building' | 'flow' | 'route'
     this.selected = null;          // {kind, id} of selected canvas object
+    this.layoutBrush = null;       // active palette key in レイアウト tool (null = select/move)
+    this.showUnderlay = true;      // draw DXF walls as a faint trace underlay in レイアウト
     this.equipBrush = 'agv';       // active palette key in 設備 tool
     this.doorBrush = 'dock';       // active door type in 躯体 tool
     this.buildMode = 'wall';       // 'wall' | 'door' within the 躯体 tool
@@ -209,6 +226,7 @@ export class Designer {
   _selectTool(key) {
     this.tool = key;
     this.selected = null;
+    this.layoutBrush = null;
     this.conveyorDraft = null;
     this.wallDraft = null;
     this.routeDraft = null;
@@ -226,13 +244,30 @@ export class Designer {
     this.body.innerHTML = '';
     if (this.tool === 'flow') { this._renderFlow(); return; }
     if (this.tool === 'route') { this._renderRoute(); return; }
-    // canvas-based tools (layout / equip) share the floor view + a side panel
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
-    this.canvas = document.createElement('canvas');
-    this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:default;';
-    wrap.appendChild(this.canvas);
-    this.body.appendChild(wrap);
+    // canvas-based tools (layout / equip / building) share the floor view + a side panel.
+    // The レイアウト tool gets a control bar above the canvas (palette / underlay / inventory).
+    let canvasHost;
+    if (this.tool === 'layout') {
+      const left = document.createElement('div');
+      left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
+      this._renderLayoutBar(left);
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+      this.canvas = document.createElement('canvas');
+      this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.layoutBrush ? 'crosshair' : 'default'};`;
+      wrap.appendChild(this.canvas);
+      left.appendChild(wrap);
+      this.body.appendChild(left);
+      canvasHost = wrap;
+    } else {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+      this.canvas = document.createElement('canvas');
+      this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:default;';
+      wrap.appendChild(this.canvas);
+      this.body.appendChild(wrap);
+      canvasHost = wrap;
+    }
 
     this.side = document.createElement('div');
     this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
@@ -243,6 +278,79 @@ export class Designer {
     this._fitCanvas();
     this._renderSide();
     this._drawCanvas();
+  }
+
+  // ---- レイアウト control bar: object palette + underlay toggle + inventory ----
+  _renderLayoutBar(parent) {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;';
+
+    const palLbl = document.createElement('span');
+    palLbl.textContent = '配置:';
+    palLbl.style.cssText = 'font-size:12px;color:#6b7785;font-weight:700;';
+    bar.appendChild(palLbl);
+
+    // PPT-like object palette: click an object, then click the floor to place it.
+    for (const p of LAYOUT_PALETTE) {
+      const b = this._btn(bar, p.label, () => {
+        this.layoutBrush = (this.layoutBrush === p.key) ? null : p.key;
+        this.selected = null;
+        this._renderTool();
+      });
+      if (this.layoutBrush === p.key) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;font-weight:700;';
+    }
+
+    const spacer = document.createElement('div');
+    spacer.style.flex = '1';
+    bar.appendChild(spacer);
+
+    // DXF underlay toggle (only meaningful when walls exist, but always shown)
+    const ulLbl = document.createElement('label');
+    ulLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:#6b7785;cursor:pointer;';
+    const ulCb = document.createElement('input');
+    ulCb.type = 'checkbox';
+    ulCb.checked = !!this.showUnderlay;
+    this._on(ulCb, 'change', () => { this.showUnderlay = ulCb.checked; this._drawCanvas(); });
+    ulLbl.appendChild(ulCb);
+    ulLbl.appendChild(document.createTextNode('下地を表示'));
+    bar.appendChild(ulLbl);
+
+    // inventory assignment button (calls optional handlers.assignInventory)
+    this._btn(bar, '在庫を割付', () => this._assignInventory());
+
+    // status line for placement hint / inventory result
+    this._layoutStatus = document.createElement('span');
+    this._layoutStatus.style.cssText = 'font-size:12px;color:#6b7785;max-width:100%;flex-basis:100%;';
+    this._layoutStatus.textContent = this.layoutBrush
+      ? `「${(LAYOUT_PALETTE.find((q) => q.key === this.layoutBrush) || {}).label}」を選択中。床をクリックして配置します。`
+      : 'パレットから配置する物を選ぶか、既存のゾーンをクリックして編集します。';
+    bar.appendChild(this._layoutStatus);
+
+    parent.appendChild(bar);
+  }
+
+  // ---- 在庫を割付: call optional async handler, surface its Japanese summary ----
+  async _assignInventory() {
+    if (!this.handlers.assignInventory) {
+      if (this._layoutStatus) this._layoutStatus.textContent = '在庫割付ハンドラがありません。';
+      return;
+    }
+    if (this._layoutStatus) {
+      this._layoutStatus.style.color = '#6b7785';
+      this._layoutStatus.textContent = '在庫を割付中…';
+    }
+    try {
+      const r = await this.handlers.assignInventory();
+      const msg = (r && r.message)
+        ? r.message
+        : (r ? `割付 ${r.assigned ?? '?'} / ロケーション ${r.locations ?? '?'} / SKU ${r.skus ?? '?'}` : '割付が完了しました。');
+      if (this._layoutStatus) { this._layoutStatus.style.color = '#1a7a3c'; this._layoutStatus.textContent = msg; }
+    } catch (err) {
+      if (this._layoutStatus) {
+        this._layoutStatus.style.color = '#b30000';
+        this._layoutStatus.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
+      }
+    }
   }
 
   // ---- 動線 tool: floor view + control bar + live distance/time table ------
@@ -500,6 +608,18 @@ export class Designer {
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
 
+    // DXF underlay: in the レイアウト tool, draw imported walls as a faint gray
+    // trace beneath everything so the user can trace over the building outline.
+    if (this.tool === 'layout' && this.showUnderlay) {
+      const walls = this.model.layout.walls || [];
+      if (walls.length) {
+        ctx.save();
+        ctx.globalAlpha = 0.28;
+        for (const w of walls) this._drawWall(w.points, w.thickness, false, false);
+        ctx.restore();
+      }
+    }
+
     const dim = this.tool === 'equip' || this.tool === 'building' || this.tool === 'route';   // zones rendered faintly under equipment/walls/routes
     for (const z of this.model.layout.zones) {
       const sel = this.tool === 'layout' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
@@ -515,10 +635,11 @@ export class Designer {
       ctx.fillStyle = dim ? '#aab2bd' : '#3a4452';
       ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(ZONE_JP[z.type] || z.type, this._X(z.x + z.w / 2), this._Y(z.y + z.h / 2));
-      // resize handle when selected in layout tool
+      // resize handle + live size badge when selected in layout tool
       if (sel) {
         ctx.fillStyle = '#1f2733';
         ctx.fillRect(this._X(z.x + z.w) - HANDLE, this._Y(z.y) - HANDLE, HANDLE, HANDLE);
+        this._sizeBadge(z);
       }
     }
 
@@ -657,6 +778,18 @@ export class Designer {
     ctx.fillStyle = '#3a4452'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     ctx.fillText(text, px, py);
   }
+  // size badge in metres (e.g. "12.0 × 8.0 m") near a zone's top-left corner
+  _sizeBadge(z) {
+    const ctx = this.ctx;
+    const text = `${(+z.w || 0).toFixed(1)} × ${(+z.h || 0).toFixed(1)} m`;
+    const px = this._X(z.x) + 4, py = this._Y(z.y + z.h) + 4;
+    ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    const w = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(31,39,51,0.88)';
+    ctx.fillRect(px, py, w + 8, 16);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, px + 4, py + 2);
+  }
   _isSel(kind, id) { return this.selected && this.selected.kind === kind && this.selected.id === id; }
 
   // ---- canvas event handling ----------------------------------------------
@@ -679,10 +812,19 @@ export class Designer {
     if (this.tool === 'route') return this._routeDown(px, py);
   }
 
-  // --- layout tool: select / move / resize zones ---
+  // --- layout tool: place (palette) / select / move / resize zones ---
   _layoutDown(px, py) {
-    // resize handle of the currently selected zone?
     const zs = this.model.layout.zones;
+    // palette brush active: click the floor to place a new object there
+    if (this.layoutBrush) {
+      const mx = snap(this._mx(px)), my = snap(this._my(py));
+      const b = this.model.layout.bounds;
+      if (mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth) {
+        this._placeFromPalette(this.layoutBrush, mx, my);
+      }
+      return;
+    }
+    // resize handle of the currently selected zone?
     if (this.selected && this.selected.kind === 'zone') {
       const z = zs.find((q) => q.id === this.selected.id);
       if (z) {
@@ -1021,6 +1163,26 @@ export class Designer {
       const last = this.model.resources.conveyors[this.model.resources.conveyors.length - 1];
       this._btn(s, '最後のコンベアを削除', () => { this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
     }
+  }
+
+  // place an object from the レイアウト palette, centered on (mx,my), clamped to floor
+  _placeFromPalette(key, mx, my) {
+    const p = LAYOUT_PALETTE.find((q) => q.key === key);
+    if (!p) return;
+    const b = this.model.layout.bounds;
+    const w = Math.min(p.w, b.width), h = Math.min(p.h, b.depth);
+    const x = clamp(snap(mx - w / 2), 0, Math.max(0, b.width - w));
+    const y = clamp(snap(my - h / 2), 0, Math.max(0, b.depth - h));
+    const z = {
+      id: uid('zone'), type: p.zoneType, x, y, w, h,
+      color: ZONE_DEFAULT_COLOR[p.zoneType] || null,
+      rack: p.rack ? clone(p.rack) : (p.zoneType === 'storage' ? { col_spacing: 4, row_spacing: 3, margin: 2 } : null),
+    };
+    this.model.layout.zones.push(z);
+    this.selected = { kind: 'zone', id: z.id };
+    // keep the brush active so the user can drop several of the same object (PPT-like)
+    this._renderSide(); this._drawCanvas();
+    if (this._layoutStatus) this._layoutStatus.textContent = `「${p.label}」を配置しました。続けて配置するか、選択を解除して編集できます。`;
   }
 
   _addZone(type) {
