@@ -92,13 +92,18 @@ def _cost_inputs(model: WarehouseModel) -> dict:
     }
 
 
-def run_replications(model: WarehouseModel) -> tuple[list[RunResult], np.ndarray]:
-    """Run N replications with deterministic per-rep seeds; average the heat grid."""
-    reps = max(1, model.simulation.replications)
+def run_replications(
+    model: WarehouseModel, reps: int | None = None
+) -> tuple[list[RunResult], np.ndarray]:
+    """Monte-Carlo: run N replications with distinct seeds (different stochastic
+    order sequences), average the heat grid. Only the first rep records the replay
+    trajectory (the others exist purely to quantify variability)."""
+    reps = max(1, reps if reps is not None else model.simulation.replications)
     results: list[RunResult] = []
     heat_sum: np.ndarray | None = None
     for r in range(reps):
-        res = run_once(model, seed=model.simulation.random_seed + r)
+        res = run_once(model, seed=model.simulation.random_seed + r,
+                       replay_window_s=None if r == 0 else 0.0)
         results.append(res)
         heat_sum = res.heat.copy() if heat_sum is None else heat_sum + res.heat
     assert heat_sum is not None

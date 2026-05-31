@@ -8,7 +8,7 @@ A scenario is a set of dotted-path edits applied to the base model
 from __future__ import annotations
 
 from whsim import kpis as kpi_mod
-from whsim.engine.run import RunResult, run_once
+from whsim.engine.run import RunResult, run_replications
 from whsim.schema.model import Scenario, WarehouseModel
 
 
@@ -55,11 +55,12 @@ def default_scenarios(base: WarehouseModel) -> list[Scenario]:
 
 
 def run_scenario(base: WarehouseModel, scenario: Scenario,
-                 replay_window_s: float | None = None) -> tuple[RunResult, dict]:
+                 reps: int = 6) -> tuple[RunResult, dict]:
+    """Monte-Carlo a scenario; return (rep-0 result for replay, aggregated KPIs)."""
     model = apply_scenario(base, scenario)
-    res = run_once(model, replay_window_s=replay_window_s)
-    metrics = kpi_mod.compute([res])
-    return res, metrics
+    results, _heat = run_replications(model, reps=reps)
+    metrics = kpi_mod.compute(results)
+    return results[0], metrics
 
 
 def payback_months(baseline_kpis: dict, alt_kpis: dict) -> float | None:

@@ -17,13 +17,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from whsim import analytic, kpis as kpi_mod, templates
-from whsim.engine.run import DEFAULT_REPLAY_WINDOW_S, run_once
+from whsim.engine.run import run_replications
 from whsim.project import Project
 from whsim.provenance import Source
 from whsim.render.png2d import render as render_png
 from whsim.render.replay import build_replay
 
 STATIC = Path(__file__).resolve().parent / "static"
+
+# Monte-Carlo replications behind every web run (variability is shown, not configured).
+MONTE_CARLO_REPS = 10
 
 app = FastAPI(title="whsim", version="0.1.0")
 
@@ -202,20 +205,21 @@ async def api_import(name: str, file: UploadFile):
 def api_run(name: str):
     proj = _open(name)
     model = proj.load_model()
-    window = min(DEFAULT_REPLAY_WINDOW_S, model.simulation.duration_s)
-    res = run_once(model, replay_window_s=window)
-    metrics = kpi_mod.compute([res])
+    # Monte-Carlo: many stochastic order sequences; rep 0 carries the replay.
+    results, heat = run_replications(model, reps=MONTE_CARLO_REPS)
+    res = results[0]
+    metrics = kpi_mod.compute(results)
     est = analytic.estimate(model)
 
     run_dir = proj.new_run_dir()
     (run_dir / "kpis.json").write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2), "utf-8")
     import numpy as np
-    np.save(run_dir / "heatmap.npy", res.heat)
+    np.save(run_dir / "heatmap.npy", heat)
     replay = build_replay(model, res, metrics)
     (run_dir / "replay.json").write_text(
         json.dumps(replay, ensure_ascii=False), "utf-8")
-    render_png(model, res.heat, metrics, proj.load_provenance().summary(),
+    render_png(model, heat, metrics, proj.load_provenance().summary(),
                run_dir / "layout_heatmap.png")
     return {"kpis": metrics, "estimate": est, "run": run_dir.name}
 
@@ -223,14 +227,12 @@ def api_run(name: str):
 @app.post("/api/projects/{name}/run-scenarios")
 def api_run_scenarios(name: str, payload: dict | None = None):
     """Run several what-ifs over the current model and return a comparison."""
-    from whsim.engine.run import DEFAULT_REPLAY_WINDOW_S
     from whsim.engine.scenarios import (
         default_scenarios, payback_months, run_scenario,
     )
     from whsim.schema.model import Scenario
     proj = _open(name)
     base = proj.load_model()
-    window = min(DEFAULT_REPLAY_WINDOW_S, base.simulation.duration_s)
 
     payload = payload or {}
     raw = payload.get("scenarios")
@@ -245,7 +247,7 @@ def api_run_scenarios(name: str, payload: dict | None = None):
     from whsim.engine.scenarios import apply_scenario
     results = []
     for i, sc in enumerate(scenarios):
-        res, metrics = run_scenario(base, sc, replay_window_s=window)
+        res, metrics = run_scenario(base, sc, reps=6)
         model_i = apply_scenario(base, sc)
         render_png(model_i, res.heat, metrics, prov, cmp_dir / f"s{i}.png")
         results.append({"name": sc.name, "description": sc.description,

@@ -218,6 +218,21 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
         world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
                   busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
 
+        if world.has_conveyor and not agv_mode:
+            # Hand each tote to the conveyor. Acquiring a belt slot BLOCKS when the
+            # belt is full (downstream pack can't keep up) -> the jam propagates
+            # back to the picker. The tote rides the belt (transit) then packs,
+            # holding its slot the whole time, modelling real accumulation.
+            for o, arr in zip(orders, arrivals):
+                slot = world.belt.request()
+                yield slot   # blocks here when the conveyor is jammed
+                world.log(t=env.now, event="conveyor_on", order_id=o.order_id,
+                          resource="conveyor")
+                env.process(_convey_tote(world, o, arr, slot, dist_per_order))
+            if world.recording():
+                w.kf(env.now, pos[0], pos[1], "idle")
+            continue
+
         for o, arr in zip(orders, arrivals):
             pack_req_t = env.now
             preq = world.packers.request()
@@ -235,6 +250,27 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                       cycle=env.now - arr, dist=dist_per_order, due=o.due_s)
         if world.recording():
             w.kf(env.now, pos[0], pos[1], "idle")
+
+
+def _convey_tote(world: World, order: Order, arrival: float, slot, dist_per_order):
+    """A tote on the conveyor: transit delay, then pack -- holding its belt slot
+    the whole time so a slow pack stage backs up the belt (accumulation/jam)."""
+    env = world.env
+    pack_time = max(world.model.process.pack_time_s, 0.0)
+    yield env.timeout(world.conveyor_transit)
+    pack_req_t = env.now
+    preq = world.packers.request()
+    yield preq
+    seize_t = env.now
+    world.log(t=env.now, event="pack_start", order_id=order.order_id,
+              wait=seize_t - pack_req_t, resource="packer")
+    yield env.timeout(pack_time)
+    world.packers.release(preq)
+    world.belt.release(slot)   # leaves the belt only after packing completes
+    world.log(t=env.now, event="pack_done", order_id=order.order_id,
+              busy=env.now - seize_t, resource="packer")
+    world.log(t=env.now, event="order_complete", order_id=order.order_id,
+              cycle=env.now - arrival, dist=dist_per_order, due=order.due_s)
 
 
 def _sample_order(world: World, rng: random.Random, idx: int, t: float) -> Order:

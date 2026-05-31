@@ -274,7 +274,9 @@ async function loadReplay() {
 function renderKpis(k) {
   const cls = k.can_handle_demand ? 'ok' : 'bad';
   const cards = [
-    ['スループット', `${k.throughput_per_hr.toFixed(0)} 件/時`],
+    ['スループット', k.throughput_p5 != null
+      ? `${k.throughput_per_hr.toFixed(0)} 件/時 (${k.throughput_p5.toFixed(0)}–${k.throughput_p95.toFixed(0)})`
+      : `${k.throughput_per_hr.toFixed(0)} 件/時`],
     ['出荷完了', `${k.orders_completed.toFixed(0)} / ${k.orders_arrived.toFixed(0)}`],
     ['ボトルネック', `${k.bottleneck_jp || ''} ${(k.bottleneck_utilization*100).toFixed(0)}%`],
     ['ピッカー稼働率', `${k.n_pickers}名 ${(k.picker_utilization*100).toFixed(0)}%`],
@@ -283,6 +285,8 @@ function renderKpis(k) {
     ['1件あたり歩行', `${k.walk_per_order_m.toFixed(0)} m`],
   ];
   const cur = k.currency || '¥';
+  if (k.robustness != null && k.replications > 1)
+    cards.push(['安定度', `${(k.robustness*100).toFixed(0)}% (${k.replications}回検証)`]);
   if (k.n_agvs) cards.push(['AGV稼働率', `${k.n_agvs}台 ${(k.agv_utilization*100).toFixed(0)}%`]);
   if (k.total_cost_per_order) cards.push(['1件あたりコスト', `${cur}${k.total_cost_per_order.toFixed(1)}`]);
   if (k.monthly_cost) cards.push(['月間コスト', `${cur}${Math.round(k.monthly_cost).toLocaleString()}`]);

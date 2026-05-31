@@ -105,14 +105,34 @@ def compute(results: list[RunResult]) -> dict:
     agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包",
                             "agv": "AGV搬送"}[agg["bottleneck"]]
 
-    can_handle = agg["completion_rate"] >= 0.98 and agg["bottleneck_utilization"] < 0.95
+    # --- Monte-Carlo robustness across replications -------------------------
+    def _rep_bottleneck(p):
+        s = {"picking": p["picker_utilization"], "packing": p["packer_utilization"]}
+        if p.get("n_agvs"):
+            s["agv"] = p["agv_utilization"]
+        return max(s.values())
+
+    rep_ok = [1.0 if (p["completion_rate"] >= 0.98 and _rep_bottleneck(p) < 0.95)
+              else 0.0 for p in per]
+    robustness = statistics.fmean(rep_ok)        # fraction of runs that cope
+    agg["robustness"] = robustness
+    tputs = sorted(p["throughput_per_hr"] for p in per)
+    agg["throughput_p5"] = _pct(tputs, 0.05)
+    agg["throughput_p95"] = _pct(tputs, 0.95)
+    agg["throughput_std"] = statistics.pstdev(tputs) if len(tputs) > 1 else 0.0
+    comp = sorted(p["completion_rate"] for p in per)
+    agg["completion_p5"] = _pct(comp, 0.05)
+
+    can_handle = robustness >= 0.9  # robust across the stochastic order sequences
     agg["can_handle_demand"] = can_handle
     util_pct = round(agg["bottleneck_utilization"] * 100)
     done_pct = round(agg["completion_rate"] * 100)
+    n = len(results)
+    conf = f"（{n}回中{round(robustness * n)}回が安定処理）" if n > 1 else ""
     agg["verdict"] = (
-        f"対応可能 — {agg['bottleneck_jp']}工程の稼働率 {util_pct}% で需要をさばけます"
+        f"対応可能 — {agg['bottleneck_jp']}工程の稼働率 {util_pct}% で需要をさばけます{conf}"
         if can_handle else
         f"要注意 — {agg['bottleneck_jp']}がボトルネック（稼働率 {util_pct}%）。"
-        f"オーダーの {done_pct}% しか出荷完了しません"
+        f"オーダーの {done_pct}% しか出荷完了しません{conf}"
     )
     return agg

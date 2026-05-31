@@ -37,6 +37,9 @@ class World:
     ready_store: simpy.Store                # AGV-fetched totes waiting for a picker
     fork_store: simpy.Store                 # inbound putaway tasks for forklifts
     packers: simpy.Resource
+    belt: simpy.Resource                    # conveyor capacity (slots); full => jam
+    has_conveyor: bool
+    conveyor_transit: float                 # seconds end-to-end on the belt
     n_pickers: int
     n_packers: int
     n_agvs: int
@@ -133,9 +136,19 @@ def build(
     slot_xy = [(loc.x, loc.y) for loc in model.locations] or [home]
 
     conveyor_points: list[tuple[float, float]] = []
+    conveyor_len = 0.0
+    conveyor_speed_sum = 0.0
     for cv in model.resources.conveyors:
         for p in cv.points:
             conveyor_points.append((p[0], p[1]))
+        for a, b in zip(cv.points, cv.points[1:]):
+            conveyor_len += abs(a[0] - b[0]) + abs(a[1] - b[1])
+        conveyor_speed_sum += cv.speed_mps
+    has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
+    cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
+                if model.resources.conveyors else 0.5) or 0.5
+    belt_cap = max(1, int(conveyor_len))           # ~1 tote per metre of belt
+    conveyor_transit = conveyor_len / cv_speed
 
     return World(
         env=env, model=model,
@@ -143,6 +156,8 @@ def build(
         ready_store=simpy.Store(env),
         fork_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
+        belt=simpy.Resource(env, capacity=belt_cap),
+        has_conveyor=has_conveyor, conveyor_transit=conveyor_transit,
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),

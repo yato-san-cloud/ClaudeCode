@@ -97,6 +97,9 @@ def render(
         ("1件あたり歩行", f"{kpis['walk_per_order_m']:.0f} m"),
     ]
     cur = kpis.get("currency", "¥")
+    if kpis.get("replications", 1) > 1:
+        rows.append(("安定度（{}回検証）".format(int(kpis["replications"])),
+                     f"{kpis.get('robustness', 0)*100:.0f}%"))
     if kpis.get("total_cost_per_order"):
         rows.append(("1件あたりコスト", f"{cur}{kpis['total_cost_per_order']:,.1f}"))
     if kpis.get("monthly_cost"):
