@@ -11,6 +11,9 @@ venv/
 .pytest_cache/
 .streamlit/secrets.toml
 sample_data/
+# whsim runtime artifacts carried over via branch switch (not part of this tool)
+projects/
+examples/
 *.xlsx
 *.xls
 *.csv
