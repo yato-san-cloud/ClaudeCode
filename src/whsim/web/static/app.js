@@ -245,8 +245,14 @@ async function openProject(name) {
 
 async function mountDesigner() {
   if (!S.project) return;
-  const model = await api(`/api/projects/${S.project}/full`);
-  if (S.designer) S.designer.dispose();
+  // Re-entrancy guard: tearing down the old Designer up-front (so a concurrent
+  // mount can't orphan it), then bailing if the project/view changed while the
+  // model fetch was in flight — otherwise two rapid mounts could leak listeners.
+  if (S.designer) { S.designer.dispose(); S.designer = null; }
+  const epoch = (S._designerEpoch = (S._designerEpoch || 0) + 1);
+  const proj = S.project;
+  const model = await api(`/api/projects/${proj}/full`);
+  if (epoch !== S._designerEpoch || S.view !== 'design' || S.project !== proj) return;
   S.designer = new Designer($('design'), model, {
     save: async (sections) => {
       const r = await api(`/api/projects/${S.project}/design`, {

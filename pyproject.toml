@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "ruff>=0.1", "httpx>=0.24"]
+dev = ["pytest>=7.0", "ruff>=0.1", "httpx>=0.24", "pytest-cov>=4.0"]
 web = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9"]
 docs = ["ezdxf>=1.1", "python-pptx>=0.6", "reportlab>=4.0"]
 
@@ -36,3 +36,25 @@ target-version = "py310"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# NOTE: coverage flags are intentionally NOT in addopts so a plain `pytest`
+# still works when pytest-cov is not installed. To measure coverage, run:
+#   pytest --cov=whsim --cov-report=term-missing
+# The [tool.coverage.*] config below applies whenever --cov is used.
+
+[tool.coverage.run]
+source = ["whsim"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

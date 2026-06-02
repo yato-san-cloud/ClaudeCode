@@ -119,6 +119,46 @@ MAX_ENTRIES = 10_000              # number of members we will look at
 MAX_ENTRY_BYTES = 256 * 1024 * 1024   # per-entry uncompressed cap (256 MiB)
 MAX_TOTAL_BYTES = 512 * 1024 * 1024   # whole-archive uncompressed cap (512 MiB)
 
+# Maximum bracket-nesting depth we will accept in a member's JSON. CPython's
+# ``json`` decoder recurses per nesting level, so a hostile member of the form
+# ``[[[[...]]]]`` (tens of thousands deep) raises ``RecursionError`` -- which is
+# NOT a ``JSONDecodeError`` and would otherwise escape the tolerant parse path
+# and 500 the import endpoint (a cheap DoS: a few KB of bytes). We cheaply
+# pre-scan the raw text and reject over-deep documents as "invalid JSON" before
+# handing them to ``json.loads``. A genuine customer export nests only a few
+# levels (orders -> lines), so this bound is generous.
+MAX_JSON_DEPTH = 200
+
+
+def _json_too_deep(text: str, limit: int = MAX_JSON_DEPTH) -> bool:
+    """True if the JSON text nests brackets/braces deeper than ``limit``.
+
+    A linear scan that ignores brackets inside string literals (so a ``"]"``
+    in a value never inflates the count). Cheap relative to ``json.loads`` and
+    runs first so a recursion bomb is rejected without ever recursing."""
+    depth = 0
+    in_str = False
+    escape = False
+    for ch in text:
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+            if depth > limit:
+                return True
+        elif ch in "]}":
+            if depth > 0:
+                depth -= 1
+    return False
+
 
 def _is_unsafe_member(name: str) -> bool:
     """Reject path-traversal / absolute members so a malicious archive can never
@@ -187,8 +227,19 @@ def merge_into_template(
     for name, raw in files:
         seen.append(name)
         try:
-            data = json.loads(_decode(raw))
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            text = _decode(raw)
+        except UnicodeDecodeError as e:
+            warnings.append(f"{name}: skipped (invalid JSON: {e})")
+            continue
+        if _json_too_deep(text):
+            # Reject a recursion-bomb member up front so json.loads never
+            # recurses into a RecursionError (which would escape this tolerant
+            # loop and 500 the import). Treat it like any other unparseable file.
+            warnings.append(f"{name}: skipped (JSON nesting too deep)")
+            continue
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, RecursionError) as e:
             warnings.append(f"{name}: skipped (invalid JSON: {e})")
             continue
 

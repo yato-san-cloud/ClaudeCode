@@ -138,6 +138,8 @@ export class Designer {
     this._listeners = [];          // [el, type, fn] for clean dispose()
     this._normalize(model);
     this._buildShell();
+    this._bindWindow();
+    this._bindKeys();
     this._selectTool('layout');
   }
 
@@ -162,7 +164,37 @@ export class Designer {
     for (const [el, type, fn] of this._listeners) el.removeEventListener(type, fn);
     this._listeners = [];
     if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._helpEl && this._helpEl.parentNode) this._helpEl.parentNode.removeChild(this._helpEl);
+    this._helpEl = null;
     this.container.innerHTML = '';
+  }
+
+  // ---- help / legend overlay ------------------------------------------------
+  _toggleHelp() {
+    if (this._helpEl) { this._helpEl.remove(); this._helpEl = null; return; }
+    const box = document.createElement('div');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', '設計エディタのヘルプ');
+    box.style.cssText = 'position:absolute;top:48px;right:16px;z-index:30;width:320px;max-width:calc(100% - 32px);'
+      + 'background:#fff;border:1px solid #d8dee6;border-radius:10px;box-shadow:0 8px 28px rgba(31,39,51,0.18);'
+      + 'padding:14px 16px;font-size:12px;color:#3a4452;line-height:1.7;';
+    box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">操作ヘルプ</div>'
+      + '<div><b>レイアウト</b>: パレットを選んで床をクリックで配置。ゾーンをドラッグで移動、右下のハンドルでサイズ変更。</div>'
+      + '<div><b>設備</b>: 床をクリックで設置、マーカーで選択。コンベアは頂点を追加してダブルクリックで確定。</div>'
+      + '<div><b>躯体</b>: 壁は頂点を追加してダブルクリックで確定。ドアは縁をクリックで配置。</div>'
+      + '<div><b>フロー</b>: 工程をクリックで作業方法を設定。「床図でフロー配置」で工程→ゾーンを割当。</div>'
+      + '<div><b>動線</b>: 床をクリックで頂点追加、ダブルクリックで確定。距離と所要時間を自動計算。</div>'
+      + '<div style="margin-top:8px;border-top:1px solid #eef0f3;padding-top:8px;">'
+      + '<b>キーボード</b><br>選択を削除: <b>Delete</b> / 取消: <b>Esc</b><br>'
+      + '元に戻す: <b>Ctrl/⌘+Z</b> / やり直す: <b>Ctrl/⌘+Shift+Z</b></div>'
+      + '<div style="margin-top:8px;color:#6b7785;">変更は「適用（保存）」を押すまでサーバーに保存されません。</div>';
+    const close = document.createElement('button');
+    close.textContent = '閉じる';
+    close.style.cssText = 'margin-top:10px;padding:5px 10px;border:1px solid #e3e8ee;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;';
+    this._on(close, 'click', () => this._toggleHelp());
+    box.appendChild(close);
+    this.container.appendChild(box);
+    this._helpEl = box;
   }
 
   // ---- model normalization (defensive against missing fields) --------------
@@ -232,22 +264,52 @@ export class Designer {
     const c = this.container;
     c.innerHTML = '';
     c.classList.add('designer-root');
-    c.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;font-size:13px;';
+    c.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;font-size:13px;position:relative;';
 
     // tool switch bar
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
     this._toolBtns = {};
+    const TOOL_TIP = {
+      layout: 'ゾーン（区画）の配置・移動・サイズ変更',
+      equip: 'AGV・コンベア・自動倉庫・梱包台などの設備を設置',
+      building: '建屋の壁とドア（ドック/通用口/シャッター）を作図',
+      flow: '工程の順序と作業方法、各工程の場所（ゾーン）を設定',
+      route: '作業員・フォークリフトの動線を作図し距離/時間を確認',
+    };
     for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー'], ['route', '動線']]) {
       const b = document.createElement('button');
       b.textContent = label;
+      b.title = TOOL_TIP[key] || label;
+      b.setAttribute('aria-label', `${label}: ${TOOL_TIP[key] || ''}`);
       this._on(b, 'click', () => this._selectTool(key));
       bar.appendChild(b);
       this._toolBtns[key] = b;
     }
+    // help / legend toggle (keyboard shortcuts + tool guide)
+    const help = document.createElement('button');
+    help.textContent = '?';
+    help.title = 'ヘルプ / ショートカット';
+    help.setAttribute('aria-label', 'ヘルプとキーボードショートカット');
+    this._on(help, 'click', () => this._toggleHelp());
+    bar.appendChild(help);
     const spacer = document.createElement('div');
     spacer.style.flex = '1';
     bar.appendChild(spacer);
+    // undo / redo
+    this._undoBtn = document.createElement('button');
+    this._undoBtn.textContent = '元に戻す';
+    this._undoBtn.title = '元に戻す (Ctrl/⌘+Z)';
+    this._undoBtn.setAttribute('aria-label', '元に戻す');
+    this._on(this._undoBtn, 'click', () => this._undo());
+    bar.appendChild(this._undoBtn);
+    this._redoBtn = document.createElement('button');
+    this._redoBtn.textContent = 'やり直す';
+    this._redoBtn.title = 'やり直す (Ctrl/⌘+Shift+Z)';
+    this._redoBtn.setAttribute('aria-label', 'やり直す');
+    this._on(this._redoBtn, 'click', () => this._redo());
+    bar.appendChild(this._redoBtn);
+    this._refreshUndoBtns();
     const save = document.createElement('button');
     save.className = 'primary';
     save.textContent = '適用（保存）';
@@ -260,9 +322,15 @@ export class Designer {
     bar.appendChild(this._saveMsg);
     c.appendChild(bar);
 
+    // "編集はPC推奨" note (CSS shows it only ≤880px).
+    const pcNote = document.createElement('div');
+    pcNote.className = 'designer-pc-note';
+    pcNote.textContent = '細かな配置・ドラッグ編集はマウスのあるPCを推奨します。スマホ/タブレットでは閲覧とタップ配置のみご利用ください。';
+    c.appendChild(pcNote);
+
     // body: canvas area + side editor (filled per tool)
     this.body = document.createElement('div');
-    this.body.style.cssText = 'flex:1;min-height:0;display:flex;gap:8px;';
+    this.body.style.cssText = 'flex:1;min-height:0;display:flex;gap:8px;flex-wrap:wrap;';
     c.appendChild(this.body);
   }
 
@@ -308,7 +376,8 @@ export class Designer {
       const wrap = document.createElement('div');
       wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
       this.canvas = document.createElement('canvas');
-      this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:default;';
+      // equip/building tools are click-to-place: a crosshair signals placement.
+      this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
       wrap.appendChild(this.canvas);
       this.body.appendChild(wrap);
       canvasHost = wrap;
@@ -578,6 +647,7 @@ export class Designer {
 
   _finishRoute() {
     if (this.routeDraft && this.routeDraft.length >= 2) {
+      this._pushUndo();
       const n = this.model.routes.length + 1;
       const rt = {
         id: uid('route'),
@@ -595,6 +665,7 @@ export class Designer {
 
   _deleteSelectedRoute() {
     if (!this.selected || this.selected.kind !== 'route') return;
+    this._pushUndo();
     this.model.routes = this.model.routes.filter((q) => q.id !== this.selected.id);
     this.selected = null;
     this._renderRouteTable(); this._drawCanvas();
@@ -838,11 +909,18 @@ export class Designer {
   _isSel(kind, id) { return this.selected && this.selected.kind === kind && this.selected.id === id; }
 
   // ---- canvas event handling ----------------------------------------------
-  _bindCanvas() {
-    this._on(this.canvas, 'mousedown', (e) => this._onDown(e));
+  // Window-level drag listeners are bound ONCE in the constructor (they read the
+  // current `this.canvas` / `this.drag`), so re-rendering a tool — which creates a
+  // fresh canvas — does not leak a new pair of window listeners each time. Only the
+  // per-canvas listeners (which die with the canvas element) are (re)bound here.
+  _bindWindow() {
     this._on(window, 'mousemove', (e) => this._onMove(e));
     this._on(window, 'mouseup', () => this._onUp());
+  }
+  _bindCanvas() {
+    this._on(this.canvas, 'mousedown', (e) => this._onDown(e));
     this._on(this.canvas, 'dblclick', (e) => this._onDbl(e));
+    this._on(this.canvas, 'touchstart', (e) => this._onTouch(e), { passive: false });
   }
   _pt(e) {
     const r = this.canvas.getBoundingClientRect();
@@ -918,11 +996,13 @@ export class Designer {
       this.conveyorDraft.push([mx, my]);
       this._drawCanvas(); this._renderSide();
     } else if (this.equipBrush === 'station') {
+      this._pushUndo();
       const s = { id: uid('st'), zone: 'packing', x: mx, y: my, count: 1 };
       this.model.resources.stations.push(s);
       this.selected = { kind: 'station', id: s.id };
       this._renderSide(); this._drawCanvas();
     } else { // agv / asrs / robot_arm / crane
+      this._pushUndo();
       const fast = this.equipBrush === 'agv';
       const e = {
         id: uid('eq'), type: this.equipBrush,
@@ -940,6 +1020,9 @@ export class Designer {
     if (!this.drag || !this.canvas) return;
     const { px, py } = this._pt(e);
     const b = this.model.layout.bounds;
+    // Snapshot once, on the first actual movement of a drag, so a plain
+    // select-click (down→up, no move) does not create a no-op undo entry.
+    if (!this.drag._snapped) { this.drag._snapped = true; this._pushUndo(); }
     if (this.drag.mode === 'move' || this.drag.mode === 'resize') {
       const z = this.model.layout.zones.find((q) => q.id === this.drag.id);
       if (!z) return;
@@ -975,8 +1058,118 @@ export class Designer {
     if (this.tool === 'route') this._finishRoute();
   }
 
+  // Basic touch support: map a single-finger tap to a canvas "down" so the same
+  // place/select logic runs on tablets. Multi-touch (pinch/zoom) is left to the
+  // browser. Continuous touch-drag is intentionally not wired (編集はPC推奨).
+  _onTouch(e) {
+    if (!e.touches || e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    const r = this.canvas.getBoundingClientRect();
+    const px = t.clientX - r.left, py = t.clientY - r.top;
+    if (this.tool === 'layout') this._layoutDown(px, py);
+    else if (this.tool === 'equip') this._equipDown(px, py);
+    else if (this.tool === 'building') this._buildingDown(px, py);
+    else if (this.tool === 'route') this._routeDown(px, py);
+    else if (this.tool === 'flow') this._flowDown(px, py);
+    this.drag = null;  // no touch-drag; a tap should not start a move
+  }
+
+  // ---- undo/redo (lightweight model snapshots) -----------------------------
+  // We snapshot the four editable sections just before a mutating action. The
+  // stack is bounded; redo is cleared on a fresh edit. Drafts (in-progress
+  // polylines) are deliberately not part of history.
+  _snapshot() {
+    return {
+      layout: clone(this.model.layout),
+      resources: clone(this.model.resources),
+      process: clone(this.model.process),
+      routes: clone(this.model.routes),
+    };
+  }
+  _pushUndo() {
+    if (!this._undoStack) this._undoStack = [];
+    this._undoStack.push(this._snapshot());
+    if (this._undoStack.length > 50) this._undoStack.shift();
+    this._redoStack = [];
+    this._refreshUndoBtns();
+  }
+  _applySnapshot(snap) {
+    this.model.layout = clone(snap.layout);
+    this.model.resources = clone(snap.resources);
+    this.model.process = clone(snap.process);
+    this.model.routes = clone(snap.routes);
+    this.selected = null;
+    this.drag = null;
+    this.conveyorDraft = this.wallDraft = this.routeDraft = null;
+    this._renderTool();
+    this._refreshUndoBtns();
+  }
+  _undo() {
+    if (!this._undoStack || !this._undoStack.length) return;
+    this._redoStack = this._redoStack || [];
+    this._redoStack.push(this._snapshot());
+    this._applySnapshot(this._undoStack.pop());
+  }
+  _redo() {
+    if (!this._redoStack || !this._redoStack.length) return;
+    this._undoStack = this._undoStack || [];
+    this._undoStack.push(this._snapshot());
+    this._applySnapshot(this._redoStack.pop());
+  }
+  _refreshUndoBtns() {
+    if (this._undoBtn) this._undoBtn.disabled = !(this._undoStack && this._undoStack.length);
+    if (this._redoBtn) this._redoBtn.disabled = !(this._redoStack && this._redoStack.length);
+  }
+
+  // ---- keyboard: Delete removes selection, Esc cancels, Ctrl/⌘+Z undo ------
+  _bindKeys() {
+    this._on(window, 'keydown', (e) => this._onKey(e));
+  }
+  _onKey(e) {
+    // Only act when the Designer is the visible surface and focus isn't in a field.
+    if (!this.container || !this.container.isConnected || this.container.offsetParent === null) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    const meta = e.ctrlKey || e.metaKey;
+    if (meta && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); this._undo(); return; }
+    if (meta && ((e.key === 'z' || e.key === 'Z') && e.shiftKey || e.key === 'y' || e.key === 'Y')) {
+      e.preventDefault(); this._redo(); return;
+    }
+    if (e.key === 'Escape') {
+      if (this.conveyorDraft || this.wallDraft || this.routeDraft) {
+        this.conveyorDraft = this.wallDraft = this.routeDraft = null;
+        this._renderTool();
+      } else if (this.selected) {
+        this.selected = null; this._renderTool();
+      }
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && this.selected) {
+      e.preventDefault();
+      this._deleteSelected();
+    }
+  }
+
+  // Delete whatever is selected, regardless of tool (used by the Delete key).
+  _deleteSelected() {
+    const sel = this.selected;
+    if (!sel) return;
+    this._pushUndo();
+    const L = this.model.layout, R = this.model.resources;
+    if (sel.kind === 'zone') L.zones = L.zones.filter((q) => q.id !== sel.id);
+    else if (sel.kind === 'equip') R.equipment = R.equipment.filter((q) => q.id !== sel.id);
+    else if (sel.kind === 'station') R.stations = R.stations.filter((q) => q.id !== sel.id);
+    else if (sel.kind === 'wall') L.walls = L.walls.filter((q) => q.id !== sel.id);
+    else if (sel.kind === 'door') L.doors = L.doors.filter((q) => q.id !== sel.id);
+    else if (sel.kind === 'route') this.model.routes = this.model.routes.filter((q) => q.id !== sel.id);
+    this.selected = null;
+    this._renderTool();
+  }
+
   _finishConveyor() {
     if (this.conveyorDraft && this.conveyorDraft.length >= 2) {
+      this._pushUndo();
       const cv = { id: uid('cv'), points: this.conveyorDraft.slice(), speed_mps: 0.5 };
       this.model.resources.conveyors.push(cv);
     }
@@ -1000,6 +1193,7 @@ export class Designer {
         return;
       }
       if (!inside) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
+      this._pushUndo();
       const pal = DOOR_PALETTE.find((x) => x.type === this.doorBrush) || DOOR_PALETTE[0];
       const w = pal.type === 'dock' ? 3 : pal.type === 'shutter' ? 4 : 1;
       const d = { id: uid('door'), type: pal.type, x: mx, y: my, w };
@@ -1048,6 +1242,7 @@ export class Designer {
 
   _finishWall() {
     if (this.wallDraft && this.wallDraft.length >= 2) {
+      this._pushUndo();
       const w = { id: uid('wall'), points: this.wallDraft.slice(), thickness: 0.3 };
       this.model.layout.walls.push(w);
       this.selected = { kind: 'wall', id: w.id };
@@ -1090,6 +1285,7 @@ export class Designer {
         this._field(s, '厚さ (m)', () => this._num(w.thickness, (v) => { w.thickness = Math.max(0.05, v); this._drawCanvas(); }));
         this._note(s, `頂点 ${(w.points || []).length} 点。`);
         this._btn(s, '削除', () => {
+          this._pushUndo();
           this.model.layout.walls = this.model.layout.walls.filter((q) => q.id !== w.id);
           this.selected = null; this._renderSide(); this._drawCanvas();
         }, 'margin-top:10px;color:#b30000;');
@@ -1114,6 +1310,7 @@ export class Designer {
         });
         this._field(s, '幅 (m)', () => this._num(d.w, (v) => { d.w = Math.max(0.3, v); this._drawCanvas(); }));
         this._btn(s, '削除', () => {
+          this._pushUndo();
           this.model.layout.doors = this.model.layout.doors.filter((q) => q.id !== d.id);
           this.selected = null; this._renderSide(); this._drawCanvas();
         }, 'margin-top:10px;color:#b30000;');
@@ -1191,14 +1388,14 @@ export class Designer {
         this._h(s, `選択中: ${p ? p.label : e.type}`);
         this._field(s, '台数', () => this._num(e.count, (v) => { e.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
         this._field(s, '速度 (m/s)', () => this._num(e.speed_mps, (v) => { e.speed_mps = Math.max(0, v); }));
-        this._btn(s, '削除', () => { this.model.resources.equipment = this.model.resources.equipment.filter((q) => q.id !== e.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
+        this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.equipment = this.model.resources.equipment.filter((q) => q.id !== e.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
       }
     } else if (sel && sel.kind === 'station') {
       const st = this.model.resources.stations.find((q) => q.id === sel.id);
       if (st) {
         this._h(s, '選択中: 梱包台');
         this._field(s, '台数', () => this._num(st.count, (v) => { st.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
-        this._btn(s, '削除', () => { this.model.resources.stations = this.model.resources.stations.filter((q) => q.id !== st.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
+        this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.stations = this.model.resources.stations.filter((q) => q.id !== st.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
       }
     } else {
       this._note(s, '床をクリックして設置、または既存マーカーをクリックして編集します。');
@@ -1207,7 +1404,7 @@ export class Designer {
     if (this.model.resources.conveyors.length) {
       this._h(s, `コンベア (${this.model.resources.conveyors.length})`);
       const last = this.model.resources.conveyors[this.model.resources.conveyors.length - 1];
-      this._btn(s, '最後のコンベアを削除', () => { this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
+      this._btn(s, '最後のコンベアを削除', () => { this._pushUndo(); this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
     }
   }
 
@@ -1215,6 +1412,7 @@ export class Designer {
   _placeFromPalette(key, mx, my) {
     const p = LAYOUT_PALETTE.find((q) => q.key === key);
     if (!p) return;
+    this._pushUndo();
     const b = this.model.layout.bounds;
     const w = Math.min(p.w, b.width), h = Math.min(p.h, b.depth);
     const x = clamp(snap(mx - w / 2), 0, Math.max(0, b.width - w));
@@ -1232,6 +1430,7 @@ export class Designer {
   }
 
   _addZone(type) {
+    this._pushUndo();
     const b = this.model.layout.bounds;
     const w = Math.min(12, b.width / 2), h = Math.min(8, b.depth / 2);
     const z = {
@@ -1245,6 +1444,7 @@ export class Designer {
   }
 
   _deleteZone(id) {
+    this._pushUndo();
     this.model.layout.zones = this.model.layout.zones.filter((z) => z.id !== id);
     this.selected = null;
     this._renderSide(); this._drawCanvas();

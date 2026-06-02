@@ -834,6 +834,22 @@ input[type="range"]::-moz-range-track {
   box-shadow: 0 0 0 3px var(--accent-tint);
   border-color: var(--accent);
 }
+/* "編集はPC推奨" banner — hidden on roomy screens, shown ≤880px where the
+   side-panel + canvas layout is too cramped for precise pointer editing. */
+.designer-pc-note {
+  display: none;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--accent-tint);
+  background: var(--accent-tint);
+  color: var(--ink-secondary);
+  border-radius: var(--r-md, 8px);
+  font-size: 12px;
+  line-height: 1.5;
+}
+@media (max-width: 880px) {
+  .designer-pc-note { display: block; }
+}
 
 /* =============================================================================
    Scrollbars (Notion-thin)

@@ -37,15 +37,36 @@ def _safe_name(name: str) -> str:
     """Validate a user-supplied identifier that becomes a filesystem path segment.
 
     Project names (and run/compare ids) are used directly under ``projects/`` and
-    ``runs/`` (``base / name``), so an attacker-controlled ``..`` or path separator
-    would escape the workspace. Allow Unicode letters/digits (project names are
-    often Japanese) but reject anything that could traverse or escape: path
-    separators, NUL, and any name that is empty or made only of dots.
+    ``runs/`` (``base / name``), so an attacker-controlled ``..`` or path
+    separator must never escape the workspace.
+
+    Crucially we don't just *check* the raw name and pass it through: the actual
+    on-disk segment is decided by ``whsim.project.safe_name`` (called inside
+    ``Project.create`` / ``Project.open``), which silently transforms unsafe
+    characters (``a:b`` -> ``a_b``, control chars -> ``_``, ...). The web layer
+    used to apply a *different*, looser check, so path-building endpoints
+    (delete / rename / duplicate / compare-png) computed ``projects/<raw>`` while
+    the project actually lived at ``projects/<sanitised>`` -- a real bug that
+    pointed those operations at the wrong (or a non-existent) directory.
+
+    The fix: reject (400) anything that is not already in canonical form, i.e.
+    any name the project sanitiser would have transformed. That keeps a single
+    source of truth (the accepted name == the stored segment) and still rejects
+    separators / NUL / dot-only names exactly as before.
     """
     name = (name or "").strip()
     if not name or set(name) <= {"."}:
         raise HTTPException(400, "invalid name")
     if "/" in name or "\\" in name or "\x00" in name or name in (".", ".."):
+        raise HTTPException(400, "invalid name")
+    # Single source of truth: the name must already be exactly what the project
+    # sanitiser would store, so the segment used for path building can never
+    # diverge from where the project actually lives on disk.
+    from whsim.project import safe_name as _project_safe_name
+    try:
+        if _project_safe_name(name) != name:
+            raise HTTPException(400, "invalid name")
+    except (ValueError, TypeError):
         raise HTTPException(400, "invalid name")
     return name
 

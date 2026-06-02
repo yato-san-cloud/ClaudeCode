@@ -63,6 +63,12 @@ MOOD_FOR_INTENT = {
 # Default template id used when none can be resolved from context.
 _FALLBACK_TEMPLATE = "ecommerce_small"
 
+# Hard cap on an incoming chat message. A real salesperson types a sentence or
+# two; an unbounded body would let a client pin CPU in the keyword scans / regex
+# (and, once the LLM seam lands, run up token cost). We truncate rather than
+# reject so the chat never "blocks" -- the leading text is what carries intent.
+MAX_MESSAGE_CHARS = 4000
+
 # ---------------------------------------------------------------------------
 # Keyword tables (generous synonyms). Order matters: more specific intents
 # (create / compare) are tested before broad ones (open_view / run).
@@ -308,6 +314,10 @@ def respond(message: str, context: dict | None = None) -> dict:
     # Be tolerant of a non-str message (the contract is str, but the LLM seam
     # must never crash on a stray type): coerce, then strip.
     text = (message if isinstance(message, str) else ("" if message is None else str(message))).strip()
+    # Bound the work: cap the message length so a giant body can't pin CPU in the
+    # keyword/regex scans below (intent lives in the opening words anyway).
+    if len(text) > MAX_MESSAGE_CHARS:
+        text = text[:MAX_MESSAGE_CHARS]
     low = text.lower()
 
     if not text:

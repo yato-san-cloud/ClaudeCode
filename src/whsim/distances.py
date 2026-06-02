@@ -33,6 +33,40 @@ import re
 # Cap to keep memory/CPU sane on a pathological export.
 MAX_PAIRS = 2_000_000
 
+# Max JSON bracket-nesting depth (see importer.MAX_JSON_DEPTH): a recursion-bomb
+# document (``[[[[...]]]]`` tens of thousands deep) makes json.loads raise
+# RecursionError, which is not a JSONDecodeError and would otherwise leak out as
+# a 500/opaque error. A real distance matrix nests at most 2 levels.
+MAX_JSON_DEPTH = 200
+
+
+def _json_too_deep(text: str, limit: int = MAX_JSON_DEPTH) -> bool:
+    """True if JSON text nests brackets/braces deeper than ``limit`` (ignoring
+    brackets inside string literals). Cheap linear pre-scan run before
+    json.loads so a recursion bomb is rejected without ever recursing."""
+    depth = 0
+    in_str = False
+    escape = False
+    for ch in text:
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+            if depth > limit:
+                return True
+        elif ch in "]}":
+            if depth > 0:
+                depth -= 1
+    return False
+
 # Candidate header names (lowercased) for long-form CSV / JSON list, by role.
 _FROM_HEADERS = {
     "from", "from_id", "fromid", "src", "source", "source_id", "origin",
@@ -404,9 +438,12 @@ def import_distance_matrix_bytes(data: bytes, filename: str = "") -> dict:
     )
 
     if looks_json:
+        if _json_too_deep(text):
+            warnings.append("JSONのネストが深すぎます。")
+            return _build_result({}, warnings, False)
         try:
             obj = json.loads(text)
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, RecursionError) as exc:
             # Malformed JSON must not block: try a CSV reading of the same text,
             # and if that also yields nothing usable, return an empty (valid)
             # result with a warning rather than raising. "Never reject data."

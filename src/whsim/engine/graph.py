@@ -23,6 +23,29 @@ straight segment ``[a, b]``.
 Only stdlib + numpy. Dijkstra is pure-python with ``heapq``; single-source
 distance maps are cached so repeated queries from the same pick locations (the
 common case) are amortised to a dict lookup.
+
+Scalability (the load-bearing optimisation)
+-------------------------------------------
+A single-source Dijkstra yields the distance to *every* node, so it is cached
+per source. The cliff was that on a large floor the simulation queries from
+thousands of *distinct* shelf positions, so the per-source cache never
+amortises: ~O(distinct_sources x N log N) full grid solves in pure Python.
+
+Fix: **collapse the Dijkstra sources to a small set of "access" nodes.** Access
+nodes are a coarse sub-lattice of the fine grid (capped at ``MAX_ACCESS``). A
+query ``distance(a, b)`` snaps ``a`` to its nearest access node ``acc_a`` and
+``b`` to its nearest fine node ``sb``; the wall-aware grid distance is taken from
+the (cached) single-source map of ``acc_a``, and the short ``a -> acc_a`` leg is
+added analytically. Because there are only a few hundred access nodes for the
+whole floor, each is solved **at most once** for the entire run, and the number
+of full Dijkstra solves is bounded by the number of *distinct access nodes
+actually queried* (dozens), not by the thousands of distinct shelves.
+
+The introduced error is bounded by the access-lattice spacing (the ``a -> acc_a``
+correction leg), which is kept small relative to the floor; on small grids the
+collapse is disabled entirely and the exact per-source Dijkstra is used, so the
+classic correctness tests are unaffected. Determinism is preserved (snapping and
+Dijkstra are deterministic).
 """
 
 from __future__ import annotations
@@ -34,6 +57,18 @@ from math import hypot
 # Hard cap on grid nodes; resolution is coarsened automatically to stay under it
 # so a huge floor never blows up memory / Dijkstra time.
 MAX_NODES = 20000
+
+# Hard cap on the number of distinct Dijkstra *source* (access) nodes. Sources
+# are collapsed onto a coarse sub-lattice of the fine grid so each is solved at
+# most once for the whole run. Bounds both runtime (few full solves) and memory
+# (we only ever cache this many full N-vectors).
+MAX_ACCESS = 512
+
+# Only collapse sources onto the access lattice once the fine grid is big enough
+# that thousands of distinct full solves would actually hurt. Below this, the
+# exact per-source Dijkstra is cheap and is kept verbatim (preserves the classic
+# correctness behaviour on small walled grids).
+ACCESS_COLLAPSE_MIN_NODES = 2000
 
 
 def _manhattan(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -126,6 +161,28 @@ class AisleGraph:
         self._dist_cache: dict[int, dict[int, float]] = {}
         # Cache: source node index -> {node index -> predecessor node index}.
         self._prev_cache: dict[int, dict[int, int]] = {}
+
+        # Number of full single-source Dijkstra solves actually run (instrument
+        # for tests / profiling; bounded by the distinct access nodes queried).
+        self.solve_count = 0
+
+        # --- Source collapse onto a coarse access sub-lattice -----------------
+        # On large grids, snap Dijkstra *sources* to a small set of access nodes
+        # so each is solved at most once for the whole run. ``_access_stride`` is
+        # how many fine cells make up one access cell, chosen so the access node
+        # count stays under ``MAX_ACCESS``.
+        n_nodes = self.ncols * self.nrows
+        self._collapse_sources = n_nodes >= ACCESS_COLLAPSE_MIN_NODES
+        self._access_stride = 1
+        if self._collapse_sources:
+            stride = 1
+            while True:
+                acols = (self.ncols + stride - 1) // stride
+                arows = (self.nrows + stride - 1) // stride
+                if acols * arows <= MAX_ACCESS or stride >= max(self.ncols, self.nrows):
+                    break
+                stride += 1
+            self._access_stride = max(1, stride)
 
     # ------------------------------------------------------------------ build
 
@@ -238,6 +295,47 @@ class AisleGraph:
         offset = hypot(px - nx, py - ny)
         return self._node_index(c, r), offset
 
+    def _snap_access(self, p: tuple[float, float]) -> tuple[int, float]:
+        """Snap a point to the nearest *access* node (a coarse sub-lattice node).
+
+        Returns ``(node_index, leg_metres)`` where ``leg_metres`` is the straight
+        correction distance from the real point to the access node centre. When
+        source collapse is disabled this is identical to :meth:`_snap`.
+
+        Critically, the chosen access node must be reachable from the point
+        *without crossing a wall* -- otherwise collapsing the source can land it
+        on the far side of an interior wall and force a spurious detour. We scan
+        the nearest access-lattice cells in increasing distance and take the first
+        whose straight ``point -> access-centre`` leg is wall-free. If none is
+        wall-free (point boxed in), we fall back to the exact fine snap so the
+        query stays correct (at the cost of one extra full solve, which is rare).
+        """
+        if not self._collapse_sources or self._access_stride <= 1:
+            return self._snap(p)
+        px, py = float(p[0]), float(p[1])
+        stride = self._access_stride
+        base_c = int(round(px / self.resolution))
+        base_r = int(round(py / self.resolution))
+
+        candidates: list[tuple[float, int, int]] = []
+        # Consider the access cells in a small window around the point; rounding
+        # to the lattice can fall either way, and a wall may force the next one.
+        for ac in range(base_c // stride - 1, base_c // stride + 2):
+            for ar in range(base_r // stride - 1, base_r // stride + 2):
+                c = min(max(ac * stride, 0), self.ncols - 1)
+                r = min(max(ar * stride, 0), self.nrows - 1)
+                nx, ny = self._node_xy(c, r)
+                leg = hypot(px - nx, py - ny)
+                candidates.append((leg, c, r))
+        candidates.sort(key=lambda t: t[0])
+
+        for leg, c, r in candidates:
+            nx, ny = self._node_xy(c, r)
+            if not (self._has_walls and self._segment_blocked((px, py), (nx, ny))):
+                return self._node_index(c, r), leg
+        # Boxed in by walls on every access leg -> exact fine snap (rare).
+        return self._snap(p)
+
     def _neighbors(self, idx: int):
         c, r = self._node_cr(idx)
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -253,6 +351,7 @@ class AisleGraph:
         if source in self._dist_cache:
             return self._dist_cache[source], self._prev_cache[source]
 
+        self.solve_count += 1
         dist: dict[int, float] = {source: 0.0}
         prev: dict[int, int] = {}
         w = self.resolution
@@ -282,35 +381,42 @@ class AisleGraph:
     def distance(
         self, a: tuple[float, float], b: tuple[float, float]
     ) -> float:
-        """Shortest wall-aware travel distance in metres (never inf)."""
-        sa, off_a = self._snap(a)
+        """Shortest wall-aware travel distance in metres (never inf).
+
+        The Dijkstra *source* is collapsed onto the coarse access lattice so each
+        access node is solved at most once for the whole run; the ``a -> acc_a``
+        leg is added analytically. The *target* keeps its exact fine-grid snap, so
+        the wall-aware grid distance between the access node and the target is
+        still the exact shortest path on the grid.
+        """
+        acc_a, leg_a = self._snap_access(a)
         sb, off_b = self._snap(b)
-        dist, _ = self._dijkstra(sa)
+        dist, _ = self._dijkstra(acc_a)
         d = dist.get(sb)
         if d is None or d == float("inf"):
             # Unreachable on the grid -> never block, fall back to Manhattan.
             return _manhattan(a, b)
-        return d + off_a + off_b
+        return d + leg_a + off_b
 
     def path(
         self, a: tuple[float, float], b: tuple[float, float]
     ) -> list[tuple[float, float]]:
         """Node-centre xy waypoints along the shortest route (for draw / heat)."""
-        sa, _ = self._snap(a)
+        acc_a, _ = self._snap_access(a)
         sb, _ = self._snap(b)
-        dist, prev = self._dijkstra(sa)
+        dist, prev = self._dijkstra(acc_a)
         if sb not in dist:
             return [a, b]
 
         chain: list[int] = []
         cur = sb
-        while cur != sa:
+        while cur != acc_a:
             chain.append(cur)
             nxt = prev.get(cur)
             if nxt is None:
                 return [a, b]
             cur = nxt
-        chain.append(sa)
+        chain.append(acc_a)
         chain.reverse()
 
         pts = [self._node_xy(*self._node_cr(idx)) for idx in chain]
