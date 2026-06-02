@@ -1798,3 +1798,50 @@ button.is-busy { cursor: progress; opacity: .85; }
 /* live staffing map (timetable 時刻連動) */
 .tt-map { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 .tt-map-canvas { width: 100%; height: 260px; display: block; border-radius: 8px; }
+
+/* ===========================================================================
+   WHSiM ブランド — タイポグラフィ刷新 + ワードマーク
+   Display=Chakra Petch, UI=Space Grotesk, Mono/Data=Space Mono。
+   立方体シンボル(i のチットル) + シアンのステム。フォントはローカル同梱で CDN非依存。
+   =========================================================================== */
+@font-face{font-family:"Chakra Petch";font-style:normal;font-weight:500;font-display:swap;src:url("./vendor/fonts/chakra-500.woff2") format("woff2");}
+@font-face{font-family:"Chakra Petch";font-style:normal;font-weight:700;font-display:swap;src:url("./vendor/fonts/chakra-700.woff2") format("woff2");}
+@font-face{font-family:"Space Grotesk";font-style:normal;font-weight:400;font-display:swap;src:url("./vendor/fonts/grotesk-400.woff2") format("woff2");}
+@font-face{font-family:"Space Grotesk";font-style:normal;font-weight:500;font-display:swap;src:url("./vendor/fonts/grotesk-500.woff2") format("woff2");}
+@font-face{font-family:"Space Grotesk";font-style:normal;font-weight:600;font-display:swap;src:url("./vendor/fonts/grotesk-600.woff2") format("woff2");}
+@font-face{font-family:"Space Mono";font-style:normal;font-weight:400;font-display:swap;src:url("./vendor/fonts/mono-400.woff2") format("woff2");}
+@font-face{font-family:"Space Mono";font-style:normal;font-weight:700;font-display:swap;src:url("./vendor/fonts/mono-700.woff2") format("woff2");}
+
+:root{
+  --font-display:"Chakra Petch","Noto Sans JP",system-ui,sans-serif;
+  --font-sans:"Space Grotesk","Noto Sans JP",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --font-mono:"Space Mono","Roboto Mono",ui-monospace,"JetBrains Mono",monospace;
+}
+body{ font-family:var(--font-sans); }
+h1,h2,h3,h4,.brand{ font-family:var(--font-display); }
+
+/* WHSiM ワードマーク (WHS + 立方体チットルの i + M) */
+.brand{ display:flex; align-items:center; gap:10px; }
+.wm{ display:inline-flex; align-items:flex-end; font-family:var(--font-display);
+  font-weight:700; letter-spacing:.05em; font-size:23px; line-height:1; }
+.wm-t{ color:#0A1626; }
+.wm-i{ position:relative; display:inline-flex; flex-direction:column; justify-content:flex-end;
+  align-items:center; width:.54em; height:.80em; margin:0 .04em; }
+.wm-stem{ width:.17em; height:.56em; border-radius:.07em;
+  background:linear-gradient(180deg,#0EA5E9,#0A5E96); }
+.wm-tittle{ position:absolute; left:50%; top:-.40em; transform:translateX(-50%);
+  width:.64em; height:.64em; }
+.wm-tittle svg{ width:100%; height:100%; display:block; }
+.wm-cube-dark{ display:none; }
+.brand-tag{ font-family:var(--font-mono); font-weight:400; font-size:9px; letter-spacing:.32em;
+  color:#6B7C8E; text-transform:uppercase; align-self:center; white-space:nowrap; }
+
+html[data-theme="dark"] .wm-t{
+  background:linear-gradient(180deg,#FBFEFF,#A9EBFB 60%,#34E3FF);
+  -webkit-background-clip:text; background-clip:text; color:transparent; }
+html[data-theme="dark"] .wm-stem{ background:linear-gradient(180deg,#34E3FF,#2F7BFF); }
+html[data-theme="dark"] .wm-cube-light{ display:none; }
+html[data-theme="dark"] .wm-cube-dark{ display:block; }
+html[data-theme="dark"] .brand-tag{ color:#8FA6BD; }
+
+@media (max-width:720px){ .brand-tag{ display:none; } .wm{ font-size:20px; } }
