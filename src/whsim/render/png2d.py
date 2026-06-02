@@ -22,6 +22,7 @@ from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
 
 from whsim.render.fonts import setup_jp_font  # noqa: E402
 from whsim.render.heatmap import blur  # noqa: E402
+from whsim.render.shelves import shelf_runs  # noqa: E402
 from whsim.schema.model import WarehouseModel  # noqa: E402
 
 ABC_COLOR = {"A": "#d7301f", "B": "#fc8d59", "C": "#fdcc8a"}
@@ -117,10 +118,17 @@ def render(
                                alpha=0.45, edgecolor="#c3cedb", lw=0.8, zorder=1))
         ax.text(z.x + z.w / 2, z.y + z.h / 2, ZONE_JP.get(z.type, z.type),
                 ha="center", va="center", fontsize=8.5, color=INK_DIM, zorder=2)
-    by_sku = model.item_by_sku()
-    for loc in model.locations:
-        cls = by_sku[loc.sku].abc_class if loc.sku in by_sku else "C"
-        ax.plot(loc.x, loc.y, "s", ms=2.6, color=ABC_COLOR.get(cls, "#ccc"), zorder=3)
+    # Storage drawn as MapMaker-style shelf runs (rack blocks), not loose dots:
+    # a slate body per run, ABC-coloured bays inside it.
+    for run in shelf_runs(model):
+        x, y0, y1, d = run["x"], run["y0"], run["y1"], run["depth"]
+        pitch = run.get("pitch", 1.0)
+        ax.add_patch(Rectangle((x - d / 2, y0), d, y1 - y0, facecolor="#dde5ee",
+                               edgecolor="#b4c1d0", lw=0.5, zorder=2))
+        for c in run["cells"]:
+            ax.add_patch(Rectangle((x - d / 2, c["y"] - pitch * 0.4), d, pitch * 0.8,
+                                   facecolor=ABC_COLOR.get(c["abc"], "#ccc"),
+                                   edgecolor="none", alpha=0.92, zorder=3))
     if model.resources.stations:
         st = model.resources.stations[0]
         ax.plot(st.x, st.y, "*", ms=15, color=ACCENT, zorder=6,

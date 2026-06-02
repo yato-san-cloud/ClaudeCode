@@ -134,9 +134,28 @@ function draw2d() {
     ctx.fillStyle = P.zoneInk; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(ZONE_JP[z.type] || z.type, X(z.x + z.w / 2), Y(z.y + z.h / 2));
   }
-  for (const r of rep.racks) {
-    ctx.fillStyle = ABC_COLOR[r.abc] || '#ccc';
-    ctx.fillRect(X(r.x) - 2, Y(r.y) - 2, 4, 4);
+  // Storage as MapMaker-style shelf runs (rack blocks + ABC bays); older replays
+  // without `shelves` fall back to the legacy per-location dots.
+  if (rep.shelves && rep.shelves.length) {
+    for (const sh of rep.shelves) {
+      const d = sh.depth, w = d * sc;
+      const x0 = X(sh.x - d / 2), yTop = Y(sh.y1), h = (sh.y1 - sh.y0) * sc;
+      ctx.fillStyle = 'rgba(150,170,195,0.16)';
+      ctx.fillRect(x0, yTop, w, h);
+      ctx.strokeStyle = 'rgba(150,170,195,0.42)'; ctx.lineWidth = 0.6;
+      ctx.strokeRect(x0, yTop, w, h);
+      const pitch = sh.pitch || 1;
+      for (const c of sh.cells) {
+        ctx.fillStyle = ABC_COLOR[c.abc] || '#ccc';
+        ctx.fillRect(x0, Y(c.y + pitch * 0.4), w, pitch * 0.8 * sc);
+      }
+    }
+    ctx.lineWidth = 1;
+  } else {
+    for (const r of rep.racks) {
+      ctx.fillStyle = ABC_COLOR[r.abc] || '#ccc';
+      ctx.fillRect(X(r.x) - 2, Y(r.y) - 2, 4, 4);
+    }
   }
   for (const s of rep.stations) {
     ctx.fillStyle = '#08519c'; ctx.beginPath();
