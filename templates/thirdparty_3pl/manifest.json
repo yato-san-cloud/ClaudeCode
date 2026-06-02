@@ -1,0 +1,71 @@
+{
+  "template_id": "thirdparty_3pl",
+  "name": "3PL多品種・混合オペ",
+  "description": "波動の大きい3PL倉庫。多荷主混合、人手+フォークリフト、ウェーブ投入。ピーク検証に。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "resources.equipment.0.count",
+      "label": "フォーク台数",
+      "type": "int",
+      "unit": "台"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.peak_factor",
+      "label": "ピーク係数",
+      "type": "float",
+      "unit": "倍"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "discrete",
+          "label": "都度ピック"
+        },
+        {
+          "value": "batch",
+          "label": "バッチ"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン"
+        },
+        {
+          "value": "wave",
+          "label": "ウェーブ"
+        }
+      ]
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間",
+      "type": "float",
+      "unit": "時間",
+      "scale": 3600
+    }
+  ]
+}

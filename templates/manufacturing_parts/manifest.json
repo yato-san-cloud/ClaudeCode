@@ -1,0 +1,64 @@
+{
+  "template_id": "manufacturing_parts",
+  "name": "製造部品供給・かんばん",
+  "description": "かんばん方式の製造部品供給。小ロット・高頻度・都度ピック、ライン直近供給。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "供給作業者",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "供給オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.lines_per_order_mean",
+      "label": "平均行数",
+      "type": "float",
+      "unit": "行/件"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "discrete",
+          "label": "都度ピック"
+        },
+        {
+          "value": "batch",
+          "label": "バッチ"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン"
+        },
+        {
+          "value": "wave",
+          "label": "ウェーブ"
+        }
+      ]
+    },
+    {
+      "path": "process.pack_time_s",
+      "label": "仕分け時間",
+      "type": "float",
+      "unit": "秒/件"
+    }
+  ]
+}

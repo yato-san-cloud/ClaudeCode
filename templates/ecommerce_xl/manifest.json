@@ -1,0 +1,71 @@
+{
+  "template_id": "ecommerce_xl",
+  "name": "大規模EC・AGV導入 (large)",
+  "description": "大規模 EC 倉庫。AGV(GTP)による高物量ピッキング、24名運用。物量増の検討に。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "resources.equipment.0.count",
+      "label": "AGV台数",
+      "type": "int",
+      "unit": "台"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "process.batch_size",
+      "label": "バッチ数",
+      "type": "int",
+      "unit": "件/トリップ"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "discrete",
+          "label": "都度ピック"
+        },
+        {
+          "value": "batch",
+          "label": "バッチ"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン"
+        },
+        {
+          "value": "wave",
+          "label": "ウェーブ"
+        }
+      ]
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間",
+      "type": "float",
+      "unit": "時間",
+      "scale": 3600
+    }
+  ]
+}

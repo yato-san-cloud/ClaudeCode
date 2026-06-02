@@ -104,6 +104,33 @@ const HANDLE = 12;        // bottom-right resize handle size in px
 const MIN_M = 1;          // smallest zone dimension in meters
 const SNAP = 0.5;         // grid snap in meters
 
+// ---- theme-aware canvas palette --------------------------------------------
+// Drawing colors are resolved from CSS custom properties at draw time (cached on
+// the instance, refreshed on the `themechange` event). Fallbacks equal the prior
+// hardcoded hexes so LIGHT mode is pixel-identical; dark variants live in
+// styles.css. Chrome (toolbar/help/side panels) uses the app's CSS vars directly.
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+function resolvePalette() {
+  return {
+    bg:           cssVar('--canvas-bg', 'transparent'),
+    shell:        cssVar('--canvas-shell', '#333'),
+    ink:          cssVar('--canvas-ink', '#3a4452'),
+    inkDim:       cssVar('--canvas-ink-dim', '#aab2bd'),
+    inkFaint:     cssVar('--canvas-ink-faint', '#9aa4b0'),
+    rack:         cssVar('--canvas-rack', 'rgba(60,72,90,0.5)'),
+    sel:          cssVar('--canvas-sel', '#1f2733'),
+    selInk:       cssVar('--canvas-sel-ink', '#fff'),
+    markerStroke: cssVar('--canvas-marker-stroke', '#fff'),
+    badgeBg:      cssVar('--canvas-badge-bg', 'rgba(31,39,51,0.88)'),
+    wall:         cssVar('--canvas-wall', '#5a6472'),
+    draft:        cssVar('--canvas-draft', '#e31a1c'),
+    accent:       cssVar('--accent', '#1f78b4'),
+  };
+}
+
 // ---- small helpers ---------------------------------------------------------
 const clone = (o) => JSON.parse(JSON.stringify(o || {}));
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
@@ -136,11 +163,26 @@ export class Designer {
     this.flowMethodStage = null;   // stage id whose method popover is open
     this.drag = null;              // active drag state on the canvas
     this._listeners = [];          // [el, type, fn] for clean dispose()
+    this.pal = resolvePalette();   // cached theme-aware canvas palette
     this._normalize(model);
     this._buildShell();
     this._bindWindow();
     this._bindKeys();
+    this._bindTheme();
     this._selectTool('layout');
+  }
+
+  // Re-resolve the canvas palette and repaint when the app toggles light/dark.
+  // (Bound once on the document; cleaned up via _listeners in dispose().)
+  _bindTheme() {
+    this._on(document, 'themechange', () => {
+      this.pal = resolvePalette();
+      // Repaint the active canvas tool, and rebuild chrome that embeds inline
+      // theme colors (active-tool highlights, help popover) so it follows suit.
+      if (this.tool === 'flow') this._drawFlowCanvas();
+      else if (this.ctx) this._drawCanvas();
+      if (this._helpEl) { this._toggleHelp(); this._toggleHelp(); }  // refresh popover colors
+    });
   }
 
   // ---- public API ----------------------------------------------------------
@@ -176,21 +218,21 @@ export class Designer {
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-label', '設計エディタのヘルプ');
     box.style.cssText = 'position:absolute;top:48px;right:16px;z-index:30;width:320px;max-width:calc(100% - 32px);'
-      + 'background:#fff;border:1px solid #d8dee6;border-radius:10px;box-shadow:0 8px 28px rgba(31,39,51,0.18);'
-      + 'padding:14px 16px;font-size:12px;color:#3a4452;line-height:1.7;';
-    box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">操作ヘルプ</div>'
+      + 'background:var(--bg-panel);border:1px solid var(--line-strong);border-radius:10px;box-shadow:var(--sh-lg);'
+      + 'padding:14px 16px;font-size:12px;color:var(--ink-secondary);line-height:1.7;';
+    box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--ink-primary);">操作ヘルプ</div>'
       + '<div><b>レイアウト</b>: パレットを選んで床をクリックで配置。ゾーンをドラッグで移動、右下のハンドルでサイズ変更。</div>'
       + '<div><b>設備</b>: 床をクリックで設置、マーカーで選択。コンベアは頂点を追加してダブルクリックで確定。</div>'
       + '<div><b>躯体</b>: 壁は頂点を追加してダブルクリックで確定。ドアは縁をクリックで配置。</div>'
       + '<div><b>フロー</b>: 工程をクリックで作業方法を設定。「床図でフロー配置」で工程→ゾーンを割当。</div>'
       + '<div><b>動線</b>: 床をクリックで頂点追加、ダブルクリックで確定。距離と所要時間を自動計算。</div>'
-      + '<div style="margin-top:8px;border-top:1px solid #eef0f3;padding-top:8px;">'
+      + '<div style="margin-top:8px;border-top:1px solid var(--line-hair);padding-top:8px;">'
       + '<b>キーボード</b><br>選択を削除: <b>Delete</b> / 取消: <b>Esc</b><br>'
       + '元に戻す: <b>Ctrl/⌘+Z</b> / やり直す: <b>Ctrl/⌘+Shift+Z</b></div>'
-      + '<div style="margin-top:8px;color:#6b7785;">変更は「適用（保存）」を押すまでサーバーに保存されません。</div>';
+      + '<div style="margin-top:8px;color:var(--ink-tertiary);">変更は「適用（保存）」を押すまでサーバーに保存されません。</div>';
     const close = document.createElement('button');
     close.textContent = '閉じる';
-    close.style.cssText = 'margin-top:10px;padding:5px 10px;border:1px solid #e3e8ee;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;';
+    close.style.cssText = 'margin-top:10px;padding:5px 10px;border:1px solid var(--line-hair);border-radius:6px;background:var(--bg-app);color:var(--ink-primary);cursor:pointer;font-size:12px;';
     this._on(close, 'click', () => this._toggleHelp());
     box.appendChild(close);
     this.container.appendChild(box);
@@ -318,7 +360,7 @@ export class Designer {
     bar.appendChild(save);
     this._saveBtn = save;
     this._saveMsg = document.createElement('span');
-    this._saveMsg.style.cssText = 'font-size:12px;color:#6b7785;max-width:340px;';
+    this._saveMsg.style.cssText = 'font-size:12px;color:var(--ink-secondary);max-width:340px;';
     bar.appendChild(this._saveMsg);
     c.appendChild(bar);
 
@@ -347,7 +389,7 @@ export class Designer {
       const active = k === key;
       const b = this._toolBtns[k];
       b.style.cssText = active
-        ? 'background:#1f2733;color:#fff;border-color:#1f2733;font-weight:700;'
+        ? 'background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;'
         : '';
     }
     this._renderTool();
@@ -365,7 +407,7 @@ export class Designer {
       left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
       this._renderLayoutBar(left);
       const wrap = document.createElement('div');
-      wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+      wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
       this.canvas = document.createElement('canvas');
       this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.layoutBrush ? 'crosshair' : 'default'};`;
       wrap.appendChild(this.canvas);
@@ -374,7 +416,7 @@ export class Designer {
       canvasHost = wrap;
     } else {
       const wrap = document.createElement('div');
-      wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+      wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
       this.canvas = document.createElement('canvas');
       // equip/building tools are click-to-place: a crosshair signals placement.
       this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
@@ -384,7 +426,7 @@ export class Designer {
     }
 
     this.side = document.createElement('div');
-    this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
+    this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
     this.body.appendChild(this.side);
 
     this.ctx = this.canvas.getContext('2d');
@@ -397,11 +439,11 @@ export class Designer {
   // ---- レイアウト control bar: object palette + underlay toggle + inventory ----
   _renderLayoutBar(parent) {
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;';
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);';
 
     const palLbl = document.createElement('span');
     palLbl.textContent = '配置:';
-    palLbl.style.cssText = 'font-size:12px;color:#6b7785;font-weight:700;';
+    palLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);font-weight:700;';
     bar.appendChild(palLbl);
 
     // PPT-like object palette: click an object, then click the floor to place it.
@@ -411,7 +453,7 @@ export class Designer {
         this.selected = null;
         this._renderTool();
       });
-      if (this.layoutBrush === p.key) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;font-weight:700;';
+      if (this.layoutBrush === p.key) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
     }
 
     const spacer = document.createElement('div');
@@ -420,7 +462,7 @@ export class Designer {
 
     // DXF underlay toggle (only meaningful when walls exist, but always shown)
     const ulLbl = document.createElement('label');
-    ulLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:#6b7785;cursor:pointer;';
+    ulLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-secondary);cursor:pointer;';
     const ulCb = document.createElement('input');
     ulCb.type = 'checkbox';
     ulCb.checked = !!this.showUnderlay;
@@ -434,7 +476,7 @@ export class Designer {
 
     // status line for placement hint / inventory result
     this._layoutStatus = document.createElement('span');
-    this._layoutStatus.style.cssText = 'font-size:12px;color:#6b7785;max-width:100%;flex-basis:100%;';
+    this._layoutStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);max-width:100%;flex-basis:100%;';
     this._layoutStatus.textContent = this.layoutBrush
       ? `「${(LAYOUT_PALETTE.find((q) => q.key === this.layoutBrush) || {}).label}」を選択中。床をクリックして配置します。`
       : 'パレットから配置する物を選ぶか、既存のゾーンをクリックして編集します。';
@@ -450,7 +492,7 @@ export class Designer {
       return;
     }
     if (this._layoutStatus) {
-      this._layoutStatus.style.color = '#6b7785';
+      this._layoutStatus.style.color = 'var(--ink-secondary)';
       this._layoutStatus.textContent = '在庫を割付中…';
     }
     try {
@@ -458,10 +500,10 @@ export class Designer {
       const msg = (r && r.message)
         ? r.message
         : (r ? `割付 ${r.assigned ?? '?'} / ロケーション ${r.locations ?? '?'} / SKU ${r.skus ?? '?'}` : '割付が完了しました。');
-      if (this._layoutStatus) { this._layoutStatus.style.color = '#1a7a3c'; this._layoutStatus.textContent = msg; }
+      if (this._layoutStatus) { this._layoutStatus.style.color = 'var(--ok)'; this._layoutStatus.textContent = msg; }
     } catch (err) {
       if (this._layoutStatus) {
-        this._layoutStatus.style.color = '#b30000';
+        this._layoutStatus.style.color = 'var(--bad)';
         this._layoutStatus.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
       }
     }
@@ -474,7 +516,7 @@ export class Designer {
     left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
 
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;';
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);';
     // mover selector
     const moverSel = this._select(bar, MOVER_OPTS, this.routeMover);
     this._on(moverSel, 'change', () => {
@@ -485,10 +527,10 @@ export class Designer {
     // speed input (m/s)
     const spLbl = document.createElement('span');
     spLbl.textContent = '速度(m/s)';
-    spLbl.style.cssText = 'font-size:12px;color:#6b7785;';
+    spLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);';
     bar.appendChild(spLbl);
     const spInp = this._num(this.routeSpeed, (v) => { this.routeSpeed = Math.max(0.1, v); }, 0.1);
-    spInp.style.cssText += ';width:70px;padding:5px 7px;border:1px solid #e3e8ee;border-radius:6px;font-size:13px;';
+    spInp.style.cssText += ';width:70px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:6px;font-size:13px;background:var(--bg-app);color:var(--ink-primary);';
     bar.appendChild(spInp);
     this._btn(bar, '新規ルート', () => {
       if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
@@ -497,12 +539,12 @@ export class Designer {
       this._renderRoute();
     });
     this._btn(bar, '確定', () => this._finishRoute());
-    this._btn(bar, '削除', () => this._deleteSelectedRoute(), 'color:#b30000;');
+    this._btn(bar, '削除', () => this._deleteSelectedRoute(), 'color:var(--bad);');
     left.appendChild(bar);
 
     // floor canvas
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
     wrap.appendChild(this.canvas);
@@ -511,7 +553,7 @@ export class Designer {
 
     // right column: live 動線一覧 table
     this.side = document.createElement('div');
-    this.side.style.cssText = 'width:300px;flex:0 0 300px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
+    this.side.style.cssText = 'width:300px;flex:0 0 300px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
     this.body.appendChild(this.side);
 
     this.ctx = this.canvas.getContext('2d');
@@ -544,7 +586,7 @@ export class Designer {
     for (const t of ['名称', '種別', '距離(m)', '所要(秒)']) {
       const th = document.createElement('th');
       th.textContent = t;
-      th.style.cssText = 'text-align:left;padding:4px 6px;border-bottom:2px solid #e3e8ee;color:#6b7785;font-weight:700;';
+      th.style.cssText = 'text-align:left;padding:4px 6px;border-bottom:2px solid var(--line-hair);color:var(--ink-secondary);font-weight:700;';
       thead.appendChild(th);
     }
     table.appendChild(thead);
@@ -556,7 +598,7 @@ export class Designer {
       totalD += dist; totalT += time;
       const tr = document.createElement('tr');
       const selRow = this._isSel('route', rt.id);
-      tr.style.cssText = 'cursor:pointer;' + (selRow ? 'background:#eef2f7;font-weight:700;' : '');
+      tr.style.cssText = 'cursor:pointer;' + (selRow ? 'background:var(--bg-hover);font-weight:700;' : '');
       this._on(tr, 'click', () => {
         this.selected = { kind: 'route', id: rt.id };
         this._renderRouteTable(); this._drawCanvas();
@@ -570,7 +612,7 @@ export class Designer {
       cells.forEach((c, i) => {
         const td = document.createElement('td');
         td.textContent = String(c);
-        td.style.cssText = 'padding:4px 6px;border-bottom:1px solid #eef0f3;'
+        td.style.cssText = 'padding:4px 6px;border-bottom:1px solid var(--line-hair);'
           + (i >= 2 ? 'text-align:right;font-variant-numeric:tabular-nums;' : '');
         if (i === 0) td.style.cssText += `border-left:3px solid ${MOVER_COLOR[rt.mover] || '#777'};`;
         tr.appendChild(td);
@@ -582,7 +624,7 @@ export class Designer {
     for (const [i, c] of [[0, '合計'], [1, ''], [2, totalD.toFixed(1)], [3, String(Math.round(totalT))]]) {
       const td = document.createElement('td');
       td.textContent = c;
-      td.style.cssText = 'padding:6px;border-top:2px solid #e3e8ee;font-weight:700;'
+      td.style.cssText = 'padding:6px;border-top:2px solid var(--line-hair);font-weight:700;'
         + (i >= 2 ? 'text-align:right;font-variant-numeric:tabular-nums;' : '');
       tot.appendChild(td);
     }
@@ -603,7 +645,7 @@ export class Designer {
       this._field(s, '速度 (m/s)', () => this._num(rt.speed_mps, (v) => {
         rt.speed_mps = Math.max(0.1, v); this._renderRouteTable();
       }, 0.1));
-      this._btn(s, '削除', () => this._deleteSelectedRoute(), 'margin-top:10px;color:#b30000;');
+      this._btn(s, '削除', () => this._deleteSelectedRoute(), 'margin-top:10px;color:var(--bad);');
     }
   }
 
@@ -717,11 +759,14 @@ export class Designer {
   _drawCanvas() {
     if (!this.ctx) return;
     const ctx = this.ctx, { w, h, sc } = this._view;
+    const P = this.pal;
     const b = this.model.layout.bounds;
     ctx.clearRect(0, 0, w, h);
+    // dim canvas fill in dark mode (transparent in light → parent --bg-app shows)
+    if (P.bg && P.bg !== 'transparent') { ctx.fillStyle = P.bg; ctx.fillRect(0, 0, w, h); }
 
     // floor
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
 
     // DXF underlay: in the レイアウト tool, draw imported walls as a faint gray
@@ -742,18 +787,18 @@ export class Designer {
       const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
       ctx.fillStyle = hexA(color, dim ? 0.12 : (sel ? 0.42 : 0.3));
       ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
-      ctx.strokeStyle = sel ? '#1f2733' : hexA(color, 0.8);
+      ctx.strokeStyle = sel ? P.sel : hexA(color, 0.8);
       ctx.lineWidth = sel ? 2 : 1;
       ctx.strokeRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
       // rack preview grid for storage zones
       if (z.type === 'storage' && z.rack) this._drawRack(z);
       // label
-      ctx.fillStyle = dim ? '#aab2bd' : '#3a4452';
+      ctx.fillStyle = dim ? P.inkDim : P.ink;
       ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(ZONE_JP[z.type] || z.type, this._X(z.x + z.w / 2), this._Y(z.y + z.h / 2));
       // resize handle + live size badge when selected in layout tool
       if (sel) {
-        ctx.fillStyle = '#1f2733';
+        ctx.fillStyle = P.sel;
         ctx.fillRect(this._X(z.x + z.w) - HANDLE, this._Y(z.y) - HANDLE, HANDLE, HANDLE);
         this._sizeBadge(z);
       }
@@ -761,7 +806,7 @@ export class Designer {
 
     // conveyors (under markers)
     for (const cv of this.model.resources.conveyors) this._drawConveyor(cv.points, '#33a02c', false);
-    if (this.conveyorDraft) this._drawConveyor(this.conveyorDraft, '#e31a1c', true);
+    if (this.conveyorDraft) this._drawConveyor(this.conveyorDraft, P.draft, true);
 
     // equipment markers
     for (const e of this.model.resources.equipment) {
@@ -793,21 +838,21 @@ export class Designer {
         const color = MOVER_COLOR[rt.mover] || '#777';
         ctx.save();
         if (!sel) ctx.globalAlpha = 0.85;
-        this._drawRoute(rt.points, sel ? '#1f2733' : color, false, rt.name);
+        this._drawRoute(rt.points, sel ? P.sel : color, false, rt.name);
         ctx.restore();
       }
-      if (this.routeDraft) this._drawRoute(this.routeDraft, MOVER_COLOR[this.routeMover] || '#e31a1c', true, null);
+      if (this.routeDraft) this._drawRoute(this.routeDraft, MOVER_COLOR[this.routeMover] || P.draft, true, null);
     }
 
     // hint text
     if (this.tool === 'equip') {
-      ctx.fillStyle = '#9aa4b0'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillStyle = P.inkFaint; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       const hint = this.equipBrush === 'conveyor'
         ? 'コンベア: 床をクリックで頂点追加、ダブルクリックか「確定」で完了'
         : '床をクリックして設置 / マーカーをクリックで選択';
       ctx.fillText(hint, 8, 8);
     } else if (this.tool === 'building') {
-      ctx.fillStyle = '#9aa4b0'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillStyle = P.inkFaint; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       const hint = this.buildMode === 'door'
         ? 'ドア: 床をクリックして配置 / マーカーをクリックで選択'
         : '壁: 床をクリックで頂点追加、ダブルクリックか「壁を確定」で完了';
@@ -819,7 +864,7 @@ export class Designer {
     if (!pts || pts.length === 0) return;
     const ctx = this.ctx;
     const wpx = Math.max(3, (+thickness || 0.3) * this._view.sc);
-    ctx.strokeStyle = sel ? '#1f2733' : (draft ? '#e31a1c' : '#5a6472');
+    ctx.strokeStyle = sel ? this.pal.sel : (draft ? this.pal.draft : this.pal.wall);
     ctx.lineWidth = wpx; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     if (draft) ctx.setLineDash([8, 6]);
     ctx.beginPath();
@@ -828,7 +873,7 @@ export class Designer {
     ctx.stroke();
     ctx.setLineDash([]);
     // vertices
-    ctx.fillStyle = sel ? '#1f2733' : (draft ? '#e31a1c' : '#5a6472');
+    ctx.fillStyle = sel ? this.pal.sel : (draft ? this.pal.draft : this.pal.wall);
     for (const p of pts) { ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3, 0, 7); ctx.fill(); }
   }
 
@@ -838,7 +883,7 @@ export class Designer {
     const color = pal ? pal.color : '#888888';
     const half = Math.max(6, (+d.w || 1) * this._view.sc / 2);
     ctx.fillStyle = hexA(color, 0.55);
-    ctx.strokeStyle = sel ? '#1f2733' : color;
+    ctx.strokeStyle = sel ? this.pal.sel : color;
     ctx.lineWidth = sel ? 2.5 : 1.5;
     ctx.beginPath();
     ctx.rect(px - half, py - 6, half * 2, 12);
@@ -850,7 +895,7 @@ export class Designer {
     const ctx = this.ctx, r = z.rack;
     const cs = +r.col_spacing || 4, rs = +r.row_spacing || 3, mg = +r.margin || 0;
     if (z.w - 2 * mg <= 0 || z.h - 2 * mg <= 0) return;
-    ctx.fillStyle = 'rgba(60,72,90,0.5)';
+    ctx.fillStyle = this.pal.rack;
     for (let cx = z.x + mg; cx <= z.x + z.w - mg + 1e-6; cx += cs) {
       for (let cy = z.y + mg; cy <= z.y + z.h - mg + 1e-6; cy += rs) {
         ctx.fillRect(this._X(cx) - 1.5, this._Y(cy) - 1.5, 3, 3);
@@ -874,13 +919,13 @@ export class Designer {
 
   _marker(x, y, color, label, sel) {
     const ctx = this.ctx, px = this._X(x), py = this._Y(y);
-    ctx.fillStyle = color; ctx.strokeStyle = sel ? '#1f2733' : '#fff'; ctx.lineWidth = sel ? 2.5 : 1.5;
+    ctx.fillStyle = color; ctx.strokeStyle = sel ? this.pal.sel : this.pal.markerStroke; ctx.lineWidth = sel ? 2.5 : 1.5;
     ctx.beginPath(); ctx.arc(px, py, 9, 0, 7); ctx.fill(); ctx.stroke();
     this._label(px, py + 16, label);
   }
   _star(px, py, color, sel) {
     const ctx = this.ctx;
-    ctx.fillStyle = color; ctx.strokeStyle = sel ? '#1f2733' : '#fff'; ctx.lineWidth = sel ? 2.5 : 1.2;
+    ctx.fillStyle = color; ctx.strokeStyle = sel ? this.pal.sel : this.pal.markerStroke; ctx.lineWidth = sel ? 2.5 : 1.2;
     ctx.beginPath();
     for (let i = 0; i < 10; i++) {
       const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 4 : 9;
@@ -891,7 +936,7 @@ export class Designer {
   }
   _label(px, py, text) {
     const ctx = this.ctx;
-    ctx.fillStyle = '#3a4452'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillStyle = this.pal.ink; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     ctx.fillText(text, px, py);
   }
   // size badge in metres (e.g. "12.0 × 8.0 m") near a zone's top-left corner
@@ -901,9 +946,9 @@ export class Designer {
     const px = this._X(z.x) + 4, py = this._Y(z.y + z.h) + 4;
     ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     const w = ctx.measureText(text).width;
-    ctx.fillStyle = 'rgba(31,39,51,0.88)';
+    ctx.fillStyle = this.pal.badgeBg;
     ctx.fillRect(px, py, w + 8, 16);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = this.pal.selInk;
     ctx.fillText(text, px + 4, py + 2);
   }
   _isSel(kind, id) { return this.selected && this.selected.kind === kind && this.selected.id === id; }
@@ -1272,7 +1317,7 @@ export class Designer {
         this._renderSide(); this._drawCanvas();
       });
       b.style.flex = '1';
-      if (this.buildMode === m) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;';
+      if (this.buildMode === m) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);';
     }
 
     if (this.buildMode === 'wall') {
@@ -1288,7 +1333,7 @@ export class Designer {
           this._pushUndo();
           this.model.layout.walls = this.model.layout.walls.filter((q) => q.id !== w.id);
           this.selected = null; this._renderSide(); this._drawCanvas();
-        }, 'margin-top:10px;color:#b30000;');
+        }, 'margin-top:10px;color:var(--bad);');
       } else {
         this._note(s, '壁をクリックして選択すると編集・削除できます。');
       }
@@ -1297,7 +1342,7 @@ export class Designer {
       const pal = this._div(s, 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;');
       for (const p of DOOR_PALETTE) {
         const b = this._btn(pal, p.label, () => { this.doorBrush = p.type; this._renderSide(); this._drawCanvas(); });
-        if (this.doorBrush === p.type) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;';
+        if (this.doorBrush === p.type) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);';
       }
       const d = this.selected && this.selected.kind === 'door'
         ? this.model.layout.doors.find((q) => q.id === this.selected.id) : null;
@@ -1313,7 +1358,7 @@ export class Designer {
           this._pushUndo();
           this.model.layout.doors = this.model.layout.doors.filter((q) => q.id !== d.id);
           this.selected = null; this._renderSide(); this._drawCanvas();
-        }, 'margin-top:10px;color:#b30000;');
+        }, 'margin-top:10px;color:var(--bad);');
       } else {
         this._note(s, '建屋の縁をクリックしてドアを配置、または既存のドアをクリックして編集します。');
       }
@@ -1364,7 +1409,7 @@ export class Designer {
         this._field(s, label, () => this._num(z.rack[key], (v) => { z.rack[key] = Math.max(0.1, v); this._drawCanvas(); }));
       }
     }
-    this._btn(s, '削除', () => this._deleteZone(z.id), 'margin-top:10px;color:#b30000;');
+    this._btn(s, '削除', () => this._deleteZone(z.id), 'margin-top:10px;color:var(--bad);');
   }
 
   _sideEquip(s) {
@@ -1372,7 +1417,7 @@ export class Designer {
     const pal = this._div(s, 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;');
     for (const p of EQUIP_PALETTE) {
       const b = this._btn(pal, p.label, () => { this.equipBrush = p.key; this.conveyorDraft = null; this._renderSide(); this._drawCanvas(); });
-      if (this.equipBrush === p.key) b.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;';
+      if (this.equipBrush === p.key) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);';
     }
     if (this.equipBrush === 'conveyor') {
       this._btn(s, '確定（コンベア完了）', () => this._finishConveyor(), 'margin-bottom:8px;');
@@ -1388,14 +1433,14 @@ export class Designer {
         this._h(s, `選択中: ${p ? p.label : e.type}`);
         this._field(s, '台数', () => this._num(e.count, (v) => { e.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
         this._field(s, '速度 (m/s)', () => this._num(e.speed_mps, (v) => { e.speed_mps = Math.max(0, v); }));
-        this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.equipment = this.model.resources.equipment.filter((q) => q.id !== e.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
+        this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.equipment = this.model.resources.equipment.filter((q) => q.id !== e.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:var(--bad);');
       }
     } else if (sel && sel.kind === 'station') {
       const st = this.model.resources.stations.find((q) => q.id === sel.id);
       if (st) {
         this._h(s, '選択中: 梱包台');
         this._field(s, '台数', () => this._num(st.count, (v) => { st.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
-        this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.stations = this.model.resources.stations.filter((q) => q.id !== st.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:#b30000;');
+        this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.stations = this.model.resources.stations.filter((q) => q.id !== st.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:var(--bad);');
       }
     } else {
       this._note(s, '床をクリックして設置、または既存マーカーをクリックして編集します。');
@@ -1460,14 +1505,14 @@ export class Designer {
     left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
 
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;';
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);';
     // toggle: spatial flow-building mode (click zones in sequence)
     const flowBtn = this._btn(bar, this.flowMode ? '配置を終了' : '床図でフロー配置', () => {
       this.flowMode = !this.flowMode;
       if (this.flowMode) { this.flowCursor = 0; this.flowMethodStage = null; }
       this._renderFlow();
     });
-    if (this.flowMode) flowBtn.style.cssText += ';background:#1f2733;color:#fff;border-color:#1f2733;font-weight:700;';
+    if (this.flowMode) flowBtn.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
     // reset all zone bindings (back to "always runnable" unbound state)
     this._btn(bar, 'ゾーン割当をリセット', () => {
       this.model.process.stages.forEach((st) => { st.zone = null; });
@@ -1475,13 +1520,13 @@ export class Designer {
       this._renderFlow();
     });
     this._flowStatus = document.createElement('span');
-    this._flowStatus.style.cssText = 'font-size:12px;color:#6b7785;flex-basis:100%;';
+    this._flowStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);flex-basis:100%;';
     bar.appendChild(this._flowStatus);
     left.appendChild(bar);
 
     // floor canvas (clickable zones)
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid #e3e8ee;border-radius:8px;background:#fff;overflow:hidden;';
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.flowMode ? 'pointer' : 'default'};`;
     wrap.appendChild(this.canvas);
@@ -1491,7 +1536,7 @@ export class Designer {
 
     // right column: the workflow strip + pick strategy + (in-context) method panel
     this.side = document.createElement('div');
-    this.side.style.cssText = 'width:340px;flex:0 0 340px;overflow-y:auto;border:1px solid #e3e8ee;border-radius:8px;background:#fafbfc;padding:10px;';
+    this.side.style.cssText = 'width:340px;flex:0 0 340px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
     this.body.appendChild(this.side);
 
     this.ctx = this.canvas.getContext('2d');
@@ -1532,10 +1577,12 @@ export class Designer {
   _drawFlowCanvas() {
     if (!this.ctx) return;
     const ctx = this.ctx, { w, h, sc } = this._view;
+    const P = this.pal;
     const b = this.model.layout.bounds;
     ctx.clearRect(0, 0, w, h);
+    if (P.bg && P.bg !== 'transparent') { ctx.fillStyle = P.bg; ctx.fillRect(0, 0, w, h); }
     // floor outline
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
 
     const order = this._orderedStages();
@@ -1549,18 +1596,18 @@ export class Designer {
       const isOpen = this.flowMethodStage && boundStage && boundStage.id === this.flowMethodStage;
       ctx.fillStyle = hexA(color, isOpen ? 0.5 : (boundStage ? 0.34 : 0.18));
       ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
-      ctx.strokeStyle = isOpen ? '#1f2733' : (isCursorTarget ? '#1f78b4' : hexA(color, 0.8));
+      ctx.strokeStyle = isOpen ? P.sel : (isCursorTarget ? P.accent : hexA(color, 0.8));
       ctx.lineWidth = (isOpen || isCursorTarget) ? 2.5 : 1;
       if (isCursorTarget) ctx.setLineDash([6, 4]);
       ctx.strokeRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
       ctx.setLineDash([]);
       // label: zone type + bound stage name(s)
-      ctx.fillStyle = '#3a4452'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = P.ink; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const cx = this._X(z.x + z.w / 2), cy = this._Y(z.y + z.h / 2);
       ctx.fillText(ZONE_JP[z.type] || z.type, cx, cy - 7);
       const bound = order.filter((st) => st.zone === z.id).map((st) => st.label || st.id);
       if (bound.length) {
-        ctx.fillStyle = '#1f2733'; ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = P.sel; ctx.font = 'bold 11px sans-serif';
         ctx.fillText(bound.join('・'), cx, cy + 9);
       }
     }
@@ -1570,7 +1617,7 @@ export class Designer {
       const za = this._zoneById(order[i].zone), zb = this._zoneById(order[i + 1].zone);
       if (!za || !zb || za.id === zb.id) continue;
       const [ax, ay] = this._zoneCenter(za), [bx, by] = this._zoneCenter(zb);
-      this._drawArrow(this._X(ax), this._Y(ay), this._X(bx), this._Y(by), '#1f78b4');
+      this._drawArrow(this._X(ax), this._Y(ay), this._X(bx), this._Y(by), P.accent);
     }
 
     // numbered step badges on each bound stage's zone, in flow order
@@ -1582,7 +1629,7 @@ export class Designer {
       step += 1;
       const [zx, zy] = this._zoneCenter(z);
       const px = this._X(zx), py = this._Y(zy);
-      ctx.fillStyle = '#1f78b4'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.fillStyle = P.accent; ctx.strokeStyle = P.markerStroke; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(px - 1, py - 24, 10, 0, 7); ctx.fill(); ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(step), px - 1, py - 24);
@@ -1590,7 +1637,7 @@ export class Designer {
 
     if (this._flowStatus) this._flowStatus.textContent = this._flowStatusText();
     if (!this.model.layout.zones.length) {
-      ctx.fillStyle = '#9aa4b0'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = P.inkFaint; ctx.font = '13px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('レイアウトにゾーンがありません。「レイアウト」タブで配置してください。', w / 2, h / 2);
     }
   }
@@ -1653,7 +1700,7 @@ export class Designer {
     const strip = this._div(s, 'display:flex;flex-direction:column;gap:0;margin:8px 0 14px;');
     order.forEach((st, i) => {
       const open = this.flowMethodStage === st.id;
-      const box = this._div(strip, `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:9px;cursor:pointer;border:2px solid ${METHOD_COLOR[st.method] || '#9aa4b0'};background:${open ? hexA(METHOD_COLOR[st.method] || '#9aa4b0', 0.28) : hexA(METHOD_COLOR[st.method] || '#9aa4b0', 0.1)};`);
+      const box = this._div(strip, `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:9px;cursor:pointer;border:2px solid ${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};background:${open ? hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.28) : hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.1)};`);
       this._on(box, 'click', () => {
         this.flowMethodStage = (this.flowMethodStage === st.id) ? null : st.id;
         this._renderFlowSide(); this._drawFlowCanvas();
@@ -1661,14 +1708,14 @@ export class Designer {
       const lblWrap = this._div(box, 'display:flex;flex-direction:column;gap:2px;');
       const lbl = this._div(lblWrap, 'font-weight:700;font-size:14px;');
       lbl.textContent = `${i + 1}. ${st.label || st.id}`;
-      const zname = this._div(lblWrap, 'font-size:11px;color:#6b7785;');
+      const zname = this._div(lblWrap, 'font-size:11px;color:var(--ink-secondary);');
       const z = st.zone ? this._zoneById(st.zone) : null;
       zname.textContent = z ? `場所: ${ZONE_JP[z.type] || z.type}` : '場所: 未割当';
-      const badge = this._div(box, `font-size:11px;color:#fff;background:${METHOD_COLOR[st.method] || '#9aa4b0'};padding:2px 7px;border-radius:10px;white-space:nowrap;`);
+      const badge = this._div(box, `font-size:11px;color:#fff;background:${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};padding:2px 7px;border-radius:10px;white-space:nowrap;`);
       badge.textContent = (METHOD_OPTS.find((o) => o.value === st.method) || {}).label || st.method;
       // arrow connector
       if (i < order.length - 1) {
-        const arrow = this._div(strip, 'text-align:center;color:#6b7785;font-size:16px;line-height:1;margin:1px 0;');
+        const arrow = this._div(strip, 'text-align:center;color:var(--ink-secondary);font-size:16px;line-height:1;margin:1px 0;');
         arrow.textContent = '↓';
       }
     });
@@ -1709,14 +1756,14 @@ export class Designer {
     st.method = work.transport;
 
     // live reverse-name banner (filled by the backend)
-    const banner = this._div(s, 'margin:6px 0 10px;padding:9px 11px;border-radius:9px;background:#eef4fb;border:1px solid #cfe0f2;');
+    const banner = this._div(s, 'margin:6px 0 10px;padding:9px 11px;border-radius:9px;background:var(--accent-tint);border:1px solid var(--accent-ring);');
     this._methodBanner = banner;
-    banner.innerHTML = '<div style="font-weight:700;color:#1f3a5f;">＝ …</div>';
+    banner.innerHTML = '<div style="font-weight:700;color:var(--accent-ink);">＝ …</div>';
 
     // 推奨 button
     const recRow = this._div(s, 'margin-bottom:10px;');
-    this._btn(recRow, '推奨を表示', () => this._recommendWork(st), 'background:#1f78b4;color:#fff;border-color:#1f78b4;font-weight:700;');
-    this._recReason = this._div(s, 'font-size:12px;color:#1a7a3c;line-height:1.5;margin-bottom:8px;');
+    this._btn(recRow, '推奨を表示', () => this._recommendWork(st), 'background:var(--accent);color:var(--ink-onAccent);border-color:var(--accent);font-weight:700;');
+    this._recReason = this._div(s, 'font-size:12px;color:var(--ok);line-height:1.5;margin-bottom:8px;');
 
     // axis A: transport (select)
     this._methodAxis(s, work, 'transport', () => {
@@ -1727,7 +1774,7 @@ export class Designer {
       work.orders_per_trip = Math.max(1, Math.round(v));
       this._refreshMethodBanner(work);
     }, 1));
-    const sub = this._div(s, 'font-size:11px;color:#9aa4b0;margin:-2px 0 8px;');
+    const sub = this._div(s, 'font-size:11px;color:var(--ink-tertiary);margin:-2px 0 8px;');
     sub.textContent = 'まとめ度 (orders_per_trip)';
     // axis C, D, E (selects)
     this._methodAxis(s, work, 'zoning');
@@ -1757,7 +1804,7 @@ export class Designer {
       });
       return sel;
     });
-    const sub = this._div(s, 'font-size:11px;color:#9aa4b0;margin:-2px 0 8px;');
+    const sub = this._div(s, 'font-size:11px;color:var(--ink-tertiary);margin:-2px 0 8px;');
     sub.textContent = ax.sub;
   }
 
@@ -1767,10 +1814,10 @@ export class Designer {
     if (!banner || !this.handlers.workmethodName) return;
     try {
       const r = await this.handlers.workmethodName(clone(work));
-      banner.innerHTML = `<div style="font-weight:700;color:#1f3a5f;">＝ ${r.name || ''}</div>`
-        + `<div style="font-size:12px;color:#3a4452;margin-top:3px;">${r.explain || ''}</div>`;
+      banner.innerHTML = `<div style="font-weight:700;color:var(--accent-ink);">＝ ${r.name || ''}</div>`
+        + `<div style="font-size:12px;color:var(--ink-primary);margin-top:3px;">${r.explain || ''}</div>`;
     } catch (err) {
-      banner.innerHTML = `<div style="font-size:12px;color:#b30000;">方式名の取得に失敗しました</div>`;
+      banner.innerHTML = `<div style="font-size:12px;color:var(--bad);">方式名の取得に失敗しました</div>`;
     }
   }
 
@@ -1780,7 +1827,7 @@ export class Designer {
       if (this._recReason) this._recReason.textContent = '推奨ハンドラがありません。';
       return;
     }
-    if (this._recReason) { this._recReason.style.color = '#6b7785'; this._recReason.textContent = '推奨を計算中…'; }
+    if (this._recReason) { this._recReason.style.color = 'var(--ink-secondary)'; this._recReason.textContent = '推奨を計算中…'; }
     try {
       const r = await this.handlers.recommendWork();
       if (r && r.work) {
@@ -1788,14 +1835,14 @@ export class Designer {
         st.method = st.work.transport;
       }
       if (this._recReason) {
-        this._recReason.style.color = '#1a7a3c';
+        this._recReason.style.color = 'var(--ok)';
         this._recReason.textContent = `推奨: ${r.name || ''} — ${r.reason || ''}`;
       }
       this._renderFlowSide();  // reloads panel with new axis values
       this._drawFlowCanvas();
     } catch (err) {
       if (this._recReason) {
-        this._recReason.style.color = '#b30000';
+        this._recReason.style.color = 'var(--bad)';
         this._recReason.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
       }
     }
@@ -1809,7 +1856,7 @@ export class Designer {
     if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
     this.routeDraft = null;
     this._saveBtn.disabled = true;
-    this._saveMsg.style.color = '#6b7785';
+    this._saveMsg.style.color = 'var(--ink-secondary)';
     this._saveMsg.textContent = '保存中…';
     try {
       const r = await this.handlers.save({
@@ -1819,10 +1866,10 @@ export class Designer {
         routes: clone(this.model.routes),
       });
       const prov = r && r.provenance_summary ? ` / ${r.provenance_summary}` : '';
-      this._saveMsg.style.color = '#1a7a3c';
+      this._saveMsg.style.color = 'var(--ok)';
       this._saveMsg.textContent = '保存しました' + prov;
     } catch (err) {
-      this._saveMsg.style.color = '#b30000';
+      this._saveMsg.style.color = 'var(--bad)';
       this._saveMsg.textContent = 'エラー: ' + (err && err.message ? err.message : String(err));
     } finally {
       this._saveBtn.disabled = false;
@@ -1835,13 +1882,13 @@ export class Designer {
   _h(parent, text) {
     const h = document.createElement('div');
     h.textContent = text;
-    h.style.cssText = 'font-size:12px;font-weight:700;color:#6b7785;margin:10px 0 6px;';
+    h.style.cssText = 'font-size:12px;font-weight:700;color:var(--ink-secondary);margin:10px 0 6px;';
     parent.appendChild(h); return h;
   }
   _note(parent, text) {
     const n = document.createElement('div');
     n.textContent = text;
-    n.style.cssText = 'font-size:12px;color:#9aa4b0;line-height:1.5;';
+    n.style.cssText = 'font-size:12px;color:var(--ink-tertiary);line-height:1.5;';
     parent.appendChild(n); return n;
   }
   _field(parent, label, makeInput) {
@@ -1852,7 +1899,7 @@ export class Designer {
     l.style.cssText = 'font-size:12px;flex:1;';
     row.appendChild(l);
     const inp = makeInput();
-    inp.style.cssText += ';width:96px;padding:5px 7px;border:1px solid #e3e8ee;border-radius:6px;font-size:13px;';
+    inp.style.cssText += ';width:96px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:6px;font-size:13px;background:var(--bg-app);color:var(--ink-primary);';
     row.appendChild(inp);
     parent.appendChild(row);
     return inp;
@@ -1866,7 +1913,7 @@ export class Designer {
   }
   _select(parent, opts, value) {
     const sel = document.createElement('select');
-    sel.style.cssText = 'padding:5px 7px;border:1px solid #e3e8ee;border-radius:6px;font-size:13px;background:#fff;';
+    sel.style.cssText = 'padding:5px 7px;border:1px solid var(--line-hair);border-radius:6px;font-size:13px;background:var(--bg-app);color:var(--ink-primary);';
     for (const o of opts) {
       const op = document.createElement('option');
       op.value = o.value; op.textContent = o.label;
@@ -1879,7 +1926,7 @@ export class Designer {
   _btn(parent, text, onClick, css) {
     const b = document.createElement('button');
     b.textContent = text;
-    b.style.cssText = 'padding:6px 10px;border:1px solid #e3e8ee;border-radius:6px;background:#fff;font-size:13px;cursor:pointer;' + (css || '');
+    b.style.cssText = 'padding:6px 10px;border:1px solid var(--line-hair);border-radius:6px;background:var(--bg-app);color:var(--ink-primary);font-size:13px;cursor:pointer;' + (css || '');
     this._on(b, 'click', onClick);
     if (parent) parent.appendChild(b);
     return b;

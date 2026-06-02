@@ -51,6 +51,30 @@ function toast(message, kind = 'info', ms = 4200) {
 const STATE_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
                       pick: '#33a02c', pack: '#e31a1c' };
 const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
+
+// ---- theme-aware canvas palette --------------------------------------------
+// Resolved from CSS custom properties at draw time (cached, refreshed on the
+// `themechange` event). Fallbacks equal the previous hardcoded values so LIGHT
+// mode is pixel-identical; the dark variants live in styles.css.
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+let PALETTE = null;
+function refreshPalette() {
+  PALETTE = {
+    shell:        cssVar('--canvas-shell', '#333'),
+    zoneInk:      cssVar('--canvas-zone-ink', '#8a93a0'),
+    inkFaint:     cssVar('--canvas-ink-faint', '#9aa4b0'),
+    wall:         cssVar('--canvas-wall-rep', '#6b7785'),
+    equip:        cssVar('--canvas-equip', '#444'),
+    equipInk:     cssVar('--canvas-equip-ink', '#555'),
+    markerStroke: cssVar('--canvas-marker-stroke', '#fff'),
+    agentStroke:  cssVar('--canvas-agent-stroke', '#000'),
+    conveyor:     cssVar('--canvas-conveyor-rep', '#8d99ae'),
+  };
+  return PALETTE;
+}
 const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキング',
                   packing: '梱包', shipping: '出荷', staging: '一時保管' };
 
@@ -87,10 +111,11 @@ function fitCanvas() {
 }
 function draw2d() {
   const rep = S.replay;
+  const P = PALETTE || refreshPalette();
   const w = canvas.clientWidth, h = canvas.clientHeight;
   ctx.clearRect(0, 0, w, h);
   if (!rep) {
-    ctx.fillStyle = '#9aa4b0'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = P.inkFaint; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('プロジェクトを作成して「実行」すると、ここに動きが表示されます', w / 2, h / 2);
     return;
   }
@@ -99,12 +124,12 @@ function draw2d() {
   const ox = (w - b.width * sc) / 2, oy = (h - b.depth * sc) / 2;
   const X = (x) => ox + x * sc, Y = (y) => h - oy - y * sc; // flip y
 
-  ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+  ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
   ctx.strokeRect(X(0), Y(b.depth), b.width * sc, b.depth * sc);
   for (const z of rep.zones) {
     ctx.fillStyle = hexA(z.color || '#eeeeee', 0.32);
     ctx.fillRect(X(z.x), Y(z.y + z.h), z.w * sc, z.h * sc);
-    ctx.fillStyle = '#8a93a0'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = P.zoneInk; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(ZONE_JP[z.type] || z.type, X(z.x + z.w / 2), Y(z.y + z.h / 2));
   }
   for (const r of rep.racks) {
@@ -118,7 +143,7 @@ function draw2d() {
   // building shell: walls + doors (躯体)
   for (const wl of (rep.walls || [])) {
     if (!wl.points || wl.points.length < 2) continue;
-    ctx.strokeStyle = '#6b7785'; ctx.lineWidth = Math.max(2, (wl.thickness || 0.2) * sc);
+    ctx.strokeStyle = P.wall; ctx.lineWidth = Math.max(2, (wl.thickness || 0.2) * sc);
     ctx.lineCap = 'round'; ctx.beginPath();
     wl.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
     ctx.stroke(); ctx.lineWidth = 1;
@@ -129,16 +154,16 @@ function draw2d() {
   }
   // placed equipment (static markers, labelled)
   for (const eq of (rep.equipment || [])) {
-    ctx.fillStyle = '#444'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+    ctx.fillStyle = P.equip; ctx.strokeStyle = P.markerStroke; ctx.lineWidth = 1;
     ctx.fillRect(X(eq.x) - 7, Y(eq.y) - 7, 14, 14);
     ctx.strokeRect(X(eq.x) - 7, Y(eq.y) - 7, 14, 14);
-    ctx.fillStyle = '#555'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = P.equipInk; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(EQUIP_JP[eq.type] || eq.type, X(eq.x), Y(eq.y) - 10);
   }
   // conveyors (static)
   for (const cv of (rep.conveyors || [])) {
     if (!cv.points || cv.points.length < 2) continue;
-    ctx.strokeStyle = '#8d99ae'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    ctx.strokeStyle = P.conveyor; ctx.lineWidth = 6; ctx.lineCap = 'round';
     ctx.beginPath();
     cv.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
     ctx.stroke(); ctx.lineWidth = 1;
@@ -155,7 +180,7 @@ function draw2d() {
   for (const fk of (rep.forklifts || [])) {
     const [x, y, st] = interp(fk.keyframes, S.t);
     ctx.fillStyle = st === 'putaway' ? '#e65100' : '#ffb74d';
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 0.7;
+    ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
     ctx.fillRect(X(x) - 7, Y(y) - 5, 14, 10);
     ctx.strokeRect(X(x) - 7, Y(y) - 5, 14, 10);
   }
@@ -163,7 +188,7 @@ function draw2d() {
   for (const ag of (rep.agvs || [])) {
     const [x, y, st] = interp(ag.keyframes, S.t);
     ctx.fillStyle = AGV_COLOR[st] || '#1f78b4';
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 0.7;
+    ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
     ctx.fillRect(X(x) - 6, Y(y) - 5, 12, 10);
     ctx.strokeRect(X(x) - 6, Y(y) - 5, 12, 10);
   }
@@ -171,7 +196,7 @@ function draw2d() {
   for (const wk of rep.workers) {
     const [x, y, st] = interp(wk.keyframes, S.t);
     ctx.fillStyle = STATE_COLOR[st] || '#999';
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 0.7;
+    ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
     ctx.beginPath(); ctx.arc(X(x), Y(y), 6, 0, 7); ctx.fill(); ctx.stroke();
   }
 }
@@ -607,6 +632,14 @@ document.addEventListener('whsim:apply-run', (e) => {
   applyAndRun(edits);
 });
 
+// Re-resolve the cached canvas palette when the theme flips. draw2d already runs
+// in the RAF loop, so it just re-reads PALETTE on the next frame; force one draw
+// for the static (paused / no-replay) case so the canvas repaints immediately.
+document.addEventListener('themechange', () => {
+  refreshPalette();
+  if (S.view === 'view2d') draw2d();
+});
+
 // ---- project management menu (duplicate / rename / delete) -----------------
 function closeProjMenu() {
   const menu = $('projMenu'), btn = $('projMenuBtn');
@@ -855,6 +888,7 @@ function initUI() {
 
 (async function main() {
   initTheme();
+  refreshPalette();
   initUI();
   initSidebar();
   S.cody = mountCody(document.body, { mood: 'idle' });
