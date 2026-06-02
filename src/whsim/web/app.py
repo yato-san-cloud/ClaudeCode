@@ -32,6 +32,24 @@ MONTE_CARLO_REPS = 10
 
 app = FastAPI(title="whsim", version="0.1.0")
 
+# Bound concurrent heavy runs so a burst of /run(-scenarios) can't saturate the
+# worker thread pool and starve the rest of the API. The event loop is single-
+# threaded, so a plain counter is race-free (no lock needed).
+MAX_INFLIGHT_RUNS = 6
+_inflight_runs = 0
+
+
+def _enter_run() -> None:
+    global _inflight_runs
+    if _inflight_runs >= MAX_INFLIGHT_RUNS:
+        raise HTTPException(429, "現在シミュレーションが混み合っています。少し待ってから再実行してください。")
+    _inflight_runs += 1
+
+
+def _exit_run() -> None:
+    global _inflight_runs
+    _inflight_runs = max(0, _inflight_runs - 1)
+
 
 def _safe_name(name: str) -> str:
     """Validate a user-supplied identifier that becomes a filesystem path segment.
@@ -746,8 +764,13 @@ def _run_blocking(proj: Project) -> dict:
 async def api_run(name: str):
     proj = _open(name)
     # Offload the blocking SimPy run to a worker thread so concurrent requests
-    # (e.g. /api/templates) stay responsive while a run is in flight.
-    return await run_in_threadpool(_run_blocking, proj)
+    # (e.g. /api/templates) stay responsive while a run is in flight; cap how
+    # many heavy runs are in flight so a burst can't exhaust the thread pool.
+    _enter_run()
+    try:
+        return await run_in_threadpool(_run_blocking, proj)
+    finally:
+        _exit_run()
 
 
 def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
@@ -811,7 +834,11 @@ async def api_run_scenarios(name: str, payload: dict | None = None):
     """Run several what-ifs over the current model and return a comparison."""
     proj = _open(name)
     # Offload the (heavier still) multi-scenario sweep to a worker thread.
-    return await run_in_threadpool(_run_scenarios_blocking, name, proj, payload or {})
+    _enter_run()
+    try:
+        return await run_in_threadpool(_run_scenarios_blocking, name, proj, payload or {})
+    finally:
+        _exit_run()
 
 
 @app.get("/api/projects/{name}/compare-png/{cmp}/{i}")
