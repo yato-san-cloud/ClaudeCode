@@ -522,6 +522,39 @@ def api_workmethod_recommend(name: str):
     return workmethod.recommend(model).to_dict()
 
 
+@app.get("/api/timetable/seed")
+def api_timetable_seed():
+    """Bundled work-timetable dataset (process master + productivity + scenarios).
+
+    The タイムチャート tab fetches this once and then re-solves entirely client-side
+    as the user drags sliders, so live recalc has zero round-trip latency."""
+    from whsim import timetable
+    seed = timetable.load_seed()
+    seed["section_color"] = timetable.SECTION_COLOR
+    seed["section_zone_type"] = timetable.SECTION_ZONE_TYPE
+    return seed
+
+
+@app.post("/api/timetable/solve")
+def api_timetable_solve(payload: dict | None = None):
+    """Solve a staffing timetable. Stateless server-side mirror of the JS solver.
+
+    Body: {scenario: name|object, processes?, productivity?}. Missing process /
+    productivity masters fall back to the bundled seed; a string `scenario`
+    selects a seed scenario by name. Used for tests, headless runs and export."""
+    from whsim import timetable
+    seed = timetable.load_seed()
+    p = payload or {}
+    processes = p.get("processes") or seed["processes"]
+    productivity = p.get("productivity") or seed["productivity"]
+    scenario = p.get("scenario")
+    if isinstance(scenario, str):
+        scenario = seed["scenarios"].get(scenario)
+    if not isinstance(scenario, dict):
+        scenario = next(iter(seed["scenarios"].values()))
+    return timetable.solve(scenario, processes, productivity)
+
+
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB hard cap on any single upload
 
 

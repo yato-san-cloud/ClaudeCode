@@ -28,7 +28,7 @@ whsim = "whsim.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-whsim = ["../../templates/**/*.json", "web/static/**/*"]
+whsim = ["../../templates/**/*.json", "web/static/**/*", "data/**/*.json"]
 
 [tool.ruff]
 line-length = 100
