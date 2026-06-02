@@ -11,7 +11,33 @@ from __future__ import annotations
 from whsim.schema.model import Item, Location, WarehouseModel
 
 
+def _shelf_slots(shelf) -> list[tuple[float, float]]:
+    """Cells filling one authored SHELF rectangle (MapMaker SHELF → cells)."""
+    cw = max(shelf.cell_w, 0.3)
+    cd = max(shelf.cell_d, 0.3)
+    xs, ys = [], []
+    x = shelf.x + cw / 2
+    while x <= shelf.x + shelf.w - cw / 2 + 1e-9:
+        xs.append(round(x, 3))
+        x += cw
+    y = shelf.y + cd / 2
+    while y <= shelf.y + shelf.h - cd / 2 + 1e-9:
+        ys.append(round(y, 3))
+        y += cd
+    if not xs:
+        xs = [round(shelf.x + shelf.w / 2, 3)]
+    if not ys:
+        ys = [round(shelf.y + shelf.h / 2, 3)]
+    return [(px, py) for px in xs for py in ys]
+
+
 def _zone_slots(zone) -> list[tuple[float, float]]:
+    # Authored SHELF blocks take precedence: locations come from drawn shelves.
+    if getattr(zone, "shelves", None):
+        slots: list[tuple[float, float]] = []
+        for sh in zone.shelves:
+            slots.extend(_shelf_slots(sh))
+        return slots
     rack = zone.rack
     if rack is None:
         return []
@@ -37,7 +63,7 @@ def materialize_racks(model: WarehouseModel) -> WarehouseModel:
     locations are kept). If no storage zone is racked, the model is unchanged.
     """
     storage_zones = [z for z in model.layout.zones
-                     if z.type == "storage" and z.rack is not None]
+                     if z.type == "storage" and (z.rack is not None or z.shelves)]
     if not storage_zones:
         return model
 

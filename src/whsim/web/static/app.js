@@ -575,6 +575,21 @@ async function uploadDistances(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 
+async function uploadMapcsv(file) {
+  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
+  const fd = new FormData(); fd.append('file', file);
+  $('importLog').textContent = 'MapMaker地図を解析中…';
+  try {
+    const r = await api(`/api/projects/${S.project}/import-mapcsv`, { method: 'POST', body: fd });
+    const lines = [`<span class="ok">地図取込: 棚${r.shelves}・壁${r.walls}・ステーション${r.stations}` +
+      ` → ロケーション${r.locations}件生成（${r.stats && r.stats.units || 'm'}）</span>`];
+    for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
+    $('importLog').innerHTML = lines.join('\n');
+    await openProject(S.project); // refresh headline/provenance/readiness
+    if (S.view === 'design') mountDesigner();
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('地図取込に失敗しました: ' + e.message, 'error'); }
+}
+
 async function uploadCad(file) {
   if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
   const fd = new FormData(); fd.append('file', file);
@@ -985,6 +1000,8 @@ function initUI() {
   $('cadInput').onchange = () => $('cadInput').files[0] && uploadCad($('cadInput').files[0]);
   $('distBtn').onclick = () => $('distInput').click();
   $('distInput').onchange = () => $('distInput').files[0] && uploadDistances($('distInput').files[0]);
+  $('mapcsvBtn').onclick = () => $('mapcsvInput').click();
+  $('mapcsvInput').onchange = () => $('mapcsvInput').files[0] && uploadMapcsv($('mapcsvInput').files[0]);
   ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => {
     e.preventDefault(); dz.classList.add('drag');
   }));

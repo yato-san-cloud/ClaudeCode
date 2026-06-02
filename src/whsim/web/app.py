@@ -651,6 +651,44 @@ async def api_import_cad(name: str, file: UploadFile):
             "stats": res.get("stats", {})}
 
 
+@app.post("/api/projects/{name}/import-mapcsv")
+async def api_import_mapcsv(name: str, file: UploadFile):
+    """Import a MapMaker (Hitachi WorldMap) Map CSV -> shelves/walls/stations.
+
+    SHELF areas become a storage zone's authored `shelves`; locations then
+    materialise inside the drawn shelves (MapMaker SHELF → cells)."""
+    from whsim import design, mapcsv
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    data = await _read_upload(file)
+    try:
+        res = mapcsv.import_mapcsv_bytes(data)
+    except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad map
+        raise HTTPException(400, f"Map CSV を解析できませんでした: {e}")
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    if res.get("bounds"):
+        md["layout"]["bounds"] = res["bounds"]
+    if res.get("walls"):
+        md["layout"]["walls"] = res["walls"]
+    if res.get("zones"):
+        md["layout"]["zones"] = res["zones"]
+    if res.get("stations"):
+        md.setdefault("resources", {})["stations"] = res["stations"]
+    model = WarehouseModel.model_validate(md)
+    design.materialize_racks(model)   # authored shelves -> location cells
+    design.synthesize_items(model)    # ensure demand so the sim stays runnable
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("layout", Source.IMPORTED)
+    proj.save_provenance(prov)
+    return {"bounds": res.get("bounds"),
+            "shelves": res.get("stats", {}).get("shelves", 0),
+            "walls": len(res.get("walls", [])), "zones": len(res.get("zones", [])),
+            "stations": len(res.get("stations", [])),
+            "locations": len(model.locations),
+            "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
+
+
 @app.post("/api/projects/{name}/assign-inventory")
 def api_assign_inventory(name: str, payload: dict | None = None):
     """Slot the loaded inventory (SKUs) onto the created storage locations."""

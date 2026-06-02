@@ -86,6 +86,22 @@ class RackFill(BaseModel):
     margin: float = 2.0        # inset from the zone edge
 
 
+class ShelfArea(BaseModel):
+    """An authored SHELF block (MapMaker-style): a rectangle the user draws (or
+    imports) inside a storage zone, subdivided into rack cells. Locations are
+    generated *inside* shelf areas, so a storage zone with no shelves (and no
+    `rack`) has no locations until one is drawn — racks come from the layout,
+    not from thin air."""
+
+    id: str = "s"
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 2.0
+    h: float = 10.0
+    cell_w: float = 1.1        # cell pitch across the shelf (bay width)
+    cell_d: float = 1.0        # cell pitch along the shelf run
+
+
 class Zone(BaseModel):
     id: str = "zone"
     type: ZoneType = "storage"
@@ -95,6 +111,7 @@ class Zone(BaseModel):
     h: float = 10.0
     color: str | None = None
     rack: RackFill | None = None  # storage zones only; None => not auto-racked
+    shelves: list[ShelfArea] = Field(default_factory=list)  # authored SHELF blocks
 
 
 class Wall(BaseModel):
