@@ -9,7 +9,10 @@
 </head>
 <body>
   <header>
-    <div class="brand">whsim<span>倉庫シミュレータ</span></div>
+    <div class="brand-group">
+      <button id="sidebarToggle" type="button" class="icon-btn" title="メニューの開閉" aria-label="メニューの開閉">☰</button>
+      <div class="brand">whsim<span>倉庫シミュレータ</span></div>
+    </div>
     <div class="header-tools">
       <div class="provenance" id="provenance">— your data</div>
       <button id="themeToggle" type="button" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
@@ -62,7 +65,8 @@
 
     <main class="main">
       <div class="tabs">
-        <button data-tab="design" class="tab active">設計</button>
+        <button data-tab="chat" class="tab active">💬 Cody</button>
+        <button data-tab="design" class="tab">設計</button>
         <button data-tab="analysis" class="tab">分析</button>
         <button data-tab="view2d" class="tab">2D アニメーション</button>
         <button data-tab="view3d" class="tab">3D</button>
@@ -80,7 +84,8 @@
       </div>
 
       <div class="stage">
-        <div id="design" class="panel active"></div>
+        <div id="chat" class="panel active"></div>
+        <div id="design" class="panel"></div>
         <div id="analysis" class="panel"></div>
         <div id="view2d" class="panel">
           <canvas id="canvas2d"></canvas>

@@ -4,7 +4,8 @@ import { Designer } from './js/designer.js';
 import { CompareView } from './js/compare.js';
 import { ExportView } from './js/export.js';
 import { mountAnalysis } from './js/analysis.js';
-import { mountCody } from './js/cody.js';
+import { mountCody, codyAvatarSVG } from './js/cody.js';
+import { mountChat } from './js/chat.js';
 
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
@@ -25,8 +26,8 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
-  export: null, cody: null, preset: 'natural',
-  t: 0, window: 1, playing: true, speed: 60, view: 'design',
+  export: null, cody: null, chat: null, preset: 'natural',
+  t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
                     dropoff: '#f57f17', charge: '#8e24aa' };
@@ -174,6 +175,15 @@ async function refreshProjects(select) {
     ps.map(p => `<option value="${p}">${p}</option>`).join('');
   if (select) $('projectSelect').value = select;
 }
+// Core create flow, shared by the sidebar button and the Cody chat.
+async function doCreate(name, template) {
+  await api('/api/projects', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, template }),
+  });
+  await refreshProjects(name);
+  await openProject(name);
+}
 async function openProject(name) {
   S.project = name;
   const m = await api(`/api/projects/${name}/model`);
@@ -261,18 +271,25 @@ async function applyHeadline() {
   $('provenance').textContent = r.provenance_summary;
   $('status').textContent = 'キー項目を反映しました。';
 }
+// Core run flow, shared by the sidebar button and the Cody chat. Throws on
+// failure (callers decide how to surface it); returns the run payload.
+async function doRun() {
+  if (!S.project) throw new Error('先にプロジェクトを作ってね。');
+  const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
+  renderKpis(r.kpis);
+  await loadReplay();
+  $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
+  if (S.export) S.export.refresh();
+  if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
+  return r;
+}
 async function runSim() {
   if (!S.project) return;
   $('runBtn').disabled = true;
   $('status').textContent = '重厚なシミュレーションを実行中…';
   cody('thinking', 'シミュレーション中…動きを最後まで追ってるよ。');
   try {
-    const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
-    renderKpis(r.kpis);
-    await loadReplay();
-    $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
-    if (S.export) S.export.refresh();
-    if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
+    const r = await doRun();
     $('status').textContent = `完了（${r.run}）。`;
     cody('success', '完了！「分析」タブに指摘と次の一手をまとめたよ。');
   } catch (e) {
@@ -316,14 +333,20 @@ function renderKpis(k) {
     cards.map(([kk, vv]) => `<div class="kpi"><div class="k">${kk}</div><div class="v">${vv}</div></div>`).join('');
 }
 
+// Core scenario-compare flow, shared by the button and the Cody chat.
+async function doRunScenarios() {
+  if (!S.project) throw new Error('先にプロジェクトを作ってね。');
+  const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
+  if (S.compare) S.compare.dispose();
+  S.compare = new CompareView($('compareView'), data);
+  return data;
+}
 async function runScenarios() {
   if (!S.project) return;
   $('runScenariosBtn').disabled = true;
   $('compareStatus').textContent = '3シナリオを重厚シミュレーション中…';
   try {
-    const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
-    if (S.compare) S.compare.dispose();
-    S.compare = new CompareView($('compareView'), data);
+    await doRunScenarios();
     $('compareStatus').textContent = '完了。';
   } catch (e) {
     $('compareStatus').textContent = 'エラー: ' + e.message;
@@ -409,18 +432,62 @@ function toggleTheme() {
 // ---- Cody mascot companion (help / suggestion / error reactions) -----------
 function cody(mood, say) { if (S.cody) S.cody.setMood(mood, say ? { say } : {}); }
 
+// ---- view switching (shared by the tab bar and the Cody chat) -------------
+function switchView(view) {
+  if (!view || !$(view)) return;
+  S.view = view;
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === view));
+  document.querySelectorAll('.panel').forEach(x => x.classList.toggle('active', x.id === view));
+  // Designer sets inline display on #design; override it so the panel hides.
+  $('design').style.display = (view === 'design') ? 'flex' : 'none';
+  // The replay transport only belongs to the 2D/3D animation views.
+  const replayView = (view === 'view2d' || view === 'view3d');
+  document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
+  // The chat home and the analysis dashboard carry their own summaries.
+  $('kpiBar').style.display = (view === 'analysis' || view === 'chat') ? 'none' : '';
+  if (view === 'design') mountDesigner();
+  if (view === 'analysis') { mountAnalysis($('analysis'), S.project); cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
+  if (view === 'view3d') mount3d();
+  if (view === 'view2d') fitCanvas();
+  if (view === 'export') mountExport();
+  if (view === 'chat' && S.chat) S.chat.focus();
+}
+
+// ---- actions the Cody chat invokes to drive whsim --------------------------
+const chatActions = {
+  listTemplates: () => api('/api/templates'),
+  createProject: (name, template) => doCreate(name, template || $('templateSelect').value || 'ecommerce_small'),
+  runSim: async () => { const r = await doRun(); return r.kpis; },
+  openView: (view) => switchView(view),
+  runScenarios: () => doRunScenarios(),
+  getAnalysis: () => (S.project ? api(`/api/projects/${S.project}/analysis`) : Promise.resolve(null)),
+};
+
+// ---- collapsible sidebar (hamburger; persisted) ----------------------------
+function initSidebar() {
+  const layout = document.querySelector('.layout');
+  const saved = localStorage.getItem('whsim-sidebar');
+  const collapsed = saved ? saved === 'collapsed' : window.innerWidth <= 880;
+  layout.classList.toggle('sidebar-collapsed', collapsed);
+  $('sidebarToggle').onclick = () => {
+    const isCol = layout.classList.toggle('sidebar-collapsed');
+    localStorage.setItem('whsim-sidebar', isCol ? 'collapsed' : 'open');
+    // Re-fit canvas/3D/designer once the grid transition settles.
+    setTimeout(() => {
+      fitCanvas();
+      if (S.scene3d) S.scene3d.resize();
+      if (S.designer) S.designer.resize();
+    }, 280);
+  };
+}
+
 // ---- wire up ---------------------------------------------------------------
 function initUI() {
   $('createBtn').onclick = async () => {
     const name = $('newName').value.trim();
     if (!name) { $('status').textContent = 'プロジェクト名を入力してください。'; return; }
     try {
-      await api('/api/projects', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, template: $('templateSelect').value }),
-      });
-      await refreshProjects(name);
-      await openProject(name);
+      await doCreate(name, $('templateSelect').value);
       cody('excited', `「${name}」を用意したよ。まずは設計を触ってみよう。`);
     } catch (e) {
       $('status').textContent = '作成に失敗: ' + e.message;
@@ -433,24 +500,7 @@ function initUI() {
   $('runScenariosBtn').onclick = runScenarios;
 
   // tabs
-  document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    S.view = t.dataset.tab;
-    $(S.view).classList.add('active');
-    // Designer sets inline display on #design; override it so the panel hides.
-    $('design').style.display = (S.view === 'design') ? 'flex' : 'none';
-    // The replay transport only belongs to the 2D/3D animation views.
-    const replayView = (S.view === 'view2d' || S.view === 'view3d');
-    document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
-    $('kpiBar').style.display = (S.view === 'analysis') ? 'none' : '';
-    if (S.view === 'design') { mountDesigner(); }
-    if (S.view === 'analysis') { mountAnalysis($('analysis'), S.project); cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
-    if (S.view === 'view3d') { mount3d(); }
-    if (S.view === 'view2d') fitCanvas();
-    if (S.view === 'export') mountExport();
-  });
+  document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchView(t.dataset.tab));
 
   $('themeToggle').onclick = toggleTheme;
 
@@ -502,17 +552,27 @@ function initUI() {
     if (S.designer) S.designer.resize();
   });
   $('playBtn').disabled = true; $('scrub').disabled = true; // until a run exists
-  // Default view is 設計 (not a replay view): hide the transport until 2D/3D.
+  // Default view is the Cody chat home: no replay transport, no KPI footer.
   document.querySelector('.transport').style.display = 'none';
+  $('kpiBar').style.display = 'none';
   fitCanvas();
 }
 
 (async function main() {
   initTheme();
   initUI();
+  initSidebar();
   S.cody = mountCody(document.body, { mood: 'idle' });
-  S.cody.say('プロジェクトを作るか、既存を開いてはじめよう。', { mood: 'idle', ms: 6000 });
+  // Chat home: the conversation owns the greeting, so the floating mascot
+  // stays quiet until it reacts to an action.
+  S.chat = mountChat($('chat'), {
+    getProject: () => S.project,
+    avatarSVG: codyAvatarSVG,
+    onMood: (mood, say) => cody(mood, say),
+    actions: chatActions,
+  });
   await loadTemplates();
   await refreshProjects();
+  S.chat.focus();
   requestAnimationFrame(loop);
 })();

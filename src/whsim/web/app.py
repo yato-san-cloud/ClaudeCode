@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from whsim import analytic, kpis as kpi_mod, templates
+from whsim import analytic, cody, kpis as kpi_mod, templates
 from whsim.engine.run import run_replications
 from whsim.project import Project
 from whsim.provenance import Source
@@ -50,6 +50,44 @@ def _set_by_path(model_dict: dict, path: str, value) -> str:
 @app.get("/api/templates")
 def api_templates():
     return templates.list_templates()
+
+
+@app.post("/api/cody/chat")
+def api_cody_chat(payload: dict):
+    """Cody mascot chat: turn a Japanese message into a reply + intent.
+
+    Assembles a context (available templates, and — if a project is named and
+    cheap to read — whether it has a finished run plus its latest KPIs) and
+    delegates ALL dialogue/intent decisions to ``cody.respond`` (the LLM seam).
+    This endpoint never executes whsim actions: the frontend runs the returned
+    intent against the existing endpoints. Honours "never blocks": any read that
+    fails leaves ``has_run``/``kpis`` as their safe defaults (False / None).
+    """
+    message = (payload.get("message") or "")
+    project = payload.get("project")
+
+    has_run = False
+    kpis = None
+    if project:
+        try:
+            proj = Project.open(project)
+            rd = proj.latest_run_dir()
+            if rd is not None and (rd / "kpis.json").is_file():
+                has_run = True
+                kpis = json.loads((rd / "kpis.json").read_text("utf-8"))
+        except Exception:  # noqa: BLE001 — context is best-effort, never fatal
+            has_run = False
+            kpis = None
+
+    context = {
+        "project": project,
+        "templates": templates.list_templates(),
+        "has_run": has_run,
+        "kpis": kpis,
+    }
+    result = cody.respond(message, context)
+    result["project"] = project
+    return result
 
 
 @app.get("/api/projects")

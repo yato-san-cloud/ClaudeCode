@@ -386,3 +386,19 @@ export function mountCody(targetEl, opts = {}) {
 }
 
 export default mountCody;
+
+/**
+ * Static (non-animated) Cody SVG markup for inline avatars — e.g. the chat
+ * thread, where one small Cody sits beside each of its messages. Reuses the
+ * exact body + per-mood face geometry, but strips every <animate> so many
+ * avatars on screen stay cheap and calm.
+ * @param {string} [mood="idle"] one of MOODS
+ * @returns {string} an <svg>…</svg> string
+ */
+export function codyAvatarSVG(mood = "idle") {
+  const face = (FACES[mood] || FACES.idle)();
+  const body = bodyMarkup()
+    .replace('<g class="cody-face"></g>', `<g class="cody-face">${face}</g>`)
+    .replace(/<animate\b[^>]*\/>/g, ""); // static: no blink/dots
+  return `<svg viewBox="0 0 300 392" xmlns="${SVG_NS}" class="cody-avatar-svg" aria-hidden="true">${body}</svg>`;
+}
