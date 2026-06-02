@@ -568,7 +568,17 @@ export function mountChat(targetEl, opts = {}) {
 
     // If we previously asked for a project name, intercept this message as the
     // answer instead of re-parsing it as a fresh intent.
-    if (pendingCreate) {
+    // If we asked for a project name but the user typed a command instead,
+    // cancel the pending create and handle the message as a normal turn —
+    // otherwise the project would be named e.g. "実行して結果を見せて".
+    if (pendingCreate && !wantsAuto(text)
+        && /(実行|回し|回す|シミュ|動かし|比較|くらべ|比べ|結果|分析|レポート|キャンセル|やめ|中止)/.test(text)) {
+      pendingCreate = null;
+      const note = '作成はいったん保留にするね。';
+      appendCody(note, 'idle');
+      history.push({ role: 'cody', text: note });
+      // fall through to the normal endpoint flow below
+    } else if (pendingCreate) {
       const create = pendingCreate;
       pendingCreate = null;
       const name = wantsAuto(text) ? generatedName() : text;

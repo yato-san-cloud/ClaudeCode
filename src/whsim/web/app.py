@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -63,6 +63,12 @@ def _set_by_path(model_dict: dict, path: str, value) -> str:
 
 
 # ---- API --------------------------------------------------------------------
+
+@app.get("/favicon.ico")
+def favicon():
+    # No icon asset shipped; answer 204 so the browser stops logging a 404.
+    return Response(status_code=204)
+
 
 @app.get("/api/templates")
 def api_templates():
@@ -202,13 +208,32 @@ def api_workmethod_recommend(name: str):
     return workmethod.recommend(model).to_dict()
 
 
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB hard cap on any single upload
+
+
+async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    """Read an upload in chunks with a hard size cap so a huge (or malicious)
+    file can't exhaust memory. Raises 413 once the cap is exceeded."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1 << 20)  # 1 MiB at a time
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(413, f"ファイルが大きすぎます（上限 {max_bytes // (1024 * 1024)}MB）。")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @app.post("/api/projects/{name}/import-cad")
 async def api_import_cad(name: str, file: UploadFile):
     """Import a DXF floor plan -> merge its bounds/walls/zones into the layout."""
     from whsim import cad
     from whsim.schema.model import WarehouseModel
     proj = _open(name)
-    data = await file.read()
+    data = await _read_upload(file)
     try:
         res = cad.import_dxf_bytes(data)
     except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad drawing
@@ -251,7 +276,7 @@ async def api_import_distances(name: str, file: UploadFile):
     from whsim import distances
     from whsim.schema.model import WarehouseModel
     proj = _open(name)
-    data = await file.read()
+    data = await _read_upload(file)
     try:
         res = distances.import_distance_matrix_bytes(data, file.filename or "")
     except Exception as e:  # noqa: BLE001 — tolerant
@@ -314,7 +339,7 @@ async def api_import(name: str, file: UploadFile):
     proj = _open(name)
     # Write to a temp file; Project.import_zip copies it into the project's raw/.
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tf:
-        tf.write(await file.read())
+        tf.write(await _read_upload(file))
         tmp = Path(tf.name)
     try:
         res = proj.import_zip(tmp)

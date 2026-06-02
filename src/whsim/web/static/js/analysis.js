@@ -338,6 +338,14 @@ function render(targetEl, payload) {
 
 export async function mountAnalysis(targetEl, projectName) {
   if (!targetEl) return;
+  // No project yet: show a friendly prompt instead of fetching /projects/null.
+  if (typeof projectName !== 'string' || !projectName.trim()) {
+    targetEl._anPayload = null;
+    targetEl.innerHTML = '';
+    targetEl.appendChild(el('p', { class: 'c-fact' },
+      '先にプロジェクトを作成して「実行」すると、ここに分析が表示されます。'));
+    return;
+  }
   targetEl.innerHTML = '';
   targetEl.appendChild(el('p', { class: 'chart-sub' }, '分析を読み込み中…'));
 
@@ -354,12 +362,15 @@ export async function mountAnalysis(targetEl, projectName) {
     return;
   }
 
+  // Stash the latest payload on the element so the (one-time) theme handler
+  // always re-renders the CURRENT data, not the payload captured on first mount.
+  targetEl._anPayload = payload;
   render(targetEl, payload);
 
   // Re-render on theme change so the self-drawn SVG charts pick up new
   // CSS-variable colours (nice-to-have; harmless if the event never fires).
   if (!targetEl._anThemeHandler) {
-    const handler = () => render(targetEl, payload);
+    const handler = () => render(targetEl, targetEl._anPayload);
     targetEl._anThemeHandler = handler;
     document.addEventListener('themechange', handler);
   }

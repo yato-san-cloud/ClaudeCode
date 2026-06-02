@@ -596,6 +596,16 @@ button.primary:disabled { background: var(--bg-active); border-color: transparen
 }
 .panel.active { display: flex; flex: 1; }
 
+.view3d-fallback {
+  margin: auto;
+  max-width: 40ch;
+  padding: var(--sp-6);
+  text-align: center;
+  color: var(--ink-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
 #design {
   flex-direction: column;
   overflow: auto;

@@ -275,13 +275,19 @@ async function applyHeadline() {
 // failure (callers decide how to surface it); returns the run payload.
 async function doRun() {
   if (!S.project) throw new Error('先にプロジェクトを作ってね。');
-  const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
-  renderKpis(r.kpis);
-  await loadReplay();
-  $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
-  if (S.export) S.export.refresh();
-  if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
-  return r;
+  if (S.running) throw new Error('いまシミュレーション中だよ。終わるまで少し待ってね。');
+  S.running = true;
+  try {
+    const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
+    renderKpis(r.kpis);
+    await loadReplay();
+    $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
+    if (S.export) S.export.refresh();
+    if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
+    return r;
+  } finally {
+    S.running = false;
+  }
 }
 async function runSim() {
   if (!S.project) return;
@@ -336,10 +342,16 @@ function renderKpis(k) {
 // Core scenario-compare flow, shared by the button and the Cody chat.
 async function doRunScenarios() {
   if (!S.project) throw new Error('先にプロジェクトを作ってね。');
-  const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
-  if (S.compare) S.compare.dispose();
-  S.compare = new CompareView($('compareView'), data);
-  return data;
+  if (S.running) throw new Error('いま実行中だよ。終わるまで少し待ってね。');
+  S.running = true;
+  try {
+    const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
+    if (S.compare) S.compare.dispose();
+    S.compare = new CompareView($('compareView'), data);
+    return data;
+  } finally {
+    S.running = false;
+  }
 }
 async function runScenarios() {
   if (!S.project) return;
@@ -358,10 +370,22 @@ async function runScenarios() {
 function mount3d() {
   const el = $('view3d');
   if (!S.replay) return;
-  if (S.scene3d) S.scene3d.dispose();
-  S.scene3d = new Scene3D(el, S.replay, () => S.t);
-  if (S.preset && S.scene3d.setPreset) S.scene3d.setPreset(S.preset);
-  S.scene3d.resize();
+  if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
+  // Clear any leftover fallback message from a previous failed mount.
+  const fb = el.querySelector('.view3d-fallback');
+  if (fb) fb.remove();
+  try {
+    S.scene3d = new Scene3D(el, S.replay, () => S.t);
+    if (S.preset && S.scene3d.setPreset) S.scene3d.setPreset(S.preset);
+    S.scene3d.resize();
+  } catch (e) {
+    // WebGL may be unavailable (no GPU / context loss). Don't let the failure
+    // escape the click handler; show a graceful fallback in the panel instead.
+    S.scene3d = null;
+    el.innerHTML = '<div class="view3d-fallback">3D表示を初期化できませんでした'
+      + '（お使いの環境でWebGLが利用できない可能性があります）。'
+      + '「2D アニメーション」タブでも動きを確認できます。</div>';
+  }
 }
 
 function mountExport() {
@@ -445,8 +469,11 @@ function switchView(view) {
   document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
   // The chat home and the analysis dashboard carry their own summaries.
   $('kpiBar').style.display = (view === 'analysis' || view === 'chat') ? 'none' : '';
+  // The chat view embeds Cody in the thread; hide the floating companion there
+  // so it doesn't overlap the composer (it returns on every other view).
+  if (S.cody) { if (view === 'chat') S.cody.hide(); else S.cody.show(); }
   if (view === 'design') mountDesigner();
-  if (view === 'analysis') { mountAnalysis($('analysis'), S.project); cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
+  if (view === 'analysis') { mountAnalysis($('analysis'), S.project); if (S.project) cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
   if (view === 'view3d') mount3d();
   if (view === 'view2d') fitCanvas();
   if (view === 'export') mountExport();
@@ -563,6 +590,9 @@ function initUI() {
   initUI();
   initSidebar();
   S.cody = mountCody(document.body, { mood: 'idle' });
+  // Default view is the chat home, which embeds Cody in the thread — keep the
+  // floating companion hidden there (switchView toggles it on other views).
+  if (S.view === 'chat') S.cody.hide();
   // Chat home: the conversation owns the greeting, so the floating mascot
   // stays quiet until it reacts to an action.
   S.chat = mountChat($('chat'), {
