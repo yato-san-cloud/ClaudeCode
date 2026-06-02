@@ -601,12 +601,30 @@ function switchView(view) {
 }
 
 // ---- timetable (作業タイムチャート) — mounted once; holds editable state ------
-// The staffing solve runs client-side, so it works without a project/run. The
-// per-time headcount it emits is fed to the 2D/3D views for the 時刻連動 link.
+// The staffing solve runs client-side, so it works without a project/run. Its
+// live map draws the loaded project's real zones (棚配置) with per-time workers;
+// the per-time headcount it emits also feeds the 2D view (時刻連動).
+let _ttProj;
+async function fetchLayoutFor(name) {
+  if (!name) return null;
+  try {
+    const f = await api(`/api/projects/${name}/full`);
+    return f && f.layout ? { bounds: f.layout.bounds, zones: f.layout.zones } : null;
+  } catch (_e) { return null; }
+}
 function mountTimetableView() {
-  if (S.timetable) { S.timetable.resize(); return; }
+  if (S.timetable) {
+    S.timetable.resize();
+    if (_ttProj !== S.project) {       // project switched since last visit → refresh map
+      _ttProj = S.project;
+      fetchLayoutFor(S.project).then((l) => { if (S.timetable) S.timetable.setLayout(l); });
+    }
+    return;
+  }
+  _ttProj = S.project;
   S.timetable = mountTimetable($('timetable'), {
     getProject: () => S.project,
+    fetchLayout: () => fetchLayoutFor(S.project),
     onChange: (payload) => { S.timetableStaffing = payload; if (S.view === 'view2d') draw2d(); },
   });
 }

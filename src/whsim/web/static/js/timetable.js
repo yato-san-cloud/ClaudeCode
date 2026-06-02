@@ -24,6 +24,8 @@ import {
 const SLOTS = generateSlots();           // 60 half-hour marks, 0..1770 min
 const N = SLOTS.length;
 const SECTIONS = ['入荷', '出荷ケース', '出荷バラ', 'ステージング', '間接'];
+const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキング',
+  packing: '梱包', shipping: '出荷', staging: '一時保管', office: '事務' };
 
 function isNum(v) { return typeof v === 'number' && Number.isFinite(v); }
 function r1(v) { return isNum(v) ? Math.round(v * 10) / 10 : 0; }
@@ -57,6 +59,7 @@ export function mountTimetable(targetEl, opts = {}) {
   let cursorSlot = 26;              // 13:00 default (typical peak)
   let recalcTimer = null;
   let destroyed = false;
+  let layout = null;               // { bounds:{width,depth}, zones:[…] } or null
 
   // ---- DOM scaffold ----
   const root = el('div', 'tt-view');
@@ -65,6 +68,7 @@ export function mountTimetable(targetEl, opts = {}) {
 
   // Sub-containers (filled after seed loads).
   let elScenario, elKpis, elWarn, elCursor, elGantt, elGanttCanvas, elMatrix, elParams;
+  let elMap, elMapCanvas, elMapTitle;
 
   function build() {
     root.innerHTML = '';
@@ -113,6 +117,16 @@ export function mountTimetable(targetEl, opts = {}) {
     cur.appendChild(elCursor);
     cur.appendChild(curRead);
     root.appendChild(cur);
+
+    // Live staffing map — the warehouse floorplan with per-zone worker dots at
+    // the current time. Editing any slider re-solves and repaints this instantly
+    // (the 時刻連動: タイムチャートをいじると 2D が変わる).
+    elMap = el('div', 'tt-map');
+    elMapTitle = el('div', 'tt-section-title', 'ライブ配置マップ（その時刻に、どのゾーンへ何人）');
+    elMap.appendChild(elMapTitle);
+    elMapCanvas = el('canvas', 'tt-map-canvas');
+    elMap.appendChild(elMapCanvas);
+    root.appendChild(elMap);
 
     // Gantt
     elGantt = el('div', 'tt-gantt');
@@ -287,6 +301,104 @@ export function mountTimetable(targetEl, opts = {}) {
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
 
+  // ---- live staffing map (floorplan + per-zone worker dots @ current time) ----
+  function renderStaffMap() {
+    if (!elMapCanvas || !result) return;
+    const cv = elMapCanvas;
+    const cssW = cv.clientWidth || 720;
+    const cssH = 260;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = cssW * dpr; cv.height = cssH * dpr;
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const minute = SLOTS[cursorSlot];
+    const hc = headcountAt(minute);
+    if (elMapTitle) {
+      elMapTitle.textContent = `ライブ配置マップ — ${minToTime(minute)} 時点（総${hc.total}名）`;
+    }
+    const shell = cssVar('--canvas-shell', '#bbb');
+    const zoneInk = cssVar('--canvas-zone-ink', '#8a93a0');
+    const pad = 14;
+    const zmap = seed.section_zone_type || SECTION_ZONE_TYPE;
+
+    if (layout && layout.bounds && Array.isArray(layout.zones) && layout.zones.length) {
+      const b = layout.bounds;
+      const sc = Math.min((cssW - 2 * pad) / (b.width || 1), (cssH - 2 * pad) / (b.depth || 1));
+      const ox = (cssW - (b.width || 0) * sc) / 2, oy = (cssH - (b.depth || 0) * sc) / 2;
+      const X = (x) => ox + x * sc, Y = (y) => cssH - oy - y * sc;
+      ctx.strokeStyle = shell; ctx.lineWidth = 1.5;
+      ctx.strokeRect(X(0), Y(b.depth), b.width * sc, b.depth * sc);
+      for (const z of layout.zones) {
+        ctx.fillStyle = hexA(z.color || '#dddddd', 0.28);
+        ctx.fillRect(X(z.x), Y(z.y + z.h), z.w * sc, z.h * sc);
+        ctx.fillStyle = zoneInk; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(ZONE_JP[z.type] || z.type, X(z.x + z.w / 2), Y(z.y + z.h / 2) - 2);
+      }
+      const fallback = [];
+      for (const sec of SECTIONS) {
+        const n = hc.by_section[sec] || 0;
+        if (!n) continue;
+        const z = layout.zones.find((zz) => zz.type === zmap[sec]);
+        if (!z) { fallback.push([sec, n]); continue; }
+        drawDots(ctx, X(z.x), Y(z.y + z.h), z.w * sc, z.h * sc, n, SECTION_COLOR[sec]);
+        ctx.fillStyle = SECTION_COLOR[sec]; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(`${sec} ${n}`, X(z.x + z.w / 2), Y(z.y + z.h) + 12);
+      }
+      drawFallback(ctx, cssW, cssH, fallback);
+    } else {
+      drawSchematic(ctx, cssW, cssH, hc);
+    }
+  }
+
+  function drawDots(ctx, x, y, w, h, n, color) {
+    const cap = Math.min(n, 80);
+    const cols = Math.max(1, Math.ceil(Math.sqrt(cap * (w / Math.max(h, 1)))));
+    const rows = Math.ceil(cap / cols);
+    const cw = w / cols, ch = h / rows;
+    const r = Math.max(1.6, Math.min(4.5, Math.min(cw, ch) * 0.28));
+    ctx.fillStyle = color || '#1f78b4';
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.6;
+    let k = 0;
+    for (let ry = 0; ry < rows && k < cap; ry++) {
+      for (let cx = 0; cx < cols && k < cap; cx++, k++) {
+        ctx.beginPath(); ctx.arc(x + cw * (cx + 0.5), y + ch * (ry + 0.5), r, 0, 7);
+        ctx.fill(); ctx.stroke();
+      }
+    }
+  }
+
+  function drawFallback(ctx, W, H, list) {
+    if (!list.length) return;
+    let x = 14; const y = H - 14;
+    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+    for (const [sec, n] of list) {
+      ctx.fillStyle = SECTION_COLOR[sec] || '#999';
+      const dots = Math.min(n, 12);
+      for (let i = 0; i < dots; i++) { ctx.beginPath(); ctx.arc(x + i * 7 + 2, y - 3, 2.6, 0, 7); ctx.fill(); }
+      const tx = x + dots * 7 + 6;
+      ctx.fillStyle = cssVar('--canvas-zone-ink', '#888');
+      ctx.fillText(`${sec} ${n}`, tx, y);
+      x = tx + ctx.measureText(`${sec} ${n}`).width + 18;
+    }
+  }
+
+  function drawSchematic(ctx, W, H, hc) {
+    const pad = 14, gap = 8;
+    const laneW = (W - 2 * pad - gap * (SECTIONS.length - 1)) / SECTIONS.length;
+    ctx.textAlign = 'center';
+    SECTIONS.forEach((sec, i) => {
+      const x = pad + i * (laneW + gap), y = pad, h = H - 2 * pad - 16;
+      ctx.fillStyle = hexA(SECTION_COLOR[sec] || '#999', 0.14); ctx.fillRect(x, y, laneW, h);
+      ctx.strokeStyle = cssVar('--canvas-shell', '#ccc'); ctx.lineWidth = 1; ctx.strokeRect(x, y, laneW, h);
+      const n = hc.by_section[sec] || 0;
+      drawDots(ctx, x + 4, y + 4, laneW - 8, h - 8, n, SECTION_COLOR[sec]);
+      ctx.fillStyle = SECTION_COLOR[sec]; ctx.font = 'bold 11px sans-serif';
+      ctx.fillText(`${sec} ${n}`, x + laneW / 2, H - pad);
+    });
+  }
+
   // ---- matrix (process rows × 30-min cols, colour by headcount) ----
   function renderMatrix() {
     elMatrix.innerHTML = '';
@@ -455,6 +567,7 @@ export function mountTimetable(targetEl, opts = {}) {
     }
     if (elCursor && elCursor.value !== String(cursorSlot)) elCursor.value = String(cursorSlot);
     renderGantt();      // move the cursor line
+    renderStaffMap();   // repaint workers for this time (the 時刻連動)
     if (typeof o.onChange === 'function') {
       o.onChange({ result, minute, headcount: hc.total, by_section: hc.by_section, by_worker: hc.by_worker, section_zone_type: seed.section_zone_type || SECTION_ZONE_TYPE });
     }
@@ -490,6 +603,9 @@ export function mountTimetable(targetEl, opts = {}) {
       root.innerHTML = '<div class="tt-loading">タイムチャートのデータ取得に失敗しました。</div>';
       return;
     }
+    if (typeof o.fetchLayout === 'function') {
+      try { layout = await o.fetchLayout(); } catch (_e) { layout = null; }
+    }
     scenarioName = Object.keys(seed.scenarios)[0];
     loadScenario(scenarioName);
     build();
@@ -497,7 +613,7 @@ export function mountTimetable(targetEl, opts = {}) {
     recompute();
   }
 
-  const onTheme = () => { if (result) renderGantt(); };
+  const onTheme = () => { if (result) { renderGantt(); renderStaffMap(); } };
   document.addEventListener('themechange', onTheme);
 
   const controller = {
@@ -506,7 +622,8 @@ export function mountTimetable(targetEl, opts = {}) {
     recompute,
     headcountAt,
     setMinute(min) { cursorSlot = Math.max(0, Math.min(N - 1, Math.floor(min / 30))); onCursor(); },
-    resize() { if (result) renderGantt(); },
+    setLayout(l) { layout = l || null; if (result) renderStaffMap(); },
+    resize() { if (result) { renderGantt(); renderStaffMap(); } },
     destroy() {
       destroyed = true;
       if (recalcTimer) clearTimeout(recalcTimer);

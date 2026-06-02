@@ -41,11 +41,14 @@ SECTION_COLOR = {
     "ステージング": "#f97316",
     "間接": "#6b7280",
 }
+# Map a timetable section onto a whsim layout zone type (ZONE_JP keys), so the
+# staffing map can place each section's per-slot headcount into the right zone.
+# 間接 (indirect) has no warehouse zone → the UI draws it in a fallback strip.
 SECTION_ZONE_TYPE = {
-    "入荷": "inbound",
+    "入荷": "receiving",
     "出荷ケース": "storage",
     "出荷バラ": "picking",
-    "ステージング": "shipping",
+    "ステージング": "staging",
     "間接": "office",
 }
 

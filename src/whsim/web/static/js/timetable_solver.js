@@ -19,11 +19,12 @@ export const SECTION_COLOR = {
   'ステージング': '#f97316',
   '間接': '#6b7280',
 };
+// Section → whsim layout zone type (ZONE_JP keys); 間接 has no warehouse zone.
 export const SECTION_ZONE_TYPE = {
-  '入荷': 'inbound',
+  '入荷': 'receiving',
   '出荷ケース': 'storage',
   '出荷バラ': 'picking',
-  'ステージング': 'shipping',
+  'ステージング': 'staging',
   '間接': 'office',
 };
 
