@@ -59,7 +59,7 @@ def run_scenario(base: WarehouseModel, scenario: Scenario,
     """Monte-Carlo a scenario; return (rep-0 result for replay, aggregated KPIs)."""
     model = apply_scenario(base, scenario)
     results, _heat = run_replications(model, reps=reps)
-    metrics = kpi_mod.compute(results)
+    metrics = kpi_mod.compute(results, model)
     return results[0], metrics
 
 

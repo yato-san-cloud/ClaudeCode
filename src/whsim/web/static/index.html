@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>whsim — 倉庫シミュレータ</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="stylesheet" href="./styles.css" />
   <link rel="stylesheet" href="./js/cody.css" />
 </head>
@@ -11,7 +12,15 @@
   <header>
     <div class="brand-group">
       <button id="sidebarToggle" type="button" class="icon-btn" title="メニューの開閉" aria-label="メニューの開閉">☰</button>
-      <div class="brand">whsim<span>倉庫シミュレータ</span></div>
+      <div class="brand">
+        <svg class="brand-mark" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect width="32" height="32" rx="7" fill="var(--accent)"/>
+          <g fill="#fff">
+            <rect x="7" y="15" width="7" height="10" rx="1"/>
+            <rect x="18" y="11" width="7" height="14" rx="1"/>
+            <path d="M5 12 16 6l11 6v1.6L16 7.8 5 13.6z"/>
+          </g>
+        </svg>whsim<span>倉庫シミュレータ</span></div>
     </div>
     <div class="header-tools">
       <div class="provenance" id="provenance">— your data</div>
@@ -70,6 +79,54 @@
       <section class="card">
         <button id="runBtn" class="primary big" disabled>▶ シミュレーション実行</button>
         <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="card settings-card">
+        <h2>
+          <button id="settingsToggle" type="button" class="settings-summary"
+                  aria-expanded="false" aria-controls="settingsBody" disabled>
+            <span class="settings-gear" aria-hidden="true">⚙</span>コスト・稼働条件
+            <span class="settings-chevron" aria-hidden="true">▾</span>
+          </button>
+        </h2>
+        <div id="settingsBody" class="settings-body" hidden>
+          <form id="settingsForm" class="settings-form">
+            <div class="settings-field">
+              <label for="set_currency">通貨</label>
+              <select id="set_currency" name="currency">
+                <option value="¥">¥ (円)</option>
+                <option value="$">$ (ドル)</option>
+                <option value="€">€ (ユーロ)</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="set_labor">人件費</label>
+              <input id="set_labor" name="labor_cost_per_hour" type="number"
+                     min="0" step="50" inputmode="numeric" />
+              <span class="unit">¥/時</span>
+            </div>
+            <div class="settings-field">
+              <label for="set_hours">1日の稼働時間</label>
+              <input id="set_hours" name="working_hours_per_day" type="number"
+                     min="0" max="24" step="0.5" inputmode="decimal" />
+              <span class="unit">時間</span>
+            </div>
+            <div class="settings-field">
+              <label for="set_days">月の稼働日数</label>
+              <input id="set_days" name="working_days_per_month" type="number"
+                     min="0" max="31" step="1" inputmode="numeric" />
+              <span class="unit">日</span>
+            </div>
+            <div class="settings-field">
+              <label for="set_agv">AGV費用</label>
+              <input id="set_agv" name="agv_cost_per_month" type="number"
+                     min="0" step="1000" inputmode="numeric" />
+              <span class="unit">¥/月</span>
+            </div>
+            <button id="settingsSave" type="submit" class="primary" style="width:100%;margin-top:6px">保存</button>
+            <div id="settingsStatus" class="status" role="status" aria-live="polite"></div>
+          </form>
+        </div>
       </section>
     </aside>
 

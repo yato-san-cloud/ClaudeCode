@@ -6,6 +6,8 @@ import { ExportView } from './js/export.js';
 import { mountAnalysis } from './js/analysis.js';
 import { mountCody, codyAvatarSVG } from './js/cody.js';
 import { mountChat } from './js/chat.js';
+import { mountSettings } from './js/settings.js';
+import { mountOnboarding } from './js/onboarding.js';
 
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
@@ -54,7 +56,8 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
-  export: null, cody: null, chat: null, preset: 'natural',
+  export: null, cody: null, chat: null, settings: null, onboarding: null,
+  hasRun: false, preset: 'natural',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -208,6 +211,7 @@ async function refreshProjects(select) {
   });
   if (select) sel.value = select;
   updateProjMenuState();
+  if (S.onboarding && S.onboarding.refreshCTA) S.onboarding.refreshCTA();
 }
 function updateProjMenuState() {
   const btn = $('projMenuBtn');
@@ -232,7 +236,9 @@ async function openProject(name) {
   updateProjMenuState();
   // Reset replay/analysis state and restore this project's chat thread.
   S.replay = null;
+  S.hasRun = false;
   if (S.chat && S.chat.loadFor) S.chat.loadFor(name);
+  if (S.settings && S.settings.loadFor) S.settings.loadFor(name);
   if (S.view === 'design') mountDesigner();
   if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
 }
@@ -323,6 +329,7 @@ async function doRun() {
   S.running = true;
   try {
     const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
+    S.hasRun = true;
     renderKpis(r.kpis);
     await loadReplay();
     $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
@@ -441,7 +448,10 @@ function mount3d() {
 
 function mountExport() {
   if (S.export) { S.export.refresh(); return; }
-  S.export = new ExportView($('export'), { getProjectName: () => S.project });
+  S.export = new ExportView($('export'), {
+    getProjectName: () => S.project,
+    toast: (msg, kind) => toast(msg, kind),
+  });
   S.export.refresh();
 }
 
@@ -671,6 +681,8 @@ async function projDelete() {
 function clearProjectState() {
   S.project = null;
   S.replay = null;
+  S.hasRun = false;
+  if (S.settings && S.settings.clear) S.settings.clear();
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
   $('projectSelect').value = '';
   $('runBtn').disabled = true;
@@ -851,8 +863,30 @@ function initUI() {
     onMood: (mood, say) => cody(mood, say),
     actions: chatActions,
   });
+  S.settings = mountSettings({
+    getProject: () => S.project,
+    toast: (msg, kind) => toast(msg, kind),
+    hasRun: () => S.hasRun,
+    onRerun: () => runSim(),
+  });
+  S.onboarding = mountOnboarding({
+    toast: (msg, kind) => toast(msg, kind),
+    openProject: async (name) => { await refreshProjects(name); await openProject(name); },
+    refreshProjects: () => refreshProjects(),
+    hasProjects: async () => {
+      const sel = $('projectSelect');
+      // Options beyond the leading "（新規作成）" placeholder mean projects exist.
+      return !!(sel && sel.options && sel.options.length > 1);
+    },
+  });
   await loadTemplates();
   await refreshProjects();
+  // First-run: show the sample CTA if there are no projects yet.
+  if (S.onboarding) {
+    S.onboarding.maybeShowFirstRunCTA();
+    // Subtle first-visit guide (shown once; localStorage 'whsim-onboarded').
+    setTimeout(() => { try { S.onboarding.startGuide(false); } catch (_e) { /* ignore */ } }, 600);
+  }
   S.chat.focus();
   requestAnimationFrame(loop);
 })();

@@ -140,6 +140,77 @@ def api_create(payload: dict):
     return {"name": name, "template": template, "root": str(proj.root)}
 
 
+def _free_project_name(preferred: str) -> str:
+    """Pick a non-colliding project name. Try `preferred`, then `demo-2`,
+    `demo-3`, ... so the one-click demo never fails because a name is taken."""
+    from whsim.project import PROJECTS_DIR
+
+    def taken(n: str) -> bool:
+        return (PROJECTS_DIR / n / "project.json").is_file()
+
+    if not taken(preferred):
+        return preferred
+    base = preferred if preferred != "デモ" else "demo"
+    i = 2
+    while taken(f"{base}-{i}"):
+        i += 1
+    return f"{base}-{i}"
+
+
+def _sample_zip_path() -> Path | None:
+    """Locate the bundled sample ZIP under the repo's examples/, generating it
+    on demand if the helper is available. Returns None if nothing can be found."""
+    # Resolve examples/ relative to the installed package's repo root.
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        cand = parent / "examples" / "acme_upload.zip"
+        if cand.is_file():
+            return cand
+    # Not present: try to generate it via the bundled script (best effort).
+    for parent in here.parents:
+        script = parent / "scripts" / "gen_sample_data.py"
+        if script.is_file():
+            try:
+                import runpy
+                runpy.run_path(str(script), run_name="__main__")
+            except Exception:  # noqa: BLE001 — generation is best effort
+                pass
+            cand = parent / "examples" / "acme_upload.zip"
+            return cand if cand.is_file() else None
+    return None
+
+
+@app.post("/api/projects/sample")
+def api_sample(payload: dict | None = None):
+    """One-click demo project: create from the default template and, if a bundled
+    sample customer ZIP is available, auto-import it so the project is immediately
+    runnable with realistic numbers.
+
+    Body (optional): ``{"name": str}``. If omitted or already taken, a free name
+    is auto-picked (``デモ`` then ``demo-2``, ``demo-3``, ...). Returns
+    ``{"name": str, "ready": bool}`` where ``ready`` is True once sample data was
+    imported (so the salesperson can run straight away)."""
+    payload = payload or {}
+    raw = payload.get("name")
+    preferred = _safe_name(raw) if isinstance(raw, str) and raw.strip() else "デモ"
+    name = _free_project_name(preferred)
+
+    try:
+        proj = Project.create(name, "ecommerce_small")
+    except FileNotFoundError:
+        raise HTTPException(400, "デモ用テンプレートが見つかりません。")
+
+    ready = False
+    zip_path = _sample_zip_path()
+    if zip_path is not None and zip_path.is_file():
+        try:
+            proj.import_zip(zip_path)
+            ready = True
+        except Exception:  # noqa: BLE001 — never block: ship a runnable template anyway
+            ready = False
+    return {"name": name, "ready": ready}
+
+
 def _project_dir(name: str) -> Path:
     """Resolve a validated project name to its directory under PROJECTS_DIR.
 
@@ -305,6 +376,90 @@ def api_apply(name: str, payload: dict):
             "provenance_summary": prov.summary()}
 
 
+# ---- settings (commercial / costing knobs) ----------------------------------
+
+# Known cost-model knobs that live under the model's `settings` subtree. The
+# schema owner adds a `settings` submodel with these flat, defaulted fields;
+# kpis reads them. We mirror the numeric ones here ONLY to give a tolerant,
+# schema-agnostic 400 on a clearly non-numeric value (structural type error)
+# even before the schema field lands. `currency` is a free string.
+_SETTINGS_NUMERIC = (
+    "labor_cost_per_hour", "working_hours_per_day",
+    "working_days_per_month", "agv_cost_per_month",
+)
+
+
+@app.get("/api/projects/{name}/settings")
+def api_get_settings(name: str):
+    """Return the flat `settings` dict from the model (``{}`` if absent).
+
+    Reads the on-disk model document directly so it round-trips even when the
+    schema does not (yet) define a `settings` field — never 500s."""
+    proj = _open(name)
+    try:
+        md = json.loads(proj.model_file.read_text("utf-8"))
+        settings = md.get("settings")
+    except Exception:  # noqa: BLE001 — best effort, never fatal
+        settings = None
+    return settings if isinstance(settings, dict) else {}
+
+
+@app.put("/api/projects/{name}/settings")
+def api_put_settings(name: str, payload: dict):
+    """Merge a flat settings dict into the model's `settings` subtree.
+
+    Tolerant: unknown keys are ignored, a missing `settings` subtree is created.
+    A 400 is returned only on a structural type error (a known numeric knob given
+    a non-numeric value). The whole document is re-validated with WarehouseModel
+    so an edit that breaks the schema rolls back. Persists by writing the merged
+    document straight to disk so `settings` survives whether or not the schema
+    yet declares the field (``save_model`` would drop unknown keys). Marks the
+    `settings` subtree provenance as INTERVIEW."""
+    from pydantic import ValidationError
+
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "settings は {キー: 値} のオブジェクトで指定してください。")
+
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    cur = md.get("settings")
+    if not isinstance(cur, dict):
+        cur = {}
+
+    # Merge: ignore unknown keys; coerce/validate known numeric knobs.
+    merged = dict(cur)
+    for key, value in payload.items():
+        if key in _SETTINGS_NUMERIC:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                # Tolerate a numeric string, else 400 (structural type error).
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"{key} は数値で指定してください。")
+            merged[key] = value
+        elif key == "currency":
+            merged[key] = str(value)
+        # Unknown keys: ignored (forward-compatible, never fatal).
+    md["settings"] = merged
+
+    # Re-validate the whole document so a structurally broken edit rolls back.
+    # If the schema does not yet declare `settings`, validation ignores it
+    # (extra fields), which is fine: we persist the raw dict ourselves below.
+    try:
+        WarehouseModel.model_validate(md)
+    except ValidationError as e:
+        raise HTTPException(400, f"invalid value: {e.errors()[0].get('msg', 'validation error')}")
+
+    # Persist by writing the merged document directly (NOT save_model, which
+    # round-trips through model_dump_json and would drop a not-yet-schema'd key).
+    proj.model_file.write_text(json.dumps(md, ensure_ascii=False, indent=2), "utf-8")
+    prov = proj.load_provenance()
+    prov.mark("settings", Source.INTERVIEW)
+    proj.save_provenance(prov)
+    return {"ok": True, "settings": merged}
+
+
 @app.post("/api/workmethod/name")
 def api_workmethod_name(payload: dict | None = None):
     """Reverse-name a 5-axis WorkMethod: return {name, explain}.
@@ -409,9 +564,71 @@ async def api_import_distances(name: str, file: UploadFile):
             "warnings": res.get("warnings", [])}
 
 
+def _latest_compare(proj: Project) -> dict | None:
+    """Load the most recent persisted scenario comparison (``compare_*/compare.json``),
+    or None if no comparison has been run. Never raises."""
+    try:
+        comps = sorted(proj.runs_dir.glob("compare_*"))
+    except Exception:  # noqa: BLE001
+        return None
+    for d in reversed(comps):
+        f = d / "compare.json"
+        if f.is_file():
+            try:
+                data = json.loads(f.read_text("utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except Exception:  # noqa: BLE001 — skip a corrupt record
+                continue
+    return None
+
+
+def _proposal_extras(proj: Project, model, metrics: dict) -> dict:
+    """Assemble the richer optional args for export_doc from project artifacts.
+
+    Returns ``{"scenarios", "insights", "provenance"}``:
+      - ``scenarios``: the latest persisted what-if comparison (baseline +
+        alternatives w/ payback), or None.
+      - ``insights``: the SAME recommendation list the analysis dashboard shows,
+        reused via ``_analysis_payload`` so the two never drift.
+      - ``provenance``: the "N% your data" summary string.
+    Every step degrades to None on missing/broken data so export never 500s."""
+    scenarios = _latest_compare(proj)
+    insights = None
+    try:
+        insights = _analysis_payload(model, metrics, "run").get("insights")
+    except Exception:  # noqa: BLE001 — insights are an enhancement, never required
+        insights = None
+    try:
+        provenance = proj.load_provenance().summary()
+    except Exception:  # noqa: BLE001
+        provenance = None
+    return {"scenarios": scenarios, "insights": insights, "provenance": provenance}
+
+
+def _call_export(builder, kpis, model_name, prov, png, out, extras: dict):
+    """Call an export_doc builder, passing the richer optional args when the
+    builder accepts them (export owner adds scenarios/insights/provenance). Falls
+    back to the original positional signature if those params are absent, so the
+    endpoint works against either version of export_doc."""
+    try:
+        return builder(kpis, model_name, prov, png, out,
+                       scenarios=extras.get("scenarios"),
+                       insights=extras.get("insights"),
+                       provenance=extras.get("provenance"))
+    except TypeError:
+        # Older export_doc without the new optional params.
+        return builder(kpis, model_name, prov, png, out)
+
+
 @app.get("/api/projects/{name}/proposal.{fmt}")
 def api_proposal(name: str, fmt: str):
-    """Generate an editable PPTX or a PDF proposal from the latest run."""
+    """Generate an editable PPTX or a PDF proposal from the latest run.
+
+    Enriches the deliverable with the latest scenario comparison, the analysis
+    dashboard's recommendations (shared via ``_analysis_payload``), and the
+    provenance summary. Degrades gracefully: missing scenarios/insights are
+    simply omitted, never a 500. Response/download behavior is unchanged."""
     from whsim import export_doc
     if fmt not in ("pptx", "pdf"):
         raise HTTPException(404, "unknown format")
@@ -423,8 +640,13 @@ def api_proposal(name: str, fmt: str):
     png = rd / "layout_heatmap.png"
     out = rd / f"proposal.{fmt}"
     prov = proj.load_provenance().summary()
+    try:
+        extras = _proposal_extras(proj, proj.load_model(), kpis)
+    except Exception:  # noqa: BLE001 — fall back to the bare proposal
+        extras = {"scenarios": None, "insights": None, "provenance": prov}
     builder = export_doc.build_pptx if fmt == "pptx" else export_doc.build_pdf
-    builder(kpis, proj.meta()["name"], prov, png if png.is_file() else None, out)
+    _call_export(builder, kpis, proj.meta()["name"], prov,
+                 png if png.is_file() else None, out, extras)
     media = ("application/vnd.openxmlformats-officedocument.presentationml.presentation"
              if fmt == "pptx" else "application/pdf")
     return FileResponse(out, media_type=media, filename=f"{name}_提案書.{fmt}")
@@ -483,7 +705,7 @@ def _run_blocking(proj: Project) -> dict:
     # Monte-Carlo: many stochastic order sequences; rep 0 carries the replay.
     results, heat = run_replications(model, reps=MONTE_CARLO_REPS)
     res = results[0]
-    metrics = kpi_mod.compute(results)
+    metrics = kpi_mod.compute(results, model)
     est = analytic.estimate(model)
 
     run_dir = proj.new_run_dir()
@@ -522,7 +744,17 @@ def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
     scenarios = ([Scenario.model_validate(s) for s in raw] if raw
                  else default_scenarios(base))
 
-    cmp_id = proj.new_run_dir().name.replace("run_", "compare_")
+    # Derive a fresh compare id WITHOUT calling new_run_dir(): that helper
+    # creates (and leaves) an empty run_NNNN directory, which would become the
+    # project's latest_run_dir() and break /proposal, /png and /replay (they
+    # require a kpis.json that an empty scenario dir never has). Index off both
+    # existing run_* and compare_* dirs so ids stay monotonic and never collide.
+    proj.runs_dir.mkdir(parents=True, exist_ok=True)
+    import re as _re
+    existing = [int(m.group(1)) for p in proj.runs_dir.glob("*")
+                if (m := _re.fullmatch(r"(?:run|compare)_(\d+)", p.name))]
+    nxt = (max(existing) + 1) if existing else 1
+    cmp_id = f"compare_{nxt:04d}"
     cmp_dir = proj.runs_dir / cmp_id
     cmp_dir.mkdir(parents=True, exist_ok=True)
     prov = proj.load_provenance().summary()
@@ -541,7 +773,16 @@ def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
     for alt in alternatives:
         pb = payback_months(baseline["kpis"], alt["kpis"])
         alt["kpis"]["payback_months"] = pb
-    return {"compare_id": cmp_id, "baseline": baseline, "alternatives": alternatives}
+    out = {"compare_id": cmp_id, "baseline": baseline, "alternatives": alternatives}
+    # Persist the comparison so the proposal export can include scenario tables
+    # without re-running the (expensive) sweep. PNG urls are dropped to keep the
+    # on-disk record self-contained.
+    try:
+        (cmp_dir / "compare.json").write_text(
+            json.dumps(out, ensure_ascii=False, indent=2), "utf-8")
+    except Exception:  # noqa: BLE001 — persistence is best effort, never fatal
+        pass
+    return out
 
 
 @app.post("/api/projects/{name}/run-scenarios")

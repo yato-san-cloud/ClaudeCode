@@ -7,6 +7,31 @@
 非エンジニア（営業）が顧客のゆるい要件をヒアリングしながらモデルを組み、裏で離散事象シミュレーション
 （SimPy）を回して、**提案書にそのまま貼れる1枚の絵**を出すことを狙います。
 
+## 主な機能
+
+- **Cody チャットで操作** — マスコット「Cody」に日本語で頼むだけで、作成・実行・分析・比較・概算ができる（LLM 差し替え可能な seam）。
+- **テンプレート** — 全項目が仮値で埋まった `model.json`。取り込み前から必ず動く。
+- **ZIP / CAD / 距離 取り込み** — 分析ツールの ZIP（商品マスタ/出荷/入荷/レイアウト…）、DXF 図面、実測距離行列（CSV/JSON）を寛容に取り込み。
+- **DES シミュレーション** — SimPy による離散事象シミュ。作業員・AGV・フォークリフトは個体エージェント。
+- **2D / 3D リプレイ** — 同じ replay データを 2D アニメ（GIF も可）と three.js の 3D で描画。
+- **分析ダッシュボード** — 処理能力・ボトルネック・稼働率・サイクルタイム・コストを可視化。
+- **提案書 PPTX / PDF** — KPI 表＋レイアウト図＋前提を、編集可能な PowerPoint と PDF で出力。
+- **シナリオ比較** — 現行 / 繁忙期 / AGV導入 を並置し、デルタ・¥/件・必要人員・投資回収まで。
+- **コスト設定** — 人件費単価・稼働時間・AGV 月額・capex/opex・償却月数（日本市場の標準値が初期値）。
+
+> 詳しいガイド：**営業向け** [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) ／
+> **開発者向け** [`docs/DEVELOPER.md`](docs/DEVELOPER.md)。
+
+## チャット先行のワークフロー：作る → 実行 → 分析 → 提案書
+
+1. **作る** — Cody に「EC倉庫を作って」。テンプレからプロジェクト作成（この時点で動く）。
+2. **実行** — 「シミュレーションを回して」。2D アニメ・3D・KPI・提案 PNG が出る。
+3. **分析** — 「結果を見せて」。ボトルネックや ¥/件、必要人員を確認。「繁忙期と比べて」でシナリオ比較。
+4. **提案書** — PPTX / PDF を書き出して顧客へ。
+
+専門知識がなくても、チャットだけで一周できます。設計を詰めたいときは「設計」タブで
+レイアウト・設備・フローを直接編集します（下記）。
+
 ## 設計の背骨：唯一の契約 = `model.json`
 
 すべてのコンポーネントが、ひとつの正規スキーマ
@@ -147,11 +172,25 @@ whsim simulate acme2
 ## 開発
 
 ```bash
+make install                              # pip install -e ".[dev,web]"
+make test                                 # pytest -q（Web テストはインプロセス、サーバ不要）
+make lint                                 # ruff check src
+make fmt                                  # ruff format src tests
+make dev                                  # whsim serve（http://127.0.0.1:8000）
+make e2e                                  # ライブサーバへのスモーク確認（先に `make dev`）
+```
+
+`make help` で全ターゲットを表示。`tests/test_perf_scale.py` は大規模モデルで
+エンジンを回し、時間予算・KPI の有限性・リプレイ構築を検証する**性能回帰ガード**です。
+素の pytest や単一テストも従来どおり使えます：
+
+```bash
 pytest -q                                 # 全テスト
 pytest tests/test_engine.py::test_kpis_are_sane   # 単一テスト
-ruff check src                            # lint
 python scripts/gen_template_ecommerce.py  # テンプレ再生成
 ```
+
+設計の詳細・コンポーネント・テンプレ追加方法は [`docs/DEVELOPER.md`](docs/DEVELOPER.md) を参照。
 
 ## ロードマップ（議論中）
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="whsim">
+  <rect width="32" height="32" rx="7" fill="#2383E2"/>
+  <g fill="#fff">
+    <rect x="7" y="15" width="7" height="10" rx="1"/>
+    <rect x="18" y="11" width="7" height="14" rx="1"/>
+    <path d="M5 12 16 6l11 6v1.6L16 7.8 5 13.6z"/>
+  </g>
+</svg>

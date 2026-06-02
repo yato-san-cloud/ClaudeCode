@@ -314,6 +314,22 @@ class Simulation(BaseModel):
     shift_hours_per_day: float = 8.0  # a work-day's length; makes cost robust to duration
 
 
+class Settings(BaseModel):
+    """First-class cost / operations settings.
+
+    The backend and frontend code against these exact field names. Every field
+    is defaulted with sensible Japanese-market values, so a model assembled from
+    a template alone is always valid and always costable ("never blocks on
+    missing data"). The KPI layer reads cost inputs from here (see kpis.py).
+    """
+
+    currency: str = "¥"
+    labor_cost_per_hour: float = 2000.0   # ¥/person-hour (JP warehouse default)
+    working_hours_per_day: float = 8.0    # a work-day's length (one shift)
+    working_days_per_month: float = 22.0  # operating days per month
+    agv_cost_per_month: float = 80000.0   # ¥/month per AGV (lease + power + maint.)
+
+
 class Scenario(BaseModel):
     """A named what-if: dotted-path edits applied over the base model."""
 
@@ -343,6 +359,7 @@ class WarehouseModel(BaseModel):
     resources: Resources = Field(default_factory=Resources)
     orders: Orders = Field(default_factory=Orders)
     simulation: Simulation = Field(default_factory=Simulation)
+    settings: Settings = Field(default_factory=Settings)  # first-class cost/ops settings
     routes: list[Route] = Field(default_factory=list)  # manual flow-line studies
     # measured shelf-to-shelf distances (sparse), keyed "fromLocId|toLocId" -> metres
     distance_overrides: dict[str, float] = Field(default_factory=dict)

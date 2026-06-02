@@ -5,6 +5,54 @@ from __future__ import annotations
 import statistics
 
 from whsim.engine.run import RunResult
+from whsim.schema.model import Settings, WarehouseModel
+
+
+def _cost_params(res: RunResult, model: WarehouseModel | None) -> dict:
+    """Resolve the cost inputs the KPI layer needs.
+
+    First-class source is ``model.settings`` (a :class:`Settings`): the wage,
+    the work-day shape, the per-AGV monthly cost and the currency all flow from
+    there. When no model is supplied we fall back to whatever the engine packed
+    into ``res.cost`` (legacy path), so existing callers keep identical numbers
+    -- ``Settings`` is the *default* source, not the only one.
+
+    Every divisor is clamped to a small positive so zero working
+    hours/days never divides-by-zero.
+    """
+    c = res.cost or {}
+    if model is not None:
+        s: Settings = model.settings
+        shift = max(float(s.working_hours_per_day), 1e-9)
+        days = max(float(s.working_days_per_month), 1e-9)
+        return {
+            "labour_rate_per_hr": float(s.labor_cost_per_hour),
+            "shift_hours_per_day": shift,
+            "work_days_per_month": days,
+            "currency": s.currency,
+            # Flat per-AGV monthly cost (settings model): amortised capex is not
+            # used in this mode; AGV opex is the per-month figure x fleet size.
+            "agv_cost_per_month_each": float(s.agv_cost_per_month),
+            "n_agvs": res.n_agvs,
+            # Legacy fields retained for output parity (capex unknown here -> 0).
+            "capex_total": 0.0,
+            "opex_per_hr_total": 0.0,
+            "amortize_months": 1,
+            "settings_mode": True,
+        }
+    # Legacy: read whatever the engine packed (preserves current behaviour).
+    return {
+        "labour_rate_per_hr": c.get("labour_rate_per_hr", 0.0),
+        "shift_hours_per_day": max(c.get("shift_hours_per_day", 8.0) or 8.0, 1e-9),
+        "work_days_per_month": max(c.get("work_days_per_month", 25), 1),
+        "currency": c.get("currency", "¥"),
+        "agv_cost_per_month_each": 0.0,
+        "n_agvs": res.n_agvs,
+        "capex_total": c.get("capex_total", 0.0),
+        "opex_per_hr_total": c.get("opex_per_hr_total", 0.0),
+        "amortize_months": max(c.get("amortize_months", 36), 1),
+        "settings_mode": False,
+    }
 
 
 def _pct(values: list[float], q: float) -> float:
@@ -15,7 +63,7 @@ def _pct(values: list[float], q: float) -> float:
     return s[k]
 
 
-def _one(res: RunResult) -> dict:
+def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     arrived = sum(1 for e in res.events if e["event"] == "order_arrive")
     completes = [e for e in res.events if e["event"] == "order_complete"]
     completed = len(completes)
@@ -46,21 +94,28 @@ def _one(res: RunResult) -> dict:
     # --- cost (robust to run duration: scale by fraction of a work-day) ------
     # NOTE: reuse the guarded `hours` from above (max(..., 1e-9)); recomputing it
     # unguarded here re-introduces a divide-by-zero for zero-duration runs.
-    c = res.cost or {}
-    shift = c.get("shift_hours_per_day", 8.0) or 8.0
+    # Cost inputs are resolved through `model.settings` when a model is supplied
+    # (first-class settings), else from the engine-packed `res.cost` (legacy).
+    c = _cost_params(res, model)
+    shift = max(c["shift_hours_per_day"], 1e-9)
     day_frac = max(hours / shift, 1e-9)          # work-days this run represents
     headcount = res.n_pickers + res.n_packers
-    labour_cost = headcount * hours * c.get("labour_rate_per_hr", 0.0)  # this window
-    opex_cost = c.get("opex_per_hr_total", 0.0) * hours
-    months = max(c.get("amortize_months", 36), 1)
-    days = max(c.get("work_days_per_month", 25), 1)
-    monthly_capex = c.get("capex_total", 0.0) / months
+    rate = c["labour_rate_per_hr"]
+    labour_cost = headcount * hours * rate       # this window
+    opex_cost = c["opex_per_hr_total"] * hours
+    months = max(c["amortize_months"], 1)
+    days = max(c["work_days_per_month"], 1)
+    monthly_capex = c["capex_total"] / months
     capex_run = monthly_capex * (day_frac / days)   # capex attributable to window
-    total_cost_run = labour_cost + opex_cost + capex_run
+    # AGV monthly cost: flat per-AGV figure x fleet size (settings mode). In the
+    # legacy path this is 0 and AGV cost is folded into opex/capex above.
+    agv_monthly = c["agv_cost_per_month_each"] * c["n_agvs"]
+    agv_run = agv_monthly * (day_frac / days)       # AGV cost attributable to window
+    total_cost_run = labour_cost + opex_cost + capex_run + agv_run
     cost_per_order = total_cost_run / completed if completed else 0.0
     daily_opex = (labour_cost + opex_cost) / day_frac   # one full work-day
     monthly_opex = daily_opex * days                    # operating only (no capex)
-    monthly_cost = monthly_opex + monthly_capex
+    monthly_cost = monthly_opex + monthly_capex + agv_monthly
 
     return {
         "orders_arrived": arrived,
@@ -85,19 +140,26 @@ def _one(res: RunResult) -> dict:
         "on_time_rate": on_time / completed if completed else 1.0,
         "headcount": headcount,
         "labour_cost_per_order": labour_cost / completed if completed else 0.0,
-        "equipment_cost_per_order": (opex_cost + capex_run) / completed if completed else 0.0,
+        "equipment_cost_per_order": (opex_cost + capex_run + agv_run) / completed
+        if completed else 0.0,
         "total_cost_per_order": cost_per_order,
         "monthly_cost": monthly_cost,
         "monthly_opex": monthly_opex,
-        "capex_total": c.get("capex_total", 0.0),
-        "labour_rate_per_hr": c.get("labour_rate_per_hr", 0.0),
-        "currency": c.get("currency", "¥"),
+        "agv_monthly_cost": agv_monthly,
+        "capex_total": c["capex_total"],
+        "labour_rate_per_hr": rate,
+        "currency": c["currency"],
     }
 
 
-def compute(results: list[RunResult]) -> dict:
-    """Average per-replication KPIs and add a plain-language verdict."""
-    per = [_one(r) for r in results]
+def compute(results: list[RunResult], model: WarehouseModel | None = None) -> dict:
+    """Average per-replication KPIs and add a plain-language verdict.
+
+    When ``model`` is supplied, cost KPIs are sourced from ``model.settings``
+    (first-class cost/ops settings); otherwise they fall back to the cost inputs
+    the engine packed into each ``RunResult.cost`` (legacy, unchanged numbers).
+    """
+    per = [_one(r, model) for r in results]
     agg = {}
     for k in per[0]:
         if isinstance(per[0][k], (int, float)):

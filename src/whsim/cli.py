@@ -73,12 +73,25 @@ def estimate(name: str):
 
 
 @app.command()
+def settings(name: str):
+    """Print the project's cost-model settings as JSON (``{}`` if none set)."""
+    proj = _open_project(name)
+    try:
+        md = json.loads(proj.model_file.read_text("utf-8"))
+        cur = md.get("settings")
+    except (OSError, json.JSONDecodeError):
+        cur = None
+    typer.echo(json.dumps(cur if isinstance(cur, dict) else {},
+                          ensure_ascii=False, indent=2))
+
+
+@app.command()
 def run(name: str):
     """Run the discrete-event simulation and store the run artifacts."""
     proj = _open_project(name)
     model = proj.load_model()
     results, heat = run_replications(model)
-    metrics = kpi_mod.compute(results)
+    metrics = kpi_mod.compute(results, model)
 
     run_dir = proj.new_run_dir()
     (run_dir / "config.json").write_text(model.simulation.model_dump_json(indent=2), "utf-8")
@@ -155,7 +168,7 @@ def simulate(name: str):
     proj = _open_project(name)
     model = proj.load_model()
     results, heat = run_replications(model)
-    metrics = kpi_mod.compute(results)
+    metrics = kpi_mod.compute(results, model)
     run_dir = proj.new_run_dir()
     (run_dir / "kpis.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), "utf-8")
     np.save(run_dir / "heatmap.npy", heat)

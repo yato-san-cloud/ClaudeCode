@@ -206,56 +206,146 @@ export class ExportView {
   _render(name) {
     // Clear loading text but keep root.
     this.root.textContent = '';
-    this.root.appendChild(this._buildToolbar(name));
+    this.root.appendChild(this._buildExportPanel(name));
     this.root.appendChild(this._buildProposal(name));
   }
 
-  // ---- toolbar ----
+  _toast(msg, kind) {
+    try {
+      const fn = this.opts.toast;
+      if (typeof fn === 'function') fn(msg, kind);
+    } catch (_e) { /* ignore */ }
+  }
 
-  _buildToolbar(name) {
-    const bar = document.createElement('div');
-    bar.className = 'export-toolbar';
-    bar.style.display = 'flex';
-    bar.style.flexWrap = 'wrap';
-    bar.style.gap = '8px';
-    bar.style.margin = '4px 0 14px';
+  // ---- "提案書を作成" panel ----
 
-    const mk = (label, handler) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'export-btn';
+  _buildExportPanel(name) {
+    const panel = document.createElement('section');
+    panel.className = 'export-panel export-no-print';
+
+    const head = document.createElement('div');
+    head.className = 'export-head';
+    const h = document.createElement('h2');
+    h.className = 'export-h2';
+    h.textContent = '提案書を作成';
+    const desc = document.createElement('p');
+    desc.className = 'export-desc';
+    desc.textContent = '含まれる内容: KPIサマリ・レイアウト図・シナリオ比較・推奨アクション。';
+    head.appendChild(h);
+    head.appendChild(desc);
+    panel.appendChild(head);
+
+    // Primary document downloads (server-generated).
+    const docs = document.createElement('div');
+    docs.className = 'export-actions';
+    docs.appendChild(this._docBtn('提案書をダウンロード (PPTX)', 'pptx', name, true));
+    docs.appendChild(this._docBtn('提案書をダウンロード (PDF)', 'pdf', name, false));
+    docs.appendChild(this._pngBtn('提案PNGを保存', name));
+    panel.appendChild(docs);
+
+    // Secondary: data exports + print.
+    const more = document.createElement('div');
+    more.className = 'export-actions-secondary';
+    more.appendChild(this._linkBtn('KPIをCSV出力', () => this._downloadKpiCsv(name)));
+    more.appendChild(this._linkBtn('動線一覧をCSV出力', () => this._downloadRoutesCsv(name)));
+    more.appendChild(this._linkBtn('簡易印刷', () => { try { window.print(); } catch (_e) { /* ignore */ } }));
+    panel.appendChild(more);
+
+    return panel;
+  }
+
+  // A primary document-download button with a busy/spinner state. Fetches the
+  // file as a blob so we can show progress and surface errors as toasts
+  // (window.open can't tell us whether generation failed).
+  _docBtn(label, fmt, name, primary) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'export-doc-btn' + (primary ? ' primary' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => this._downloadDoc(btn, label, fmt, name));
+    return btn;
+  }
+
+  async _downloadDoc(btn, label, fmt, name) {
+    if (btn.dataset.busy === '1') return;
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>生成中…';
+    const url = `/api/projects/${encodeURIComponent(name)}/proposal.${fmt}`;
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/octet-stream' } });
+      if (!res.ok) {
+        let detail = `生成に失敗しました (${res.status})`;
+        try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (_e) { /* ignore */ }
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      const dl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = dl;
+      a.download = `${name}_提案書.${fmt}`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => { try { URL.revokeObjectURL(dl); } catch (_e) { /* ignore */ } }, 4000);
+      this._toast(`提案書(${fmt.toUpperCase()})を作成しました。`, 'ok');
+    } catch (err) {
+      this._toast('提案書の作成に失敗しました: ' + (err && err.message ? err.message : ''), 'error');
+    } finally {
+      btn.dataset.busy = '';
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
       btn.textContent = label;
-      btn.style.cursor = 'pointer';
-      btn.style.padding = '8px 14px';
-      btn.style.fontSize = '13px';
-      btn.style.fontWeight = '600';
-      btn.style.color = '#fff';
-      btn.style.background = 'var(--brand, #08519c)';
-      btn.style.border = '1px solid var(--brand, #08519c)';
-      btn.style.borderRadius = '8px';
-      btn.addEventListener('click', handler);
-      return btn;
-    };
+    }
+  }
 
-    bar.appendChild(mk('KPIをCSV出力', () => this._downloadKpiCsv(name)));
-    bar.appendChild(mk('動線一覧をCSV出力', () => this._downloadRoutesCsv(name)));
-    // Server-generated, editable proposal documents.
-    bar.appendChild(mk('提案書PPTX', () => {
-      window.open(`/api/projects/${name}/proposal.pptx`, '_blank');
-    }));
-    bar.appendChild(mk('提案書PDF', () => {
-      window.open(`/api/projects/${name}/proposal.pdf`, '_blank');
-    }));
+  // Download the proposal PNG (already produced by a run) as a file.
+  _pngBtn(label, name) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'export-doc-btn';
+    btn.textContent = label;
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.busy === '1') return;
+      btn.dataset.busy = '1';
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>保存中…';
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(name)}/png`);
+        if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
+        const blob = await res.blob();
+        const dl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = dl;
+        a.download = `${name}_提案.png`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => { try { URL.revokeObjectURL(dl); } catch (_e) { /* ignore */ } }, 4000);
+        this._toast('提案PNGを保存しました。', 'ok');
+      } catch (err) {
+        this._toast('PNGの保存に失敗しました: ' + (err && err.message ? err.message : ''), 'error');
+      } finally {
+        btn.dataset.busy = '';
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = label;
+      }
+    });
+    return btn;
+  }
 
-    const printBtn = mk('簡易印刷', () => { try { window.print(); } catch (_e) { /* ignore */ } });
-    printBtn.classList.add('export-no-print');
-    printBtn.style.background = 'transparent';
-    printBtn.style.color = 'var(--brand, #08519c)';
-    bar.appendChild(printBtn);
-
-    // Hide the toolbar when printing.
-    bar.classList.add('export-no-print');
-    return bar;
+  _linkBtn(label, handler) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'export-link-btn';
+    btn.textContent = label;
+    btn.addEventListener('click', handler);
+    return btn;
   }
 
   // ---- KPI CSV ----
