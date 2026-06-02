@@ -569,7 +569,10 @@ export function mountTimetable(targetEl, opts = {}) {
     renderGantt();      // move the cursor line
     renderStaffMap();   // repaint workers for this time (the 時刻連動)
     if (typeof o.onChange === 'function') {
-      o.onChange({ result, minute, headcount: hc.total, by_section: hc.by_section, by_worker: hc.by_worker, section_zone_type: seed.section_zone_type || SECTION_ZONE_TYPE });
+      o.onChange({
+        result, minute, headcount: hc.total, by_section: hc.by_section, by_worker: hc.by_worker,
+        section_zone_type: seed.section_zone_type || SECTION_ZONE_TYPE, colors: SECTION_COLOR,
+      });
     }
     document.dispatchEvent(new CustomEvent('whsim:timetable-change', {
       detail: { minute, headcount: hc.total, by_section: hc.by_section },

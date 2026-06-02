@@ -115,6 +115,9 @@ export class Scene3D {
     this._workers = []; // { mesh, keyframes }
     this._agvs = [];    // { mesh, keyframes }
     this._forklifts = []; // { group, keyframes, prevX, prevZ }
+    this._staffMeshes = []; // timetable staffing spheres (per-zone, per current time)
+    this._staffMats = [];   // their materials (disposed/rebuilt on each setStaffing)
+    this._staffGeom = null;
     this._rackMaterials = []; // rack mats (preset tweaks their emissiveIntensity)
     this._textures = []; // CanvasTextures to dispose
     this._preset = 'natural';
@@ -674,6 +677,56 @@ export class Scene3D {
     }
   }
 
+  // Timetable 時刻連動: place section-coloured worker spheres into their zones,
+  // count = the headcount at the timetable's current time. Distinct from the DES
+  // agents (those move; these are the planned staffing snapshot). Re-callable —
+  // old meshes/materials are removed and freed first so cursor moves don't leak.
+  // payload: { by_section:{sec:n}, zmap:{sec:zoneType}, colors:{sec:hex} }
+  setStaffing(payload) {
+    for (const m of this._staffMeshes) this.scene.remove(m);
+    for (const mat of this._staffMats) { if (mat && mat.dispose) mat.dispose(); }
+    this._staffMeshes = [];
+    this._staffMats = [];
+    if (this._disposed || !payload || !payload.by_section) return 0;
+    const zones = this.replay.zones || [];
+    const zmap = payload.zmap || {};
+    const colors = payload.colors || {};
+    if (!this._staffGeom) {
+      this._staffGeom = new THREE.SphereGeometry(0.42, 12, 10);
+      this._geometries.push(this._staffGeom);
+    }
+    const geom = this._staffGeom;
+    let fallbackX = 1; // sections with no matching zone line up along the front edge
+    for (const sec of Object.keys(payload.by_section)) {
+      const n = payload.by_section[sec] || 0;
+      if (n <= 0) continue;
+      const cap = Math.min(n, 60);
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(colors[sec] || 0x4477aa), roughness: 0.5, metalness: 0.05,
+      });
+      this._staffMats.push(mat);
+      const zone = zones.find((z) => z.type === zmap[sec]);
+      let place;
+      if (zone) {
+        const cols = Math.max(1, Math.ceil(Math.sqrt(cap * ((zone.w || 1) / (zone.h || 1)))));
+        const cw = (zone.w || 1) / cols, ch = (zone.h || 1) / Math.ceil(cap / cols);
+        place = (k) => [(zone.x || 0) + cw * ((k % cols) + 0.5), (zone.y || 0) + ch * (Math.floor(k / cols) + 0.5)];
+      } else {
+        const startX = fallbackX; fallbackX += cap * 0.9 + 2;
+        place = (k) => [startX + k * 0.9, 1];
+      }
+      for (let k = 0; k < cap; k++) {
+        const [px, pz] = place(k);
+        const mesh = new THREE.Mesh(geom, mat);
+        mesh.position.set(px, 0.7, pz);
+        mesh.castShadow = true;
+        this.scene.add(mesh);
+        this._staffMeshes.push(mesh);
+      }
+    }
+    return this._staffMeshes.length;
+  }
+
   // AGVs: small flat boxes (distinct from worker spheres), raised slightly,
   // colored by action. Missing/empty `replay.agvs` -> nothing.
   _buildAgvs() {
@@ -858,9 +911,12 @@ export class Scene3D {
     this._geometries = [];
     this._materials = [];
     this._textures = [];
+    for (const mat of this._staffMats) { if (mat && mat.dispose) mat.dispose(); }
     this._workers = [];
     this._agvs = [];
     this._forklifts = [];
+    this._staffMeshes = [];
+    this._staffMats = [];
     this._rackMaterials = [];
     if (this.renderer) {
       this.renderer.dispose();

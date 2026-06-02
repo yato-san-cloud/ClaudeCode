@@ -467,6 +467,7 @@ function mount3d() {
   try {
     S.scene3d = new Scene3D(el, S.replay, () => S.t);
     if (S.preset && S.scene3d.setPreset) S.scene3d.setPreset(S.preset);
+    applyStaffing3d();   // overlay the timetable staffing if one has been computed
     S.scene3d.resize();
   } catch (e) {
     // WebGL may be unavailable (no GPU / context loss). Don't let the failure
@@ -625,8 +626,23 @@ function mountTimetableView() {
   S.timetable = mountTimetable($('timetable'), {
     getProject: () => S.project,
     fetchLayout: () => fetchLayoutFor(S.project),
-    onChange: (payload) => { S.timetableStaffing = payload; if (S.view === 'view2d') draw2d(); },
+    onChange: (payload) => {
+      S.timetableStaffing = payload;
+      if (S.view === 'view2d') draw2d();
+      if (S.view === 'view3d' && S.scene3d) applyStaffing3d();
+    },
   });
+}
+
+// Push the timetable's per-time, per-section headcount into the 3D scene as
+// worker spheres placed in their zones (時刻連動). No-op without a staffing
+// snapshot or a live scene.
+function applyStaffing3d() {
+  const p = S.timetableStaffing;
+  if (!S.scene3d || !p || !S.scene3d.setStaffing) return;
+  const count = S.scene3d.setStaffing({ by_section: p.by_section, zmap: p.section_zone_type, colors: p.colors });
+  // Lightweight signal (count of worker spheres placed) for observers/tests.
+  document.dispatchEvent(new CustomEvent('whsim:staffing3d', { detail: { count, minute: p.minute } }));
 }
 
 // ---- apply structured edits then re-run (closes the analysis loop) ---------
