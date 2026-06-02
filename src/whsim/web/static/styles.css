@@ -1845,3 +1845,28 @@ html[data-theme="dark"] .wm-cube-dark{ display:block; }
 html[data-theme="dark"] .brand-tag{ color:#8FA6BD; }
 
 @media (max-width:720px){ .brand-tag{ display:none; } .wm{ font-size:20px; } }
+
+/* ===========================================================================
+   WHSiM ブランド — アクセント調整 + 数値タイポ + 仕上げ磨き
+   既存トークンを上書き(後勝ち)。ライト=テックブルー / ダーク=シアン寄りハイライト。
+   数値は Space Mono(--num) で「データ/オペレーション」感に。
+   =========================================================================== */
+:root{
+  --num:"Space Mono","Roboto Mono",ui-monospace,monospace;
+  --accent:#2F7BFF; --accent-hover:#1F6BEF; --accent-press:#1A5FD8;
+  --accent-tint:#E9F1FF; --accent-tint-2:#CFE0FF; --accent-ink:#1857C9;
+}
+html[data-theme="dark"]{
+  --accent:#4FA8F2; --accent-hover:#6FBCFA; --accent-press:#3C97E6;
+  --accent-tint:#11283A; --accent-tint-2:#1B3A52; --accent-ink:#9FE6FF;
+  --line-focus:#34E3FF;
+}
+/* premium micro-polish: brand focus glow + crisper active tab */
+a:focus-visible, button:focus-visible, [role="tab"]:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible{
+  outline:2px solid var(--line-focus); outline-offset:2px; border-radius:5px;
+}
+.tab.active, button[role="tab"][aria-selected="true"]{ font-weight:700; }
+html[data-theme="dark"] .tab.active, html[data-theme="dark"] button[role="tab"][aria-selected="true"]{
+  text-shadow:0 0 14px rgba(52,227,255,.35);
+}
