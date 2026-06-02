@@ -83,7 +83,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
   export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
-  dataanalysis: null, hasData: false, hasRun: false, preset: 'natural',
+  dataanalysis: null, hasData: false, hasRun: false, preset: 'brand',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -1038,4 +1038,10 @@ function initUI() {
   }
   S.chat.focus();
   requestAnimationFrame(loop);
+  // Dismiss the boot splash once the shell is mounted and interactive.
+  const boot = $('boot');
+  if (boot) {
+    setTimeout(() => boot.classList.add('gone'), 400);
+    setTimeout(() => boot.remove(), 1100);
+  }
 })();

@@ -9,6 +9,18 @@
   <link rel="stylesheet" href="./js/cody.css" />
 </head>
 <body>
+  <div id="boot" aria-hidden="true">
+    <svg class="boot-cube" viewBox="0 0 64 64" width="88" height="88" fill="none" aria-hidden="true">
+      <polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#1685b4"/>
+      <polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0c5a82"/>
+      <polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#3ae6ff"/>
+      <g fill="none" stroke="#7ef6ff" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g>
+      <g fill="none" stroke="#bdf8ff" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g>
+    </svg>
+    <div class="boot-word">WHSiM</div>
+    <div class="boot-bar"><span></span></div>
+    <div class="boot-tx">WAREHOUSE&nbsp;SIMULATOR&nbsp;·&nbsp;起動中</div>
+  </div>
   <header>
     <div class="brand-group">
       <button id="sidebarToggle" type="button" class="icon-btn" title="メニューの開閉" aria-label="メニューの開閉">☰</button>
@@ -146,6 +158,7 @@
         <button data-tab="export" data-tier="result" data-need="run" class="tab" role="tab" id="tab-export" aria-selected="false" aria-controls="export" tabindex="-1">エクスポート</button>
         <label class="preset-ctl" title="3D表現">3D表現
           <select id="presetSelect">
+            <option value="brand">ブランド</option>
             <option value="natural">ナチュラル</option>
             <option value="evening">夕</option>
             <option value="night">夜</option>

@@ -34,6 +34,15 @@ const AGV_Y = 0.2;
 // `shadow`: enable hard cast shadows for this preset; `shadowOpacity` controls
 // how dark the contact shadow reads (lower = softer/lighter).
 const PRESETS = {
+  // Dark-first brand preset (default) — matches the cool-slate + cyan chrome.
+  brand: {
+    background: 0x0f141d, fogColor: 0x121a26,
+    hemiSky: 0x6a8ba8, hemiGround: 0x0c1018, hemiInt: 0.5,
+    ambient: 0x2b3b52, ambientInt: 0.30,
+    dirColor: 0xbfe6ff, dirInt: 0.72,
+    exposure: 1.0, rackEmissive: 0.16,
+    shadow: true, shadowOpacity: 0.55,
+  },
   natural: {
     background: 0xeef1f5, fogColor: 0xeef1f5,
     hemiSky: 0xffffff, hemiGround: 0xb7c0cc, hemiInt: 0.85,
@@ -69,6 +78,17 @@ const PRESETS = {
 };
 
 // Route mover -> bright line color.
+// Floor + grid tones per preset (the concrete texture multiplies `floor`, so a
+// dark floor reads as dark concrete with faint joints). Keeps the 3D floor in
+// step with the dark-first chrome instead of a bright white slab.
+const FLOOR_TONES = {
+  brand:   { floor: 0x141b26, gridA: 0x2a3a52, gridB: 0x1c2636 },
+  natural: { floor: 0xeef1f5, gridA: 0xb0b8c0, gridB: 0xc8cfd6 },
+  evening: { floor: 0x241d2e, gridA: 0x46384f, gridB: 0x33293c },
+  night:   { floor: 0x0c1426, gridA: 0x24365a, gridB: 0x162540 },
+  mono:    { floor: 0xdfe4ea, gridA: 0xb0b8c0, gridB: 0xc8cfd6 },
+};
+
 const ROUTE_COLOR = { forklift: 0xff7a00, person: 0x00b8d4 };
 
 // Equipment type -> base color (placed/static equipment models).
@@ -120,7 +140,7 @@ export class Scene3D {
     this._staffGeom = null;
     this._rackMaterials = []; // rack mats (preset tweaks their emissiveIntensity)
     this._textures = []; // CanvasTextures to dispose
-    this._preset = 'natural';
+    this._preset = 'brand';
 
     const meta = this.replay.meta || {};
     const bounds = meta.bounds || { width: 20, depth: 20 };
@@ -146,11 +166,11 @@ export class Scene3D {
 
     // Scene + camera.
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xeef1f5);
+    this.scene.background = new THREE.Color(0x0f141d);
     // Gentle distance fog keeps the far edge of large floors soft. The actual
     // colors/exposure are set by applyPreset(); near/far distances are fixed.
     const fogStart = Math.max(this.bounds.width, this.bounds.depth) * 2.0;
-    this.scene.fog = new THREE.Fog(0xeef1f5, fogStart, fogStart * 2.5);
+    this.scene.fog = new THREE.Fog(0x121a26, fogStart, fogStart * 2.5);
 
     this.camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 5000);
     const cx = this.bounds.width / 2;
@@ -273,10 +293,12 @@ export class Scene3D {
   _buildFloor() {
     const { width, depth } = this.bounds;
     const geom = new THREE.BoxGeometry(width, 0.1, depth);
+    const tone = FLOOR_TONES[this._preset] || FLOOR_TONES.brand;
     const tex = this._makeFloorTexture(meta_grid(this.replay));
     const mat = new THREE.MeshStandardMaterial({
-      color: 0xeef1f5, roughness: 1.0, metalness: 0.0, map: tex,
+      color: tone.floor, roughness: 1.0, metalness: 0.0, map: tex,
     });
+    this._floorMat = mat;
     const floor = new THREE.Mesh(geom, mat);
     floor.position.set(width / 2, -0.05, depth / 2);
     floor.receiveShadow = true; // catches contact shadows of every object
@@ -286,7 +308,7 @@ export class Scene3D {
     // Subtle grid aligned to the floor; GridHelper is centered at origin.
     const grid = meta_grid(this.replay);
     const divisions = Math.max(1, Math.round(Math.max(width, depth) / grid));
-    const helper = new THREE.GridHelper(Math.max(width, depth), divisions, 0xb0b8c0, 0xc8cfd6);
+    const helper = new THREE.GridHelper(Math.max(width, depth), divisions, tone.gridA, tone.gridB);
     helper.position.set(width / 2, 0.011, depth / 2);
     this.scene.add(helper);
     if (helper.geometry) this._geometries.push(helper.geometry);
@@ -647,6 +669,11 @@ export class Scene3D {
       this.renderer.toneMappingExposure = p.exposure;
       // Lower-key presets get lighter contact shadows.
       this.renderer.shadowMap.needsUpdate = true;
+    }
+    // Floor concrete tone follows the preset (multiplies the baked texture).
+    if (this._floorMat && this._floorMat.color) {
+      const tone = FLOOR_TONES[this._preset] || FLOOR_TONES.brand;
+      this._floorMat.color.setHex(tone.floor);
     }
     // Rack emissive glow: subtle by day, strong at night.
     for (const m of this._rackMaterials) {
