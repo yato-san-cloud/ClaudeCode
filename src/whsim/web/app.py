@@ -555,6 +555,55 @@ def api_timetable_solve(payload: dict | None = None):
     return timetable.solve(scenario, processes, productivity)
 
 
+@app.get("/api/analysis/sample")
+def api_analysis_sample():
+    """Run the full data-analysis suite on the bundled demo WMS dataset.
+
+    Powers the データ分析 tab's「サンプルで試す」: no upload needed, returns the
+    whole bundle (KPIs, insights, trend, ABC, peak, turnover, forecast, …)."""
+    from whsim.analysis.report import sample_bundle
+    return sample_bundle()
+
+
+@app.post("/api/analysis/upload")
+async def api_analysis_upload(shipments: UploadFile, inbound: UploadFile | None = None,
+                              inventory: UploadFile | None = None):
+    """Analyse uploaded WMS files (出荷 required; 入荷/在庫 optional).
+
+    Columns are auto-mapped heuristically (data_io.initial_mapping); the standard
+    suite then runs and returns the same bundle shape as /api/analysis/sample."""
+    import pandas as pd
+
+    from whsim.analysis import report
+    from whsim.analysis.data_io import (
+        INBOUND_FIELDS,
+        INVENTORY_FIELDS,
+        SHIPMENT_FIELDS,
+        apply_mapping,
+        initial_mapping,
+        load_table,
+    )
+
+    async def load(uf, fields):
+        if uf is None:
+            return pd.DataFrame()
+        raw = await uf.read()
+        try:
+            df = load_table(raw, uf.filename)
+        except Exception as e:  # noqa: BLE001 — surface a friendly 400
+            raise HTTPException(400, f"読込に失敗しました（{uf.filename}）: {e}") from e
+        return apply_mapping(df, initial_mapping(df, fields), fields)
+
+    ship = await load(shipments, SHIPMENT_FIELDS)
+    if ship.empty:
+        raise HTTPException(400, "出荷データを読み込めませんでした。列名をご確認ください。")
+    inb = await load(inbound, INBOUND_FIELDS)
+    inv = await load(inventory, INVENTORY_FIELDS)
+    bundle = report.run_all(ship, inb, inv)
+    bundle["source"] = "upload"
+    return bundle
+
+
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB hard cap on any single upload
 
 
