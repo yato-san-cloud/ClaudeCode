@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from scripts.generate_sample_data import build_frames
-from src import analyses, charts, insights, sql_analyses
+from src import analyses, charts, insights, sql_analyses, theme
 from src.data_io import (
     INBOUND_FIELDS,
     INVENTORY_FIELDS,
@@ -35,28 +35,9 @@ INV_COLS = {
     "dead_stock": "デッドストック",
 }
 
-# ── スマホ向け CSS（狭い画面で columns / metric を縦並びに） ────────────────
-st.markdown(
-    """
-    <style>
-    @media (max-width: 720px) {
-      section[data-testid="stSidebar"] { min-width: 88vw !important; }
-      div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
-        flex: 1 1 100% !important;
-        min-width: 100% !important;
-      }
-      div[data-testid="stMetricValue"] { font-size: 1.4rem !important; }
-      div[data-testid="stMetricLabel"] { font-size: 0.85rem !important; }
-      h1 { font-size: 1.5rem !important; }
-      h2 { font-size: 1.2rem !important; }
-      div[data-baseweb="tab-list"] { gap: 0.25rem !important; }
-      button[data-baseweb="tab"] { padding: 0.4rem 0.6rem !important; font-size: 0.9rem !important; }
-      .block-container { padding: 1rem 0.5rem !important; }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# ── デザインシステム（テーマ CSS + 全チャート共通の Plotly テンプレ） ─────────
+theme.register_plotly_template()
+theme.inject_css()
 
 # ── セッション初期化 ───────────────────────────────────────────────────────
 ss = st.session_state
@@ -516,16 +497,10 @@ tab_sum, tab_trend, tab_abc, tab_peak, tab_inv, tab_fc, tab_pf, tab_cmp = st.tab
 
 
 def _insight_card(ins: insights.Insight) -> None:
-    """色付きカードを 1 枚描画。"""
-    color = {"critical": "#FFEBEE", "warning": "#FFF8E1", "info": "#E8F4FD"}[ins.severity]
-    border = {"critical": "#E53935", "warning": "#FB8C00", "info": "#1E88E5"}[ins.severity]
-    metric_html = f"<span style='float:right;font-weight:bold;color:{border}'>{ins.metric}</span>" if ins.metric else ""
-    sug_html = f"<div style='margin-top:4px;font-size:0.85rem'>💬 {ins.suggestion}</div>" if ins.suggestion else ""
+    """severity 付きインサイトカードを 1 枚描画（デザインシステム準拠）。"""
     st.markdown(
-        f"<div style='background:{color};border-left:4px solid {border};"
-        f"padding:8px 12px;margin-bottom:6px;border-radius:4px'>"
-        f"<div style='font-weight:bold'>{ins.icon} {ins.title}{metric_html}</div>"
-        f"<div style='font-size:0.85rem;color:#555'>{ins.detail}</div>{sug_html}</div>",
+        theme.insight_card_html(ins.icon, ins.title, ins.detail, ins.suggestion,
+                                ins.metric, ins.severity),
         unsafe_allow_html=True,
     )
 
