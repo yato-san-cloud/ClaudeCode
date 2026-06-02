@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+.pytest_cache/
+.streamlit/secrets.toml
+sample_data/
+# whsim runtime artifacts carried over via branch switch (not part of this tool)
+projects/
+examples/
+*.xlsx
+*.xls
+*.csv
+!tests/**/*.csv
+
+# generated design handoff archive (regenerable from design_handoff/)
+design_handoff.zip

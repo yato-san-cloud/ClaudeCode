@@ -1,0 +1,15 @@
+# 3PL 倉庫 物量分析ツール — テーマ「クリーン・ロジスティクス」
+# 白基調 + ディープブルー + アンバー差し色。データインク重視で、判断の速い
+# 業務ダッシュボードの見た目に寄せる。詳細トークン/コンポーネントは src/theme.py。
+[theme]
+primaryColor = "#1565C0"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F7FB"
+textColor = "#1F2A37"
+font = "sans serif"
+baseRadius = "0.6rem"
+borderColor = "#E3E8EF"
+
+[theme.sidebar]
+backgroundColor = "#F7F9FC"
+borderColor = "#E3E8EF"
