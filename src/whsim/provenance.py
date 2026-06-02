@@ -43,8 +43,13 @@ class Provenance:
         }
         if subtrees:
             for k, v in subtrees.items():
-                if k in self.subtrees:
+                if k not in self.subtrees:
+                    continue
+                try:
                     self.subtrees[k] = Source(v)
+                except ValueError:
+                    # Corrupt/unknown source string: stay provisional, never crash.
+                    self.subtrees[k] = Source.PROVISIONAL
 
     def mark(self, subtree: str, source: Source) -> None:
         if subtree in self.subtrees:

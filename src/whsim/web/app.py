@@ -31,6 +31,23 @@ MONTE_CARLO_REPS = 10
 app = FastAPI(title="whsim", version="0.1.0")
 
 
+def _safe_name(name: str) -> str:
+    """Validate a user-supplied identifier that becomes a filesystem path segment.
+
+    Project names (and run/compare ids) are used directly under ``projects/`` and
+    ``runs/`` (``base / name``), so an attacker-controlled ``..`` or path separator
+    would escape the workspace. Allow Unicode letters/digits (project names are
+    often Japanese) but reject anything that could traverse or escape: path
+    separators, NUL, and any name that is empty or made only of dots.
+    """
+    name = (name or "").strip()
+    if not name or set(name) <= {"."}:
+        raise HTTPException(400, "invalid name")
+    if "/" in name or "\\" in name or "\x00" in name or name in (".", ".."):
+        raise HTTPException(400, "invalid name")
+    return name
+
+
 def _set_by_path(model_dict: dict, path: str, value) -> str:
     """Set a dotted path like 'resources.workers.0.count'; return top subtree."""
     parts = path.split(".")
@@ -63,8 +80,12 @@ def api_cody_chat(payload: dict):
     intent against the existing endpoints. Honours "never blocks": any read that
     fails leaves ``has_run``/``kpis`` as their safe defaults (False / None).
     """
-    message = (payload.get("message") or "")
-    project = payload.get("project")
+    # Coerce defensively: the frontend always sends strings, but a stray number
+    # / object must not 500 the chat seam (cody.respond expects a str message).
+    raw_msg = payload.get("message")
+    message = raw_msg if isinstance(raw_msg, str) else ("" if raw_msg is None else str(raw_msg))
+    raw_proj = payload.get("project")
+    project = raw_proj if isinstance(raw_proj, str) else None
 
     has_run = False
     kpis = None
@@ -101,11 +122,13 @@ def api_projects():
 
 @app.post("/api/projects")
 def api_create(payload: dict):
-    name = (payload.get("name") or "").strip()
+    name = _safe_name(payload.get("name") or "")
     template = payload.get("template") or "ecommerce_small"
-    if not name:
-        raise HTTPException(400, "name required")
-    proj = Project.create(name, template)
+    try:
+        proj = Project.create(name, template)
+    except FileNotFoundError:
+        # Unknown template id: a clean 400, not a 500.
+        raise HTTPException(400, f"unknown template {template!r}")
     return {"name": name, "template": template, "root": str(proj.root)}
 
 
@@ -268,10 +291,19 @@ def api_headline(name: str, payload: dict):
     md = json.loads(proj.model_file.read_text("utf-8"))
     prov = proj.load_provenance()
     for path, value in payload.items():
-        subtree = _set_by_path(md, path, value)
+        try:
+            subtree = _set_by_path(md, path, value)
+        except (KeyError, IndexError, ValueError, TypeError) as e:
+            raise HTTPException(400, f"invalid field path {path!r}: {e}")
         prov.mark(subtree, Source.INTERVIEW)
+    from pydantic import ValidationError
+
     from whsim.schema.model import WarehouseModel
-    proj.save_model(WarehouseModel.model_validate(md))
+    try:
+        model = WarehouseModel.model_validate(md)
+    except ValidationError as e:
+        raise HTTPException(400, f"invalid value: {e.errors()[0].get('msg', 'validation error')}")
+    proj.save_model(model)
     proj.save_provenance(prov)
     return {"ok": True, "provenance_summary": prov.summary()}
 
@@ -360,6 +392,7 @@ def api_run_scenarios(name: str, payload: dict | None = None):
 @app.get("/api/projects/{name}/compare-png/{cmp}/{i}")
 def api_compare_png(name: str, cmp: str, i: int):
     proj = _open(name)
+    cmp = _safe_name(cmp)
     png = proj.runs_dir / cmp / f"s{i}.png"
     if not png.is_file():
         raise HTTPException(404, "no such comparison image")
@@ -605,6 +638,7 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
 
 
 def _open(name: str) -> Project:
+    name = _safe_name(name)
     try:
         return Project.open(name)
     except FileNotFoundError:

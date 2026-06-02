@@ -95,12 +95,35 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return out
 
 
-def _iter_json_files(zip_path: Path):
-    with zipfile.ZipFile(zip_path) as zf:
-        for name in zf.namelist():
-            if name.endswith("/") or not name.lower().endswith(".json"):
-                continue
-            yield name, zf.read(name)
+# Decoding fallbacks: UTF-8 first, then the encodings a Japanese customer's
+# export is most likely to use (Shift-JIS / CP932), before giving up.
+_DECODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp932", "shift_jis")
+
+
+def _decode(raw: bytes) -> str:
+    """Decode dropped bytes tolerantly. Tries UTF-8 (with/without BOM) then the
+    common Japanese codecs; raises UnicodeDecodeError only if all fail."""
+    last: UnicodeDecodeError | None = None
+    for enc in _DECODINGS:
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError as e:  # noqa: PERF203
+            last = e
+    assert last is not None
+    raise last
+
+
+def _read_zip_entries(zf: zipfile.ZipFile) -> list[tuple[str, bytes]]:
+    """Read every .json entry from an open ZipFile, skipping unreadable ones."""
+    out: list[tuple[str, bytes]] = []
+    for name in zf.namelist():
+        if name.endswith("/") or not name.lower().endswith(".json"):
+            continue
+        try:
+            out.append((name, zf.read(name)))
+        except Exception:  # noqa: BLE001 - a corrupt member must not be fatal
+            continue
+    return out
 
 
 def merge_into_template(
@@ -115,7 +138,7 @@ def merge_into_template(
     for name, raw in files:
         seen.append(name)
         try:
-            data = json.loads(raw.decode("utf-8"))
+            data = json.loads(_decode(raw))
         except (UnicodeDecodeError, json.JSONDecodeError) as e:
             warnings.append(f"{name}: skipped (invalid JSON: {e})")
             continue
@@ -141,7 +164,14 @@ def merge_into_template(
 
 
 def import_zip(template_dict: dict, zip_path: str | Path) -> ImportResult:
-    files = list(_iter_json_files(Path(zip_path)))
+    try:
+        with zipfile.ZipFile(Path(zip_path)) as zf:
+            files = _read_zip_entries(zf)
+    except zipfile.BadZipFile as e:
+        # A corrupt / non-ZIP file must not be fatal: keep the template as-is.
+        res = merge_into_template(template_dict, [])
+        res.warnings.append(f"ZIPを開けませんでした ({e}); テンプレートをそのまま使用します。")
+        return res
     if not files:
         res = merge_into_template(template_dict, [])
         res.warnings.append("ZIP contained no .json files; kept template as-is.")
@@ -150,10 +180,11 @@ def import_zip(template_dict: dict, zip_path: str | Path) -> ImportResult:
 
 
 def import_bytes(template_dict: dict, zip_bytes: bytes) -> ImportResult:
-    files = []
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for name in zf.namelist():
-            if name.endswith("/") or not name.lower().endswith(".json"):
-                continue
-            files.append((name, zf.read(name)))
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            files = _read_zip_entries(zf)
+    except zipfile.BadZipFile as e:
+        res = merge_into_template(template_dict, [])
+        res.warnings.append(f"ZIPを開けませんでした ({e}); テンプレートをそのまま使用します。")
+        return res
     return merge_into_template(template_dict, files)

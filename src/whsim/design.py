@@ -49,6 +49,13 @@ def materialize_racks(model: WarehouseModel) -> WarehouseModel:
     for z in storage_zones:
         slots.extend(_zone_slots(z))
 
+    # Degenerate rack params (e.g. margin larger than the zone) can yield zero
+    # slots. Regenerating would delete every existing location and orphan all
+    # item SKUs, breaking routing. The tolerant choice is to leave the model
+    # untouched so nothing is silently destroyed.
+    if not slots:
+        return model
+
     # Keep any locations that belong to non-racked storage (rare); drop racked ones.
     kept = [loc for loc in model.locations
             if loc.zone not in {z.id for z in storage_zones} and loc.zone != "storage"]

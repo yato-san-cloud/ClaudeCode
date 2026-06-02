@@ -305,7 +305,9 @@ def respond(message: str, context: dict | None = None) -> dict:
     dict; everything downstream (the API endpoint, the frontend) is unchanged.
     """
     context = context or {}
-    text = (message or "").strip()
+    # Be tolerant of a non-str message (the contract is str, but the LLM seam
+    # must never crash on a stray type): coerce, then strip.
+    text = (message if isinstance(message, str) else ("" if message is None else str(message))).strip()
     low = text.lower()
 
     if not text:

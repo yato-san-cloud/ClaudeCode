@@ -14,6 +14,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 from matplotlib.animation import FuncAnimation, PillowWriter  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
@@ -92,8 +93,12 @@ def render_gif(replay: dict, out_path: str | Path, seconds: float = 14.0,
             xs.append(x)
             ys.append(y)
             cs.append(STATE_COLOR.get(st, "#999"))
-        scat.set_offsets(list(zip(xs, ys)))
-        scat.set_color(cs)
+        # When there are no workers, pass an explicit (0, 2) array: matplotlib
+        # treats an empty list as 1-D and raises on set_offsets.
+        offsets = np.column_stack([xs, ys]) if xs else np.empty((0, 2))
+        scat.set_offsets(offsets)
+        if cs:
+            scat.set_color(cs)
         title.set_text(f"{replay['meta']['name']}   {t/60:4.1f}分   |  {verdict}")
         return scat, title
 

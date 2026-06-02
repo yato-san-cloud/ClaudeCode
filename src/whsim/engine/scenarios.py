@@ -26,7 +26,7 @@ def apply_scenario(base: WarehouseModel, scenario: Scenario) -> WarehouseModel:
     for path, value in scenario.edits.items():
         try:
             _set_by_path(md, path, value)
-        except (KeyError, IndexError, ValueError):
+        except (KeyError, IndexError, ValueError, TypeError):
             continue  # tolerant: skip edits that don't apply
     return WarehouseModel.model_validate(md)
 

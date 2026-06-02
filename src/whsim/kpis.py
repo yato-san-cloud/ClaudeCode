@@ -44,8 +44,9 @@ def _one(res: RunResult) -> dict:
     pack_util = packer_busy / max(res.n_packers * res.duration_s, 1e-9)
 
     # --- cost (robust to run duration: scale by fraction of a work-day) ------
+    # NOTE: reuse the guarded `hours` from above (max(..., 1e-9)); recomputing it
+    # unguarded here re-introduces a divide-by-zero for zero-duration runs.
     c = res.cost or {}
-    hours = res.duration_s / 3600.0
     shift = c.get("shift_hours_per_day", 8.0) or 8.0
     day_frac = max(hours / shift, 1e-9)          # work-days this run represents
     headcount = res.n_pickers + res.n_packers

@@ -51,7 +51,7 @@ class RackFill(BaseModel):
 
 
 class Zone(BaseModel):
-    id: str
+    id: str = "zone"
     type: ZoneType = "storage"
     x: float = 0.0
     y: float = 0.0
@@ -87,7 +87,7 @@ class Layout(BaseModel):
 
 
 class Location(BaseModel):
-    id: str
+    id: str = "loc"
     zone: str = "storage"
     x: float = 0.0
     y: float = 0.0
@@ -98,7 +98,7 @@ class Location(BaseModel):
 
 
 class Item(BaseModel):
-    sku: str
+    sku: str = ""
     name: str = ""
     abc_class: ABCClass = "C"
     pick_freq: float = 0.0  # relative pick frequency weight (demand share)
@@ -139,7 +139,7 @@ class Stage(BaseModel):
     """One step of the operation flow, shown in the editor's workflow strip and
     pinned to a zone on the floor plan (`zone`) so flow can be drawn spatially."""
 
-    id: str
+    id: str = "stage"
     label: str = ""
     method: StageMethod = "manual"          # legacy per-stage transport (kept)
     zone: str | None = None                 # geographic binding (zone id) for spatial flow
@@ -207,7 +207,7 @@ class WorkerGroup(BaseModel):
 
 
 class Equipment(BaseModel):
-    id: str
+    id: str = "equip"
     type: Literal["agv", "forklift", "asrs", "robot_arm", "crane"] = "agv"
     count: int = 0
     speed_mps: float = 1.6
@@ -219,7 +219,7 @@ class Equipment(BaseModel):
 
 
 class Conveyor(BaseModel):
-    id: str
+    id: str = "conveyor"
     points: list[list[float]] = Field(default_factory=list)  # [[x,y], ...]
     speed_mps: float = 0.5
 
@@ -240,12 +240,12 @@ class Resources(BaseModel):
 
 
 class OrderLine(BaseModel):
-    sku: str
+    sku: str = ""
     qty: int = 1
 
 
 class Order(BaseModel):
-    order_id: str
+    order_id: str = ""
     arrival_s: float = 0.0
     due_s: float | None = None
     lines: list[OrderLine] = Field(default_factory=list)
@@ -281,7 +281,7 @@ class Simulation(BaseModel):
 class Scenario(BaseModel):
     """A named what-if: dotted-path edits applied over the base model."""
 
-    name: str
+    name: str = ""
     description: str = ""
     edits: dict = Field(default_factory=dict)  # {"orders.profile.peak_factor": 3.0, ...}
 

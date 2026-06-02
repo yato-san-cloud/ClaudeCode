@@ -38,7 +38,11 @@ def estimate(model: WarehouseModel) -> dict:
             model.simulation.duration_s / 3600.0, 1e-9)
     else:
         lines_per = max(model.orders.profile.lines_per_order_mean, 1.0)
-        rate_per_hr = model.orders.profile.rate_per_hr
+        # The engine scales the profile arrival rate by peak_factor
+        # (engine.processes.order_source); the oracle must match it or it
+        # under-estimates load on peak scenarios.
+        rate_per_hr = (model.orders.profile.rate_per_hr
+                       * max(model.orders.profile.peak_factor, 0.0))
 
     ts_mean = statistics.fmean(it.ts_per_unit for it in model.items) if model.items else 1.5
     handling = lines_per * ts_mean * 1.0  # ~1 unit/line assumed for the estimate

@@ -9,7 +9,10 @@ workspace is what we keep, re-run and compare.
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,13 +23,49 @@ from whsim.schema.model import WarehouseModel
 
 PROJECTS_DIR = Path("projects")
 
+# Project names become directory names, so they must be a single safe path
+# segment: no separators, no parent refs, no leading dots / reserved chars.
+_UNSAFE = re.compile(r"[^0-9A-Za-z_.\-぀-ヿ一-鿿]+")
+
+
+def safe_name(name: str) -> str:
+    """Reduce an arbitrary user-supplied name to one safe path segment.
+
+    Collapses path separators and other unsafe characters to '_', strips
+    parent-directory traversal and leading dots so a name can never escape the
+    projects/ root. Raises ValueError only if nothing usable remains."""
+    base = Path(str(name)).name  # drop any directory components first
+    cleaned = _UNSAFE.sub("_", base).strip("._-")
+    if not cleaned or cleaned in {".", ".."}:
+        raise ValueError(f"invalid project name: {name!r}")
+    return cleaned
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _atomic_write(path: Path, text: str) -> None:
+    """Write text durably: temp file in the same dir, then atomic rename, so a
+    crash mid-write never leaves a half-written (corrupt) file behind."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=path.suffix)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
 def _write_json(path: Path, obj) -> None:
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write(path, json.dumps(obj, ensure_ascii=False, indent=2))
 
 
 class Project:
@@ -57,11 +96,12 @@ class Project:
     # --- lifecycle ------------------------------------------------------------
     @classmethod
     def create(cls, name: str, template_id: str, base: Path = PROJECTS_DIR) -> "Project":
+        slug = safe_name(name)
         model = templates.load_template_model(template_id)
         model.meta.name = name
-        model.meta.project_id = name
+        model.meta.project_id = slug
 
-        root = base / name
+        root = base / slug
         root.mkdir(parents=True, exist_ok=True)
         (root / "imported").mkdir(exist_ok=True)
         (root / "raw").mkdir(exist_ok=True)
@@ -82,7 +122,7 @@ class Project:
 
     @classmethod
     def open(cls, name: str, base: Path = PROJECTS_DIR) -> "Project":
-        root = base / name
+        root = base / safe_name(name)
         if not (root / "project.json").is_file():
             raise FileNotFoundError(f"no project named {name!r} under {base}")
         return cls(root)
@@ -92,9 +132,7 @@ class Project:
         return WarehouseModel.model_validate_json(self.model_file.read_text("utf-8"))
 
     def save_model(self, model: WarehouseModel) -> None:
-        self.model_file.write_text(
-            model.model_dump_json(indent=2), encoding="utf-8"
-        )
+        _atomic_write(self.model_file, model.model_dump_json(indent=2))
 
     def load_provenance(self) -> Provenance:
         return Provenance.from_dict(json.loads(self.provenance_file.read_text("utf-8")))
@@ -130,13 +168,31 @@ class Project:
         return result
 
     # --- runs -----------------------------------------------------------------
+    @staticmethod
+    def _run_index(p: Path) -> int | None:
+        m = re.fullmatch(r"run_(\d+)", p.name)
+        return int(m.group(1)) if m else None
+
+    def _run_dirs(self) -> list[tuple[int, Path]]:
+        out = []
+        for p in self.runs_dir.glob("run_*"):
+            if p.is_dir():
+                idx = self._run_index(p)
+                if idx is not None:
+                    out.append((idx, p))
+        out.sort()
+        return out
+
     def new_run_dir(self) -> Path:
-        self.runs_dir.mkdir(exist_ok=True)
-        n = 1 + sum(1 for p in self.runs_dir.glob("run_*") if p.is_dir())
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
+        existing = self._run_dirs()
+        # Derive the next index from the highest existing one, so deleting an
+        # intermediate run can never reuse / collide with a live directory.
+        n = (existing[-1][0] + 1) if existing else 1
         d = self.runs_dir / f"run_{n:04d}"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def latest_run_dir(self) -> Path | None:
-        runs = sorted(p for p in self.runs_dir.glob("run_*") if p.is_dir())
-        return runs[-1] if runs else None
+        runs = self._run_dirs()
+        return runs[-1][1] if runs else None
