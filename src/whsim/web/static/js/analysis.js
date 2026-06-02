@@ -115,6 +115,26 @@ function buildCallout(ins) {
     action.appendChild(el('span', null, ins.action));
     main.appendChild(action);
   }
+  // Actionable insight: "適用して再実行" closes the loop via a shared event that
+  // app.js listens for (applies the edit, then re-runs the simulation).
+  if (ins.edit && typeof ins.edit === 'object' && typeof ins.edit.path === 'string') {
+    const edit = ins.edit;
+    const btn = el('button', { class: 'c-apply', type: 'button' });
+    const label = (typeof edit.label === 'string' && edit.label.trim())
+      ? edit.label.trim() : '適用して再実行';
+    btn.setAttribute('aria-label', label);
+    btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
+      + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+      + 'stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>'
+      + '<path d="M3 3v5h5"/></svg>';
+    btn.appendChild(el('span', null, '適用して再実行'));
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      const edits = {}; edits[edit.path] = edit.value;
+      document.dispatchEvent(new CustomEvent('whsim:apply-run', { detail: { edits } }));
+    });
+    main.appendChild(btn);
+  }
   card.appendChild(main);
 
   if (ins.metric != null && ins.metric !== '') {

@@ -71,6 +71,53 @@ const GREETING_SUB = 'やりたいことを話すだけ。Codyが倉庫を作っ
 // History turns sent to the endpoint (sliding window).
 const HISTORY_TURNS = 8;
 
+// ---- per-project chat persistence (localStorage) ---------------------------
+// Keyed by project name; the pre-project conversation lives in a 'home' bucket.
+// We cap stored turns and never persist large payloads (only role + short text).
+const STORE_PREFIX = 'whsim-chat:';
+const MAX_STORED_TURNS = 50;
+const MAX_TEXT_LEN = 2000;
+
+function bucketKey(project) {
+  const name = (typeof project === 'string' && project.trim()) ? project.trim() : 'home';
+  return STORE_PREFIX + name;
+}
+function loadHistory(project) {
+  try {
+    const raw = localStorage.getItem(bucketKey(project));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((h) => h && (h.role === 'user' || h.role === 'cody') && typeof h.text === 'string')
+      .slice(-MAX_STORED_TURNS)
+      .map((h) => ({ role: h.role, text: h.text }));
+  } catch (_e) {
+    return [];
+  }
+}
+function saveHistory(project, history) {
+  try {
+    const trimmed = history
+      .filter((h) => h && typeof h.text === 'string' && h.text.length <= MAX_TEXT_LEN
+        && (h.role === 'user' || h.role === 'cody'))
+      .slice(-MAX_STORED_TURNS)
+      .map((h) => ({ role: h.role, text: h.text }));
+    localStorage.setItem(bucketKey(project), JSON.stringify(trimmed));
+  } catch (_e) { /* quota / disabled — non-fatal */ }
+}
+function dropHistory(project) {
+  try { localStorage.removeItem(bucketKey(project)); } catch (_e) { /* ignore */ }
+}
+function moveHistory(fromProject, toProject) {
+  try {
+    const raw = localStorage.getItem(bucketKey(fromProject));
+    if (raw == null) return;
+    localStorage.setItem(bucketKey(toProject), raw);
+    localStorage.removeItem(bucketKey(fromProject));
+  } catch (_e) { /* ignore */ }
+}
+
 // ---- main mount -------------------------------------------------------------
 
 export function mountChat(targetEl, opts = {}) {
@@ -84,6 +131,7 @@ export function mountChat(targetEl, opts = {}) {
 
   // ---- state ----
   const history = []; // [{ role:'user'|'cody', text }]
+  let activeBucket = null; // project name whose thread is currently displayed
   let started = false; // false => empty state; true => thread layout
   let busy = false; // awaiting endpoint / running an action
   let destroyed = false;
@@ -113,6 +161,17 @@ export function mountChat(targetEl, opts = {}) {
   empty.appendChild(hero);
   empty.appendChild(heroTitle);
   empty.appendChild(heroSub);
+
+  // Thread toolbar (clear-conversation affordance). Hidden in the empty state.
+  const toolbar = document.createElement('div');
+  toolbar.className = 'chat-toolbar';
+  toolbar.hidden = true;
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'chat-clear';
+  clearBtn.textContent = '🗑 会話をクリア';
+  clearBtn.setAttribute('aria-label', 'この会話をクリア');
+  toolbar.appendChild(clearBtn);
 
   // Thread (scroll area). Hidden until the first message.
   const thread = document.createElement('div');
@@ -150,9 +209,15 @@ export function mountChat(targetEl, opts = {}) {
   empty.appendChild(suggests);
 
   root.appendChild(empty);
+  root.appendChild(toolbar);
   root.appendChild(thread);
 
   target.appendChild(root);
+
+  clearBtn.addEventListener('click', () => {
+    if (busy) return;
+    clearConversation();
+  });
 
   // ---- helpers bound to this instance ----
 
@@ -196,6 +261,11 @@ export function mountChat(targetEl, opts = {}) {
     });
   }
 
+  // Persist the current thread under the currently-active project bucket.
+  function persist() {
+    saveHistory(activeBucket, history);
+  }
+
   // Switch from the centered empty state to the thread layout. The composer
   // and suggests move out of `empty` and become persistent root children.
   function ensureStarted() {
@@ -203,9 +273,50 @@ export function mountChat(targetEl, opts = {}) {
     started = true;
     empty.hidden = true;
     thread.hidden = false;
+    toolbar.hidden = false;
     // Relocate composer + suggests to the bottom of root (after thread).
     root.appendChild(suggests);
     root.appendChild(composer);
+  }
+
+  // Append a stored turn to the thread WITHOUT pushing to history again
+  // (used when restoring a saved conversation).
+  function renderStoredTurn(turn) {
+    if (!turn || typeof turn.text !== 'string') return;
+    if (turn.role === 'user') appendUser(turn.text);
+    else appendCody(turn.text, 'idle');
+  }
+
+  // Load and display the saved conversation for a project (null/'' => home).
+  function loadFor(project) {
+    if (busy) return;
+    const next = (typeof project === 'string' && project.trim()) ? project.trim() : null;
+    activeBucket = next;
+    // Reset the visible thread + in-memory history.
+    history.length = 0;
+    pendingCreate = null;
+    hideTyping();
+    thread.textContent = '';
+    started = false;
+    thread.hidden = true;
+    toolbar.hidden = true;
+    empty.hidden = false;
+    empty.appendChild(composer);
+    empty.appendChild(suggests);
+    const saved = loadHistory(next);
+    if (saved.length) {
+      saved.forEach((turn) => {
+        history.push({ role: turn.role, text: turn.text });
+        renderStoredTurn(turn);
+      });
+    }
+    renderSuggests(DEFAULT_SUGGESTS);
+  }
+
+  // Clear the active conversation (thread + storage), back to empty state.
+  function clearConversation() {
+    dropHistory(activeBucket);
+    reset();
   }
 
   // ---- message rendering ----
@@ -269,6 +380,46 @@ export function mountChat(targetEl, opts = {}) {
     thread.appendChild(card);
     scrollToBottom();
     return card;
+  }
+
+  // An "apply & re-run" action chip below a Cody suggestion. Dispatches the
+  // shared whsim:apply-run event that app.js listens for (closes the loop).
+  function appendApplyChip(edit) {
+    if (!edit || typeof edit !== 'object' || typeof edit.path !== 'string') return;
+    ensureStarted();
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-apply';
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chat-suggest chat-apply-chip';
+    const label = (typeof edit.label === 'string' && edit.label.trim())
+      ? edit.label.trim() : 'その案で再実行';
+    chip.textContent = '✨ ' + label;
+    chip.setAttribute('aria-label', label + ' を適用して再実行');
+    chip.addEventListener('click', () => {
+      if (busy) return;
+      chip.disabled = true;
+      const edits = {}; edits[edit.path] = edit.value;
+      document.dispatchEvent(new CustomEvent('whsim:apply-run', { detail: { edits } }));
+      appendCard('反映して再実行中…', ['結果が出たら分析タブで見比べてね。'], 'ok');
+    });
+    wrap.appendChild(chip);
+    thread.appendChild(wrap);
+    scrollToBottom();
+    return wrap;
+  }
+
+  // Pull the first actionable edit out of an analysis payload, if any.
+  function firstEdit(a) {
+    if (!a || typeof a !== 'object') return null;
+    const ins = Array.isArray(a.insights) ? a.insights : [];
+    for (const it of ins) {
+      if (it && it.edit && typeof it.edit === 'object'
+          && typeof it.edit.path === 'string') {
+        return it.edit;
+      }
+    }
+    return null;
   }
 
   // Animated typing indicator (three dots). Returns the element so callers
@@ -335,6 +486,9 @@ export function mountChat(targetEl, opts = {}) {
     busy = !!on;
     input.disabled = busy;
     send.disabled = busy;
+    clearBtn.disabled = busy;
+    // Each settled turn is a good moment to persist the (capped) thread.
+    if (!busy) persist();
   }
 
   // ---- endpoint + intent execution ----
@@ -467,6 +621,13 @@ export function mountChat(targetEl, opts = {}) {
     if (isEstimate) {
       return 'これはざっくりした見立てだよ。詳しく見るなら「結果を見せて」と言ってね。';
     }
+    // If the analysis surfaces a concrete fix, offer a one-tap apply & re-run.
+    if (typeof actions.getAnalysis === 'function') {
+      try {
+        const edit = firstEdit(await actions.getAnalysis());
+        if (edit) appendApplyChip(edit);
+      } catch (_e) { /* non-fatal */ }
+    }
     return can === false
       ? 'いまの構成だと需要に追いつかないかも。AGVを入れたり人を増やして比べてみよう。'
       : '結果は問題なさそう。「比べて」で改善案も見られるよ。';
@@ -480,15 +641,18 @@ export function mountChat(targetEl, opts = {}) {
 
     if (view === 'analysis') {
       let insight = null;
+      let edit = null;
       if (typeof actions.getAnalysis === 'function') {
         try {
           const a = await actions.getAnalysis();
           insight = topInsight(a);
+          edit = firstEdit(a);
         } catch (_e) {
           insight = null;
         }
       }
       appendCard('分析を開いたよ', insight ? [insight] : ['分析タブを見てね。'], 'ok');
+      if (edit) appendApplyChip(edit);
       callMood('success');
       return null;
     }
@@ -700,6 +864,7 @@ export function mountChat(targetEl, opts = {}) {
     thread.textContent = '';
     started = false;
     thread.hidden = true;
+    toolbar.hidden = true;
     empty.hidden = false;
     // Move composer + suggests back into the empty-state block.
     empty.appendChild(composer);
@@ -714,6 +879,7 @@ export function mountChat(targetEl, opts = {}) {
     const mood = opts2 && opts2.mood ? opts2.mood : 'idle';
     appendCody(text, mood);
     history.push({ role: 'cody', text: typeof text === 'string' ? text : '' });
+    persist();
   }
 
   function destroy() {
@@ -731,10 +897,20 @@ export function mountChat(targetEl, opts = {}) {
     reset,
     addCody,
     destroy,
+    // Switch the displayed thread to a project's saved conversation.
+    loadFor,
+    // Storage maintenance hooks invoked by the project-management menu.
+    clearBucket: (project) => {
+      dropHistory(project);
+      const target2 = (typeof project === 'string' && project.trim()) ? project.trim() : null;
+      if (activeBucket === target2) reset();
+    },
+    renameBucket: (fromProject, toProject) => moveHistory(fromProject, toProject),
   };
 
   // ---- init ----
-  renderSuggests(DEFAULT_SUGGESTS);
+  // Restore the saved conversation for the current project (or the home bucket).
+  loadFor(currentProject());
   autoGrow();
 
   return controller;

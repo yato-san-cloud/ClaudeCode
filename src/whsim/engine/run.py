@@ -31,6 +31,7 @@ class RunResult:
     consolidation: str = "pick"
     pick_method: str = "manual"
     workers: list[Worker] = field(default_factory=list)
+    helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay)
     agvs: list[Worker] = field(default_factory=list)
     forklifts: list[Worker] = field(default_factory=list)
     replay_window_s: float = 0.0
@@ -75,7 +76,7 @@ def run_once(
         n_agvs=world.n_agvs,
         n_put_wall=(world.put_wall.capacity if world.consolidation == "sort" else 0),
         consolidation=world.consolidation, pick_method=world.pick_method,
-        workers=world.workers, agvs=agvs, forklifts=forklifts,
+        workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
         replay_window_s=window, cost=_cost_inputs(model),
     )
 

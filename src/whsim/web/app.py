@@ -10,9 +10,11 @@ touching simulation vocabulary.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -138,6 +140,70 @@ def api_create(payload: dict):
     return {"name": name, "template": template, "root": str(proj.root)}
 
 
+def _project_dir(name: str) -> Path:
+    """Resolve a validated project name to its directory under PROJECTS_DIR.
+
+    Read PROJECTS_DIR lazily on each call so tests that monkeypatch it (into a
+    tmp dir) are honoured. The name is validated with ``_safe_name`` first, so
+    no separator / traversal can escape the workspace."""
+    from whsim.project import PROJECTS_DIR
+    return PROJECTS_DIR / _safe_name(name)
+
+
+@app.delete("/api/projects/{name}")
+def api_delete(name: str):
+    """Delete a project workspace and all its artifacts."""
+    d = _project_dir(name)
+    if not (d / "project.json").is_file():
+        raise HTTPException(404, f"no project {name!r}")
+    shutil.rmtree(d, ignore_errors=False)
+    return {"ok": True}
+
+
+@app.post("/api/projects/{name}/rename")
+def api_rename(name: str, payload: dict):
+    """Rename a project directory (src -> to). 404 if src missing, 400 if dest
+    exists or the target name is invalid."""
+    src = _project_dir(name)
+    if not (src / "project.json").is_file():
+        raise HTTPException(404, f"no project {name!r}")
+    to = _safe_name(payload.get("to") or "")
+    dst = _project_dir(to)
+    if dst.exists():
+        raise HTTPException(400, f"project {to!r} already exists")
+    shutil.move(str(src), str(dst))
+    # Keep the stored display name in sync so listings/proposals match.
+    try:
+        meta = json.loads((dst / "project.json").read_text("utf-8"))
+        meta["name"] = to
+        (dst / "project.json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+    except Exception:  # noqa: BLE001 — never block on metadata bookkeeping
+        pass
+    return {"ok": True, "name": to}
+
+
+@app.post("/api/projects/{name}/duplicate")
+def api_duplicate(name: str, payload: dict):
+    """Copy a project to a new name. 404 if src missing, 400 if dest exists."""
+    src = _project_dir(name)
+    if not (src / "project.json").is_file():
+        raise HTTPException(404, f"no project {name!r}")
+    to = _safe_name(payload.get("to") or "")
+    dst = _project_dir(to)
+    if dst.exists():
+        raise HTTPException(400, f"project {to!r} already exists")
+    shutil.copytree(src, dst)
+    try:
+        meta = json.loads((dst / "project.json").read_text("utf-8"))
+        meta["name"] = to
+        (dst / "project.json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "name": to}
+
+
 @app.get("/api/projects/{name}/model")
 def api_model(name: str):
     proj = _open(name)
@@ -183,6 +249,60 @@ def api_design(name: str, payload: dict):
     proj.save_provenance(prov)
     return {"ok": True, "provenance_summary": prov.summary(),
             "locations": len(model.locations)}
+
+
+@app.post("/api/projects/{name}/apply")
+def api_apply(name: str, payload: dict):
+    """Apply a batch of structured dotted-path edits, then re-validate & save.
+
+    Backend for the frontend's "適用して再実行": each edit in ``edits`` is applied
+    to the model dict via ``_set_by_path`` tolerantly (a bad path is skipped and
+    collected, never fatal — honours "never blocks"). Touched top-level subtrees
+    are marked INTERVIEW; if a layout/locations/storage path was touched, racks
+    are re-materialised so routing/KPIs reflect the change. The frontend calls
+    this and then the existing /run."""
+    from whsim.design import materialize_racks
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    edits = payload.get("edits")
+    if not isinstance(edits, dict):
+        raise HTTPException(400, "edits は {path: value} のオブジェクトで指定してください。")
+
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    applied: list[str] = []
+    skipped: list[str] = []
+    touched_subtrees: set[str] = set()
+    for path, value in edits.items():
+        try:
+            subtree = _set_by_path(md, str(path), value)
+        except (KeyError, IndexError, ValueError, TypeError):
+            skipped.append(str(path))
+            continue
+        applied.append(str(path))
+        touched_subtrees.add(subtree)
+
+    # Re-validate the whole document; a value that violates the schema rolls the
+    # whole apply back (the on-disk model is untouched until validation passes).
+    from pydantic import ValidationError
+    try:
+        model = WarehouseModel.model_validate(md)
+    except ValidationError as e:
+        raise HTTPException(400, f"invalid value: {e.errors()[0].get('msg', 'validation error')}")
+
+    # Re-materialise racks when the layout / locations / storage intent changed.
+    if any(p.split(".")[0] in ("layout", "locations") or "storage" in p
+           for p in applied):
+        materialize_racks(model)
+
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    for sub in touched_subtrees:
+        prov.mark(sub, Source.INTERVIEW)
+        if sub == "layout":
+            prov.mark("locations", Source.INTERVIEW)
+    proj.save_provenance(prov)
+    return {"ok": True, "applied": applied, "skipped": skipped,
+            "provenance_summary": prov.summary()}
 
 
 @app.post("/api/workmethod/name")
@@ -353,9 +473,12 @@ async def api_import(name: str, file: UploadFile):
     }
 
 
-@app.post("/api/projects/{name}/run")
-def api_run(name: str):
-    proj = _open(name)
+def _run_blocking(proj: Project) -> dict:
+    """The CPU-bound heart of a run (SimPy + KPIs + render + disk writes).
+
+    Pulled out so the endpoint can hand it to a worker thread via
+    ``run_in_threadpool``: the heavyweight discrete-event simulation must never
+    execute on the event loop, or the whole server stalls for its duration."""
     model = proj.load_model()
     # Monte-Carlo: many stochastic order sequences; rep 0 carries the replay.
     results, heat = run_replications(model, reps=MONTE_CARLO_REPS)
@@ -376,17 +499,25 @@ def api_run(name: str):
     return {"kpis": metrics, "estimate": est, "run": run_dir.name}
 
 
-@app.post("/api/projects/{name}/run-scenarios")
-def api_run_scenarios(name: str, payload: dict | None = None):
-    """Run several what-ifs over the current model and return a comparison."""
+@app.post("/api/projects/{name}/run")
+async def api_run(name: str):
+    proj = _open(name)
+    # Offload the blocking SimPy run to a worker thread so concurrent requests
+    # (e.g. /api/templates) stay responsive while a run is in flight.
+    return await run_in_threadpool(_run_blocking, proj)
+
+
+def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
+    """CPU-bound what-if comparison: runs every scenario through SimPy + render.
+
+    Run in a worker thread (see ``api_run_scenarios``) so a multi-scenario
+    comparison never blocks the event loop."""
     from whsim.engine.scenarios import (
-        default_scenarios, payback_months, run_scenario,
+        apply_scenario, default_scenarios, payback_months, run_scenario,
     )
     from whsim.schema.model import Scenario
-    proj = _open(name)
     base = proj.load_model()
 
-    payload = payload or {}
     raw = payload.get("scenarios")
     scenarios = ([Scenario.model_validate(s) for s in raw] if raw
                  else default_scenarios(base))
@@ -396,7 +527,6 @@ def api_run_scenarios(name: str, payload: dict | None = None):
     cmp_dir.mkdir(parents=True, exist_ok=True)
     prov = proj.load_provenance().summary()
 
-    from whsim.engine.scenarios import apply_scenario
     results = []
     for i, sc in enumerate(scenarios):
         res, metrics = run_scenario(base, sc, reps=6)
@@ -412,6 +542,14 @@ def api_run_scenarios(name: str, payload: dict | None = None):
         pb = payback_months(baseline["kpis"], alt["kpis"])
         alt["kpis"]["payback_months"] = pb
     return {"compare_id": cmp_id, "baseline": baseline, "alternatives": alternatives}
+
+
+@app.post("/api/projects/{name}/run-scenarios")
+async def api_run_scenarios(name: str, payload: dict | None = None):
+    """Run several what-ifs over the current model and return a comparison."""
+    proj = _open(name)
+    # Offload the (heavier still) multi-scenario sweep to a worker thread.
+    return await run_in_threadpool(_run_scenarios_blocking, name, proj, payload or {})
 
 
 @app.get("/api/projects/{name}/compare-png/{cmp}/{i}")
@@ -484,6 +622,32 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
         v = metrics.get(key, default)
         return v if isinstance(v, (int, float)) else default
 
+    md = model.model_dump()
+
+    def _worker_edit(role: str, label_fmt: str) -> dict | None:
+        """Build an {path,value,label} edit that bumps a worker group's count by
+        one, reading the real schema index from the model dump. Returns None if
+        no such worker group exists (so we never emit an invalid path)."""
+        groups = md.get("resources", {}).get("workers", []) or []
+        for i, w in enumerate(groups):
+            if w.get("role") == role:
+                cnt = int(w.get("count", 0))
+                return {"path": f"resources.workers.{i}.count", "value": cnt + 1,
+                        "label": label_fmt.format(n=cnt + 1)}
+        return None
+
+    def _agv_edit() -> dict | None:
+        """Enable / raise the AGV fleet count by one. Targets the first AGV-type
+        equipment entry if present; otherwise None (no equipment list to edit)."""
+        equip = md.get("resources", {}).get("equipment", []) or []
+        for i, e in enumerate(equip):
+            if e.get("type") == "agv":
+                cnt = int(e.get("count", 0))
+                verb = "を1台追加" if cnt > 0 else "を1台導入"
+                return {"path": f"resources.equipment.{i}.count", "value": cnt + 1,
+                        "label": f"AGV{verb}"}
+        return None
+
     cur = metrics.get("currency", "¥")
     pickers = int(g("n_pickers", 0))
     packers = int(g("n_packers", 0))
@@ -506,25 +670,43 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
         add_stage = {"梱包": "梱包台を1台増設", "ピッキング": "ピッカーを1名増員",
                      "AGV搬送": "AGVを1台追加", "種まき仕分け": "仕分け間口を増設"}
         action = f"{add_stage.get(bottleneck_jp, '当該工程の能力を増強')}で改善を検討。"
+        # Compute a concrete one-click remedy from the live model. Map the raw
+        # bottleneck stage to a count-bump on the corresponding resource; only
+        # attach when a valid path+value can be derived (else omit `edit`).
+        bn_raw = metrics.get("bottleneck")
+        if bn_raw == "packing":
+            remedy = _worker_edit("packer", "梱包担当を{n}名に増員")
+        elif bn_raw == "picking":
+            remedy = _worker_edit("picker", "ピッカーを{n}名に増員")
+        elif bn_raw == "agv":
+            remedy = _agv_edit()
+        else:
+            remedy = None
         if not can_handle:
             wtxt = f"（待ち {wait_min:.1f}分）" if wait_min is not None else ""
-            insights.append({
+            ins = {
                 "severity": "danger", "icon": "alert",
                 "title": f"{bottleneck_jp}がボトルネック{wtxt}",
                 "fact": f"稼働率 <span class=\"num\">{round(bn_util * 100)}</span>% / "
                         f"出荷完了 <span class=\"num\">{round(completion * 100)}</span>%。",
                 "metric": f"{round(bn_util * 100)}%",
                 "action": action,
-            })
+            }
+            if remedy:
+                ins["edit"] = remedy
+            insights.append(ins)
         elif bn_util >= 0.85:
-            insights.append({
+            ins = {
                 "severity": "warn", "icon": "trend",
                 "title": f"{bottleneck_jp}の稼働率が高水準",
                 "fact": f"稼働率 <span class=\"num\">{round(bn_util * 100)}</span>%。"
                         f"需要増で逼迫の恐れ。",
                 "metric": f"{round(bn_util * 100)}%",
                 "action": f"繁忙時間帯の{bottleneck_jp}増強余地を確認。",
-            })
+            }
+            if remedy:
+                ins["edit"] = remedy
+            insights.append(ins)
         else:
             insights.append({
                 "severity": "ok", "icon": "check",
@@ -547,12 +729,18 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
     n_agvs = int(g("n_agvs", 0))
     if n_agvs:
         agv_u = g("agv_utilization", 0.0)
-        insights.append({
+        ins = {
             "severity": "info", "icon": "info",
             "title": f"AGV {n_agvs}台の稼働率は {round(agv_u * 100)}%",
             "fact": "低稼働なら台数の見直し、高稼働なら増車の検討材料。",
             "metric": f"{round(agv_u * 100)}%",
-        })
+        }
+        # When the fleet is running hot, offer a one-click "add an AGV".
+        if agv_u >= 0.85:
+            remedy = _agv_edit()
+            if remedy:
+                ins["edit"] = remedy
+        insights.append(ins)
 
     # 4) Cost-per-order (info) when costed.
     if cost_per_order > 0:

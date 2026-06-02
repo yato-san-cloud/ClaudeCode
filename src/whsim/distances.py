@@ -407,14 +407,26 @@ def import_distance_matrix_bytes(data: bytes, filename: str = "") -> dict:
         try:
             obj = json.loads(text)
         except json.JSONDecodeError as exc:
-            # If extension lied, fall back to CSV before giving up.
-            if ext != ".json":
-                return _parse_csv(text, warnings)
-            raise ValueError(f"JSONの解析に失敗しました: {exc}") from exc
+            # Malformed JSON must not block: try a CSV reading of the same text,
+            # and if that also yields nothing usable, return an empty (valid)
+            # result with a warning rather than raising. "Never reject data."
+            warnings.append(f"JSONとして解析できませんでした（{exc}）。別形式として再解釈します。")
+            try:
+                res = _parse_csv(text, warnings)
+            except ValueError:
+                res = _build_result({}, warnings, False)
+            if res["count"] == 0:
+                warnings.append("有効な距離データが見つかりませんでした。")
+            return res
         return _parse_json(obj, warnings)
 
-    # CSV / matrix path.
-    return _parse_csv(text, warnings)
+    # CSV / matrix path. A totally empty/garbage CSV yields zero pairs with a
+    # warning rather than an exception.
+    try:
+        return _parse_csv(text, warnings)
+    except ValueError as exc:
+        warnings.append(f"距離データを解析できませんでした（{exc}）。")
+        return _build_result({}, warnings, False)
 
 
 def import_distance_matrix(path) -> dict:

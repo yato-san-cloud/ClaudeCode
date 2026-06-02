@@ -18,6 +18,34 @@ const api = async (url, opts) => {
   return r.json();
 };
 
+// ---- toast notifications (small, accessible, Japanese) ---------------------
+function toast(message, kind = 'info', ms = 4200) {
+  const host = $('toastHost');
+  if (!host) return;
+  const t = document.createElement('div');
+  t.className = 'toast ' + (kind === 'error' ? 'error' : kind === 'ok' ? 'ok' : 'info');
+  t.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  const body = document.createElement('span');
+  body.className = 'toast-msg';
+  body.textContent = String(message == null ? '' : message);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'toast-close';
+  close.setAttribute('aria-label', '閉じる');
+  close.textContent = '×';
+  const dismiss = () => {
+    if (!t.parentNode) return;
+    t.classList.add('leaving');
+    setTimeout(() => t.remove(), 200);
+  };
+  close.onclick = dismiss;
+  t.appendChild(body);
+  t.appendChild(close);
+  host.appendChild(t);
+  if (ms > 0) setTimeout(dismiss, ms);
+  return t;
+}
+
 const STATE_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
                       pick: '#33a02c', pack: '#e31a1c' };
 const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
@@ -171,9 +199,19 @@ async function loadTemplates() {
 }
 async function refreshProjects(select) {
   const ps = await api('/api/projects');
-  $('projectSelect').innerHTML = '<option value="">（新規作成）</option>' +
-    ps.map(p => `<option value="${p}">${p}</option>`).join('');
-  if (select) $('projectSelect').value = select;
+  const sel = $('projectSelect');
+  sel.innerHTML = '<option value="">（新規作成）</option>';
+  ps.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p; opt.textContent = p;
+    sel.appendChild(opt);
+  });
+  if (select) sel.value = select;
+  updateProjMenuState();
+}
+function updateProjMenuState() {
+  const btn = $('projMenuBtn');
+  if (btn) btn.disabled = !S.project;
 }
 // Core create flow, shared by the sidebar button and the Cody chat.
 async function doCreate(name, template) {
@@ -191,7 +229,12 @@ async function openProject(name) {
   $('provenance').textContent = m.provenance_summary;
   $('runBtn').disabled = false;
   $('status').textContent = `プロジェクト「${name}」を開きました。設計を調整して実行できます。`;
+  updateProjMenuState();
+  // Reset replay/analysis state and restore this project's chat thread.
+  S.replay = null;
+  if (S.chat && S.chat.loadFor) S.chat.loadFor(name);
   if (S.view === 'design') mountDesigner();
+  if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
 }
 
 async function mountDesigner() {
@@ -270,6 +313,7 @@ async function applyHeadline() {
   });
   $('provenance').textContent = r.provenance_summary;
   $('status').textContent = 'キー項目を反映しました。';
+  toast('キー項目を反映しました。', 'ok');
 }
 // Core run flow, shared by the sidebar button and the Cody chat. Throws on
 // failure (callers decide how to surface it); returns the run payload.
@@ -291,7 +335,7 @@ async function doRun() {
 }
 async function runSim() {
   if (!S.project) return;
-  $('runBtn').disabled = true;
+  setBtnBusy($('runBtn'), true, '実行中…');
   $('status').textContent = '重厚なシミュレーションを実行中…';
   cody('thinking', 'シミュレーション中…動きを最後まで追ってるよ。');
   try {
@@ -300,9 +344,10 @@ async function runSim() {
     cody('success', '完了！「分析」タブに指摘と次の一手をまとめたよ。');
   } catch (e) {
     $('status').textContent = 'エラー: ' + e.message;
+    toast('シミュレーションに失敗しました: ' + e.message, 'error');
     cody('error', 'エラー: ' + e.message + ' — 落ち着いて直そう。');
   } finally {
-    $('runBtn').disabled = false;
+    setBtnBusy($('runBtn'), false);
   }
 }
 async function loadReplay() {
@@ -347,6 +392,7 @@ async function doRunScenarios() {
   try {
     const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
     if (S.compare) S.compare.dispose();
+    $('compareView').innerHTML = '';  // clear any skeleton placeholder
     S.compare = new CompareView($('compareView'), data);
     return data;
   } finally {
@@ -354,16 +400,21 @@ async function doRunScenarios() {
   }
 }
 async function runScenarios() {
-  if (!S.project) return;
-  $('runScenariosBtn').disabled = true;
+  if (!S.project) { toast('先にプロジェクトを作ってください。', 'error'); return; }
+  setBtnBusy($('runScenariosBtn'), true, '比較中…');
   $('compareStatus').textContent = '3シナリオを重厚シミュレーション中…';
+  if (S.compare && S.compare.dispose) S.compare.dispose();
+  $('compareView').innerHTML = '<div class="skeleton-block" aria-hidden="true"></div>'
+    + '<div class="skeleton-block" aria-hidden="true"></div>';
   try {
     await doRunScenarios();
     $('compareStatus').textContent = '完了。';
   } catch (e) {
     $('compareStatus').textContent = 'エラー: ' + e.message;
+    $('compareView').innerHTML = '';
+    toast('シナリオ比較に失敗しました: ' + e.message, 'error');
   } finally {
-    $('runScenariosBtn').disabled = false;
+    setBtnBusy($('runScenariosBtn'), false);
   }
 }
 
@@ -406,7 +457,7 @@ async function uploadZip(file) {
     $('importLog').innerHTML = lines.join('\n');
     $('provenance').textContent = r.provenance_summary;
     await openProject(S.project); // refresh headline values
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 
 async function uploadDistances(file) {
@@ -418,7 +469,7 @@ async function uploadDistances(file) {
     const lines = [`<span class="ok">棚間距離: ${r.count}件取込（実測距離で動線を補正）</span>`];
     for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
     $('importLog').innerHTML = lines.join('\n');
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 
 async function uploadCad(file) {
@@ -432,7 +483,7 @@ async function uploadCad(file) {
     for (const w of (r.warnings || [])) lines.push(`<span class="warn">! ${w}</span>`);
     $('importLog').innerHTML = lines.join('\n');
     if (S.view === 'design') mountDesigner();
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 
 // ---- theme (light/dark, manual toggle, persisted) -------------------------
@@ -456,12 +507,38 @@ function toggleTheme() {
 // ---- Cody mascot companion (help / suggestion / error reactions) -----------
 function cody(mood, say) { if (S.cody) S.cody.setMood(mood, say ? { say } : {}); }
 
+// ---- shared busy state (spinner on a button + disable controls) -------------
+function setBtnBusy(btn, on, busyLabel) {
+  if (!btn) return;
+  if (on) {
+    btn.dataset.label = btn.dataset.label || btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    btn.setAttribute('aria-busy', 'true');
+    btn.innerHTML = `<span class="spinner" aria-hidden="true"></span>${busyLabel || btn.dataset.label}`;
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('is-busy');
+    btn.removeAttribute('aria-busy');
+    if (btn.dataset.label != null) { btn.textContent = btn.dataset.label; }
+  }
+}
+
 // ---- view switching (shared by the tab bar and the Cody chat) -------------
 function switchView(view) {
   if (!view || !$(view)) return;
   S.view = view;
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === view));
-  document.querySelectorAll('.panel').forEach(x => x.classList.toggle('active', x.id === view));
+  document.querySelectorAll('.tab').forEach(x => {
+    const on = x.dataset.tab === view;
+    x.classList.toggle('active', on);
+    x.setAttribute('aria-selected', on ? 'true' : 'false');
+    x.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll('.panel').forEach(x => {
+    const on = x.id === view;
+    x.classList.toggle('active', on);
+    x.hidden = !on;
+  });
   // Designer sets inline display on #design; override it so the panel hides.
   $('design').style.display = (view === 'design') ? 'flex' : 'none';
   // The replay transport only belongs to the 2D/3D animation views.
@@ -478,6 +555,135 @@ function switchView(view) {
   if (view === 'view2d') fitCanvas();
   if (view === 'export') mountExport();
   if (view === 'chat' && S.chat) S.chat.focus();
+}
+
+// ---- apply structured edits then re-run (closes the analysis loop) ---------
+// Dispatched from analysis.js / chat.js via CustomEvent('whsim:apply-run').
+async function applyAndRun(edits) {
+  if (!S.project) { toast('先にプロジェクトを作ってください。', 'error'); return; }
+  if (S.running) { toast('いま実行中です。完了までお待ちください。', 'info'); return; }
+  if (!edits || typeof edits !== 'object' || !Object.keys(edits).length) return;
+  $('status').textContent = '変更を適用して再実行中…';
+  cody('thinking', '提案を反映して、もう一度シミュレーションするよ。');
+  try {
+    const a = await api(`/api/projects/${S.project}/apply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ edits }),
+    });
+    if (a && a.provenance_summary) $('provenance').textContent = a.provenance_summary;
+    if (a && Array.isArray(a.skipped) && a.skipped.length) {
+      toast(`一部の変更は適用できませんでした（${a.skipped.length}件）。`, 'info');
+    }
+    await openProjectQuiet();
+    const r = await doRun();
+    $('status').textContent = `再実行が完了しました（${r.run}）。`;
+    toast('変更を適用して再実行しました。', 'ok');
+    cody('success', '反映して再実行したよ。分析を見比べてみて。');
+    switchView('analysis');
+  } catch (e) {
+    $('status').textContent = 'エラー: ' + e.message;
+    toast('適用に失敗しました: ' + e.message, 'error');
+    cody('error', 'うまく適用できなかった: ' + e.message);
+  }
+}
+document.addEventListener('whsim:apply-run', (e) => {
+  const edits = e && e.detail && e.detail.edits;
+  applyAndRun(edits);
+});
+
+// ---- project management menu (duplicate / rename / delete) -----------------
+function closeProjMenu() {
+  const menu = $('projMenu'), btn = $('projMenuBtn');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('click', onDocClickProjMenu, true);
+  document.removeEventListener('keydown', onProjMenuKey, true);
+}
+function openProjMenu() {
+  const menu = $('projMenu'), btn = $('projMenuBtn');
+  if (!menu || !S.project) return;
+  menu.hidden = false;
+  btn.setAttribute('aria-expanded', 'true');
+  const first = menu.querySelector('[role="menuitem"]');
+  if (first) first.focus();
+  document.addEventListener('click', onDocClickProjMenu, true);
+  document.addEventListener('keydown', onProjMenuKey, true);
+}
+function onDocClickProjMenu(e) {
+  if (!$('projMenu').contains(e.target) && e.target !== $('projMenuBtn')) closeProjMenu();
+}
+function onProjMenuKey(e) {
+  const menu = $('projMenu');
+  const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+  const idx = items.indexOf(document.activeElement);
+  if (e.key === 'Escape') { e.preventDefault(); closeProjMenu(); $('projMenuBtn').focus(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); items[(idx + 1) % items.length].focus(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); items[(idx - 1 + items.length) % items.length].focus(); }
+  else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+  else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+  else if (e.key === 'Tab') { closeProjMenu(); }
+}
+async function projDuplicate() {
+  const from = S.project;
+  if (!from) return;
+  const to = (prompt(`「${from}」を複製します。新しい名前を入力してください。`, from + '-copy') || '').trim();
+  if (!to) return;
+  try {
+    const r = await api(`/api/projects/${from}/duplicate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to }),
+    });
+    await refreshProjects(r.name || to);
+    await openProject(r.name || to);
+    toast(`「${from}」を複製しました。`, 'ok');
+  } catch (e) { toast('複製に失敗しました: ' + e.message, 'error'); }
+}
+async function projRename() {
+  const from = S.project;
+  if (!from) return;
+  const to = (prompt(`「${from}」の新しい名前を入力してください。`, from) || '').trim();
+  if (!to || to === from) return;
+  try {
+    const r = await api(`/api/projects/${from}/rename`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to }),
+    });
+    if (S.chat && S.chat.renameBucket) S.chat.renameBucket(from, r.name || to);
+    await refreshProjects(r.name || to);
+    await openProject(r.name || to);
+    toast(`「${to}」に名前を変更しました。`, 'ok');
+  } catch (e) { toast('名前変更に失敗しました: ' + e.message, 'error'); }
+}
+async function projDelete() {
+  const name = S.project;
+  if (!name) return;
+  if (!confirm(`プロジェクト「${name}」を削除します。元に戻せません。よろしいですか？`)) return;
+  try {
+    await api(`/api/projects/${name}`, { method: 'DELETE' });
+    if (S.chat && S.chat.clearBucket) S.chat.clearBucket(name);
+    clearProjectState();
+    await refreshProjects('');
+    toast(`「${name}」を削除しました。`, 'ok');
+  } catch (e) { toast('削除に失敗しました: ' + e.message, 'error'); }
+}
+// Reset everything tied to a now-gone project.
+function clearProjectState() {
+  S.project = null;
+  S.replay = null;
+  if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
+  $('projectSelect').value = '';
+  $('runBtn').disabled = true;
+  $('playBtn').disabled = true; $('scrub').disabled = true;
+  $('headline').innerHTML = '';
+  $('kpiBar').innerHTML = '';
+  $('importLog').innerHTML = '';
+  $('pngImg').removeAttribute('src');
+  $('provenance').textContent = '— your data';
+  $('status').textContent = 'プロジェクトを選択するか、新規に作成してください。';
+  updateProjMenuState();
+  if (S.chat && S.chat.loadFor) S.chat.loadFor(null);
+  if (S.view === 'analysis') mountAnalysis($('analysis'), null);
 }
 
 // ---- actions the Cody chat invokes to drive whsim --------------------------
@@ -512,22 +718,66 @@ function initSidebar() {
 function initUI() {
   $('createBtn').onclick = async () => {
     const name = $('newName').value.trim();
-    if (!name) { $('status').textContent = 'プロジェクト名を入力してください。'; return; }
+    if (!name) {
+      $('status').textContent = 'プロジェクト名を入力してください。';
+      toast('プロジェクト名を入力してください。', 'info');
+      $('newName').focus();
+      return;
+    }
+    setBtnBusy($('createBtn'), true, '作成中…');
     try {
       await doCreate(name, $('templateSelect').value);
+      $('newName').value = '';
+      toast(`「${name}」を作成しました。`, 'ok');
       cody('excited', `「${name}」を用意したよ。まずは設計を触ってみよう。`);
     } catch (e) {
       $('status').textContent = '作成に失敗: ' + e.message;
+      toast('作成に失敗しました: ' + e.message, 'error');
       cody('error', '作成でつまずいた: ' + e.message + ' — 直せるよ。');
+    } finally {
+      setBtnBusy($('createBtn'), false);
     }
   };
   $('projectSelect').onchange = (e) => { if (e.target.value) openProject(e.target.value); };
-  $('applyBtn').onclick = applyHeadline;
+  $('applyBtn').onclick = async () => {
+    try { await applyHeadline(); }
+    catch (e) {
+      $('status').textContent = 'エラー: ' + e.message;
+      toast('反映に失敗しました: ' + e.message, 'error');
+    }
+  };
   $('runBtn').onclick = runSim;
   $('runScenariosBtn').onclick = runScenarios;
 
-  // tabs
-  document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchView(t.dataset.tab));
+  // tabs: click + roving-tabindex keyboard navigation (WAI-ARIA tablist)
+  const tabs = Array.from(document.querySelectorAll('.tab'));
+  tabs.forEach((t) => {
+    t.onclick = () => switchView(t.dataset.tab);
+    t.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(t);
+      let j = -1;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') j = 0;
+      else if (e.key === 'End') j = tabs.length - 1;
+      if (j >= 0) { e.preventDefault(); switchView(tabs[j].dataset.tab); tabs[j].focus(); }
+    });
+  });
+
+  // project management menu
+  $('projMenuBtn').onclick = (e) => {
+    e.stopPropagation();
+    if ($('projMenu').hidden) openProjMenu(); else closeProjMenu();
+  };
+  $('projMenu').querySelectorAll('[role="menuitem"]').forEach((mi) => {
+    mi.onclick = () => {
+      const act = mi.dataset.act;
+      closeProjMenu();
+      if (act === 'duplicate') projDuplicate();
+      else if (act === 'rename') projRename();
+      else if (act === 'delete') projDelete();
+    };
+  });
 
   $('themeToggle').onclick = toggleTheme;
 

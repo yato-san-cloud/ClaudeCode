@@ -23,8 +23,18 @@
     <aside class="sidebar">
       <section class="card">
         <h2>1. プロジェクト</h2>
-        <div class="row">
-          <select id="projectSelect"><option value="">（新規作成）</option></select>
+        <div class="row proj-row">
+          <select id="projectSelect" aria-label="プロジェクトを選択"><option value="">（新規作成）</option></select>
+          <div class="proj-menu-wrap">
+            <button id="projMenuBtn" type="button" class="icon-btn" title="プロジェクト操作"
+                    aria-label="プロジェクト操作メニュー" aria-haspopup="menu" aria-expanded="false"
+                    aria-controls="projMenu" disabled>⋯</button>
+            <div id="projMenu" class="proj-menu" role="menu" aria-label="プロジェクト操作" hidden>
+              <button type="button" role="menuitem" data-act="duplicate">複製</button>
+              <button type="button" role="menuitem" data-act="rename">名前変更</button>
+              <button type="button" role="menuitem" data-act="delete" class="danger-item">削除</button>
+            </div>
+          </div>
         </div>
         <div class="row new-proj">
           <input id="newName" placeholder="プロジェクト名 例: acme" />
@@ -59,20 +69,20 @@
 
       <section class="card">
         <button id="runBtn" class="primary big" disabled>▶ シミュレーション実行</button>
-        <div id="status" class="status"></div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
     </aside>
 
     <main class="main">
-      <div class="tabs">
-        <button data-tab="chat" class="tab active">💬 Cody</button>
-        <button data-tab="design" class="tab">設計</button>
-        <button data-tab="analysis" class="tab">分析</button>
-        <button data-tab="view2d" class="tab">2D アニメーション</button>
-        <button data-tab="view3d" class="tab">3D</button>
-        <button data-tab="viewpng" class="tab">提案PNG</button>
-        <button data-tab="compare" class="tab">比較</button>
-        <button data-tab="export" class="tab">エクスポート</button>
+      <div class="tabs" role="tablist" aria-label="ビュー切り替え">
+        <button data-tab="chat" class="tab active" role="tab" id="tab-chat" aria-selected="true" aria-controls="chat" tabindex="0">💬 Cody</button>
+        <button data-tab="design" class="tab" role="tab" id="tab-design" aria-selected="false" aria-controls="design" tabindex="-1">設計</button>
+        <button data-tab="analysis" class="tab" role="tab" id="tab-analysis" aria-selected="false" aria-controls="analysis" tabindex="-1">分析</button>
+        <button data-tab="view2d" class="tab" role="tab" id="tab-view2d" aria-selected="false" aria-controls="view2d" tabindex="-1">2D アニメーション</button>
+        <button data-tab="view3d" class="tab" role="tab" id="tab-view3d" aria-selected="false" aria-controls="view3d" tabindex="-1">3D</button>
+        <button data-tab="viewpng" class="tab" role="tab" id="tab-viewpng" aria-selected="false" aria-controls="viewpng" tabindex="-1">提案PNG</button>
+        <button data-tab="compare" class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="compare" tabindex="-1">比較</button>
+        <button data-tab="export" class="tab" role="tab" id="tab-export" aria-selected="false" aria-controls="export" tabindex="-1">エクスポート</button>
         <label class="preset-ctl" title="3D表現">3D表現
           <select id="presetSelect">
             <option value="natural">ナチュラル</option>
@@ -84,24 +94,24 @@
       </div>
 
       <div class="stage">
-        <div id="chat" class="panel active"></div>
-        <div id="design" class="panel"></div>
-        <div id="analysis" class="panel"></div>
-        <div id="view2d" class="panel">
-          <canvas id="canvas2d"></canvas>
+        <div id="chat" class="panel active" role="tabpanel" aria-labelledby="tab-chat" tabindex="0"></div>
+        <div id="design" class="panel" role="tabpanel" aria-labelledby="tab-design" tabindex="0" hidden></div>
+        <div id="analysis" class="panel" role="tabpanel" aria-labelledby="tab-analysis" tabindex="0" hidden></div>
+        <div id="view2d" class="panel" role="tabpanel" aria-labelledby="tab-view2d" tabindex="0" hidden>
+          <canvas id="canvas2d" aria-label="2Dシミュレーション再生"></canvas>
         </div>
-        <div id="view3d" class="panel"></div>
-        <div id="viewpng" class="panel">
+        <div id="view3d" class="panel" role="tabpanel" aria-labelledby="tab-view3d" tabindex="0" hidden></div>
+        <div id="viewpng" class="panel" role="tabpanel" aria-labelledby="tab-viewpng" tabindex="0" hidden>
           <img id="pngImg" alt="提案PNG（実行後に表示）" />
         </div>
-        <div id="compare" class="panel">
+        <div id="compare" class="panel" role="tabpanel" aria-labelledby="tab-compare" tabindex="0" hidden>
           <div class="compare-bar">
             <button id="runScenariosBtn" class="primary">シナリオを比較（現行 / ピーク日 / AGV導入）</button>
-            <span id="compareStatus" class="status"></span>
+            <span id="compareStatus" class="status" role="status" aria-live="polite"></span>
           </div>
           <div id="compareView"></div>
         </div>
-        <div id="export" class="panel"></div>
+        <div id="export" class="panel" role="tabpanel" aria-labelledby="tab-export" tabindex="0" hidden></div>
 
         <div class="transport">
           <button id="playBtn">⏸</button>
@@ -127,6 +137,8 @@
       <div id="kpiBar" class="kpibar"></div>
     </main>
   </div>
+
+  <div id="toastHost" class="toast-host" role="region" aria-label="通知" aria-live="polite" aria-atomic="false"></div>
 
   <script type="importmap">
   { "imports": { "three": "./vendor/three/three.module.js" } }

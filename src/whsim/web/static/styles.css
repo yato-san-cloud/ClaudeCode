@@ -1250,6 +1250,14 @@ html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
   .an-grid-2 { grid-template-columns: 1fr; }
   .callout { grid-template-columns: auto 1fr; }
   .callout .c-metric { grid-column: 2; justify-self: start; }
+  /* Tabs scroll horizontally instead of wrapping into an unusable stack. */
+  .tabs {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 0 0 auto; white-space: nowrap; }
+  .preset-ctl { flex: 0 0 auto; margin-left: var(--sp-2); }
 }
 @media (max-width: 460px) {
   .kpi-hero { grid-template-columns: 1fr 1fr; }
@@ -1282,7 +1290,9 @@ html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
 }
 /* On small screens the sidebar becomes an overlay drawer. */
 @media (max-width: 880px) {
-  .layout { grid-template-columns: 1fr; }
+  /* The drawer is position:fixed, so the grid is always a single column — even
+     when collapsed (must out-specify `.layout.sidebar-collapsed` above). */
+  .layout, .layout.sidebar-collapsed { grid-template-columns: 1fr; }
   .sidebar {
     position: fixed; top: var(--header-h); left: 0; bottom: 0;
     width: min(86vw, 320px); z-index: 30; box-shadow: var(--sh-lg);
@@ -1386,3 +1396,123 @@ html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
 }
 .chat-send:hover:not(:disabled) { background: var(--accent-hover); }
 .chat-send:disabled { opacity: .45; cursor: default; }
+
+/* =============================================================================
+   COMMERCIAL FINISH: project menu, toasts, spinners, skeletons, apply chips,
+   chat toolbar, and responsive / a11y refinements.
+   ============================================================================= */
+
+/* ---- project management menu (⋯) ------------------------------------------ */
+.proj-row { align-items: center; }
+.proj-row #projectSelect { flex: 1 1 auto; min-width: 0; }
+.proj-menu-wrap { position: relative; flex: none; }
+#projMenuBtn { font-size: 18px; line-height: 1; }
+#projMenuBtn:disabled { opacity: .4; cursor: default; }
+#projMenuBtn[aria-expanded="true"] { background: var(--bg-hover); color: var(--ink-primary); }
+.proj-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  min-width: 168px; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-app); border: 1px solid var(--line-hair);
+  border-radius: var(--r-md); box-shadow: var(--sh-pop);
+}
+.proj-menu[hidden] { display: none; }
+.proj-menu [role="menuitem"] {
+  display: block; width: 100%; text-align: left; height: 32px; padding: 0 10px;
+  border: 0; background: transparent; color: var(--ink-primary);
+  font-size: var(--fs-sm); border-radius: var(--r-sm); cursor: pointer;
+}
+.proj-menu [role="menuitem"]:hover,
+.proj-menu [role="menuitem"]:focus-visible {
+  background: var(--bg-hover); outline: none;
+}
+.proj-menu [role="menuitem"]:focus-visible { box-shadow: 0 0 0 2px var(--accent-tint); }
+.proj-menu .danger-item { color: var(--bad-ink); }
+.proj-menu .danger-item:hover, .proj-menu .danger-item:focus-visible { background: var(--bad-tint); }
+
+/* ---- toast notifications --------------------------------------------------- */
+.toast-host {
+  position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 9500;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  max-width: min(92vw, 380px); pointer-events: none;
+}
+.toast {
+  pointer-events: auto; display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: 11px 12px 11px 14px; border-radius: var(--r-md);
+  background: var(--bg-app); color: var(--ink-primary);
+  border: 1px solid var(--line-hair); border-left: 3px solid var(--ink-tertiary);
+  box-shadow: var(--sh-lg); font-size: var(--fs-sm); line-height: 1.5;
+  animation: toastIn var(--dur-3) var(--ease-out);
+}
+.toast.ok { border-left-color: var(--ok); background: var(--ok-tint); }
+.toast.error { border-left-color: var(--bad); background: var(--bad-tint); }
+.toast.info { border-left-color: var(--accent); }
+.toast-msg { flex: 1 1 auto; overflow-wrap: anywhere; }
+.toast-close {
+  flex: none; width: 22px; height: 22px; line-height: 1; padding: 0;
+  border: 0; background: transparent; color: var(--ink-tertiary);
+  font-size: 18px; cursor: pointer; border-radius: var(--r-xs);
+}
+.toast-close:hover { background: var(--bg-hover); color: var(--ink-primary); }
+.toast.leaving { animation: toastOut 200ms var(--ease) forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(8px); } }
+
+/* ---- button spinner / busy state ------------------------------------------ */
+.spinner {
+  display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+  vertical-align: -2px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+button.is-busy { cursor: progress; opacity: .85; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- skeleton loading blocks ---------------------------------------------- */
+.skeleton-block {
+  height: 120px; border-radius: var(--r-md); margin-bottom: var(--sp-3);
+  background: linear-gradient(90deg, var(--bg-panel) 25%, var(--bg-hover) 37%, var(--bg-panel) 63%);
+  background-size: 400% 100%; animation: shimmer 1.3s ease-in-out infinite;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* ---- analysis "適用して再実行" action + chat apply chip --------------------- */
+.c-apply {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: var(--sp-2);
+  padding: 6px 12px; border-radius: var(--r-pill); cursor: pointer;
+  background: var(--accent); color: #fff; border: 0;
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  transition: background var(--t-fast);
+}
+.c-apply:hover:not(:disabled) { background: var(--accent-hover); }
+.c-apply:disabled { opacity: .5; cursor: default; }
+.c-apply:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-tint); }
+.chat-apply { display: flex; margin-left: 40px; }
+.chat-apply-chip { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-ink); font-weight: var(--fw-semibold); }
+.chat-apply-chip:disabled { opacity: .5; cursor: default; }
+
+/* ---- chat toolbar (clear conversation) ------------------------------------ */
+.chat-toolbar {
+  flex: none; display: flex; justify-content: flex-end;
+  padding: var(--sp-2) var(--sp-5) 0; max-width: 820px; width: 100%; margin: 0 auto;
+}
+.chat-toolbar[hidden] { display: none; }
+.chat-clear {
+  font-size: var(--fs-xs); padding: 5px 11px; border-radius: var(--r-pill);
+  border: 1px solid var(--line-hair); background: var(--bg-app);
+  color: var(--ink-tertiary); cursor: pointer; transition: all var(--t-fast);
+}
+.chat-clear:hover:not(:disabled) { background: var(--bad-tint); border-color: var(--bad-line); color: var(--bad-ink); }
+.chat-clear:disabled { opacity: .5; cursor: default; }
+
+/* ---- gate the Cody float animation behind reduced-motion ------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 0.001ms; }
+  .skeleton-block { animation: none; }
+  .toast { animation: none; }
+}
+
+/* ---- responsive: keep the floating Cody clear of the composer/controls ---- */
+@media (max-width: 880px) {
+  .toast-host { left: var(--sp-3); right: var(--sp-3); bottom: var(--sp-3); max-width: none; }
+  .proj-menu { right: auto; left: 0; }
+}

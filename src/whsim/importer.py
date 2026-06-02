@@ -113,16 +113,65 @@ def _decode(raw: bytes) -> str:
     raise last
 
 
-def _read_zip_entries(zf: zipfile.ZipFile) -> list[tuple[str, bytes]]:
-    """Read every .json entry from an open ZipFile, skipping unreadable ones."""
+# Zip-bomb / abuse safety caps. A customer bundle is a handful of small JSON
+# exports, so these limits are generous but bound a hostile/corrupt archive.
+MAX_ENTRIES = 10_000              # number of members we will look at
+MAX_ENTRY_BYTES = 256 * 1024 * 1024   # per-entry uncompressed cap (256 MiB)
+MAX_TOTAL_BYTES = 512 * 1024 * 1024   # whole-archive uncompressed cap (512 MiB)
+
+
+def _is_unsafe_member(name: str) -> bool:
+    """Reject path-traversal / absolute members so a malicious archive can never
+    be made to escape an extraction root (defence-in-depth; we read into memory
+    here, but callers may extract)."""
+    if name.startswith("/") or name.startswith("\\"):
+        return True
+    # normalize separators and look for any parent-dir component
+    parts = name.replace("\\", "/").split("/")
+    if ".." in parts:
+        return True
+    # Windows drive-absolute (e.g. C:\...) or UNC
+    if len(name) >= 2 and name[1] == ":":
+        return True
+    return False
+
+
+def _read_zip_entries(
+    zf: zipfile.ZipFile, warnings: list[str] | None = None
+) -> list[tuple[str, bytes]]:
+    """Read every .json entry from an open ZipFile, skipping unreadable ones.
+
+    Tolerant + safe: caps the number of entries and the total/per-entry
+    uncompressed size (zip-bomb guard), and skips path-traversal members."""
+    warns = warnings if warnings is not None else []
     out: list[tuple[str, bytes]] = []
-    for name in zf.namelist():
+    total = 0
+    for i, info in enumerate(zf.infolist()):
+        if i >= MAX_ENTRIES:
+            warns.append(
+                f"ZIP内のエントリ数が上限({MAX_ENTRIES})を超えたため、以降を無視しました。"
+            )
+            break
+        name = info.filename
         if name.endswith("/") or not name.lower().endswith(".json"):
             continue
+        if _is_unsafe_member(name):
+            warns.append(f"{name}: 安全でないパスのためスキップしました。")
+            continue
+        if info.file_size > MAX_ENTRY_BYTES:
+            warns.append(
+                f"{name}: 展開後サイズが大きすぎる({info.file_size}バイト)ためスキップしました。"
+            )
+            continue
+        if total + info.file_size > MAX_TOTAL_BYTES:
+            warns.append("ZIPの合計展開サイズが上限を超えたため、以降のファイルを無視しました。")
+            break
         try:
-            out.append((name, zf.read(name)))
+            data = zf.read(name)
         except Exception:  # noqa: BLE001 - a corrupt member must not be fatal
             continue
+        total += len(data)
+        out.append((name, data))
     return out
 
 
@@ -159,14 +208,24 @@ def merge_into_template(
 
     # The merge result must validate -- this is the "always runs" guarantee.
     model = WarehouseModel.model_validate(merged)
+    # Import-only hardening (the schema itself stays strict for the editor):
+    #  * coerce_messy: clamp negative/zero/out-of-range numbers a customer file
+    #    might carry, so the sim never divides-by-zero or silences demand;
+    #  * normalize_ids: blank / duplicate ids would silently collide in
+    #    downstream dict maps (lost zones / SKUs / orders) -- auto-assign stable
+    #    unique ids instead of dropping data.
+    # Both surface every change as a warning rather than mutating silently.
+    warnings.extend(model.coerce_messy())
+    warnings.extend(model.normalize_ids())
     return ImportResult(model=model, touched_subtrees=touched, warnings=warnings,
                         files_seen=seen)
 
 
 def import_zip(template_dict: dict, zip_path: str | Path) -> ImportResult:
+    zip_warnings: list[str] = []
     try:
         with zipfile.ZipFile(Path(zip_path)) as zf:
-            files = _read_zip_entries(zf)
+            files = _read_zip_entries(zf, zip_warnings)
     except zipfile.BadZipFile as e:
         # A corrupt / non-ZIP file must not be fatal: keep the template as-is.
         res = merge_into_template(template_dict, [])
@@ -174,17 +233,23 @@ def import_zip(template_dict: dict, zip_path: str | Path) -> ImportResult:
         return res
     if not files:
         res = merge_into_template(template_dict, [])
+        res.warnings = zip_warnings + res.warnings
         res.warnings.append("ZIP contained no .json files; kept template as-is.")
         return res
-    return merge_into_template(template_dict, files)
+    res = merge_into_template(template_dict, files)
+    res.warnings = zip_warnings + res.warnings
+    return res
 
 
 def import_bytes(template_dict: dict, zip_bytes: bytes) -> ImportResult:
+    zip_warnings: list[str] = []
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            files = _read_zip_entries(zf)
+            files = _read_zip_entries(zf, zip_warnings)
     except zipfile.BadZipFile as e:
         res = merge_into_template(template_dict, [])
         res.warnings.append(f"ZIPを開けませんでした ({e}); テンプレートをそのまま使用します。")
         return res
-    return merge_into_template(template_dict, files)
+    res = merge_into_template(template_dict, files)
+    res.warnings = zip_warnings + res.warnings
+    return res

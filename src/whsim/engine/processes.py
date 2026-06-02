@@ -245,15 +245,24 @@ def _pick_phase(world: World, w: Worker, pos, points, qtys, tss, speed):
 
     if world.zoning == "parallel":
         # Launch one sub-process per zone; they run at the same simulated time.
+        # Each concurrent leg gets its OWN replay track (a helper sub-worker), so
+        # the keyframes never interleave on a single worker (which would make it
+        # teleport between zones). The primary worker `w` coordinates and stays
+        # put for the parallel sweep, marked idle at `pos` for the makespan.
         results: dict[int, float] = {}
         procs = []
+        if world.recording():
+            w.kf(world.env.now, pos[0], pos[1], "idle")
         for z, (bp, bq, bt) in buckets.items():
+            helper = world.helper_for(w, z)
             procs.append(world.env.process(
-                _pick_zone(world, w, results, z, pos, bp, bq, bt, speed)))
+                _pick_zone(world, helper, results, z, pos, bp, bq, bt, speed)))
         for p in procs:
             yield p
         # makespan = the slowest zone (they overlapped), distance = sum walked.
         total = sum(results.values())
+        if world.recording():
+            w.kf(world.env.now, pos[0], pos[1], "idle")
         return pos, total
 
     # sequential (pick-and-pass relay): traverse zones in order, sweeping each.
@@ -342,10 +351,13 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             picker_busy = env.now - busy_start
 
         dist_per_order = total_dist / len(orders)
-        world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
-                  busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
 
         if world.has_conveyor and not agv_mode:
+            # The conveyor decouples pick from pack: the picker hands each tote
+            # to the belt and is free again. So its busy time ends here (pick +
+            # carry), logged now; packing happens downstream on its own process.
+            world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
+                      busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
             # Hand each tote to the conveyor. Acquiring a belt slot BLOCKS when the
             # belt is full (downstream pack can't keep up) -> the jam propagates
             # back to the picker. The tote rides the belt (transit) then packs,
@@ -360,11 +372,21 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 w.kf(env.now, pos[0], pos[1], "idle")
             continue
 
+        # Inline pack (manual AND AGV-handoff modes): the picker DOUBLES AS THE
+        # PACKER, so it is genuinely occupied until packing finishes (queue wait
+        # at the pack station + pack service). Picker "busy" is therefore defined
+        # as pick/handle + carry + the time spent packing this batch -- otherwise
+        # picker_utilization would exclude real occupancy and understate load
+        # (diverging from the M/M/c oracle under overload). We log pick_done AFTER
+        # the pack loop so its busy spans the whole occupied interval.
+        # packer_utilization stays a meaningful measure of the pack-station
+        # service time on its own. (`picker_busy` here is just the pick/carry
+        # portion, retained for clarity; the logged busy below supersedes it.)
         for o, arr in zip(orders, arrivals):
             pack_req_t = env.now
             preq = world.packers.request()
             yield preq
-            seize_t = env.now  # busy = service time only, not the queue wait
+            seize_t = env.now  # packer busy = service time only, not the queue wait
             world.log(t=env.now, event="pack_start", order_id=o.order_id,
                       wait=seize_t - pack_req_t, resource="packer", worker=w.id)
             if world.recording():
@@ -375,6 +397,10 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                       busy=env.now - seize_t, resource="packer", worker=w.id)
             world.log(t=env.now, event="order_complete", order_id=o.order_id,
                       cycle=env.now - arr, dist=dist_per_order, due=o.due_s)
+        # Picker was occupied (pick/handle + carry + pack) for this whole interval.
+        world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
+                  busy=env.now - busy_start, dist=total_dist,
+                  resource="picker", worker=w.id)
         if world.recording():
             w.kf(env.now, pos[0], pos[1], "idle")
 

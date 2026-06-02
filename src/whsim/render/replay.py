@@ -31,6 +31,13 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         {"id": w.id, "role": w.role, "keyframes": w.keyframes}
         for w in res.workers
     ]
+    # Parallel-zone legs run concurrently on their own replay tracks (so a single
+    # worker never teleports between zones); surface them as extra worker agents.
+    workers += [
+        {"id": h.id, "role": h.role, "keyframes": h.keyframes}
+        for h in getattr(res, "helpers", [])
+        if h.keyframes
+    ]
     agvs = [
         {"id": a.id, "keyframes": a.keyframes}
         for a in res.agvs

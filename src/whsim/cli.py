@@ -93,12 +93,32 @@ def run(name: str):
 
 
 @app.command()
+def delete(name: str):
+    """Delete a project workspace and all its artifacts."""
+    import shutil
+
+    from whsim.project import PROJECTS_DIR, safe_name
+    try:
+        slug = safe_name(name)
+    except ValueError:
+        typer.echo(f"プロジェクト名 '{name}' は無効です。", err=True)
+        raise typer.Exit(code=1)
+    root = PROJECTS_DIR / slug
+    if not (root / "project.json").is_file():
+        typer.echo(f"プロジェクト '{name}' が見つかりません。", err=True)
+        raise typer.Exit(code=1)
+    shutil.rmtree(root)
+    typer.echo(f"deleted project '{name}'")
+
+
+@app.command()
 def render(name: str, run: str = typer.Option("latest", "--run")):
     """Render the proposal PNG for a run."""
     proj = _open_project(name)
     run_dir = proj.latest_run_dir() if run == "latest" else proj.runs_dir / run
     if run_dir is None or not (run_dir / "kpis.json").is_file():
-        raise typer.BadParameter("no run found; call `whsim run` first")
+        typer.echo("実行結果が見つかりません。先に `whsim run` を実行してください。", err=True)
+        raise typer.Exit(code=1)
     metrics = json.loads((run_dir / "kpis.json").read_text("utf-8"))
     heat = np.load(run_dir / "heatmap.npy")
     out = render_png(proj.load_model(), heat, metrics,
@@ -115,7 +135,8 @@ def animate(name: str, run: str = typer.Option("latest", "--run")):
     proj = _open_project(name)
     run_dir = proj.latest_run_dir() if run == "latest" else proj.runs_dir / run
     if run_dir is None or not (run_dir / "replay.json").is_file():
-        raise typer.BadParameter("no replay found; call `whsim run` first")
+        typer.echo("リプレイが見つかりません。先に `whsim run` を実行してください。", err=True)
+        raise typer.Exit(code=1)
     replay = _json.loads((run_dir / "replay.json").read_text("utf-8"))
     out = render_gif(replay, run_dir / "replay_2d.gif")
     typer.echo(f"gif -> {out}")

@@ -56,6 +56,16 @@ def estimate(model: WarehouseModel) -> dict:
     travel = 2 * avg_depot_dist + max(lines_per - 1, 0) * avg_depot_dist * 0.3
     service_s = travel / speed + handling
 
+    # When there is no conveyor, the picker DOUBLES AS THE PACKER and is occupied
+    # through packing too (see engine.processes.picker_agent's busy definition).
+    # The picker service time must include pack time, or this oracle understates
+    # picker utilisation relative to the engine. With a conveyor, pack is a
+    # decoupled downstream stage and is excluded.
+    has_conveyor = bool(model.resources.conveyors) and any(
+        len(cv.points) >= 2 for cv in model.resources.conveyors)
+    if not has_conveyor:
+        service_s += max(model.process.pack_time_s, 0.0)
+
     c = sum(w.count for w in model.resources.workers if w.role == "picker") or 1
     lam = rate_per_hr / 3600.0           # arrivals/s
     mu = 1.0 / max(service_s, 1e-6)      # service/s per picker

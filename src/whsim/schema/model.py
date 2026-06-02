@@ -9,11 +9,47 @@ enforced here, by construction.
 
 from __future__ import annotations
 
+import math
+import re as _re
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 SCHEMA_VERSION = "0.1"
+
+
+# --- tolerant coercion helpers ---------------------------------------------
+# Customer exports are messy: numbers arrive as strings ("12", "3.5 m",
+# "1,234"), counts arrive negative, ratios out of range. The load-bearing rule
+# is "never reject imported data" -- so the IMPORT path (and only the import
+# path) coerces such values to sane numbers via WarehouseModel.coerce_messy().
+#
+# These are deliberately NOT pydantic field validators: keeping the schema
+# strict by default means the interactive editor (web /apply, /headline) still
+# gets a clean validation error for a genuinely bad hand-typed value, instead
+# of silently swallowing it. Coercion is a property of importing a file, not of
+# the type itself.
+def _to_float(v, default: float = 0.0) -> float:
+    """Coerce a messy scalar to float; fall back to `default` (never raise)."""
+    if isinstance(v, bool):
+        return float(v)
+    if isinstance(v, (int, float)):
+        f = float(v)
+        return f if math.isfinite(f) else default
+    if isinstance(v, str):
+        s = v.strip().replace(",", "").replace("　", "")
+        m = _re.match(r"[-+]?[0-9]*\.?[0-9]+", s)
+        if m:
+            try:
+                f = float(m.group(0))
+                return f if math.isfinite(f) else default
+            except ValueError:
+                return default
+    return default
+
+
+def _to_int(v, default: int = 0) -> int:
+    return int(round(_to_float(v, float(default))))
 
 ABCClass = Literal["A", "B", "C"]
 ZoneType = Literal[
@@ -316,6 +352,202 @@ class WarehouseModel(BaseModel):
 
     def location_by_id(self) -> dict[str, Location]:
         return {loc.id: loc for loc in self.locations}
+
+    def coerce_messy(self) -> list[str]:
+        """Clamp/repair messy numeric fields that survived validation.
+
+        Applied on the IMPORT path only (see module note). pydantic already
+        parsed numeric strings like "12" into ints/floats; this pass fixes the
+        values it cannot reason about: negative counts/dimensions, zero or
+        negative speeds/durations that would divide-by-zero or silence the sim,
+        and out-of-range ratios. It never raises and never drops data; it
+        returns Japanese warnings describing every clamp.
+        """
+        w: list[str] = []
+
+        def clamp_f(obj, attr, lo, label, hint=""):
+            cur = getattr(obj, attr)
+            new = _to_float(cur, lo)
+            if new < lo:
+                new = lo
+            if new != cur:
+                setattr(obj, attr, new)
+                w.append(f"{label}を {cur} から {new} に補正しました{hint}。")
+
+        def clamp_i(obj, attr, lo, label):
+            cur = getattr(obj, attr)
+            new = _to_int(cur, lo)
+            if new < lo:
+                new = lo
+            if new != cur:
+                setattr(obj, attr, new)
+                w.append(f"{label}を {cur} から {new} に補正しました。")
+
+        clamp_f(self.layout.bounds, "width", 0.0, "建屋幅")
+        clamp_f(self.layout.bounds, "depth", 0.0, "建屋奥行")
+
+        for it in self.items:
+            clamp_f(it, "pick_freq", 0.0, f"商品{it.sku}のピック頻度")
+            clamp_f(it, "ts_per_unit", 0.0, f"商品{it.sku}の処理時間")
+            clamp_i(it, "case_qty", 1, f"商品{it.sku}のケース入数")
+            clamp_i(it, "stock", 0, f"商品{it.sku}の在庫")
+
+        for lc in self.locations:
+            clamp_i(lc, "capacity", 0, f"ロケーション{lc.id}の収容数")
+            clamp_i(lc, "qty", 0, f"ロケーション{lc.id}の在庫数")
+
+        for grp in self.resources.workers:
+            clamp_i(grp, "count", 0, "作業者数")
+            clamp_f(grp, "speed_mps", 0.1, "作業者の歩行速度", "（0以下は不可）")
+            clamp_f(grp, "labour_rate_per_hr", 0.0, "人件費単価")
+        for eq in self.resources.equipment:
+            clamp_i(eq, "count", 0, "設備台数")
+            clamp_i(eq, "capacity", 0, "設備の積載数")
+            clamp_f(eq, "speed_mps", 0.1, "設備の速度", "（0以下は不可）")
+        for st in self.resources.stations:
+            clamp_i(st, "count", 1, "ステーション数")
+
+        clamp_i(self.process, "batch_size", 1, "バッチサイズ")
+        clamp_f(self.process, "walk_speed_mps", 0.1, "歩行速度", "（0以下は不可）")
+        clamp_f(self.process, "pack_time_s", 0.0, "梱包時間")
+        clamp_f(self.process, "sort_time_s", 0.0, "仕分け時間")
+
+        prof = self.orders.profile
+        clamp_f(prof, "rate_per_hr", 0.0, "オーダー到着率")
+        clamp_f(prof, "lines_per_order_mean", 0.0, "平均オーダー行数")
+        clamp_f(prof, "peak_factor", 0.0, "ピーク係数")
+
+        sim = self.simulation
+        clamp_f(sim, "duration_s", 1.0, "シミュレーション時間", "（最低1秒）")
+        clamp_f(sim, "warmup_s", 0.0, "ウォームアップ時間")
+        clamp_f(sim, "heatmap_grid_m", 0.1, "ヒートマップ格子")
+        clamp_f(sim, "shift_hours_per_day", 0.1, "1日の稼働時間")
+        clamp_i(sim, "replications", 1, "反復回数")
+        clamp_i(sim, "amortize_capex_months", 1, "償却月数")
+        clamp_i(sim, "work_days_per_month", 1, "月間稼働日数")
+
+        for o in self.orders.outbound + self.orders.inbound:
+            clamp_f(o, "arrival_s", 0.0, f"オーダー{o.order_id}の到着時刻")
+            for ln in o.lines:
+                clamp_i(ln, "qty", 1, f"オーダー{o.order_id}の数量")
+
+        return w
+
+    def normalize_ids(self) -> list[str]:
+        """Auto-assign stable unique identifiers for blank/duplicate keys.
+
+        KNOWN DEFECT this fixes: downstream code builds dict maps keyed by
+        ``Zone.id`` / ``Location.id`` / ``Item.sku`` / ``Order.order_id``. When
+        those keys are blank or duplicated, later entries silently overwrite
+        earlier ones, so whole zones/SKUs/orders vanish from the simulation.
+
+        Rather than dropping data we make every key present and unique here, at
+        the data layer: blanks get a stable synthetic id (``zone-1``,
+        ``loc-000007``, ``sku-000012`` ...), and collisions get a ``-2`` suffix.
+        Cross-references are repaired so nothing is orphaned:
+
+        * ``Location.sku`` -> renamed ``Item.sku`` (only when an item carried the
+          old sku; an unknown sku reference is left untouched).
+        * ``Item.default_location`` -> renamed ``Location.id``.
+        * ``OrderLine.sku`` -> renamed ``Item.sku``.
+
+        Returns a list of human-readable (Japanese) warnings describing every
+        rename, intended to be surfaced as import warnings -- never a silent
+        mutation.
+        """
+        warnings: list[str] = []
+
+        def _unique(items, get, set_, prefix: str, label: str, width: int = 0):
+            seen: set[str] = set()
+            remap: dict[int, tuple[str, str]] = {}  # index -> (old, new)
+            for i, it in enumerate(items):
+                raw = get(it)
+                old = raw.strip() if isinstance(raw, str) else (raw or "")
+                if not old:
+                    n = i + 1
+                    new = f"{prefix}{n:0{width}d}" if width else f"{prefix}{n}"
+                else:
+                    new = old
+                if new in seen:
+                    base = new
+                    k = 2
+                    while f"{base}-{k}" in seen:
+                        k += 1
+                    new = f"{base}-{k}"
+                if new != old:
+                    if not old:
+                        warnings.append(
+                            f"{label}のIDが空欄だったため '{new}' を自動採番しました。"
+                        )
+                    else:
+                        warnings.append(
+                            f"{label}のID '{old}' が重複していたため '{new}' に変更しました。"
+                        )
+                    remap[i] = (old, new)
+                seen.add(new)
+                set_(it, new)
+            return remap
+
+        _unique(
+            self.layout.zones,
+            lambda z: z.id, lambda z, v: setattr(z, "id", v),
+            "zone-", "ゾーン",
+        )
+
+        loc_remap = _unique(
+            self.locations,
+            lambda lc: lc.id, lambda lc, v: setattr(lc, "id", v),
+            "loc-", "ロケーション", width=6,
+        )
+        final_loc_ids = {lc.id for lc in self.locations}
+
+        sku_remap = _unique(
+            self.items,
+            lambda it: it.sku, lambda it, v: setattr(it, "sku", v),
+            "sku-", "商品", width=6,
+        )
+        final_skus = {it.sku for it in self.items}
+
+        # Only remap a reference when its old key no longer resolves to a real
+        # entry. For duplicate ids the FIRST holder keeps the original key, so a
+        # reference to that key is still valid and must NOT be redirected to the
+        # renamed duplicate. (Blank-origin renames have old == "" and never
+        # match a reference.)
+        loc_old_to_new = {
+            old: new for old, new in loc_remap.values()
+            if old and old not in final_loc_ids
+        }
+        sku_old_to_new = {
+            old: new for old, new in sku_remap.values()
+            if old and old not in final_skus
+        }
+
+        _unique(
+            self.orders.outbound,
+            lambda o: o.order_id, lambda o, v: setattr(o, "order_id", v),
+            "out-", "出荷オーダー", width=6,
+        )
+        _unique(
+            self.orders.inbound,
+            lambda o: o.order_id, lambda o, v: setattr(o, "order_id", v),
+            "in-", "入荷オーダー", width=6,
+        )
+
+        # Repair cross-references broken by the renames above.
+        if loc_old_to_new:
+            for it in self.items:
+                if it.default_location in loc_old_to_new:
+                    it.default_location = loc_old_to_new[it.default_location]
+        if sku_old_to_new:
+            for lc in self.locations:
+                if lc.sku in sku_old_to_new:
+                    lc.sku = sku_old_to_new[lc.sku]
+            for o in self.orders.outbound + self.orders.inbound:
+                for ln in o.lines:
+                    if ln.sku in sku_old_to_new:
+                        ln.sku = sku_old_to_new[ln.sku]
+
+        return warnings
 
 
 # Subtrees the importer recognises from dropped files (filename hints below).

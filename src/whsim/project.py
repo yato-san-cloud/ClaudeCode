@@ -129,19 +129,50 @@ class Project:
 
     # --- model / provenance ---------------------------------------------------
     def load_model(self) -> WarehouseModel:
-        return WarehouseModel.model_validate_json(self.model_file.read_text("utf-8"))
+        """Load the persisted model, recovering to defaults if the file is
+        missing, empty or corrupt. The 'always runnable' guarantee means a
+        truncated write (e.g. a crash on an older build) must never wedge a
+        project -- we fall back to an empty (valid) model rather than raise."""
+        try:
+            text = self.model_file.read_text("utf-8")
+        except (FileNotFoundError, OSError):
+            return WarehouseModel()
+        if not text.strip():
+            return WarehouseModel()
+        try:
+            return WarehouseModel.model_validate_json(text)
+        except Exception:  # noqa: BLE001 - corrupt JSON recovers to a valid model
+            return WarehouseModel()
 
     def save_model(self, model: WarehouseModel) -> None:
         _atomic_write(self.model_file, model.model_dump_json(indent=2))
 
     def load_provenance(self) -> Provenance:
-        return Provenance.from_dict(json.loads(self.provenance_file.read_text("utf-8")))
+        try:
+            text = self.provenance_file.read_text("utf-8")
+            d = json.loads(text) if text.strip() else {}
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        return Provenance.from_dict(d)
 
     def save_provenance(self, prov: Provenance) -> None:
         _write_json(self.provenance_file, prov.to_dict())
 
     def meta(self) -> dict:
-        return json.loads(self.project_file.read_text("utf-8"))
+        try:
+            text = self.project_file.read_text("utf-8")
+            d = json.loads(text) if text.strip() else {}
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        # Defensive defaults so callers that index meta()["template_id"] etc.
+        # never KeyError on a partially-written project.json.
+        d.setdefault("name", self.root.name)
+        d.setdefault("template_id", "ecommerce_small")
+        return d
 
     # --- import ---------------------------------------------------------------
     def import_zip(self, zip_path: str | Path):

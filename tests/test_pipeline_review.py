@@ -53,7 +53,14 @@ def test_import_with_missing_keys_is_not_fatal():
     items = [{"name": "no sku here"}, {"sku": "REAL", "name": "ok"}]
     res = import_bytes(tmpl, _zip({"product_master.json": json.dumps(items)}))
     assert len(res.model.items) == 2
-    assert res.model.items[0].sku == ""  # defaulted, not fatal
+    # A blank sku is no longer left as "" (that would collide with any other
+    # blank sku in a downstream dict map): normalize_ids auto-assigns a stable
+    # unique id. The row is kept, not dropped, and import is still not fatal.
+    assert res.model.items[0].sku != ""
+    assert res.model.items[0].sku not in {"REAL"}
+    assert {it.sku for it in res.model.items} == set(  # all unique, none lost
+        it.sku for it in res.model.items
+    ) and len({it.sku for it in res.model.items}) == 2
 
 
 def test_schema_round_trip_fidelity():

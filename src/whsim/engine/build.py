@@ -76,12 +76,25 @@ class World:
     use_graph: bool = False
     dist_overrides: dict = field(default_factory=dict)  # (rounded xy pair) -> metres
     workers: list[Worker] = field(default_factory=list)
+    helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
     events: list[dict] = field(default_factory=list)
     replay_window_s: float = 0.0            # only record keyframes up to this time
     zone_edges: list[float] = field(default_factory=list)  # x cut points dividing picking zones
+    _helper_seq: int = 0                    # monotonic id source for helper tracks
 
     def log(self, **kw) -> None:
         self.events.append(kw)
+
+    def helper_for(self, w: "Worker", zone: int) -> "Worker":
+        """A lightweight replay-only sub-worker track for one concurrent zone leg
+        of `w`. Parallel zoning runs several legs at the SAME simulated time, so
+        they cannot share `w.kf` (their keyframes would interleave and the worker
+        would appear to teleport). Each concurrent leg gets its own coherent
+        track instead; the primary worker `w` stays put while they run."""
+        self._helper_seq += 1
+        h = Worker(id=f"{w.id}.z{zone}#{self._helper_seq}", role=f"{w.role}-zone")
+        self.helpers.append(h)
+        return h
 
     def zone_of(self, p: tuple[float, float]) -> int:
         """Which picking zone (0..n_zones-1) a pick point falls in. Zones are
