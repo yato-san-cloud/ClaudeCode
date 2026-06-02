@@ -100,6 +100,25 @@ def register_plotly_template(name: str = "logi") -> None:
     pio.templates.default = f"plotly_white+{name}"
 
 
+# ── KPI hero cards (custom HTML — big numbers, clear hierarchy, KI-style) ─────
+def kpi_hero_html(cards: list[dict]) -> str:
+    """Render a responsive row of hero KPI cards from dicts:
+    {label, value, unit?, sub?, tone?('good'|'bad'|None)}.
+    One markdown block (CSS grid) so it reflows on mobile."""
+    cells = []
+    for c in cards:
+        tone = c.get("tone")
+        accent = {"good": SUCCESS, "bad": DANGER}.get(tone, PRIMARY)
+        unit = f"<span class='kpi-hero-unit'>{c['unit']}</span>" if c.get("unit") else ""
+        sub = f"<div class='kpi-hero-sub'>{c['sub']}</div>" if c.get("sub") else ""
+        cells.append(
+            f"<div class='kpi-hero-card' style='--kpi-accent:{accent}'>"
+            f"<div class='kpi-hero-label'>{c['label']}</div>"
+            f"<div class='kpi-hero-value'>{c['value']}{unit}</div>{sub}</div>"
+        )
+    return f"<div class='kpi-hero'>{''.join(cells)}</div>"
+
+
 # ── insight card ──────────────────────────────────────────────────────────────
 def insight_card_html(icon: str, title: str, detail: str, suggestion: str | None,
                       metric: str | None, severity: str) -> str:
@@ -158,6 +177,21 @@ def _css() -> str:
     }}
     div[data-testid="stMetricLabel"] {{ color:{INK_SOFT}; font-weight:600; }}
     div[data-testid="stMetricLabel"] p {{ font-size:.82rem; }}
+
+    /* Hero KPI cards (custom) — big numbers, top accent, clear hierarchy */
+    .kpi-hero {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+      gap:.8rem; margin:.4rem 0 .2rem; }}
+    .kpi-hero-card {{ position:relative; background:{SURFACE}; border:1px solid {LINE};
+      border-radius:.8rem; padding:1.05rem 1.15rem 1rem; overflow:hidden;
+      box-shadow:0 1px 2px rgba(16,40,80,.05); transition:box-shadow .15s, border-color .15s; }}
+    .kpi-hero-card::before {{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px;
+      background:var(--kpi-accent,{PRIMARY}); }}
+    .kpi-hero-card:hover {{ border-color:#C9D7E8; box-shadow:0 4px 14px rgba(16,40,80,.09); }}
+    .kpi-hero-label {{ color:{INK_SOFT}; font-size:.82rem; font-weight:600; margin-bottom:.3rem; }}
+    .kpi-hero-value {{ color:{INK}; font-size:2.05rem; font-weight:800; line-height:1.05;
+      font-variant-numeric:tabular-nums; letter-spacing:-.01em; }}
+    .kpi-hero-unit {{ font-size:.9rem; font-weight:600; color:{INK_FAINT}; margin-left:.28rem; }}
+    .kpi-hero-sub {{ color:{INK_FAINT}; font-size:.78rem; margin-top:.35rem; }}
 
     /* Tabs → underline-active, comfortable hit area */
     div[data-baseweb="tab-list"] {{

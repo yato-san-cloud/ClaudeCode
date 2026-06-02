@@ -528,6 +528,18 @@ with tab_sum:
                 st.rerun()
         st.divider()
 
+    # ── ヒーローKPI: 最初に見る4指標（主従を明確に / KI 風の大きな数字） ──────
+    _dead_rate = (k["dead_sku_rate"] or 0) * 100 if not pd.isna(k["dead_sku_rate"]) else None
+    st.markdown(theme.kpi_hero_html([
+        {"label": "総出荷ピース", "value": _fmt(k["total_pcs_out"]), "unit": "pcs", "sub": "期間合計"},
+        {"label": "ピーク曜日", "value": k["peak_weekday"] or "—", "sub": "最も忙しい曜日"},
+        {"label": "平均回転率", "value": _fmt(k["avg_turnover"], 2), "unit": "回", "sub": "出荷 ÷ 在庫 の平均"},
+        {"label": "デッドストック率",
+         "value": _fmt(_dead_rate, 1) if _dead_rate is not None else "—", "unit": "%",
+         "sub": (f"{k['dead_sku_count']:,} / {k['sku_master']:,} SKU" if k["sku_master"] else "在庫データ未取込"),
+         "tone": "bad" if (_dead_rate or 0) >= 10 else None},
+    ]), unsafe_allow_html=True)
+
     # Row 1: ボリューム
     st.markdown("##### 📦 ボリューム")
     c = st.columns(4)
