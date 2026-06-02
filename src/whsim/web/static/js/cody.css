@@ -1,0 +1,222 @@
+/* ============================================================
+   Cody mascot — companion + speech bubble styles.
+
+   Self-contained. Consumes the app's CSS variables where present
+   (--bg-app, --ink-primary, --line-hair, --accent, --bad, --warn,
+   --ok) and falls back to Cody's own palette otherwise. Fonts are
+   inherited from the app (Inter + Noto Sans JP); none are imported.
+   Dark mode is handled via html[data-theme="dark"] overrides.
+   ============================================================ */
+
+.cody-root {
+  /* local fallbacks layered under the app variables */
+  --cody-bubble-bg: var(--bg-app, #fbf7ef);
+  --cody-bubble-ink: var(--ink-primary, #211c17);
+  --cody-bubble-line: var(--line-hair, rgba(55, 53, 47, 0.16));
+  --cody-accent: var(--accent, #d97757);
+  --cody-bad: var(--bad, #c4453f);
+  --cody-warn: var(--warn, #b7791f);
+  --cody-ok: var(--ok, #2e7d55);
+
+  box-sizing: border-box;
+  font-family: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  pointer-events: none; /* children re-enable */
+}
+
+.cody-root * {
+  box-sizing: border-box;
+}
+
+/* ---------- floating companion placement ---------- */
+.cody-companion {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* ---------- the mascot figure ---------- */
+.cody-figure {
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  filter: drop-shadow(0 10px 18px rgba(33, 28, 23, 0.22));
+  transition: transform 0.18s ease;
+}
+
+.cody-companion .cody-figure {
+  width: 92px;
+  height: auto;
+  animation: cody-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both,
+    cody-float 4.5s ease-in-out 0.5s infinite;
+}
+
+.cody-figure:hover {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.cody-figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* ---------- speech bubble (appears above the mascot) ---------- */
+.cody-bubble {
+  pointer-events: auto;
+  position: relative;
+  max-width: 260px;
+  min-width: 120px;
+  padding: 12px 30px 12px 14px;
+  background: var(--cody-bubble-bg);
+  color: var(--cody-bubble-ink);
+  border: 1px solid var(--cody-bubble-line);
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  box-shadow: 0 14px 30px -16px rgba(33, 28, 23, 0.5),
+    0 2px 6px rgba(33, 28, 23, 0.08);
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  transform-origin: bottom right;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cody-bubble.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.cody-bubble-text {
+  display: block;
+  word-break: break-word;
+}
+
+/* little tail pointing down toward Cody (companion is right-aligned) */
+.cody-companion .cody-bubble::after {
+  content: "";
+  position: absolute;
+  right: 28px;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  background: var(--cody-bubble-bg);
+  border-right: 1px solid var(--cody-bubble-line);
+  border-bottom: 1px solid var(--cody-bubble-line);
+  transform: rotate(45deg);
+}
+
+/* close / dismiss affordance */
+.cody-bubble-close {
+  pointer-events: auto;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cody-bubble-ink);
+  opacity: 0.5;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.cody-bubble-close:hover {
+  opacity: 1;
+  background: var(--cody-bubble-line);
+}
+
+/* mood-tinted left edge to echo app status colors */
+.cody-root[data-mood="error"] .cody-bubble {
+  border-left: 3px solid var(--cody-bad);
+}
+.cody-root[data-mood="success"] .cody-bubble,
+.cody-root[data-mood="excited"] .cody-bubble {
+  border-left: 3px solid var(--cody-ok);
+}
+.cody-root[data-mood="curious"] .cody-bubble,
+.cody-root[data-mood="thinking"] .cody-bubble {
+  border-left: 3px solid var(--cody-accent);
+}
+
+/* ---------- hide / show ---------- */
+.cody-hidden {
+  display: none !important;
+}
+
+/* ---------- animations ---------- */
+@keyframes cody-enter {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cody-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cody-companion .cody-figure {
+    animation: cody-enter 0.42s ease both;
+  }
+}
+
+/* ---------- mobile sizing ---------- */
+@media (max-width: 880px) {
+  .cody-companion {
+    right: 12px;
+    bottom: 12px;
+    gap: 6px;
+  }
+  .cody-companion .cody-figure {
+    width: 68px;
+  }
+  .cody-bubble {
+    max-width: 200px;
+    font-size: 12.5px;
+    padding: 10px 26px 10px 12px;
+  }
+}
+
+/* ---------- dark mode ---------- */
+html[data-theme="dark"] .cody-root {
+  /* When the app flips theme, its --bg-app/--ink-primary already
+     update; these provide readable fallbacks if they don't. */
+  --cody-bubble-bg: var(--bg-app, #211c17);
+  --cody-bubble-ink: var(--ink-primary, #f5eee3);
+  --cody-bubble-line: var(--line-hair, rgba(245, 238, 227, 0.18));
+}
+
+html[data-theme="dark"] .cody-bubble {
+  box-shadow: 0 14px 32px -14px rgba(0, 0, 0, 0.7),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+html[data-theme="dark"] .cody-figure {
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.5));
+}

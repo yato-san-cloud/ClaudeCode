@@ -3,6 +3,8 @@ import { Scene3D } from './js/view3d.js';
 import { Designer } from './js/designer.js';
 import { CompareView } from './js/compare.js';
 import { ExportView } from './js/export.js';
+import { mountAnalysis } from './js/analysis.js';
+import { mountCody } from './js/cody.js';
 
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
@@ -23,7 +25,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
-  export: null, preset: 'natural',
+  export: null, cody: null, preset: 'natural',
   t: 0, window: 1, playing: true, speed: 60, view: 'design',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -263,15 +265,19 @@ async function runSim() {
   if (!S.project) return;
   $('runBtn').disabled = true;
   $('status').textContent = '重厚なシミュレーションを実行中…';
+  cody('thinking', 'シミュレーション中…動きを最後まで追ってるよ。');
   try {
     const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
     renderKpis(r.kpis);
     await loadReplay();
     $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
     if (S.export) S.export.refresh();
+    if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
     $('status').textContent = `完了（${r.run}）。`;
+    cody('success', '完了！「分析」タブに指摘と次の一手をまとめたよ。');
   } catch (e) {
     $('status').textContent = 'エラー: ' + e.message;
+    cody('error', 'エラー: ' + e.message + ' — 落ち着いて直そう。');
   } finally {
     $('runBtn').disabled = false;
   }
@@ -382,6 +388,27 @@ async function uploadCad(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; }
 }
 
+// ---- theme (light/dark, manual toggle, persisted) -------------------------
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = $('themeToggle');
+  if (btn) btn.textContent = theme === 'dark' ? '☀ ライト' : '🌙 ダーク';
+  // Let canvas/SVG views (2D replay, analysis charts) re-read colors.
+  document.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
+}
+function initTheme() {
+  const saved = localStorage.getItem('whsim-theme');
+  applyTheme(saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+}
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('whsim-theme', next);
+  applyTheme(next);
+}
+
+// ---- Cody mascot companion (help / suggestion / error reactions) -----------
+function cody(mood, say) { if (S.cody) S.cody.setMood(mood, say ? { say } : {}); }
+
 // ---- wire up ---------------------------------------------------------------
 function initUI() {
   $('createBtn').onclick = async () => {
@@ -394,8 +421,10 @@ function initUI() {
       });
       await refreshProjects(name);
       await openProject(name);
+      cody('excited', `「${name}」を用意したよ。まずは設計を触ってみよう。`);
     } catch (e) {
       $('status').textContent = '作成に失敗: ' + e.message;
+      cody('error', '作成でつまずいた: ' + e.message + ' — 直せるよ。');
     }
   };
   $('projectSelect').onchange = (e) => { if (e.target.value) openProject(e.target.value); };
@@ -412,11 +441,18 @@ function initUI() {
     $(S.view).classList.add('active');
     // Designer sets inline display on #design; override it so the panel hides.
     $('design').style.display = (S.view === 'design') ? 'flex' : 'none';
+    // The replay transport only belongs to the 2D/3D animation views.
+    const replayView = (S.view === 'view2d' || S.view === 'view3d');
+    document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
+    $('kpiBar').style.display = (S.view === 'analysis') ? 'none' : '';
     if (S.view === 'design') { mountDesigner(); }
+    if (S.view === 'analysis') { mountAnalysis($('analysis'), S.project); cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
     if (S.view === 'view3d') { mount3d(); }
     if (S.view === 'view2d') fitCanvas();
     if (S.view === 'export') mountExport();
   });
+
+  $('themeToggle').onclick = toggleTheme;
 
   $('presetSelect').onchange = (e) => {
     S.preset = e.target.value;
@@ -466,11 +502,16 @@ function initUI() {
     if (S.designer) S.designer.resize();
   });
   $('playBtn').disabled = true; $('scrub').disabled = true; // until a run exists
+  // Default view is 設計 (not a replay view): hide the transport until 2D/3D.
+  document.querySelector('.transport').style.display = 'none';
   fitCanvas();
 }
 
 (async function main() {
+  initTheme();
   initUI();
+  S.cody = mountCody(document.body, { mood: 'idle' });
+  S.cody.say('プロジェクトを作るか、既存を開いてはじめよう。', { mood: 'idle', ms: 6000 });
   await loadTemplates();
   await refreshProjects();
   requestAnimationFrame(loop);

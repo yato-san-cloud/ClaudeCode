@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>whsim — 倉庫シミュレータ</title>
   <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./js/cody.css" />
 </head>
 <body>
   <header>
     <div class="brand">whsim<span>倉庫シミュレータ</span></div>
-    <div class="provenance" id="provenance">— your data</div>
+    <div class="header-tools">
+      <div class="provenance" id="provenance">— your data</div>
+      <button id="themeToggle" type="button" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
+    </div>
   </header>
 
   <div class="layout">
@@ -59,6 +63,7 @@
     <main class="main">
       <div class="tabs">
         <button data-tab="design" class="tab active">設計</button>
+        <button data-tab="analysis" class="tab">分析</button>
         <button data-tab="view2d" class="tab">2D アニメーション</button>
         <button data-tab="view3d" class="tab">3D</button>
         <button data-tab="viewpng" class="tab">提案PNG</button>
@@ -76,6 +81,7 @@
 
       <div class="stage">
         <div id="design" class="panel active"></div>
+        <div id="analysis" class="panel"></div>
         <div id="view2d" class="panel">
           <canvas id="canvas2d"></canvas>
         </div>

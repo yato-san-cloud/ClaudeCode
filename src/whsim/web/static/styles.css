@@ -1029,8 +1029,10 @@ input[type="range"]::-moz-range-track {
 /* =============================================================================
    Dark mode (improved; mirrors Notion's dim surfaces with warm-neutral ink)
    ============================================================================= */
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Manual dark toggle: html[data-theme="dark"]. JS chooses the initial theme
+   (localStorage > OS preference) and dispatches a "themechange" event on flip
+   so canvas/SVG views can re-read colors. */
+html[data-theme="dark"] {
     --bg-app:        #1F1F1E;
     --bg-sunken:     #1A1A19;
     --bg-panel:      #262625;
@@ -1068,13 +1070,15 @@ input[type="range"]::-moz-range-track {
     --sh-sm:  0 1px 2px rgba(0,0,0,0.45), 0 2px 4px rgba(0,0,0,0.4);
     --sh-md:  0 2px 6px rgba(0,0,0,0.5);
     --sh-lg:  0 10px 30px rgba(0,0,0,0.55);
-  }
-  #pngImg, .proposal-sheet, .export-proposal, .proposal-block { background: #fff; color: #1f1f1e; }
-  .proposal-verdict { background: var(--ok-tint); color: var(--ok-ink); }
-  #playBtn { background: var(--ink-primary); color: var(--bg-app); border-color: var(--ink-primary); }
-  #playBtn:hover { background: #fff; color: var(--bg-app); border-color: #fff; }
-  .brand::before { background: var(--ink-primary); color: var(--bg-app); }
 }
+html[data-theme="dark"] #pngImg,
+html[data-theme="dark"] .proposal-sheet,
+html[data-theme="dark"] .export-proposal,
+html[data-theme="dark"] .proposal-block { background: #fff; color: #1f1f1e; }
+html[data-theme="dark"] .proposal-verdict { background: var(--ok-tint); color: var(--ok-ink); }
+html[data-theme="dark"] #playBtn { background: var(--ink-primary); color: var(--bg-app); border-color: var(--ink-primary); }
+html[data-theme="dark"] #playBtn:hover { background: #fff; color: var(--bg-app); border-color: #fff; }
+html[data-theme="dark"] .brand::before { background: var(--ink-primary); color: var(--bg-app); }
 
 /* ---- polish pass: fix cramped text wrapping & density ---- */
 .headline .field { gap: 10px; align-items: center; }
@@ -1083,3 +1087,161 @@ input[type="range"]::-moz-range-track {
 .kpi { min-width: 138px; flex: 1 1 auto; }
 .kpi .v { white-space: nowrap; font-size: 19px; line-height: 1.25; }
 .kpi .k { white-space: nowrap; }
+
+/* =============================================================================
+   Analysis design system (consolidated from the 3PL analysis tool, Notion-style)
+   Tokens for flow / rank / heatmap, then the callout / KPI / chart / table
+   components consumed by js/analysis.js. Colors flow through CSS vars so the
+   manual dark toggle and any SVG charts follow the theme.
+   ============================================================================= */
+:root {
+  --up:        #4AA564;  --up-tint:   #EDF3EC;
+  --down:      #E5484D;  --down-tint: #FDEBEC;
+  --inbound:   #2383E2;  --outbound:  #0D9488;
+  --rank-a:    #1C5FA8;  --rank-b:    #5B9BD5;  --rank-c: #B9D3EE;
+  --heat-0: #F0F6FC; --heat-1: #CFE3F6; --heat-2: #9CC6EC;
+  --heat-3: #5B9BD5; --heat-4: #2B6CB0; --heat-5: #1A4F8A;
+}
+html[data-theme="dark"] {
+  --up:        #4FB07C;  --up-tint:   #16271D;
+  --down:      #E0726B;  --down-tint: #2C1817;
+  --inbound:   #5AA7EE;  --outbound:  #2DD4BF;
+  --rank-a:    #4E84BD;  --rank-b:    #79AEDE;  --rank-c: #A8CDF0;
+  --heat-0: #232A33; --heat-1: #2C4660; --heat-2: #38618C;
+  --heat-3: #4E84BD; --heat-4: #79AEDE; --heat-5: #A8CDF0;
+}
+
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* ---- Analysis view shell --------------------------------------------------- */
+#analysis.panel { overflow: auto; padding: var(--sp-6) var(--sp-8); }
+.an-view { max-width: 1080px; margin: 0 auto; }
+.an-section { margin-bottom: var(--sp-8); }
+.an-section-title {
+  font-size: var(--fs-title); font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-title); color: var(--ink-primary);
+  margin: 0 0 var(--sp-4); display: flex; align-items: center; gap: var(--sp-3);
+}
+.an-section-title .sub { font-size: var(--fs-sm); font-weight: var(--fw-regular); color: var(--ink-tertiary); }
+.an-divider { height: 1px; background: var(--line-hair); border: 0; margin: var(--sp-8) 0; }
+.an-empty { color: var(--ink-tertiary); font-size: var(--fs-sm); padding: var(--sp-6); text-align: center; }
+
+/* ---- Callout (insight: 指摘 → 提案) ---------------------------------------- */
+.callout {
+  position: relative; display: grid; grid-template-columns: auto 1fr auto;
+  gap: var(--sp-3); align-items: start;
+  padding: 14px 16px 14px 18px; border-radius: var(--r-md);
+  background: var(--bg-panel); margin-bottom: var(--sp-2);
+}
+.callout::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  border-radius: var(--r-md) 0 0 var(--r-md); background: var(--ink-tertiary);
+}
+.callout.danger { background: var(--bad-tint); }
+.callout.danger::before { background: var(--bad); }
+.callout.warn   { background: var(--warn-tint); }
+.callout.warn::before   { background: var(--warn); }
+.callout.info   { background: var(--accent-tint); }
+.callout.info::before   { background: var(--accent); }
+.callout.ok     { background: var(--ok-tint); }
+.callout.ok::before     { background: var(--ok); }
+.callout .c-icon { width: 26px; height: 26px; display: grid; place-items: center; color: var(--ink-secondary); }
+.callout.danger .c-icon { color: var(--bad-ink); }
+.callout.warn   .c-icon { color: var(--warn-ink); }
+.callout.info   .c-icon { color: var(--accent-ink); }
+.callout.ok     .c-icon { color: var(--ok-ink); }
+.callout .c-icon svg { width: 22px; height: 22px; }
+.c-title { font-size: var(--fs-body); font-weight: var(--fw-semibold); color: var(--ink-primary); }
+.c-fact  { font-size: var(--fs-sm); color: var(--ink-secondary); margin-top: 2px; }
+.c-fact .num { font-weight: var(--fw-semibold); color: var(--ink-primary); }
+.c-action {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px;
+  font-size: var(--fs-sm); font-weight: var(--fw-medium); text-decoration: none;
+  padding: 4px 10px; border-radius: var(--r-pill);
+  background: rgba(255,255,255,0.6); color: var(--ink-secondary); cursor: default;
+}
+html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
+.callout.danger .c-action { color: var(--bad-ink); }
+.callout.warn   .c-action { color: var(--warn-ink); }
+.callout.ok     .c-action { color: var(--ok-ink); }
+.c-metric { font-size: 22px; font-weight: var(--fw-bold); line-height: 1.2; white-space: nowrap; }
+.callout.danger .c-metric { color: var(--bad-ink); }
+.callout.warn   .c-metric { color: var(--warn-ink); }
+.callout.info   .c-metric { color: var(--accent-ink); }
+.callout.ok     .c-metric { color: var(--ok-ink); }
+
+/* ---- KPI: hero grid + standard cards --------------------------------------- */
+.kpi-hero {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--line-hair); border: 1px solid var(--line-hair);
+  border-radius: var(--r-md); overflow: hidden;
+}
+.kpi-hero-cell { background: var(--bg-app); padding: 14px 16px; }
+.kpi-hero-cell .kpi-label { font-size: var(--fs-sm); color: var(--ink-secondary); }
+.kpi-hero-cell .kpi-value { font-size: var(--fs-metric-lg); font-weight: var(--fw-bold);
+  color: var(--ink-primary); line-height: 1.15; margin-top: 4px; }
+.kpi-value .kpi-unit { font-size: 14px; font-weight: var(--fw-medium); color: var(--ink-tertiary); margin-left: 3px; }
+.delta { display: inline-flex; align-items: center; gap: 3px; margin-top: 6px;
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold); padding: 1px 8px; border-radius: var(--r-pill); }
+.delta.up   { color: var(--up);   background: var(--up-tint); }
+.delta.down { color: var(--down); background: var(--down-tint); }
+.kpi-group { margin-top: var(--sp-5); }
+.kpi-group-label { display: flex; align-items: center; gap: 8px;
+  font-size: var(--fs-section); font-weight: var(--fw-semibold); color: var(--ink-secondary); margin-bottom: var(--sp-3); }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); }
+.kpi-card { border: 1px solid var(--line-hair); border-radius: var(--r-sm); padding: 13px 15px; background: var(--bg-app); }
+.kpi-card .kpi-label { font-size: var(--fs-xs); color: var(--ink-secondary); }
+.kpi-card .kpi-value { font-size: 23px; font-weight: var(--fw-semibold); color: var(--ink-primary); margin-top: 3px; }
+
+/* ---- Chart card ------------------------------------------------------------ */
+.chart-card { border: 1px solid var(--line-hair); border-radius: var(--r-md); padding: 18px 20px; background: var(--bg-app); }
+.chart-card + .chart-card { margin-top: var(--sp-4); }
+.chart-title { font-size: var(--fs-section); font-weight: var(--fw-semibold); color: var(--ink-primary); }
+.chart-sub { font-size: var(--fs-xs); color: var(--ink-tertiary); margin-top: 2px; margin-bottom: var(--sp-3); }
+.chart-card svg { width: 100%; height: auto; display: block; }
+.an-grid-2, .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.callouts { display: block; }
+.c-main { min-width: 0; }
+
+/* ---- Table ----------------------------------------------------------------- */
+.tbl-wrap { border: 1px solid var(--line-hair); border-radius: var(--r-md); overflow: hidden; }
+.ntbl { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.ntbl thead th { background: var(--bg-sunken); color: var(--ink-secondary);
+  font-weight: var(--fw-semibold); font-size: var(--fs-xs); text-align: left; padding: 9px 14px; }
+.ntbl td { padding: 9px 14px; border-top: 1px solid var(--line-hair); color: var(--ink-primary); }
+.ntbl td.n, .ntbl th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.ntbl tr.hl td { background: var(--warn-tint); }
+.tag { display: inline-block; font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  padding: 1px 9px; border-radius: var(--r-pill); }
+.tag.grow { color: var(--ok-ink); background: var(--ok-tint); }
+.tag.new  { color: var(--accent-ink); background: var(--accent-tint); }
+.tag.rank-a { color: #fff; background: var(--rank-a); }
+.tag.rank-b { color: #fff; background: var(--rank-b); }
+.tag.rank-c { color: var(--ink-primary); background: var(--rank-c); }
+
+/* ---- Header: dark-mode toggle --------------------------------------------- */
+.header-tools { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.header-tools #provenance { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 880px) { .header-tools #provenance { display: none; } }
+#themeToggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: var(--fs-sm); color: var(--ink-secondary);
+  background: var(--bg-panel); border: 1px solid var(--line-hair);
+  border-radius: var(--r-pill); padding: 5px 12px;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+#themeToggle:hover { background: var(--bg-hover); color: var(--ink-primary); }
+
+/* ---- Responsive (≤880px): match the handoff's mobile collapse -------------- */
+@media (max-width: 880px) {
+  #analysis.panel { padding: var(--sp-4); }
+  .kpi-hero { grid-template-columns: repeat(2, 1fr); }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .an-grid-2 { grid-template-columns: 1fr; }
+  .callout { grid-template-columns: auto 1fr; }
+  .callout .c-metric { grid-column: 2; justify-self: start; }
+}
+@media (max-width: 460px) {
+  .kpi-hero { grid-template-columns: 1fr 1fr; }
+  .kpi-grid { grid-template-columns: 1fr; }
+}

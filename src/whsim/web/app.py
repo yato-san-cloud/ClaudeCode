@@ -328,6 +328,29 @@ def api_compare_png(name: str, cmp: str, i: int):
     return FileResponse(png)
 
 
+@app.get("/api/projects/{name}/analysis")
+def api_analysis(name: str):
+    """Analysis-dashboard payload (the "分析" tab).
+
+    Consolidates an analysis-tool-style summary INTO whsim: it reshapes the
+    project's KPIs into insights ("指摘 -> 提案"), a hero/grouped KPI hierarchy,
+    and a couple of small chart series. Honours whsim's "never blocks" invariant:
+    if no SimPy run exists yet it falls back to the closed-form analytic estimate
+    so the view always has something to show.
+    """
+    proj = _open(name)
+    model = proj.load_model()
+    rd = proj.latest_run_dir()
+    source = "run"
+    if rd is not None and (rd / "kpis.json").is_file():
+        metrics = json.loads((rd / "kpis.json").read_text("utf-8"))
+    else:
+        # No heavyweight run yet: instant analytic estimate keeps the view alive.
+        metrics = analytic.estimate(model)
+        source = "estimate"
+    return _analysis_payload(model, metrics, source)
+
+
 @app.get("/api/projects/{name}/replay")
 def api_replay(name: str):
     proj = _open(name)
@@ -344,6 +367,203 @@ def api_png(name: str):
     if rd is None or not (rd / "layout_heatmap.png").is_file():
         raise HTTPException(404, "no png yet")
     return FileResponse(rd / "layout_heatmap.png")
+
+
+def _analysis_payload(model, metrics: dict, source: str) -> dict:
+    """Reshape whsim KPIs into the analysis-dashboard contract.
+
+    Output:
+      {
+        source: "run" | "estimate",
+        verdict: str | None,
+        insights: [{severity, icon, title, fact, metric, action}],
+        kpis: {hero: [{label, value, unit, delta}],
+               groups: [{label, items:[{label, value, unit}]}]},
+        charts: {stages: {...}, cost: {...}},
+      }
+    Defensive: every metric is read with .get and a default, so a thin analytic
+    estimate (few keys) renders just as safely as a full Monte-Carlo run.
+    """
+    def g(key, default=0.0):
+        v = metrics.get(key, default)
+        return v if isinstance(v, (int, float)) else default
+
+    cur = metrics.get("currency", "¥")
+    pickers = int(g("n_pickers", 0))
+    packers = int(g("n_packers", 0))
+    headcount = int(g("headcount", pickers + packers))
+    bottleneck_jp = metrics.get("bottleneck_jp")
+    bn_util = g("bottleneck_utilization", g("picker_utilization", 0.0))
+    completion = g("completion_rate", 1.0)
+    pick_wait = metrics.get("pick_wait_mean_s")
+    sort_wait = g("sort_wait_mean_s", 0.0)
+    cost_per_order = g("total_cost_per_order", 0.0)
+    monthly_cost = g("monthly_cost", 0.0)
+    can_handle = bool(metrics.get("can_handle_demand", not metrics.get("overloaded", False)))
+
+    # --- insights: "指摘 -> 提案" ------------------------------------------
+    insights: list[dict] = []
+
+    # 1) Bottleneck / capacity (danger if demand not met, warn if hot).
+    if bottleneck_jp:
+        wait_min = (pick_wait / 60.0) if isinstance(pick_wait, (int, float)) else None
+        add_stage = {"梱包": "梱包台を1台増設", "ピッキング": "ピッカーを1名増員",
+                     "AGV搬送": "AGVを1台追加", "種まき仕分け": "仕分け間口を増設"}
+        action = f"{add_stage.get(bottleneck_jp, '当該工程の能力を増強')}で改善を検討。"
+        if not can_handle:
+            wtxt = f"（待ち {wait_min:.1f}分）" if wait_min is not None else ""
+            insights.append({
+                "severity": "danger", "icon": "alert",
+                "title": f"{bottleneck_jp}がボトルネック{wtxt}",
+                "fact": f"稼働率 <span class=\"num\">{round(bn_util * 100)}</span>% / "
+                        f"出荷完了 <span class=\"num\">{round(completion * 100)}</span>%。",
+                "metric": f"{round(bn_util * 100)}%",
+                "action": action,
+            })
+        elif bn_util >= 0.85:
+            insights.append({
+                "severity": "warn", "icon": "trend",
+                "title": f"{bottleneck_jp}の稼働率が高水準",
+                "fact": f"稼働率 <span class=\"num\">{round(bn_util * 100)}</span>%。"
+                        f"需要増で逼迫の恐れ。",
+                "metric": f"{round(bn_util * 100)}%",
+                "action": f"繁忙時間帯の{bottleneck_jp}増強余地を確認。",
+            })
+        else:
+            insights.append({
+                "severity": "ok", "icon": "check",
+                "title": f"{bottleneck_jp}に余力あり（需要をさばけます）",
+                "fact": f"最繁忙工程の稼働率 <span class=\"num\">{round(bn_util * 100)}</span>%。",
+                "metric": f"{round(bn_util * 100)}%",
+            })
+
+    # 2) Sort/put-wall queueing (warn) if material.
+    if sort_wait >= 30.0:
+        insights.append({
+            "severity": "warn", "icon": "bars",
+            "title": f"種まき仕分けで待ちが発生（平均 {sort_wait / 60.0:.1f}分）",
+            "fact": f"間口数 <span class=\"num\">{int(g('n_put_wall', 0))}</span> 口。",
+            "metric": f"{sort_wait / 60.0:.1f}分",
+            "action": "仕分け間口の追加、または波の平準化を検討。",
+        })
+
+    # 3) AGV under/over-utilisation (info) when an AGV fleet is present.
+    n_agvs = int(g("n_agvs", 0))
+    if n_agvs:
+        agv_u = g("agv_utilization", 0.0)
+        insights.append({
+            "severity": "info", "icon": "info",
+            "title": f"AGV {n_agvs}台の稼働率は {round(agv_u * 100)}%",
+            "fact": "低稼働なら台数の見直し、高稼働なら増車の検討材料。",
+            "metric": f"{round(agv_u * 100)}%",
+        })
+
+    # 4) Cost-per-order (info) when costed.
+    if cost_per_order > 0:
+        insights.append({
+            "severity": "info", "icon": "info",
+            "title": "1件あたり処理コスト",
+            "fact": f"人件費・設備費を合算。月次コスト概算 "
+                    f"<span class=\"num\">{cur}{round(monthly_cost):,}</span>。",
+            "metric": f"{cur}{cost_per_order:,.1f}",
+        })
+
+    # --- hero KPIs ----------------------------------------------------------
+    hero: list[dict] = []
+    tput = g("throughput_per_hr", g("capacity_orders_per_hr", 0.0))
+    if tput:
+        hero.append({"label": "処理能力", "value": round(tput),
+                     "unit": "件/時", "delta": None})
+    hero.append({"label": "出荷完了率", "value": round(completion * 100),
+                 "unit": "%",
+                 "delta": {"dir": "up" if completion >= 0.98 else "down",
+                           "text": "需要をさばけます" if can_handle else "要注意"}})
+    if bottleneck_jp:
+        hero.append({"label": f"{bottleneck_jp}稼働率", "value": round(bn_util * 100),
+                     "unit": "%",
+                     "delta": {"dir": "down" if bn_util >= 0.85 else "up",
+                               "text": "高負荷" if bn_util >= 0.85 else "余力あり"}})
+    if cost_per_order > 0:
+        hero.append({"label": "1件あたりコスト", "value": round(cost_per_order, 1),
+                     "unit": cur, "delta": None})
+    if len(hero) < 4 and headcount:
+        hero.append({"label": "必要人員", "value": headcount, "unit": "名", "delta": None})
+
+    # --- grouped standard KPIs ---------------------------------------------
+    groups: list[dict] = []
+    vol = [it for it in (
+        {"label": "到着オーダー", "value": round(g("orders_arrived")), "unit": "件"},
+        {"label": "完了オーダー", "value": round(g("orders_completed")), "unit": "件"},
+        {"label": "総歩行距離", "value": round(g("walk_total_m")), "unit": "m"},
+        {"label": "1件あたり歩行", "value": round(g("walk_per_order_m"), 1), "unit": "m"},
+    ) if it["value"]]
+    if vol:
+        groups.append({"label": "ボリューム", "items": vol})
+
+    eff = []
+    if g("picker_utilization"):
+        eff.append({"label": "ピッキング稼働率",
+                    "value": round(g("picker_utilization") * 100), "unit": "%"})
+    if g("packer_utilization"):
+        eff.append({"label": "梱包稼働率",
+                    "value": round(g("packer_utilization") * 100), "unit": "%"})
+    if g("cycle_mean_s"):
+        eff.append({"label": "平均サイクル",
+                    "value": round(g("cycle_mean_s") / 60.0, 1), "unit": "分"})
+    if g("on_time_rate"):
+        eff.append({"label": "納期遵守率",
+                    "value": round(g("on_time_rate") * 100), "unit": "%"})
+    if eff:
+        groups.append({"label": "効率指標", "items": eff})
+
+    cost_items = []
+    if cost_per_order > 0:
+        cost_items.append({"label": "1件あたりコスト",
+                           "value": round(cost_per_order, 1), "unit": cur})
+    if monthly_cost > 0:
+        cost_items.append({"label": "月次コスト",
+                           "value": round(monthly_cost), "unit": cur})
+    if g("monthly_opex") > 0:
+        cost_items.append({"label": "月次運用費",
+                           "value": round(g("monthly_opex")), "unit": cur})
+    if headcount:
+        cost_items.append({"label": "人員", "value": headcount, "unit": "名"})
+    if cost_items:
+        groups.append({"label": "コスト・人員", "items": cost_items})
+
+    # --- charts -------------------------------------------------------------
+    # (a) per-stage utilisation (bar): the congestion picture.
+    stage_rows = [("ピッキング", g("picker_utilization")),
+                  ("梱包", g("packer_utilization"))]
+    if n_agvs:
+        stage_rows.append(("AGV搬送", g("agv_utilization")))
+    if int(g("n_put_wall", 0)):
+        stage_rows.append(("種まき仕分け", g("sort_utilization")))
+    stages_chart = {
+        "labels": [r[0] for r in stage_rows],
+        "values": [round(r[1] * 100, 1) for r in stage_rows],
+        "peak_label": bottleneck_jp,
+    }
+
+    # (b) cost breakdown (bar) per order: labour vs equipment.
+    labour_po = g("labour_cost_per_order")
+    equip_po = g("equipment_cost_per_order")
+    cost_chart = None
+    if labour_po or equip_po:
+        cost_chart = {
+            "labels": ["人件費", "設備費"],
+            "values": [round(labour_po, 2), round(equip_po, 2)],
+            "currency": cur,
+        }
+
+    return {
+        "name": model.meta.name,
+        "source": source,
+        "verdict": metrics.get("verdict"),
+        "insights": insights,
+        "kpis": {"hero": hero[:4], "groups": groups},
+        "charts": {"stages": stages_chart, "cost": cost_chart},
+    }
 
 
 def _open(name: str) -> Project:
