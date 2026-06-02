@@ -1070,63 +1070,65 @@ input[type="range"]::-moz-range-track {
    (localStorage > OS preference) and dispatches a "themechange" event on flip
    so canvas/SVG views can re-read colors. */
 html[data-theme="dark"] {
-    --bg-app:        #1F1F1E;
-    --bg-sunken:     #1A1A19;
-    --bg-panel:      #262625;
-    --bg-hover:      #2C2C2A;
-    --bg-active:     #34332F;
+    /* ClaudeDesign handoff — dark-first (cool slate surfaces + brand cyan) */
+    --bg-app:        #0F141D;
+    --bg-sunken:     #121823;
+    --bg-panel:      #161D29;
+    --bg-hover:      #1A2230;
+    --bg-active:     #202B3B;
 
-    --ink-primary:   #EDEAE3;
-    --ink-secondary: rgba(237,234,227,0.66);
-    --ink-tertiary:  rgba(237,234,227,0.46);
-    --ink-faint:     rgba(237,234,227,0.30);
+    --ink-primary:   #E6EDF4;
+    --ink-secondary: rgba(230,237,244,0.66);
+    --ink-tertiary:  rgba(230,237,244,0.46);
+    --ink-faint:     rgba(230,237,244,0.30);
+    --ink-onAccent:  #04222C;
 
-    --line-hair:     rgba(255,255,255,0.09);
-    --line-soft:     rgba(255,255,255,0.05);
-    --line-strong:   rgba(255,255,255,0.18);
-    --line-focus:    #4FA0EE;
+    --line-hair:     rgba(150,172,200,0.12);
+    --line-soft:     rgba(150,172,200,0.07);
+    --line-strong:   rgba(150,172,200,0.22);
+    --line-focus:    #34E3FF;
 
-    --accent:        #4FA0EE;
-    --accent-hover:  #6BB1F2;
-    --accent-press:  #3C8FE0;
-    --accent-tint:   #1E2C3C;
-    --accent-tint-2: #284563;
-    --accent-ink:    #9CC9F4;
+    --accent:        #34E3FF;
+    --accent-hover:  #5CEBFF;
+    --accent-press:  #18C7E6;
+    --accent-tint:   #0E2531;
+    --accent-tint-2: #123642;
+    --accent-ink:    #7EF6FF;
 
-    --ok:        #4FB07C;   --ok-ink:   #8FD3AC;
-    --ok-tint:   #16271D;   --ok-line:  #2A4A37;
-    --warn:      #D29A3E;   --warn-ink: #E6C079;
+    --ok:        #2EE6A0;   --ok-ink:   #7DF0C4;
+    --ok-tint:   #0F2820;   --ok-line:  #1E4A3A;
+    --warn:      #F5B05A;   --warn-ink: #FFD08A;
     --warn-tint: #2A2316;   --warn-line:#4A3D22;
-    --bad:       #E0726B;   --bad-ink:  #F0A39D;
-    --bad-tint:  #2C1817;   --bad-line: #4E2A27;
+    --bad:       #FF5A78;   --bad-ink:  #FF9AAE;
+    --bad-tint:  #2A1620;   --bad-line: #4E2733;
 
-    --prov-real: #4FB07C;
-    --prov-est:  #D29A3E;
+    --prov-real: #2EE6A0;
+    --prov-est:  #F5B05A;
 
-    /* Canvas palette — dim surface, light ink, brighter strokes for contrast. */
-    --canvas-bg:        #1F1F1E;
-    --canvas-shell:     rgba(237,234,227,0.55);
-    --canvas-ink:       #C9C5BC;
-    --canvas-ink-dim:   rgba(237,234,227,0.40);
-    --canvas-ink-faint: rgba(237,234,227,0.50);
-    --canvas-zone-ink:  rgba(237,234,227,0.62);
-    --canvas-rack:      rgba(210,206,196,0.55);
-    --canvas-sel:       #EDEAE3;
-    --canvas-sel-ink:   #1F1F1E;
-    --canvas-marker-stroke: #1F1F1E;
-    --canvas-agent-stroke:  rgba(0,0,0,0.55);
-    --canvas-badge-bg:  rgba(237,234,227,0.92);
-    --canvas-wall:      #8A93A0;
-    --canvas-wall-rep:  #9AA4B0;
-    --canvas-draft:     #F0726B;
-    --canvas-equip:     #B8B3AA;
-    --canvas-equip-ink: rgba(237,234,227,0.66);
-    --canvas-conveyor-rep: #9AA4B0;
+    /* Canvas palette — cool dark floor, light ink, brighter strokes for contrast. */
+    --canvas-bg:        #0F141D;
+    --canvas-shell:     rgba(230,237,244,0.50);
+    --canvas-ink:       #C9D2DD;
+    --canvas-ink-dim:   rgba(230,237,244,0.40);
+    --canvas-ink-faint: rgba(230,237,244,0.50);
+    --canvas-zone-ink:  rgba(230,237,244,0.62);
+    --canvas-rack:      rgba(200,212,228,0.55);
+    --canvas-sel:       #E6EDF4;
+    --canvas-sel-ink:   #0F141D;
+    --canvas-marker-stroke: #0F141D;
+    --canvas-agent-stroke:  rgba(0,0,0,0.45);
+    --canvas-badge-bg:  rgba(230,237,244,0.92);
+    --canvas-wall:      #8AA0B8;
+    --canvas-wall-rep:  #9AB0C8;
+    --canvas-draft:     #FF5A78;
+    --canvas-equip:     #B7C4D4;
+    --canvas-equip-ink: rgba(230,237,244,0.66);
+    --canvas-conveyor-rep: #9AB0C8;
 
-    --sh-xs:  0 1px 2px rgba(0,0,0,0.4);
-    --sh-sm:  0 1px 2px rgba(0,0,0,0.45), 0 2px 4px rgba(0,0,0,0.4);
-    --sh-md:  0 2px 6px rgba(0,0,0,0.5);
-    --sh-lg:  0 10px 30px rgba(0,0,0,0.55);
+    --sh-xs:  0 1px 2px rgba(0,0,0,0.5);
+    --sh-sm:  0 1px 2px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.45);
+    --sh-md:  0 4px 14px rgba(0,0,0,0.5);
+    --sh-lg:  0 14px 40px rgba(0,0,0,0.6);
 }
 html[data-theme="dark"] #pngImg,
 html[data-theme="dark"] .proposal-sheet,
@@ -1904,3 +1906,22 @@ html[data-theme="dark"] .tab.active, html[data-theme="dark"] button[role="tab"][
   background:color-mix(in srgb,#f5b05a 24%,transparent);
 }
 .tab.active.gated::before{ display:none; }
+
+/* ===== Stage 1 polish: handoff signature treatments ===== */
+/* Primary run CTA — cyan→blue gradient + glow (handoff .btn-run). */
+.sidebar .primary.big{
+  background:linear-gradient(135deg,var(--accent),#2f7bff);
+  color:#04222c; border:none; font-weight:700; letter-spacing:.03em;
+  box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 22%,transparent);
+}
+.sidebar .primary.big:hover:not(:disabled){ filter:brightness(1.08); transform:translateY(-1px); }
+.sidebar .primary.big:disabled{ background:var(--bg-active); color:var(--ink-faint); box-shadow:none; }
+
+/* KPI cards — glass panel, mono uppercase label, accent edge on hover. */
+.kpi{ position:relative; overflow:hidden;
+  transition:transform var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease); }
+.kpi:hover{ transform:translateY(-2px); box-shadow:var(--sh-lg); border-color:var(--line-strong); }
+.kpi .k{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; }
+.kpi::after{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+  background:var(--accent); opacity:0; transition:opacity var(--dur-2) var(--ease); }
+.kpi:hover::after{ opacity:.9; }

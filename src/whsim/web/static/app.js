@@ -579,8 +579,9 @@ function applyTheme(theme) {
   document.dispatchEvent(new CustomEvent('themechange', { detail: { theme } }));
 }
 function initTheme() {
+  // Dark-first per the brand handoff; the manual toggle still wins when set.
   const saved = localStorage.getItem('whsim-theme');
-  applyTheme(saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  applyTheme(saved || 'dark');
 }
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
