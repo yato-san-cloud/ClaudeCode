@@ -1870,3 +1870,37 @@ input:focus-visible, select:focus-visible, textarea:focus-visible{
 html[data-theme="dark"] .tab.active, html[data-theme="dark"] button[role="tab"][aria-selected="true"]{
   text-shadow:0 0 14px rgba(52,227,255,.35);
 }
+
+/* ===== 動線 / IA: topbar status pill, tab groups, soft-gated result tabs ===== */
+.status-pill{
+  display:flex; align-items:center; gap:10px; margin:0 auto; padding:6px 14px;
+  border:1px solid var(--line,rgba(120,140,170,.2)); border-radius:999px;
+  background:var(--bg-panel,rgba(127,127,127,.05)); max-width:46vw; overflow:hidden;
+}
+.status-pill .sp-chip{
+  display:flex; align-items:center; gap:6px; white-space:nowrap;
+  font-size:11.5px; color:var(--ink-tertiary,#8195a8); font-weight:600;
+}
+.status-pill .sp-chip i{
+  width:8px; height:8px; border-radius:50%; flex:0 0 auto;
+  background:var(--line-strong,#b8c2cf); transition:.2s;
+}
+.status-pill .sp-chip.on{ color:var(--ink-primary,#16202e); }
+.status-pill .sp-chip.on i{ background:var(--accent,#2f7bff); box-shadow:0 0 7px var(--accent,#2f7bff); }
+.status-pill .sp-div{ width:1px; height:13px; background:var(--line,rgba(120,140,170,.3)); flex:0 0 auto; }
+@media (max-width:980px){ .status-pill{ display:none; } }
+
+.tabs .tab-group{
+  align-self:center; margin:0 2px 0 8px; padding:0 2px;
+  font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--ink-tertiary,#8195a8); font-weight:700; user-select:none; white-space:nowrap;
+}
+.tab.gated{ position:relative; opacity:.72; }
+.tab.gated:hover{ opacity:1; }
+.tab.gated::before{
+  content:"要実行"; position:absolute; top:-3px; right:2px;
+  font-size:8px; letter-spacing:.04em; font-weight:700; line-height:1;
+  padding:2px 4px; border-radius:5px; color:#b3741a;
+  background:color-mix(in srgb,#f5b05a 24%,transparent);
+}
+.tab.active.gated::before{ display:none; }

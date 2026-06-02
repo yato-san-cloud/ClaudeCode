@@ -15,6 +15,13 @@
       <div class="brand" aria-label="WHSiM — WAREHOUSE SIMULATOR" title="WHSiM — WAREHOUSE SIMULATOR">
         <span class="wm" aria-hidden="true"><span class="wm-t">WHS</span><span class="wm-i"><span class="wm-tittle"><svg class="wm-cube wm-cube-light" viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#0e8fd1"/><polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0664a0"/><polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#5cc8f7"/><g fill="none" stroke="#0b4f78" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g><g fill="none" stroke="#0e7bb0" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g></svg><svg class="wm-cube wm-cube-dark" viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#1685b4"/><polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0c5a82"/><polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#3ae6ff"/><g fill="none" stroke="#7ef6ff" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g><g fill="none" stroke="#bdf8ff" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g></svg></span><span class="wm-stem"></span></span><span class="wm-t">M</span></span><span class="brand-tag">WAREHOUSE SIMULATOR</span></div>
     </div>
+    <div class="status-pill" id="statusPill" aria-live="polite" title="準備状況">
+      <span class="sp-chip" data-step="project"><i></i>プロジェクト</span>
+      <span class="sp-div"></span>
+      <span class="sp-chip" data-step="data"><i></i><b id="spData">テンプレ仮値</b></span>
+      <span class="sp-div"></span>
+      <span class="sp-chip" data-step="run"><i></i>未実行</span>
+    </div>
     <div class="header-tools">
       <div class="provenance" id="provenance">— your data</div>
       <button id="themeToggle" type="button" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
@@ -126,14 +133,17 @@
     <main class="main">
       <div class="tabs" role="tablist" aria-label="ビュー切り替え">
         <button data-tab="chat" class="tab active" role="tab" id="tab-chat" aria-selected="true" aria-controls="chat" tabindex="0">💬 Cody</button>
-        <button data-tab="design" class="tab" role="tab" id="tab-design" aria-selected="false" aria-controls="design" tabindex="-1">設計</button>
-        <button data-tab="analysis" class="tab" role="tab" id="tab-analysis" aria-selected="false" aria-controls="analysis" tabindex="-1">分析</button>
-        <button data-tab="timetable" class="tab" role="tab" id="tab-timetable" aria-selected="false" aria-controls="timetable" tabindex="-1">タイムチャート</button>
-        <button data-tab="view2d" class="tab" role="tab" id="tab-view2d" aria-selected="false" aria-controls="view2d" tabindex="-1">2D アニメーション</button>
-        <button data-tab="view3d" class="tab" role="tab" id="tab-view3d" aria-selected="false" aria-controls="view3d" tabindex="-1">3D</button>
-        <button data-tab="viewpng" class="tab" role="tab" id="tab-viewpng" aria-selected="false" aria-controls="viewpng" tabindex="-1">提案PNG</button>
-        <button data-tab="compare" class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="compare" tabindex="-1">比較</button>
-        <button data-tab="export" class="tab" role="tab" id="tab-export" aria-selected="false" aria-controls="export" tabindex="-1">エクスポート</button>
+        <span class="tab-group" aria-hidden="true">入力</span>
+        <button data-tab="design" data-tier="input" class="tab" role="tab" id="tab-design" aria-selected="false" aria-controls="design" tabindex="-1">設計</button>
+        <button data-tab="dataanalysis" data-tier="input" data-need="data" class="tab" role="tab" id="tab-dataanalysis" aria-selected="false" aria-controls="dataanalysis" tabindex="-1">データ分析</button>
+        <span class="tab-group" aria-hidden="true">結果</span>
+        <button data-tab="analysis" data-tier="result" data-need="run" class="tab" role="tab" id="tab-analysis" aria-selected="false" aria-controls="analysis" tabindex="-1">分析</button>
+        <button data-tab="timetable" data-tier="result" class="tab" role="tab" id="tab-timetable" aria-selected="false" aria-controls="timetable" tabindex="-1">タイムチャート</button>
+        <button data-tab="view2d" data-tier="result" data-need="run" class="tab" role="tab" id="tab-view2d" aria-selected="false" aria-controls="view2d" tabindex="-1">2D アニメーション</button>
+        <button data-tab="view3d" data-tier="result" data-need="run" class="tab" role="tab" id="tab-view3d" aria-selected="false" aria-controls="view3d" tabindex="-1">3D</button>
+        <button data-tab="viewpng" data-tier="result" data-need="run" class="tab" role="tab" id="tab-viewpng" aria-selected="false" aria-controls="viewpng" tabindex="-1">提案PNG</button>
+        <button data-tab="compare" data-tier="result" data-need="run" class="tab" role="tab" id="tab-compare" aria-selected="false" aria-controls="compare" tabindex="-1">比較</button>
+        <button data-tab="export" data-tier="result" data-need="run" class="tab" role="tab" id="tab-export" aria-selected="false" aria-controls="export" tabindex="-1">エクスポート</button>
         <label class="preset-ctl" title="3D表現">3D表現
           <select id="presetSelect">
             <option value="natural">ナチュラル</option>
@@ -148,6 +158,7 @@
         <div id="chat" class="panel active" role="tabpanel" aria-labelledby="tab-chat" tabindex="0"></div>
         <div id="design" class="panel" role="tabpanel" aria-labelledby="tab-design" tabindex="0" hidden></div>
         <div id="analysis" class="panel" role="tabpanel" aria-labelledby="tab-analysis" tabindex="0" hidden></div>
+        <div id="dataanalysis" class="panel" role="tabpanel" aria-labelledby="tab-dataanalysis" tabindex="0" hidden></div>
         <div id="timetable" class="panel" role="tabpanel" aria-labelledby="tab-timetable" tabindex="0" hidden></div>
         <div id="view2d" class="panel" role="tabpanel" aria-labelledby="tab-view2d" tabindex="0" hidden>
           <canvas id="canvas2d" aria-label="2Dシミュレーション再生"></canvas>

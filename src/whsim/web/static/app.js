@@ -9,6 +9,7 @@ import { mountChat } from './js/chat.js';
 import { mountSettings } from './js/settings.js';
 import { mountOnboarding } from './js/onboarding.js';
 import { mountTimetable } from './js/timetable.js';
+import { mountDataAnalysis } from './js/dataanalysis.js';
 
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
@@ -82,7 +83,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
   export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
-  hasRun: false, preset: 'natural',
+  dataanalysis: null, hasData: false, hasRun: false, preset: 'natural',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -263,6 +264,9 @@ async function openProject(name) {
   // Reset replay/analysis state and restore this project's chat thread.
   S.replay = null;
   S.hasRun = false;
+  // "% your data" > 0 ⇒ real customer data has been imported (not just template).
+  S.hasData = /([1-9]\d*)\s*%/.test(m.provenance_summary || '');
+  refreshReadiness();
   if (S.chat && S.chat.loadFor) S.chat.loadFor(name);
   if (S.settings && S.settings.loadFor) S.settings.loadFor(name);
   if (S.view === 'design') mountDesigner();
@@ -362,6 +366,7 @@ async function doRun() {
   try {
     const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
     S.hasRun = true;
+    refreshReadiness();
     renderKpis(r.kpis);
     await loadReplay();
     $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
@@ -488,6 +493,40 @@ function mountExport() {
   S.export.refresh();
 }
 
+function mountDataAnalysisView() {
+  if (S.dataanalysis) return;
+  S.dataanalysis = mountDataAnalysis($('dataanalysis'), {
+    getProject: () => S.project,
+    toast: (msg, kind) => toast(msg, kind),
+  });
+}
+
+// ---- readiness / 動線 (Cody home status + soft-gated result tabs) -----------
+// The product never blocks (every model is runnable from provisional values), so
+// the result tier is *soft*-gated: tabs stay visible but carry a 「要実行」 badge
+// and clicking one before a run nudges toward 実行 instead of showing emptiness.
+function refreshReadiness() {
+  const hasP = !!S.project, run = !!S.hasRun, data = !!S.hasData;
+  const pill = $('statusPill');
+  if (pill) {
+    const set = (step, on) => {
+      const c = pill.querySelector(`.sp-chip[data-step="${step}"]`);
+      if (c) c.classList.toggle('on', on);
+    };
+    set('project', hasP);
+    set('data', data);
+    set('run', run);
+    const runChip = pill.querySelector('.sp-chip[data-step="run"]');
+    if (runChip) runChip.lastChild.textContent = run ? '実行済' : '未実行';
+    const dataEl = $('spData');
+    if (dataEl) dataEl.textContent = data ? '取込済' : 'テンプレ仮値';
+  }
+  // run-gated result tabs get a badge until a run exists
+  document.querySelectorAll('.tab[data-need="run"]').forEach((t) => {
+    t.classList.toggle('gated', !run);
+  });
+}
+
 // ---- import ----------------------------------------------------------------
 async function uploadZip(file) {
   if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
@@ -499,7 +538,9 @@ async function uploadZip(file) {
     for (const w of r.warnings) lines.push(`<span class="warn">! ${w}</span>`);
     $('importLog').innerHTML = lines.join('\n');
     $('provenance').textContent = r.provenance_summary;
-    await openProject(S.project); // refresh headline values
+    S.hasData = true;
+    await openProject(S.project); // refresh headline values (also refreshes readiness)
+    if (S.dataanalysis) S.dataanalysis.refresh();
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 
@@ -587,8 +628,17 @@ function switchView(view) {
   // The replay transport only belongs to the 2D/3D animation views.
   const replayView = (view === 'view2d' || view === 'view3d');
   document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
-  // The chat home, analysis dashboard and timetable carry their own summaries.
-  $('kpiBar').style.display = (view === 'analysis' || view === 'chat' || view === 'timetable') ? 'none' : '';
+  // The chat home, analysis dashboards and timetable carry their own summaries.
+  $('kpiBar').style.display =
+    (view === 'analysis' || view === 'dataanalysis' || view === 'chat' || view === 'timetable')
+      ? 'none' : '';
+  // Soft guidance: opening a run-gated result view before any run nudges toward 実行.
+  const tabBtn = document.querySelector(`.tab[data-tab="${view}"]`);
+  if (tabBtn && tabBtn.dataset.need === 'run' && !S.hasRun) {
+    cody('curious', S.project
+      ? 'この結果はシミュレーション実行後に表示されるよ。左の「▶ シミュレーション実行」を押してね。'
+      : 'まずプロジェクトを作って、左で「実行」しよう。結果はそのあとここに出るよ。');
+  }
   // The chat view embeds Cody in the thread; hide the floating companion there
   // so it doesn't overlap the composer (it returns on every other view).
   if (S.cody) { if (view === 'chat') S.cody.hide(); else S.cody.show(); }
@@ -597,6 +647,7 @@ function switchView(view) {
   if (view === 'view3d') mount3d();
   if (view === 'view2d') fitCanvas();
   if (view === 'export') mountExport();
+  if (view === 'dataanalysis') mountDataAnalysisView();
   if (view === 'timetable') mountTimetableView();
   if (view === 'chat' && S.chat) S.chat.focus();
 }
@@ -775,6 +826,8 @@ function clearProjectState() {
   S.project = null;
   S.replay = null;
   S.hasRun = false;
+  S.hasData = false;
+  refreshReadiness();
   if (S.settings && S.settings.clear) S.settings.clear();
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
   $('projectSelect').value = '';
@@ -937,6 +990,7 @@ function initUI() {
   // Default view is the Cody chat home: no replay transport, no KPI footer.
   document.querySelector('.transport').style.display = 'none';
   $('kpiBar').style.display = 'none';
+  refreshReadiness();
   fitCanvas();
 }
 
