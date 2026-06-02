@@ -8,6 +8,7 @@ import { mountCody, codyAvatarSVG } from './js/cody.js';
 import { mountChat } from './js/chat.js';
 import { mountSettings } from './js/settings.js';
 import { mountOnboarding } from './js/onboarding.js';
+import { mountTimetable } from './js/timetable.js';
 
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
@@ -80,7 +81,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
-  export: null, cody: null, chat: null, settings: null, onboarding: null,
+  export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
   hasRun: false, preset: 'natural',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
@@ -585,8 +586,8 @@ function switchView(view) {
   // The replay transport only belongs to the 2D/3D animation views.
   const replayView = (view === 'view2d' || view === 'view3d');
   document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
-  // The chat home and the analysis dashboard carry their own summaries.
-  $('kpiBar').style.display = (view === 'analysis' || view === 'chat') ? 'none' : '';
+  // The chat home, analysis dashboard and timetable carry their own summaries.
+  $('kpiBar').style.display = (view === 'analysis' || view === 'chat' || view === 'timetable') ? 'none' : '';
   // The chat view embeds Cody in the thread; hide the floating companion there
   // so it doesn't overlap the composer (it returns on every other view).
   if (S.cody) { if (view === 'chat') S.cody.hide(); else S.cody.show(); }
@@ -595,7 +596,19 @@ function switchView(view) {
   if (view === 'view3d') mount3d();
   if (view === 'view2d') fitCanvas();
   if (view === 'export') mountExport();
+  if (view === 'timetable') mountTimetableView();
   if (view === 'chat' && S.chat) S.chat.focus();
+}
+
+// ---- timetable (作業タイムチャート) — mounted once; holds editable state ------
+// The staffing solve runs client-side, so it works without a project/run. The
+// per-time headcount it emits is fed to the 2D/3D views for the 時刻連動 link.
+function mountTimetableView() {
+  if (S.timetable) { S.timetable.resize(); return; }
+  S.timetable = mountTimetable($('timetable'), {
+    getProject: () => S.project,
+    onChange: (payload) => { S.timetableStaffing = payload; if (S.view === 'view2d') draw2d(); },
+  });
 }
 
 // ---- apply structured edits then re-run (closes the analysis loop) ---------
@@ -638,6 +651,13 @@ document.addEventListener('whsim:apply-run', (e) => {
 document.addEventListener('themechange', () => {
   refreshPalette();
   if (S.view === 'view2d') draw2d();
+});
+
+// Modules (e.g. the timetable tab) request a toast via a CustomEvent so they
+// stay decoupled from the shell's notification host.
+document.addEventListener('whsim:toast', (e) => {
+  const d = (e && e.detail) || {};
+  if (d.msg) toast(d.msg, d.kind || 'info');
 });
 
 // ---- project management menu (duplicate / rename / delete) -----------------
