@@ -60,6 +60,12 @@
       "label": "歩行速度",
       "type": "float",
       "unit": "m/s"
+    },
+    {
+      "path": "process.staging_capacity",
+      "label": "仮置き容量(0=兼任)",
+      "type": "int",
+      "unit": "個"
     }
   ]
 }

@@ -1954,7 +1954,8 @@
     "routing_policy": "nearest",
     "batch_size": 1,
     "walk_speed_mps": 1.2,
-    "pack_time_s": 40.0
+    "pack_time_s": 40.0,
+    "staging_capacity": 0
   },
   "resources": {
     "workers": [

@@ -238,7 +238,23 @@ function draw2d() {
     ctx.fillRect(X(x) - 6, Y(y) - 5, 12, 10);
     ctx.strokeRect(X(x) - 6, Y(y) - 5, 12, 10);
   }
-  // workers (round)
+  // 仮置き(staging) buffer: WIP heat rectangle + live 滞留数 (staged mode only).
+  const sg = rep.staging;
+  if (sg) {
+    const tl = sg.timeline || [];
+    let wip = 0;
+    for (let i = 0; i < tl.length; i++) { if (tl[i][0] <= S.t) wip = tl[i][1]; else break; }
+    const util = Math.min(1, wip / Math.max(sg.capacity, 1));
+    const hue = Math.round((1 - util) * 120); // 120=green (empty) → 0=red (full/jam)
+    ctx.fillStyle = `hsla(${hue},85%,50%,${0.22 + util * 0.5})`;
+    ctx.fillRect(X(sg.x), Y(sg.y + sg.h), sg.w * sc, sg.h * sc);
+    ctx.strokeStyle = `hsl(${hue},85%,38%)`; ctx.lineWidth = 1.2;
+    ctx.strokeRect(X(sg.x), Y(sg.y + sg.h), sg.w * sc, sg.h * sc);
+    ctx.fillStyle = util > 0.55 ? '#fff' : '#243244';
+    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(`仮置 ${wip}/${sg.capacity}`, X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2));
+  }
+  // workers (round) — includes dedicated packer agents (role="packer", "pack" red)
   for (const wk of rep.workers) {
     const [x, y, st] = interp(wk.keyframes, S.t);
     ctx.fillStyle = STATE_COLOR[st] || '#999';

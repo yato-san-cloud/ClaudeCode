@@ -75,6 +75,7 @@ def build():
             "batch_size": 1,
             "walk_speed_mps": 1.2,
             "pack_time_s": 40.0,
+            "staging_capacity": 0,  # 仮置きバッファ容量(0=梱包兼任/既定, >0で専任packer本格モード)
         },
         "resources": {
             "workers": [{"id": "pickers", "role": "picker", "count": 6, "speed_mps": 1.2}],
@@ -121,6 +122,8 @@ def build():
              "unit": "時間", "scale": 3600},
             {"path": "process.walk_speed_mps", "label": "歩行速度", "type": "float",
              "unit": "m/s"},
+            {"path": "process.staging_capacity", "label": "仮置き容量(0=兼任)",
+             "type": "int", "unit": "個"},
         ],
     }
     return model, manifest

@@ -187,6 +187,7 @@ export class Scene3D {
     this._buildFloor();
     this._buildShell();
     this._buildZones();
+    this._buildStaging();
     this._buildRacks();
     this._buildStations();
     this._buildConveyors();
@@ -334,6 +335,23 @@ export class Scene3D {
       this.scene.add(mesh);
       this._track(geom, mat);
     }
+  }
+
+  _buildStaging() {
+    this._staging = null;
+    const sg = this.replay.staging;
+    if (!sg) return;
+    const w = sg.w || 2, h = sg.h || 2;
+    const geom = new THREE.BoxGeometry(w, 1, h); // unit height; scaled per-frame by WIP
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x33a02c, transparent: true, opacity: 0.6, roughness: 0.5, metalness: 0.05,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.position.set((sg.x || 0) + w / 2, 0.1, (sg.y || 0) + h / 2);
+    mesh.castShadow = true;
+    this.scene.add(mesh);
+    this._track(geom, mat);
+    this._staging = { mesh, timeline: sg.timeline || [], capacity: sg.capacity || 1 };
   }
 
   _buildRacks() {
@@ -907,12 +925,29 @@ export class Scene3D {
     }
   }
 
+  // 仮置き(staging) buffer: a box whose height + colour track its WIP over time
+  // (green/low → red/full). Packers themselves ride in `workers` so they animate
+  // with the standard worker sampler; this is the buffer they drain.
+  _updateStaging(t) {
+    const sg = this._staging;
+    if (!sg) return;
+    let wip = 0;
+    const tl = sg.timeline;
+    for (let i = 0; i < tl.length; i++) { if (tl[i][0] <= t) wip = tl[i][1]; else break; }
+    const util = Math.min(1, wip / Math.max(sg.capacity, 1));
+    const hgt = 0.2 + util * 2.2;
+    sg.mesh.scale.y = hgt;
+    sg.mesh.position.y = hgt / 2;
+    sg.mesh.material.color.setHSL((1 - util) * 0.33, 0.85, 0.45); // green→red
+  }
+
   _loop() {
     if (this._disposed) return;
     const t = this.getTime() || 0;
     this._updateWorkers(t);
     this._updateAgvs(t);
     this._updateForklifts(t);
+    this._updateStaging(t);
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this._raf = requestAnimationFrame(this._loop);

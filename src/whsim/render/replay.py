@@ -41,6 +41,14 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         for h in getattr(res, "helpers", [])
         if h.keyframes
     ]
+    # Dedicated packer agents (仮置き staged mode) are individual workers with a
+    # position + "pack"/"idle" states, so the 2D/3D viewers animate them like any
+    # other worker (the "pack" colour already exists). Absent in legacy mode.
+    workers += [
+        {"id": p.id, "role": p.role, "keyframes": p.keyframes}
+        for p in getattr(res, "packers", [])
+        if p.keyframes
+    ]
     agvs = [
         {"id": a.id, "keyframes": a.keyframes}
         for a in res.agvs
@@ -67,6 +75,24 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     doors = [{"id": d.id, "type": d.type, "x": d.x, "y": d.y, "w": d.w}
              for d in model.layout.doors]
 
+    # 仮置き(staging): a finite buffer whose WIP (滞留数) rises and falls. Surface
+    # its footprint + an exact (t, wip) timeline so the 2D/3D viewers can colour it
+    # by occupancy at the current playback time. Only present in staged mode.
+    staging = None
+    if getattr(res, "staging_capacity", 0) > 0:
+        timeline = sorted(
+            ([round(e["t"], 1), int(e.get("wip", 0))] for e in res.events
+             if e["event"] in ("staging_put", "staging_get")),
+            key=lambda p: p[0])
+        sz = next((z for z in model.layout.zones if z.type == "staging"), None)
+        if sz is not None:
+            box = {"x": sz.x, "y": sz.y, "w": sz.w, "h": sz.h}
+        else:
+            st = model.resources.stations[0] if model.resources.stations else None
+            bx, by = (st.x, st.y) if st else (0.0, 0.0)
+            box = {"x": bx + 2.0, "y": by, "w": 3.0, "h": 3.0}
+        staging = {**box, "capacity": res.staging_capacity, "timeline": timeline}
+
     return {
         "meta": {
             "name": model.meta.name,
@@ -89,5 +115,6 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "walls": walls,
         "doors": doors,
         "routes": routes,
+        "staging": staging,
         "kpis": kpis,
     }
