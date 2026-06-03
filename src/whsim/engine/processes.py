@@ -372,6 +372,31 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 w.kf(env.now, pos[0], pos[1], "idle")
             continue
 
+        # 仮置き(staging) path (manual only): decouple pick from pack. The picker
+        # drops each tote into a FINITE staging buffer and is free again; dedicated
+        # packer agents pull from it downstream. staging.put() BLOCKS when the
+        # buffer is full -> real back-pressure to the picker (and explicit pack-WIP).
+        # Deadlock-safe: the picker never consumes staging, so it never waits on
+        # itself; only the dedicated packer_agent drains it.
+        if world.staging is not None and not agv_mode:
+            # picker busy = pick + carry only (packing is the packer's time now).
+            world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
+                      busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
+            for o, arr in zip(orders, arrivals):
+                tote = {"order": o, "arrival": arr, "ready_at": env.now,
+                        "dist": dist_per_order}
+                put_start = env.now
+                yield world.staging.put(tote)   # blocks when staging is full
+                blocked = env.now - put_start
+                if blocked > 1e-6:
+                    world.log(t=env.now, event="staging_block", order_id=o.order_id,
+                              blocked=blocked, resource="staging", worker=w.id)
+                world.log(t=env.now, event="staging_put", order_id=o.order_id,
+                          wip=len(world.staging.items), resource="staging")
+            if world.recording():
+                w.kf(env.now, pos[0], pos[1], "idle")
+            continue
+
         # Inline pack (manual AND AGV-handoff modes): the picker DOUBLES AS THE
         # PACKER, so it is genuinely occupied until packing finishes (queue wait
         # at the pack station + pack service). Picker "busy" is therefore defined
@@ -403,6 +428,39 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                   resource="picker", worker=w.id)
         if world.recording():
             w.kf(env.now, pos[0], pos[1], "idle")
+
+
+def packer_agent(world: World, p: Worker, station_xy, rng: random.Random):
+    """A dedicated packer agent: pull totes from the finite staging buffer and
+    pack them at its station. The agent itself is the server (one process per
+    packer), so the packer headcount + staging capacity are the real constraint
+    (no separate resource pool). Emits its own trajectory keyframes and the
+    pack_start/pack_done/order_complete events the KPI layer reads."""
+    env = world.env
+    pack_time = max(world.model.process.pack_time_s, 0.0)
+    sx, sy = station_xy
+    if world.recording():
+        p.kf(env.now, sx, sy, "idle")
+    while True:
+        tote = yield world.staging.get()       # waits when staging is empty
+        order = tote["order"]
+        arr = tote["arrival"]
+        dwell = env.now - tote.get("ready_at", env.now)   # time spent waiting in 仮置き
+        world.log(t=env.now, event="staging_get", order_id=order.order_id,
+                  wait=dwell, wip=len(world.staging.items),
+                  resource="staging", worker=p.id)
+        seize_t = env.now
+        world.log(t=env.now, event="pack_start", order_id=order.order_id,
+                  wait=0.0, resource="packer", worker=p.id)
+        if world.recording():
+            p.kf(env.now, sx, sy, "pack")
+        yield env.timeout(pack_time)
+        world.log(t=env.now, event="pack_done", order_id=order.order_id,
+                  busy=env.now - seize_t, resource="packer", worker=p.id)
+        world.log(t=env.now, event="order_complete", order_id=order.order_id,
+                  cycle=env.now - arr, dist=tote.get("dist", 0.0), due=order.due_s)
+        if world.recording():
+            p.kf(env.now, sx, sy, "idle")
 
 
 def _convey_tote(world: World, order: Order, arrival: float, slot, dist_per_order):

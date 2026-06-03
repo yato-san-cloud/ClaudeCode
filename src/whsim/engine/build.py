@@ -80,6 +80,12 @@ class World:
     events: list[dict] = field(default_factory=list)
     replay_window_s: float = 0.0            # only record keyframes up to this time
     zone_edges: list[float] = field(default_factory=list)  # x cut points dividing picking zones
+    # 仮置き(staging): finite buffer between pick and pack. None = disabled (legacy
+    # inline pack). When present, pickers put totes here (blocking when full =
+    # back-pressure) and dedicated packer agents pull from it.
+    staging: simpy.Store | None = None
+    staging_capacity: int = 0
+    pack_xy: list[tuple[float, float]] = field(default_factory=list)  # packer agent stations
     _helper_seq: int = 0                    # monotonic id source for helper tracks
 
     def log(self, **kw) -> None:
@@ -242,6 +248,13 @@ def build(
     # real DAS / put-to-light wall. One station per pack station by default.
     put_wall_cap = max(1, n_packers)
 
+    # 仮置き(staging) buffer: only the manual non-conveyor path uses it (the AGV
+    # and conveyor paths already model their own buffering/back-pressure). A finite
+    # simpy.Store blocks put() when full, giving real pick->pack back-pressure.
+    staging_cap = max(0, int(model.process.staging_capacity))
+    staging = simpy.Store(env, capacity=staging_cap) if staging_cap > 0 else None
+    pack_xy = [(s.x, s.y) for s in model.resources.stations] or [home]
+
     has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
     cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
                 if model.resources.conveyors else 0.5) or 0.5
@@ -271,4 +284,5 @@ def build(
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
         graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,
+        staging=staging, staging_capacity=staging_cap, pack_xy=pack_xy,
     )

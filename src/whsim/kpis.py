@@ -91,6 +91,26 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     pick_util = picker_busy / max(res.n_pickers * res.duration_s, 1e-9)
     pack_util = packer_busy / max(res.n_packers * res.duration_s, 1e-9)
 
+    # --- 仮置き(staging) WIP: time-average + peak, dwell, picker block (BAS) -----
+    # WIP only changes at staging put/get, so the (t, wip) series is an EXACT step
+    # function -> integrate it for the true time-average (Little's law: L = λ·W).
+    wip_pts = sorted(((e["t"], e.get("wip", 0)) for e in res.events
+                      if e["event"] in ("staging_put", "staging_get")),
+                     key=lambda p: p[0])
+    wip_max = max((w for _, w in wip_pts), default=0)
+    area, prev_t, prev_w = 0.0, 0.0, 0
+    for t, w in wip_pts:
+        area += prev_w * (t - prev_t)
+        prev_t, prev_w = t, w
+    area += prev_w * max(res.duration_s - prev_t, 0.0)   # carry last level to end
+    wip_avg = area / max(res.duration_s, 1e-9)
+    staging_dwells = [e.get("wait", 0.0) for e in res.events if e["event"] == "staging_get"]
+    staging_dwell_mean = statistics.fmean(staging_dwells) if staging_dwells else 0.0
+    # Picker time spent BLOCKED on a full staging buffer (kept out of `busy` so
+    # utilisation is not inflated by back-pressure waiting).
+    staging_block_time = sum(e.get("blocked", 0.0) for e in res.events
+                             if e["event"] == "staging_block")
+
     # --- cost (robust to run duration: scale by fraction of a work-day) ------
     # NOTE: reuse the guarded `hours` from above (max(..., 1e-9)); recomputing it
     # unguarded here re-introduces a divide-by-zero for zero-duration runs.
@@ -135,6 +155,11 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
         "pick_wait_mean_s": statistics.fmean(pick_waits) if pick_waits else 0.0,
+        "wip_avg": wip_avg,
+        "wip_max": wip_max,
+        "staging_dwell_mean_s": staging_dwell_mean,
+        "staging_block_time_s": staging_block_time,
+        "staging_capacity": res.staging_capacity,
         "walk_total_m": sum(dists),
         "walk_per_order_m": statistics.fmean(dists) if dists else 0.0,
         "on_time_rate": on_time / completed if completed else 1.0,

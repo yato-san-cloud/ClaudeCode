@@ -222,6 +222,11 @@ class Process(BaseModel):
     walk_speed_mps: float = 1.2
     pack_time_s: float = 40.0  # mean packing seconds per order
     sort_time_s: float = 6.0   # 種まき(consolidation=="sort"): seconds to put one line at the wall
+    # 仮置き(staging) buffer between pick and pack. 0 = disabled (legacy: the picker
+    # doubles as packer inline). >0 = decouple: pickers drop totes into a finite
+    # staging buffer (back-pressure when full) and dedicated packer agents pull from
+    # it. Makes pack-stage WIP / blocking explicit (本格DES).
+    staging_capacity: int = 0
 
     def pick_stage(self) -> "Stage | None":
         for s in self.stages:
