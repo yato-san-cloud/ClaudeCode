@@ -21,6 +21,7 @@ from whsim.analysis.data_io import (
     initial_mapping,
 )
 from whsim.analysis.sample import build_frames
+from whsim.analysis.staffing import staffing_profile
 
 
 def _jsonable(v):
@@ -92,6 +93,7 @@ def run_all(shipments: pd.DataFrame | None, inbound: pd.DataFrame | None,
         "portfolio": _records(analyses.sku_portfolio(ti)),
         "lifecycle": _records(analyses.sku_lifecycle(shipments)),
         "partner_matrix": _matrix(analyses.partner_weekday_matrix(shipments)),
+        "staffing": staffing_profile(shipments, inbound),
     }
     by_weekday, by_hour, heatmap = analyses.peak_analysis(shipments) if has_ship else (
         pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
