@@ -7,6 +7,7 @@ worker keyframes (t, x, y, state); viewers linearly interpolate between frames.
 
 from __future__ import annotations
 
+from whsim.engine.navnet import NavNetwork
 from whsim.engine.run import RunResult
 from whsim.render.shelves import shelf_runs
 from whsim.schema.model import WarehouseModel
@@ -14,6 +15,7 @@ from whsim.schema.model import WarehouseModel
 
 def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     by_sku = model.item_by_sku()
+    _nav = NavNetwork.from_model(model)  # MapMaker-style waypoint/Delaunay net
     racks = []
     for loc in model.locations:
         cls = by_sku[loc.sku].abc_class if loc.sku in by_sku else "C"
@@ -77,6 +79,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "zones": zones,
         "racks": racks,
         "shelves": shelf_runs(model),
+        "navnet": _nav.to_dict() if _nav.obstacles else None,
         "stations": stations,
         "workers": workers,
         "agvs": agvs,

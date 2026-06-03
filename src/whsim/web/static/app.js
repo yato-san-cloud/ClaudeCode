@@ -137,6 +137,21 @@ function draw2d() {
     ctx.fillStyle = P.zoneInk; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(ZONE_JP[z.type] || z.type, X(z.x + z.w / 2), Y(z.y + z.h / 2));
   }
+  // MapMaker-style waypoint navigation network (Delaunay over aisle waypoints):
+  // faint edges + nodes, drawn under the racks/agents as a routing underlay.
+  if (rep.navnet && rep.navnet.waypoints && rep.navnet.waypoints.length) {
+    const wp = rep.navnet.waypoints;
+    ctx.strokeStyle = 'rgba(52,227,255,0.20)'; ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (const [i, j] of (rep.navnet.edges || [])) {
+      const a = wp[i], b = wp[j];
+      if (!a || !b) continue;
+      ctx.moveTo(X(a[0]), Y(a[1])); ctx.lineTo(X(b[0]), Y(b[1]));
+    }
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(52,227,255,0.45)';
+    for (const p of wp) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 1.8, 0, 7); ctx.fill(); }
+  }
   // Storage as MapMaker-style shelf runs (rack blocks + ABC bays); older replays
   // without `shelves` fall back to the legacy per-location dots.
   if (rep.shelves && rep.shelves.length) {
