@@ -120,14 +120,24 @@ _DEPS = {"格納": ["入荷検品"], "検品": ["ピッキング"], "梱包": ["
 _BAND = {"入荷": ["08:00", "16:00"], "出荷": ["09:00", "21:00"]}
 
 
-def timetable_scenario(shipments: pd.DataFrame | None,
-                       inbound: pd.DataFrame | None) -> dict:
-    """Build a generic timetable-solver payload (processes/productivity/scenario)
-    from the measured volumes, so the タイムチャート can place the day from real
-    data. Schema matches whsim.timetable.solve / timetable_solver.js."""
-    prof = staffing_profile(shipments, inbound)
+def flow_seed() -> list[dict]:
+    """The material-flow skeleton for the authoring screen: each process with its
+    section, unit, productivity, measured driver and upstream dependency."""
+    return [
+        {"id": p["id"], "section": p["section"], "unit": p["unit"],
+         "productivity": p["prod"], "driver": p["driver"],
+         "depends": _DEPS.get(p["id"], [])}
+        for p in GENERIC_PROCESSES
+    ]
+
+
+def scenario_from_volumes(volumes_by_process: dict) -> dict:
+    """Build a generic timetable-solver payload from explicit per-process 荷役物量.
+
+    `volumes_by_process` maps a process id (入荷検品/格納/…/出荷) to a daily volume.
+    Schema matches whsim.timetable.solve / timetable_solver.js."""
     processes, productivity, volumes = [], {}, {}
-    for p in prof["processes"]:
+    for p in GENERIC_PROCESSES:
         vk = f"{p['id']}_物量"
         processes.append({
             "id": p["id"], "section": p["section"], "worker_type": "PT",
@@ -136,10 +146,49 @@ def timetable_scenario(shipments: pd.DataFrame | None,
             "volume_unit": p["unit"].split("/")[0], "配置方式": "dynamic",
             "固定人数": 0, "依存": _DEPS.get(p["id"], []),
         })
-        productivity[p["id"]] = {"篁採用値": p["productivity"], "単位": p["unit"],
+        productivity[p["id"]] = {"篁採用値": p["prod"], "単位": p["unit"],
                                  "fixed_hours": False}
-        volumes[vk] = int(round(p["daily_volume"]))
+        volumes[vk] = int(round(float(volumes_by_process.get(p["id"], 0) or 0)))
     scenario = {"物量": volumes,
                 "制約": {"ピーク人数上限": 999, "Fマン上限": 99, "PT上限": 999}}
     return {"processes": processes, "productivity": productivity,
             "scenarios": {"実データ（平均日）": scenario}}
+
+
+def timetable_scenario(shipments: pd.DataFrame | None,
+                       inbound: pd.DataFrame | None) -> dict:
+    """Generic timetable payload from *measured* volumes (analysis → staffing)."""
+    prof = staffing_profile(shipments, inbound)
+    vols = {p["id"]: p["daily_volume"] for p in prof["processes"]}
+    return scenario_from_volumes(vols)
+
+
+_PIECES_PER_LINE = 3.0
+_LINES_PER_ORDER = 1.4
+
+
+def generate_flow_volumes(base: dict | None) -> dict:
+    """Estimate every process's 荷役物量 from a partial base (不足データ作成).
+
+    `base` may carry any of out_lines / out_qty / out_orders / in_lines / in_qty
+    (daily). Missing drivers are inferred from typical 3PL ratios (pieces/line,
+    lines/order, inbound≈outbound) so the material-flow screen can be filled even
+    when only one number is known."""
+    b = dict(base or {})
+
+    def f(k):
+        try:
+            return float(b.get(k) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    out_lines = f("out_lines")
+    if out_lines <= 0:
+        out_lines = (f("out_orders") * _LINES_PER_ORDER or f("out_qty") / _PIECES_PER_LINE
+                     or f("in_lines"))
+    b["out_lines"] = out_lines
+    b["out_qty"] = f("out_qty") or out_lines * _PIECES_PER_LINE
+    b["out_orders"] = f("out_orders") or (out_lines / _LINES_PER_ORDER if out_lines else 0.0)
+    b["in_lines"] = f("in_lines") or out_lines
+    b["in_qty"] = f("in_qty") or b["out_qty"]
+    return {p["id"]: round(float(b.get(p["driver"], 0.0)), 1) for p in GENERIC_PROCESSES}

@@ -182,6 +182,8 @@ def solve(scenario: dict, processes: list[dict], productivity: dict) -> dict:
                 )
         else:
             cum = 0.0
+            deps = proc.get("依存") or []   # defined up-front: a 0-volume dynamic
+            # process skips the slot loop entirely, so `deps` must already exist.
             for i, t in enumerate(slots):
                 if t < start or t >= end:
                     cumulative[i + 1] = cum
@@ -193,7 +195,6 @@ def solve(scenario: dict, processes: list[dict], productivity: dict) -> dict:
                 remaining_h = ((end - t) / 30) * 0.5
                 need = max(1, math.ceil(remaining / rate / remaining_h))
 
-                deps = proc.get("依存") or []
                 if deps:
                     max_dep_throughput = math.inf
                     for dep_id in deps:

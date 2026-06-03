@@ -116,6 +116,30 @@ def api_templates():
     return templates.list_templates()
 
 
+@app.get("/api/materialflow/seed")
+def api_materialflow_seed():
+    """Material-flow skeleton (process flow + units/productivity) for the
+    荷役物量 authoring screen."""
+    from whsim.analysis import staffing
+    return {"flow": staffing.flow_seed()}
+
+
+@app.post("/api/materialflow/generate")
+def api_materialflow_generate(payload: dict | None = None):
+    """不足データ作成: estimate every process's 荷役物量 from a partial base."""
+    from whsim.analysis import staffing
+    base = (payload or {}).get("base") or {}
+    return {"volumes": staffing.generate_flow_volumes(base)}
+
+
+@app.post("/api/materialflow/scenario")
+def api_materialflow_scenario(payload: dict | None = None):
+    """Turn authored per-process 荷役物量 into a timetable scenario (→ 人員配置)."""
+    from whsim.analysis import staffing
+    volumes = (payload or {}).get("volumes") or {}
+    return staffing.scenario_from_volumes(volumes)
+
+
 @app.get("/api/racktypes")
 def api_racktypes():
     """Storage-equipment presets (軽量棚/中量棚/パレットラック/ネステナー/…) for the
