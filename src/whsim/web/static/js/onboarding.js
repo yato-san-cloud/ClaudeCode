@@ -20,7 +20,8 @@
 //
 // Vanilla ES module. No raw-HTML for any server/user string (textContent only).
 
-const STORAGE_KEY = 'whsim-onboarded';
+// Versioned: bumping re-introduces the (now 5-phase) guide once to existing users.
+const STORAGE_KEY = 'whsim-onboarded-v2';
 
 const $ = (id) => document.getElementById(id);
 
@@ -117,12 +118,15 @@ export function mountOnboarding(opts = {}) {
 
   // ---- first-visit guide (help "?" button + coachmark popover) --------------
 
-  // Targets to spotlight: the tab buttons by data-tab + the run button.
+  // Targets to spotlight: the 5-phase journey pills (degrade to a centered card
+  // when a selector isn't present yet — renderStep handles target === null).
   const STEPS = [
-    { sel: '#tab-design', title: '① 作成', text: 'テンプレートから倉庫を作り、レイアウトや設備を調整します。' },
-    { sel: '#runBtn', title: '② 実行', text: '重厚なシミュレーションを動かして、処理能力やコストを検証します。' },
-    { sel: '#tab-analysis', title: '③ 分析', text: 'ボトルネックや改善案を読み解き、ワンタップで再実行できます。' },
-    { sel: '#tab-export', title: '④ 提案書', text: 'KPI・レイアウト・比較をまとめた提案書（PPTX/PDF）を出力します。' },
+    { sel: '.jn-pill[data-phase="intake"]', title: '① 取込', text: '案件を作り、顧客データ（CSV/Excel/ZIP/CAD）を取り込みます。読めない項目は飛ばすだけで止まりません。手元に無ければ「サンプルでためす」でOK。' },
+    { sel: '.jn-pill[data-phase="analyze"]', title: '② 分析', text: '取り込んだ出荷データから物量・波動・ABCを自動分析。現状の事実をここで掴みます。' },
+    { sel: '.jn-pill[data-phase="design"]', title: '③ 設計', text: 'レイアウト・棚・動線を組み、物量を工程ごとの人時へ、必要人員まで試算します。' },
+    { sel: '.jn-pill[data-phase="validate"]', title: '④ 検証', text: 'シミュレーションを実行し、処理能力・コスト・混雑をKPIと動きで確かめます。' },
+    { sel: '.jn-pill[data-phase="propose"]', title: '⑤ 提案', text: '提案PNG・シナリオ比較・提案書（PPTX/PDF）を出力。「実データN%」も併記されます。' },
+    { sel: '.jn-pin[data-view="chat"]', title: '横断: Cody と 知見', text: 'どのフェーズでもCodyに相談でき、気づきは「知見」に残せます。フェーズ動線とは別レーンでいつでも使えます。' },
   ];
 
   let overlay = null;

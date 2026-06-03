@@ -44,6 +44,11 @@ artifacts, so each is independently testable/replaceable:
 - `web/` — FastAPI backend + single-page frontend (`static/`). `js/view3d.js` (three.js
   replay) and `js/designer.js` (interactive layout/equipment/flow editor) are self-contained
   ES modules mounted by `app.js`. three.js is vendored under `static/vendor/`.
+  The UI is a phase-driven journey (取込→分析→設計→検証→提案) rather than flat tabs:
+  `js/journey.js` renders the 5-phase stepper + sub-tabs and drives view selection
+  (`switchView` keeps it in sync), `js/overview.js` is the ①取込 landing dashboard
+  (readiness checklist + next-step), and `js/phasehint.js` is the per-phase goal/CTA
+  banner; Cody and 知見 (notes) are cross-cutting across all phases.
   The editor saves via `POST /design`; the engine honours per-stage method (manual vs AGV).
 
 ### Commands

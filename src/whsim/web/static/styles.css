@@ -1943,3 +1943,19 @@ html[data-theme="dark"] .tab.active, html[data-theme="dark"] button[role="tab"][
 @keyframes bootSweep{ 0%{ left:-45%; } 100%{ left:105%; } }
 @keyframes bootSpin{ 0%,100%{ transform:rotate(-6deg); } 50%{ transform:rotate(6deg); } }
 @media (prefers-reduced-motion:reduce){ #boot .boot-cube{ animation:none; } }
+
+/* ── Narrow phones (≤430px): journey nav + sidebar drawer + KPI stacking ──
+   The 5-phase journey bar scrolls horizontally on its own (see js/journey.js);
+   here we tighten the drawer width, stack the KPI footer, and guarantee 44px
+   tap targets so the refactored 動線 stays usable one-handed. */
+@media (max-width: 430px) {
+  .sidebar { width: min(86vw, 280px); }
+  .kpibar { flex-direction: column; gap: 8px; }
+  .kpibar .kpi, .kpibar .verdict { min-width: 0; width: 100%; flex: 1 1 100%; }
+  .kpibar .kpi .v { font-size: 22px; }
+  .jn-pill, .jn-sub, .jn-pin { min-height: 40px; }
+  .tabs { padding-right: 4px; }
+}
+
+/* 3D preset picker is niche on a phone — reclaim that width for the stepper. */
+@media (max-width: 560px) { .preset-ctl { display: none; } }

@@ -8,6 +8,9 @@ import { mountCody, codyAvatarSVG } from './js/cody.js';
 import { mountChat } from './js/chat.js';
 import { mountSettings } from './js/settings.js';
 import { mountOnboarding } from './js/onboarding.js';
+import { mountJourney } from './js/journey.js';
+import { mountOverview } from './js/overview.js';
+import { mountPhaseHint } from './js/phasehint.js';
 import { mountTimetable } from './js/timetable.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
@@ -88,7 +91,8 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
   export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
-  dataanalysis: null, materialflow: null, notes: null, hasData: false, hasRun: false, preset: 'brand',
+  dataanalysis: null, materialflow: null, notes: null, journey: null, overview: null, phaseHint: null,
+  hasData: false, hasRun: false, preset: 'brand',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -579,10 +583,9 @@ function refreshReadiness() {
     const dataEl = $('spData');
     if (dataEl) dataEl.textContent = data ? '取込済' : 'テンプレ仮値';
   }
-  // run-gated result tabs get a badge until a run exists
-  document.querySelectorAll('.tab[data-need="run"]').forEach((t) => {
-    t.classList.toggle('gated', !run);
-  });
+  // The 5-phase stepper re-evaluates its ✓/🔒 flags + sub-tab hints from S.
+  if (S.journey) S.journey.refresh();
+  if (S.view) updatePhaseHint(S.view);
 }
 
 // ---- import ----------------------------------------------------------------
@@ -762,7 +765,7 @@ function switchView(view) {
   // The chat home, analysis dashboards and timetable carry their own summaries.
   $('kpiBar').style.display =
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
-      || view === 'notes' || view === 'chat' || view === 'timetable')
+      || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview')
       ? 'none' : '';
   // Soft guidance: opening a run-gated result view before any run nudges toward 実行.
   const tabBtn = document.querySelector(`.tab[data-tab="${view}"]`);
@@ -783,7 +786,47 @@ function switchView(view) {
   if (view === 'materialflow') mountMaterialFlowView();
   if (view === 'notes') mountNotesView();
   if (view === 'timetable') mountTimetableView();
+  if (view === 'overview') mountOverviewView();
   if (view === 'chat' && S.chat) S.chat.focus();
+  // Keep the 5-phase stepper highlight + the per-phase hint banner in sync with
+  // whatever drove the view change (journey click, Cody, or programmatic).
+  if (S.journey) S.journey.setActive(view);
+  updatePhaseHint(view);
+}
+
+// viewId → phase id (mirrors journey.js PHASES). Cross-cutting views map to null.
+const VIEW_PHASE = {
+  overview: 'intake', dataanalysis: 'analyze',
+  design: 'design', materialflow: 'design', timetable: 'design',
+  analysis: 'validate', view2d: 'validate', view3d: 'validate',
+  viewpng: 'propose', compare: 'propose', export: 'propose',
+};
+
+// Show the phase-goal + next-step banner; for run-gated phases without a run
+// (and analyze without data / intake without a project) surface the empty state.
+function updatePhaseHint(view) {
+  if (!S.phaseHint) return;
+  const phase = VIEW_PHASE[view];
+  if (!phase) { S.phaseHint.hide(); return; } // chat / notes are cross-cutting
+  let empty = false;
+  if (phase === 'validate' || phase === 'propose') empty = !S.hasRun;
+  else if (phase === 'analyze') empty = !S.hasData;
+  else if (phase === 'intake') empty = !S.project;
+  S.phaseHint.show(phase, { empty });
+}
+
+// Mount the ①取込 overview home once; refresh it on every revisit.
+function mountOverviewView() {
+  if (!S.overview) {
+    S.overview = mountOverview($('overview'), {
+      getState: () => S,
+      getProject: () => api(`/api/projects/${S.project}/model`),
+      switchTo: switchView,
+      toast: (m, k) => toast(m, k),
+    });
+  } else {
+    S.overview.refresh();
+  }
 }
 
 // ---- timetable (作業タイムチャート) — mounted once; holds editable state ------
@@ -1052,20 +1095,19 @@ function initUI() {
   $('runBtn').onclick = runSim;
   $('runScenariosBtn').onclick = runScenarios;
 
-  // tabs: click + roving-tabindex keyboard navigation (WAI-ARIA tablist)
-  const tabs = Array.from(document.querySelectorAll('.tab'));
-  tabs.forEach((t) => {
-    t.onclick = () => switchView(t.dataset.tab);
-    t.addEventListener('keydown', (e) => {
-      const i = tabs.indexOf(t);
-      let j = -1;
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % tabs.length;
-      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + tabs.length) % tabs.length;
-      else if (e.key === 'Home') j = 0;
-      else if (e.key === 'End') j = tabs.length - 1;
-      if (j >= 0) { e.preventDefault(); switchView(tabs[j].dataset.tab); tabs[j].focus(); }
-    });
+  // 5-phase guided journey (replaces the flat tab bar). The stepper owns view
+  // selection; switchView keeps it (and the phase-hint banner) in sync.
+  S.journey = mountJourney($('journey'), {
+    getState: () => S,
+    onSelectView: (v) => switchView(v),
   });
+  S.phaseHint = mountPhaseHint($('phaseHint'), {
+    onCta: (target) => switchView(target),
+    onRun: () => runSim(),
+  });
+  // Sync the initial highlight with the default landing view (Cody home).
+  S.journey.setActive(S.view);
+  updatePhaseHint(S.view);
 
   // project management menu
   $('projMenuBtn').onclick = (e) => {
