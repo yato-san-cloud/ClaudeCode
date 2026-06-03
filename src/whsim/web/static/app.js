@@ -617,6 +617,46 @@ async function uploadMapcsv(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('地図取込に失敗しました: ' + e.message, 'error'); }
 }
 
+// ---- unified 入荷/出荷/商品マスタ import with editable column mapping ---------
+let _tableFile = null, _tableKind = 'shipments';
+async function uploadTable(file) {
+  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
+  _tableFile = file; _tableKind = $('tableKind').value;
+  await doTableImport(null);
+}
+async function doTableImport(mapping) {
+  const fd = new FormData(); fd.append('file', _tableFile);
+  let url = `/api/projects/${S.project}/import-table?kind=${_tableKind}`;
+  if (mapping) url += '&mapping=' + encodeURIComponent(JSON.stringify(mapping));
+  $('importLog').textContent = '取込中…';
+  try {
+    const r = await api(url, { method: 'POST', body: fd });
+    renderTableMapping(r);
+    if (r.provenance_summary) $('provenance').textContent = r.provenance_summary;
+    await openProject(S.project);
+    toast('取込しました。', 'ok');
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取込に失敗しました: ' + e.message, 'error'); }
+}
+function renderTableMapping(r) {
+  const opts = (sel) => ['<option value="">（なし）</option>']
+    .concat((r.columns || []).map(c => `<option${c === sel ? ' selected' : ''}>${c}</option>`)).join('');
+  const rows = Object.entries(r.mapping || {}).map(([k, m]) =>
+    `<div class="row" style="gap:6px;margin:3px 0;align-items:center">
+       <span style="flex:1;font-size:12px">${m.label}${m.required ? ' <b style="color:var(--bad)">*</b>' : ''}</span>
+       <select data-mapfield="${k}" style="flex:1">${opts(m.column)}</select>
+     </div>`).join('');
+  const cnt = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(' / ');
+  $('importLog').innerHTML =
+    `<span class="ok">取込（${cnt || '0'}）</span>
+     <div style="margin-top:6px;font-size:11px;color:var(--muted-2)">列マッピング（必要なら直して再取込）</div>${rows}
+     <button id="remapBtn" style="margin-top:6px;width:100%">この対応で再取込</button>`;
+  $('remapBtn').onclick = () => {
+    const mp = {};
+    $('importLog').querySelectorAll('[data-mapfield]').forEach(s => { mp[s.dataset.mapfield] = s.value || null; });
+    doTableImport(mp);
+  };
+}
+
 async function generateMissing() {
   if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
   setBtnBusy($('genMissingBtn'), true, '生成中…');
@@ -1060,6 +1100,8 @@ function initUI() {
   $('mapcsvBtn').onclick = () => $('mapcsvInput').click();
   $('mapcsvInput').onchange = () => $('mapcsvInput').files[0] && uploadMapcsv($('mapcsvInput').files[0]);
   $('genMissingBtn').onclick = generateMissing;
+  $('tableBtn').onclick = () => $('tableInput').click();
+  $('tableInput').onchange = () => $('tableInput').files[0] && uploadTable($('tableInput').files[0]);
   ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => {
     e.preventDefault(); dz.classList.add('drag');
   }));

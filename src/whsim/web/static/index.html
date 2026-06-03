@@ -84,6 +84,15 @@
           <input type="file" id="mapcsvInput" accept=".csv" hidden />
         </div>
         <div class="row" style="margin-top:8px">
+          <select id="tableKind" aria-label="取込種別" style="flex:0 0 auto">
+            <option value="shipments">出荷</option>
+            <option value="inbound">入荷</option>
+            <option value="master">商品マスタ</option>
+          </select>
+          <button id="tableBtn" style="flex:1">表データ(CSV/Excel)を取込</button>
+          <input type="file" id="tableInput" accept=".csv,.xlsx,.xls,.json" hidden />
+        </div>
+        <div class="row" style="margin-top:8px">
           <button id="genMissingBtn" style="flex:1" title="不足している商品マスタ・ピック頻度・在庫を実データから生成">不足データを生成</button>
         </div>
         <div id="importLog" class="log"></div>

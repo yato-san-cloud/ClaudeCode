@@ -721,6 +721,64 @@ async def api_import_mapcsv(name: str, file: UploadFile):
             "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
 
 
+_TABLE_FIELDS = {"shipments": "SHIPMENT_FIELDS", "inbound": "INBOUND_FIELDS",
+                 "master": "INVENTORY_FIELDS"}
+
+
+@app.post("/api/projects/{name}/import-table")
+async def api_import_table(name: str, file: UploadFile, kind: str = "shipments",
+                           mapping: str | None = None):
+    """Unified 入荷/出荷/商品マスタ import with column mapping.
+
+    Loads a CSV/Excel, maps columns to whsim field keys (auto-detected, or the
+    caller's `mapping` JSON), and builds model subtrees: 出荷→outbound orders,
+    商品マスタ→items, 入荷→(counts; feeds 物量/analysis). Returns the *used* mapping +
+    the file's columns so the UI can show/correct it. Tolerant: never 500."""
+    import json as _json
+
+    from whsim import design, tabular
+    from whsim.analysis import data_io
+    proj = _open(name)
+    data = await _read_upload(file)
+    fields = getattr(data_io, _TABLE_FIELDS.get(kind, "SHIPMENT_FIELDS"))
+    try:
+        df = data_io.load_table(data, file.filename)
+    except Exception as e:  # noqa: BLE001 — tolerant
+        raise HTTPException(400, f"表を読み込めませんでした: {e}")
+    mp = _json.loads(mapping) if mapping else data_io.initial_mapping(df, fields)
+    std = data_io.apply_mapping(df, mp, fields)
+
+    model = proj.load_model()
+    counts: dict = {}
+    prov_key = "orders"
+    if kind == "master":
+        items = tabular.build_items(std)
+        if items:
+            model.items = items
+        counts["items"] = len(items)
+        prov_key = "items"
+    elif kind == "inbound":
+        counts["inbound_lines"] = int(len(std))
+    else:  # shipments
+        orders = tabular.build_orders(std, model.simulation.duration_s or 3600.0)
+        if orders:
+            model.orders.outbound = orders
+        counts["orders"] = len(orders)
+        counts["lines"] = int(len(std))
+    design.materialize_racks(model)   # re-peg onto storage slots
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    if counts.get("orders") or counts.get("items"):
+        prov.mark(prov_key, Source.IMPORTED)
+    proj.save_provenance(prov)
+    return {
+        "kind": kind, "counts": counts, "columns": list(df.columns),
+        "mapping": {f.key: {"label": f.label, "required": f.required,
+                            "column": mp.get(f.key)} for f in fields},
+        "provenance_summary": prov.summary(),
+    }
+
+
 @app.post("/api/projects/{name}/generate-missing")
 def api_generate_missing(name: str):
     """不足データ作成: derive missing masters (商品マスタ/ピック頻度/在庫) from the
