@@ -20,6 +20,9 @@ from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
 
+from matplotlib.colors import to_rgba  # noqa: E402
+
+from whsim import racktypes  # noqa: E402
 from whsim.render.fonts import setup_jp_font  # noqa: E402
 from whsim.render.heatmap import blur  # noqa: E402
 from whsim.render.shelves import shelf_runs  # noqa: E402
@@ -119,12 +122,17 @@ def render(
         ax.text(z.x + z.w / 2, z.y + z.h / 2, ZONE_JP.get(z.type, z.type),
                 ha="center", va="center", fontsize=8.5, color=INK_DIM, zorder=2)
     # Storage drawn as MapMaker-style shelf runs (rack blocks), not loose dots:
-    # a slate body per run, ABC-coloured bays inside it.
+    # the run body is tinted by storage-equipment type, with ABC-coloured bays.
+    present_types: list[str] = []
     for run in shelf_runs(model):
         x, y0, y1, d = run["x"], run["y0"], run["y1"], run["depth"]
         pitch = run.get("pitch", 1.0)
-        ax.add_patch(Rectangle((x - d / 2, y0), d, y1 - y0, facecolor="#dde5ee",
-                               edgecolor="#b4c1d0", lw=0.5, zorder=2))
+        rtid = run.get("rack_type", "medium")
+        if rtid not in present_types:
+            present_types.append(rtid)
+        rc = racktypes.color(rtid)
+        ax.add_patch(Rectangle((x - d / 2, y0), d, y1 - y0, facecolor=to_rgba(rc, 0.18),
+                               edgecolor=to_rgba(rc, 0.6), lw=0.7, zorder=2))
         for c in run["cells"]:
             ax.add_patch(Rectangle((x - d / 2, c["y"] - pitch * 0.4), d, pitch * 0.8,
                                    facecolor=ABC_COLOR.get(c["abc"], "#ccc"),
@@ -159,6 +167,21 @@ def render(
                     framealpha=0.92, borderpad=0.6, handletextpad=0.3,
                     title="保管区分", title_fontsize=7, edgecolor=LINE)
     leg.get_frame().set_facecolor("#fbfcfe")
+    ax.add_artist(leg)  # keep the ABC legend when adding the equipment legend
+
+    # Storage-equipment legend (which rack types are present).
+    if present_types:
+        rt_handles = [
+            Line2D([0], [0], marker="s", color="none",
+                   markerfacecolor=to_rgba(racktypes.color(t), 0.6),
+                   markeredgecolor=to_rgba(racktypes.color(t), 0.9),
+                   markersize=8, label=racktypes.get(t)["label"])
+            for t in present_types
+        ]
+        leg2 = ax.legend(handles=rt_handles, loc="lower right", fontsize=7,
+                         framealpha=0.92, borderpad=0.6, handletextpad=0.3,
+                         title="保管設備", title_fontsize=7, edgecolor=LINE)
+        leg2.get_frame().set_facecolor("#fbfcfe")
 
     ax.set_xlim(-1, fw + 1)
     ax.set_ylim(-1, fd + 1)

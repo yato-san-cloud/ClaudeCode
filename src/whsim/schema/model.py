@@ -98,8 +98,9 @@ class ShelfArea(BaseModel):
     y: float = 0.0
     w: float = 2.0
     h: float = 10.0
-    cell_w: float = 1.1        # cell pitch across the shelf (bay width)
-    cell_d: float = 1.0        # cell pitch along the shelf run
+    rack_type: str = "medium"  # storage-equipment preset (whsim.racktypes)
+    cell_w: float | None = None  # override bay pitch (m); None => from rack_type
+    cell_d: float | None = None  # override depth pitch (m); None => from rack_type
 
 
 class Zone(BaseModel):
@@ -145,6 +146,7 @@ class Location(BaseModel):
     x: float = 0.0
     y: float = 0.0
     type: Literal["pallet", "shelf", "bin", "floor"] = "shelf"
+    rack_type: str = "medium"  # storage-equipment preset (whsim.racktypes)
     capacity: int = 100
     sku: str | None = None
     qty: int = 0

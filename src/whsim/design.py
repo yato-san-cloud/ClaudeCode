@@ -8,36 +8,40 @@ the regenerated slots so a layout edit immediately changes routing and the heatm
 
 from __future__ import annotations
 
+from whsim import racktypes
 from whsim.schema.model import Item, Location, WarehouseModel
 
 
 def _shelf_slots(shelf) -> list[tuple[float, float]]:
-    """Cells filling one authored SHELF rectangle (MapMaker SHELF → cells)."""
-    cw = max(shelf.cell_w, 0.3)
-    cd = max(shelf.cell_d, 0.3)
+    """Cells filling one authored SHELF rectangle at its rack type's pitch.
+
+    Bays run along the rectangle's long axis, racks are `depth` across the short
+    axis (so a thin run = one column of bays). Explicit cell_w/cell_d override the
+    preset; falls back to a single cell for a tiny area."""
+    rt = racktypes.get(getattr(shelf, "rack_type", None))
+    bay = max(shelf.cell_w or rt["bay"], 0.3)
+    depth = max(shelf.cell_d or rt["depth"], 0.3)
+    vertical = shelf.h >= shelf.w
+    px = depth if vertical else bay   # pitch along x
+    py = bay if vertical else depth   # pitch along y
     xs, ys = [], []
-    x = shelf.x + cw / 2
-    while x <= shelf.x + shelf.w - cw / 2 + 1e-9:
+    x = shelf.x + px / 2
+    while x <= shelf.x + shelf.w - px / 2 + 1e-9:
         xs.append(round(x, 3))
-        x += cw
-    y = shelf.y + cd / 2
-    while y <= shelf.y + shelf.h - cd / 2 + 1e-9:
+        x += px
+    y = shelf.y + py / 2
+    while y <= shelf.y + shelf.h - py / 2 + 1e-9:
         ys.append(round(y, 3))
-        y += cd
+        y += py
     if not xs:
         xs = [round(shelf.x + shelf.w / 2, 3)]
     if not ys:
         ys = [round(shelf.y + shelf.h / 2, 3)]
-    return [(px, py) for px in xs for py in ys]
+    return [(px_, py_) for px_ in xs for py_ in ys]
 
 
 def _zone_slots(zone) -> list[tuple[float, float]]:
-    # Authored SHELF blocks take precedence: locations come from drawn shelves.
-    if getattr(zone, "shelves", None):
-        slots: list[tuple[float, float]] = []
-        for sh in zone.shelves:
-            slots.extend(_shelf_slots(sh))
-        return slots
+    """Legacy whole-zone rack fill (used when a storage zone has no shelves)."""
     rack = zone.rack
     if rack is None:
         return []
@@ -71,9 +75,19 @@ def materialize_racks(model: WarehouseModel) -> WarehouseModel:
     station = model.resources.stations[0] if model.resources.stations else None
     ref = (station.x, station.y) if station else (0.0, 0.0)
 
-    slots: list[tuple[float, float]] = []
+    # Slots carry their storage-equipment type + per-cell capacity so the type
+    # flows through to routing, capacity and the rendered shelf colour.
+    slots: list[tuple[float, float, str, int]] = []
     for z in storage_zones:
-        slots.extend(_zone_slots(z))
+        if z.shelves:
+            for sh in z.shelves:
+                rtid = getattr(sh, "rack_type", None) or racktypes.DEFAULT
+                cap = racktypes.get(rtid)["capacity"]
+                for (x, y) in _shelf_slots(sh):
+                    slots.append((x, y, rtid, cap))
+        elif z.rack is not None:
+            for (x, y) in _zone_slots(z):
+                slots.append((x, y, racktypes.DEFAULT, 100))
 
     # Degenerate rack params (e.g. margin larger than the zone) can yield zero
     # slots. Regenerating would delete every existing location and orphan all
@@ -89,9 +103,9 @@ def materialize_racks(model: WarehouseModel) -> WarehouseModel:
     new_locs: list[Location] = list(kept)
     diag = (model.layout.bounds.width + model.layout.bounds.depth) or 1.0
     base = len(kept)
-    for i, (x, y) in enumerate(slots):
+    for i, (x, y, rtid, cap) in enumerate(slots):
         new_locs.append(Location(id=f"L{i:04d}", zone="storage", x=x, y=y,
-                                 type="shelf", capacity=100))
+                                 type="shelf", rack_type=rtid, capacity=cap))
 
     # Re-peg SKUs round-robin onto the regenerated slots so the engine can route.
     if model.items and slots:

@@ -49,12 +49,14 @@ def shelf_runs(model) -> list[dict]:
         items.sort(key=lambda loc: loc.y)
         cells = [
             {"y": round(loc.y, 3),
-             "abc": (by_sku[loc.sku].abc_class if loc.sku in by_sku else "C")}
+             "abc": (by_sku[loc.sku].abc_class if loc.sku in by_sku else "C"),
+             "rack_type": getattr(loc, "rack_type", "medium")}
             for loc in items
         ]
         y0 = items[0].y - pad
         y1 = items[-1].y + pad
+        rtid = getattr(items[0], "rack_type", "medium")  # a column is one shelf type
         runs.append({"x": round(x, 3), "y0": round(y0, 3), "y1": round(y1, 3),
                      "depth": round(depth, 3), "pitch": round(pitch_y, 3),
-                     "cells": cells})
+                     "rack_type": rtid, "cells": cells})
     return runs

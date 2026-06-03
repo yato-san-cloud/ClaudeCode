@@ -116,6 +116,14 @@ def api_templates():
     return templates.list_templates()
 
 
+@app.get("/api/racktypes")
+def api_racktypes():
+    """Storage-equipment presets (軽量棚/中量棚/パレットラック/ネステナー/…) for the
+    designer's 棚種別 picker — each with cell footprint, capacity and colour."""
+    from whsim import racktypes
+    return racktypes.catalog()
+
+
 @app.post("/api/cody/chat")
 def api_cody_chat(payload: dict):
     """Cody mascot chat: turn a Japanese message into a reply + intent.

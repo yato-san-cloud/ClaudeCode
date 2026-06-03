@@ -53,6 +53,9 @@ function toast(message, kind = 'info', ms = 4200) {
 const STATE_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
                       pick: '#33a02c', pack: '#e31a1c' };
 const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
+// Storage-equipment colors (mirror whsim.racktypes) — tints the 2D shelf bodies.
+const RACK_COLOR = { light: '#7fb0f2', medium: '#2ee6a0', pallet: '#f5b05a',
+                     nestainer: '#9b6bff', flow: '#34e3ff', asrs: '#5cebff' };
 
 // ---- theme-aware canvas palette --------------------------------------------
 // Resolved from CSS custom properties at draw time (cached, refreshed on the
@@ -140,9 +143,10 @@ function draw2d() {
     for (const sh of rep.shelves) {
       const d = sh.depth, w = d * sc;
       const x0 = X(sh.x - d / 2), yTop = Y(sh.y1), h = (sh.y1 - sh.y0) * sc;
-      ctx.fillStyle = 'rgba(150,170,195,0.16)';
+      const rc = RACK_COLOR[sh.rack_type] || '#8aa0b8';
+      ctx.fillStyle = hexA(rc, 0.18);
       ctx.fillRect(x0, yTop, w, h);
-      ctx.strokeStyle = 'rgba(150,170,195,0.42)'; ctx.lineWidth = 0.6;
+      ctx.strokeStyle = hexA(rc, 0.5); ctx.lineWidth = 0.7;
       ctx.strokeRect(x0, yTop, w, h);
       const pitch = sh.pitch || 1;
       for (const c of sh.cells) {
