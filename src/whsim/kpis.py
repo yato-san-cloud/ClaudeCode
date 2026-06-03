@@ -76,6 +76,10 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     agv_busy = sum(e.get("busy", 0.0) for e in res.events if e["event"] == "agv_done")
     pick_waits = [e.get("wait", 0.0) for e in res.events if e["event"] == "pick_start"]
     agv_util = agv_busy / max(res.n_agvs * res.duration_s, 1e-9) if res.n_agvs else 0.0
+    # 入荷検品(inbound inspection) stage utilisation (when inspector agents exist).
+    inspect_busy = sum(e.get("busy", 0.0) for e in res.events if e["event"] == "inspect_done")
+    n_insp = getattr(res, "n_inspectors", 0)
+    inspect_util = inspect_busy / max(n_insp * res.duration_s, 1e-9) if n_insp else 0.0
 
     # 種まき(sort) put-wall stage: utilisation and queueing at the wall.
     sort_events = [e for e in res.events if e["event"] == "sort_done"]
@@ -148,6 +152,8 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "picker_utilization": pick_util,
         "packer_utilization": pack_util,
         "agv_utilization": agv_util,
+        "inspector_utilization": inspect_util,
+        "n_inspectors": n_insp,
         "n_agvs": res.n_agvs,
         "sort_utilization": sort_util,
         "sort_wait_mean_s": statistics.fmean(sort_waits) if sort_waits else 0.0,

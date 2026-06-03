@@ -86,6 +86,11 @@ class World:
     staging: simpy.Store | None = None
     staging_capacity: int = 0
     pack_xy: list[tuple[float, float]] = field(default_factory=list)  # packer agent stations
+    # 入荷検品(inbound inspection): when enabled, receipts queue here for inspector
+    # agents before forklift putaway. None = disabled (receipts go straight to fork).
+    inbound_store: simpy.Store | None = None
+    n_inspectors: int = 0
+    inspect_time_s: float = 0.0
     _helper_seq: int = 0                    # monotonic id source for helper tracks
 
     def log(self, **kw) -> None:
@@ -255,6 +260,12 @@ def build(
     staging = simpy.Store(env, capacity=staging_cap) if staging_cap > 0 else None
     pack_xy = [(s.x, s.y) for s in model.resources.stations] or [home]
 
+    # 入荷検品(inbound inspection) stage: receipts wait here for inspector agents
+    # before forklift putaway (an explicit upstream WIP), when enabled.
+    n_inspectors = max(0, int(model.process.inspector_count))
+    inbound_store = simpy.Store(env) if n_inspectors > 0 else None
+    inspect_time_s = max(0.0, float(model.process.inbound_inspection_time_s))
+
     has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
     cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
                 if model.resources.conveyors else 0.5) or 0.5
@@ -285,4 +296,6 @@ def build(
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
         graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,
         staging=staging, staging_capacity=staging_cap, pack_xy=pack_xy,
+        inbound_store=inbound_store, n_inspectors=n_inspectors,
+        inspect_time_s=inspect_time_s,
     )

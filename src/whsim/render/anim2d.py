@@ -26,7 +26,7 @@ ABC_COLOR = {"A": "#d7301f", "B": "#fc8d59", "C": "#fdcc8a"}
 ZONE_JP = {"receiving": "入荷", "storage": "保管", "picking": "ピッキング",
            "packing": "梱包", "shipping": "出荷", "staging": "一時保管"}
 STATE_COLOR = {"idle": "#9e9e9e", "travel": "#1f78b4", "carry": "#6a3d9a",
-               "pick": "#33a02c", "pack": "#e31a1c"}
+               "pick": "#33a02c", "pack": "#e31a1c", "inspect": "#ffb300"}
 
 
 def _interp(keyframes: list, t: float) -> tuple[float, float, str]:

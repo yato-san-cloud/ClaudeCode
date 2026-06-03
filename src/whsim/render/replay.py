@@ -49,6 +49,12 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         for p in getattr(res, "packers", [])
         if p.keyframes
     ]
+    # 入荷検品 agents — same idea, animated with the "inspect" state colour.
+    workers += [
+        {"id": ins.id, "role": ins.role, "keyframes": ins.keyframes}
+        for ins in getattr(res, "inspectors", [])
+        if ins.keyframes
+    ]
     agvs = [
         {"id": a.id, "keyframes": a.keyframes}
         for a in res.agvs

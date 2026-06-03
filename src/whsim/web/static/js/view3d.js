@@ -15,6 +15,7 @@ const STATE_COLOR = {
   carry:  0x6a3d9a,
   pick:   0x33a02c,
   pack:   0xe31a1c,
+  inspect: 0xffb300,
 };
 // Rack ABC class -> color.
 const ABC_COLOR = { A: 0xd7301f, B: 0xfc8d59, C: 0xfdcc8a };

@@ -10,8 +10,8 @@ import simpy
 
 from whsim.engine.build import Worker, build
 from whsim.engine.processes import (
-    agv_agent, forklift_agent, order_source, packer_agent, picker_agent,
-    putaway_source,
+    agv_agent, forklift_agent, inspector_agent, order_source, packer_agent,
+    picker_agent, putaway_source,
 )
 from whsim.schema.model import WarehouseModel
 
@@ -36,6 +36,8 @@ class RunResult:
     agvs: list[Worker] = field(default_factory=list)
     forklifts: list[Worker] = field(default_factory=list)
     packers: list[Worker] = field(default_factory=list)  # dedicated packer agents (staging mode)
+    inspectors: list[Worker] = field(default_factory=list)  # 入荷検品 agents
+    n_inspectors: int = 0
     staging_capacity: int = 0               # 仮置き buffer capacity (0 = disabled)
     replay_window_s: float = 0.0
     cost: dict = field(default_factory=dict)
@@ -69,6 +71,13 @@ def run_once(
             forklifts.append(fk)
             env.process(forklift_agent(world, fk, rng))
         env.process(putaway_source(world, rng))
+    # Dedicated 入荷検品 agents inspect each inbound receipt before putaway.
+    inspectors: list[Worker] = []
+    if world.inbound_store is not None:
+        for i in range(world.n_inspectors):
+            ins = Worker(id=f"inspector-{i+1}", role="inspector")
+            inspectors.append(ins)
+            env.process(inspector_agent(world, ins, world.fork_home))
     # Dedicated packer agents drain the 仮置き(staging) buffer (manual staged mode).
     packers: list[Worker] = []
     if world.staging is not None and world.pick_method != "agv":
@@ -87,7 +96,8 @@ def run_once(
         n_put_wall=(world.put_wall.capacity if world.consolidation == "sort" else 0),
         consolidation=world.consolidation, pick_method=world.pick_method,
         workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
-        packers=packers, staging_capacity=world.staging_capacity,
+        packers=packers, inspectors=inspectors, n_inspectors=world.n_inspectors,
+        staging_capacity=world.staging_capacity,
         replay_window_s=window, cost=_cost_inputs(model),
     )
 

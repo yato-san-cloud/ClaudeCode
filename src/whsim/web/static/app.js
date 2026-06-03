@@ -56,7 +56,7 @@ function toast(message, kind = 'info', ms = 4200) {
 }
 
 const STATE_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
-                      pick: '#33a02c', pack: '#e31a1c' };
+                      pick: '#33a02c', pack: '#e31a1c', inspect: '#ffb300' };
 const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
 // Storage-equipment colors (mirror whsim.racktypes) — tints the 2D shelf bodies.
 const RACK_COLOR = { light: '#7fb0f2', medium: '#2ee6a0', pallet: '#f5b05a',

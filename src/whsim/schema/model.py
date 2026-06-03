@@ -227,6 +227,11 @@ class Process(BaseModel):
     # staging buffer (back-pressure when full) and dedicated packer agents pull from
     # it. Makes pack-stage WIP / blocking explicit (本格DES).
     staging_capacity: int = 0
+    # 入荷検品(inbound inspection). 0 = disabled (legacy: receipts go straight to
+    # putaway). >0 = dedicated inspector agents inspect each receipt at the dock
+    # before forklift putaway (an explicit upstream stage with its own WIP).
+    inspector_count: int = 0
+    inbound_inspection_time_s: float = 8.0   # seconds to inspect one inbound receipt
 
     def pick_stage(self) -> "Stage | None":
         for s in self.stages:

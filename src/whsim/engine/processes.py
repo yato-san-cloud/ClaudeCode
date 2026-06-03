@@ -73,9 +73,35 @@ def putaway_source(world: World, rng: random.Random):
     rate_per_s = max(out_per_hr * 0.3, 0.0) / 3600.0
     if rate_per_s <= 0:
         return
+    # When inbound inspection is enabled, receipts queue for an inspector first;
+    # otherwise they go straight to the forklift putaway queue (legacy).
+    dest = world.inbound_store if world.inbound_store is not None else world.fork_store
     while env.now < world.model.simulation.duration_s:
         yield env.timeout(rng.expovariate(rate_per_s))
-        yield world.fork_store.put(rng.choice(world.slot_xy))
+        yield dest.put(rng.choice(world.slot_xy))
+
+
+def inspector_agent(world: World, ins: Worker, station_xy):
+    """A dedicated 入荷検品 agent: pull a receipt from the inbound queue, inspect it
+    at the dock, then release it to forklift putaway. One process per inspector, so
+    inspector headcount is the stage's real constraint; inbound WIP is the queue it
+    drains. Emits its own keyframes + inspect_done events for KPIs/replay."""
+    env = world.env
+    sx, sy = station_xy
+    t_insp = world.inspect_time_s
+    if world.recording():
+        ins.kf(env.now, sx, sy, "idle")
+    while True:
+        slot = yield world.inbound_store.get()    # waits when no inbound work
+        start = env.now
+        if world.recording():
+            ins.kf(env.now, sx, sy, "inspect")
+        yield env.timeout(t_insp)
+        world.log(t=env.now, event="inspect_done", busy=env.now - start,
+                  resource="inspector", worker=ins.id)
+        yield world.fork_store.put(slot)           # hand off to forklift putaway
+        if world.recording():
+            ins.kf(env.now, sx, sy, "idle")
 
 
 def forklift_agent(world: World, f: Worker, rng: random.Random):
