@@ -45,6 +45,18 @@ const LAYOUT_PALETTE = [
   { key: 'shipping', label: '出荷ゾーン', zoneType: 'shipping', w: 10, h: 6 },
   { key: 'staging', label: '一時保管ゾーン', zoneType: 'staging', w: 8, h: 5 },
 ];
+// Storage-equipment presets (mirror whsim.racktypes): bay×depth (m) + colour.
+// Drawing a 棚ブロック creates a SHELF area of the chosen type; cells fill at its
+// pitch (bays along the run, depth across).
+const RACK_TYPES = {
+  light:     { label: '軽量棚', bay: 0.9, depth: 0.45, color: '#7fb0f2' },
+  medium:    { label: '中量棚', bay: 1.2, depth: 0.6, color: '#2ee6a0' },
+  pallet:    { label: 'パレットラック', bay: 1.1, depth: 1.1, color: '#f5b05a' },
+  nestainer: { label: 'ネステナー', bay: 1.1, depth: 1.4, color: '#9b6bff' },
+  flow:      { label: 'フローラック', bay: 1.0, depth: 1.5, color: '#34e3ff' },
+  asrs:      { label: '自動倉庫(AS/RS)', bay: 0.8, depth: 1.2, color: '#5cebff' },
+};
+const RACK_ORDER = ['light', 'medium', 'pallet', 'nestainer', 'flow', 'asrs'];
 // Door palette for the 躯体 (building) tool: label, schema type, marker color.
 const DOOR_PALETTE = [
   { type: 'dock', label: 'ドックドア', color: '#1f78b4' },
@@ -149,6 +161,7 @@ export class Designer {
     this.tool = 'layout';          // 'layout' | 'equip' | 'building' | 'flow' | 'route'
     this.selected = null;          // {kind, id} of selected canvas object
     this.layoutBrush = null;       // active palette key in レイアウト tool (null = select/move)
+    this.shelfType = 'medium';     // storage-equipment preset applied to new 棚ブロック
     this.showUnderlay = true;      // draw DXF walls as a faint trace underlay in レイアウト
     this.equipBrush = 'agv';       // active palette key in 設備 tool
     this.doorBrush = 'dock';       // active door type in 躯体 tool
@@ -791,7 +804,8 @@ export class Designer {
       ctx.lineWidth = sel ? 2 : 1;
       ctx.strokeRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
       // rack preview grid for storage zones
-      if (z.type === 'storage' && z.rack) this._drawRack(z);
+      if (z.type === 'storage' && z.shelves && z.shelves.length) this._drawShelves(z);
+      else if (z.type === 'storage' && z.rack) this._drawRack(z);
       // label
       ctx.fillStyle = dim ? P.inkDim : P.ink;
       ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -889,6 +903,31 @@ export class Designer {
     ctx.rect(px - half, py - 6, half * 2, 12);
     ctx.fill(); ctx.stroke();
     this._label(px, py + 12, `${DOOR_JP[d.type] || d.type} ${(+d.w || 1)}m`);
+  }
+
+  _drawShelves(z) {
+    // Draw each authored SHELF area as a rack body (tinted by equipment type)
+    // with its cells at the type's pitch — MapMaker SHELF → cells, in the editor.
+    const ctx = this.ctx;
+    // A lone shelf tracks the zone footprint (so resizing the zone resizes it).
+    if (z.shelves.length === 1) Object.assign(z.shelves[0], { x: z.x, y: z.y, w: z.w, h: z.h });
+    for (const sh of z.shelves) {
+      const rt = RACK_TYPES[sh.rack_type] || RACK_TYPES.medium;
+      const bay = +sh.cell_w || rt.bay, depth = +sh.cell_d || rt.depth;
+      const vertical = sh.h >= sh.w;
+      const px = Math.max(0.3, vertical ? depth : bay);
+      const py = Math.max(0.3, vertical ? bay : depth);
+      ctx.fillStyle = hexA(rt.color, 0.16);
+      ctx.strokeStyle = hexA(rt.color, 0.55); ctx.lineWidth = 1;
+      ctx.fillRect(this._X(sh.x), this._Y(sh.y + sh.h), sh.w * this._view.sc, sh.h * this._view.sc);
+      ctx.strokeRect(this._X(sh.x), this._Y(sh.y + sh.h), sh.w * this._view.sc, sh.h * this._view.sc);
+      ctx.fillStyle = hexA(rt.color, 0.85);
+      for (let cx = sh.x + px / 2; cx <= sh.x + sh.w - px / 2 + 1e-6; cx += px) {
+        for (let cy = sh.y + py / 2; cy <= sh.y + sh.h - py / 2 + 1e-6; cy += py) {
+          ctx.fillRect(this._X(cx) - 1.4, this._Y(cy) - 1.4, 2.8, 2.8);
+        }
+      }
+    }
   }
 
   _drawRack(z) {
@@ -1373,6 +1412,20 @@ export class Designer {
     const addBtn = this._btn(addRow, 'ゾーン追加', () => this._addZone(typeSel.value));
     addBtn.style.flex = '0 0 auto';
 
+    // Warehouse size (倉庫サイズ) — set the floor extents up front, MapMaker-style.
+    this._h(s, '倉庫サイズ');
+    const bnd = this.model.layout.bounds;
+    this._field(s, '幅 W (m)', () => this._num(bnd.width, (v) => {
+      bnd.width = Math.max(MIN_M, v); this._fitCanvas(); this._drawCanvas(); }));
+    this._field(s, '奥行 D (m)', () => this._num(bnd.depth, (v) => {
+      bnd.depth = Math.max(MIN_M, v); this._fitCanvas(); this._drawCanvas(); }));
+    // Default storage equipment applied to new 棚ブロック.
+    this._field(s, '棚種別(新規)', () => {
+      const sel = this._select(null, RACK_ORDER.map((k) => ({ value: k, label: RACK_TYPES[k].label })), this.shelfType);
+      this._on(sel, 'change', () => { this.shelfType = sel.value; });
+      return sel;
+    });
+
     const z = this.selected && this.selected.kind === 'zone'
       ? this.model.layout.zones.find((q) => q.id === this.selected.id) : null;
     if (!z) { this._note(s, 'ゾーンをクリックして選択すると編集できます。'); return; }
@@ -1383,8 +1436,10 @@ export class Designer {
       const sel = this._select(null, ZONE_TYPES.map((t) => ({ value: t, label: ZONE_JP[t] })), z.type);
       this._on(sel, 'change', () => {
         z.type = sel.value;
-        if (z.type === 'storage' && !z.rack) z.rack = { col_spacing: 4, row_spacing: 3, margin: 2 };
-        if (z.type !== 'storage') z.rack = null;
+        if (z.type === 'storage') {
+          if ((!z.shelves || !z.shelves.length) && !z.rack)
+            z.shelves = [{ id: uid('s'), x: z.x, y: z.y, w: z.w, h: z.h, rack_type: this.shelfType }];
+        } else { z.rack = null; z.shelves = []; }
         this._renderSide(); this._drawCanvas();
       });
       return sel;
@@ -1401,12 +1456,28 @@ export class Designer {
         this._drawCanvas();
       }));
     }
-    // rack spacing (storage only) — live updates the preview grid
+    // storage equipment (棚種別) — drives the cell footprint & capacity
     if (z.type === 'storage') {
-      if (!z.rack) z.rack = { col_spacing: 4, row_spacing: 3, margin: 2 };
-      this._h(s, 'ラック（保管棚）');
-      for (const [label, key] of [['列間隔 (m)', 'col_spacing'], ['段間隔 (m)', 'row_spacing'], ['余白 (m)', 'margin']]) {
-        this._field(s, label, () => this._num(z.rack[key], (v) => { z.rack[key] = Math.max(0.1, v); this._drawCanvas(); }));
+      if ((!z.shelves || !z.shelves.length) && !z.rack)
+        z.shelves = [{ id: uid('s'), x: z.x, y: z.y, w: z.w, h: z.h, rack_type: this.shelfType }];
+      if (z.shelves && z.shelves.length) {
+        const cur = z.shelves[0].rack_type || 'medium';
+        this._h(s, '保管設備（棚種別）');
+        this._field(s, '種別', () => {
+          const sel = this._select(null, RACK_ORDER.map((k) => ({ value: k, label: RACK_TYPES[k].label })), cur);
+          this._on(sel, 'change', () => {
+            z.shelves.forEach((sh) => { sh.rack_type = sel.value; });
+            this._renderSide(); this._drawCanvas();
+          });
+          return sel;
+        });
+        const rt = RACK_TYPES[cur] || RACK_TYPES.medium;
+        this._note(s, `セル ${rt.bay}×${rt.depth} m・${z.shelves.length}ブロック。棚を描いた結果ロケーションが生成されます。`);
+      } else if (z.rack) {
+        this._h(s, 'ラック（保管棚・従来）');
+        for (const [label, key] of [['列間隔 (m)', 'col_spacing'], ['段間隔 (m)', 'row_spacing'], ['余白 (m)', 'margin']]) {
+          this._field(s, label, () => this._num(z.rack[key], (v) => { z.rack[key] = Math.max(0.1, v); this._drawCanvas(); }));
+        }
       }
     }
     this._btn(s, '削除', () => this._deleteZone(z.id), 'margin-top:10px;color:var(--bad);');
@@ -1465,8 +1536,13 @@ export class Designer {
     const z = {
       id: uid('zone'), type: p.zoneType, x, y, w, h,
       color: ZONE_DEFAULT_COLOR[p.zoneType] || null,
-      rack: p.rack ? clone(p.rack) : (p.zoneType === 'storage' ? { col_spacing: 4, row_spacing: 3, margin: 2 } : null),
+      rack: null,
     };
+    // Storage zones author a SHELF area (MapMaker-style) of the chosen equipment
+    // type filling the block; cells materialise inside it on save.
+    if (p.zoneType === 'storage') {
+      z.shelves = [{ id: uid('s'), x, y, w, h, rack_type: this.shelfType }];
+    }
     this.model.layout.zones.push(z);
     this.selected = { kind: 'zone', id: z.id };
     // keep the brush active so the user can drop several of the same object (PPT-like)
