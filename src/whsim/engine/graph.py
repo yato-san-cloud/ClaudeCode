@@ -132,9 +132,20 @@ class AisleGraph:
         depth: float,
         wall_segments: list[tuple[tuple[float, float], tuple[float, float]]],
         resolution: float = 1.0,
+        obstacle_rects: list[tuple[float, float, float, float]] | None = None,
     ) -> None:
         self.width = max(float(width), 1e-6)
         self.depth = max(float(depth), 1e-6)
+        # Shelf/rack footprints are impassable: pickers detour down the aisles.
+        # Treat each rectangle's perimeter as walls (so crossing into it is blocked)
+        # and remember the rects so endpoints snap to the nearest *aisle* node.
+        self._obstacles: list[tuple[float, float, float, float]] = list(obstacle_rects or [])
+        obstacle_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for (rx, ry, rw, rh) in self._obstacles:
+            cs = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
+            for i in range(4):
+                obstacle_segments.append((cs[i], cs[(i + 1) % 4]))
+        wall_segments = list(wall_segments) + obstacle_segments
         self._has_walls = len(wall_segments) > 0
 
         # Choose a resolution that keeps the node count under the cap. Node count
@@ -219,7 +230,22 @@ class AisleGraph:
                 pts = w.get("points")
             wall_dicts.append({"points": pts or []})
         segments = cls._segments_from_walls(wall_dicts)
-        return cls(width, depth, segments, resolution=1.0)
+        # Authored SHELF blocks are impassable obstacles (route around the aisles).
+        obstacles: list[tuple[float, float, float, float]] = []
+        for z in (getattr(layout, "zones", []) or []):
+            ztype = getattr(z, "type", None) if not isinstance(z, dict) else z.get("type")
+            if ztype != "storage":
+                continue
+            shelves = (getattr(z, "shelves", None) if not isinstance(z, dict)
+                       else z.get("shelves")) or []
+            for sh in shelves:
+                d = sh if isinstance(sh, dict) else sh.__dict__
+                try:
+                    obstacles.append((float(d["x"]), float(d["y"]),
+                                      float(d["w"]), float(d["h"])))
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    continue
+        return cls(width, depth, segments, resolution=1.0, obstacle_rects=obstacles)
 
     @staticmethod
     def _segments_from_walls(
@@ -284,13 +310,46 @@ class AisleGraph:
         y = min(r * self.resolution, self.depth)
         return x, y
 
+    def _inside_obstacle(self, x: float, y: float, eps: float = 1e-6) -> bool:
+        """True if (x, y) lies strictly inside any shelf/rack footprint."""
+        for (rx, ry, rw, rh) in self._obstacles:
+            if rx + eps < x < rx + rw - eps and ry + eps < y < ry + rh - eps:
+                return True
+        return False
+
+    def _nearest_free(self, c: int, r: int) -> tuple[int, int]:
+        """Nearest grid node (ring search) whose centre is not inside an obstacle."""
+        if not self._inside_obstacle(*self._node_xy(c, r)):
+            return c, r
+        for rad in range(1, max(self.ncols, self.nrows) + 1):
+            best = None
+            for dc in range(-rad, rad + 1):
+                for dr in range(-rad, rad + 1):
+                    if max(abs(dc), abs(dr)) != rad:
+                        continue
+                    nc, nr = c + dc, r + dr
+                    if not (0 <= nc < self.ncols and 0 <= nr < self.nrows):
+                        continue
+                    if not self._inside_obstacle(*self._node_xy(nc, nr)):
+                        d = dc * dc + dr * dr
+                        if best is None or d < best[0]:
+                            best = (d, nc, nr)
+            if best is not None:
+                return best[1], best[2]
+        return c, r
+
     def _snap(self, p: tuple[float, float]) -> tuple[int, float]:
-        """Snap a point to the nearest grid node; return (index, offset_metres)."""
+        """Snap a point to the nearest grid node; return (index, offset_metres).
+
+        A point inside a rack footprint snaps to the nearest aisle node instead,
+        so distances are measured aisle-to-aisle (pickers stand in the aisle)."""
         px, py = float(p[0]), float(p[1])
         c = int(round(px / self.resolution))
         r = int(round(py / self.resolution))
         c = min(max(c, 0), self.ncols - 1)
         r = min(max(r, 0), self.nrows - 1)
+        if self._obstacles:
+            c, r = self._nearest_free(c, r)
         nx, ny = self._node_xy(c, r)
         offset = hypot(px - nx, py - ny)
         return self._node_index(c, r), offset
@@ -331,9 +390,11 @@ class AisleGraph:
 
         for leg, c, r in candidates:
             nx, ny = self._node_xy(c, r)
+            if self._inside_obstacle(nx, ny):
+                continue
             if not (self._has_walls and self._segment_blocked((px, py), (nx, ny))):
                 return self._node_index(c, r), leg
-        # Boxed in by walls on every access leg -> exact fine snap (rare).
+        # Boxed in on every access leg -> exact fine snap (rare).
         return self._snap(p)
 
     def _neighbors(self, idx: int):
