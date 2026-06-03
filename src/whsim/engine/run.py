@@ -75,7 +75,7 @@ def run_once(
         for i in range(max(1, world.n_packers)):
             pk = Worker(id=f"packer-{i+1}", role="packer")
             packers.append(pk)
-            env.process(packer_agent(world, pk, world.pack_xy[i % len(world.pack_xy)], rng))
+            env.process(packer_agent(world, pk, world.pack_xy[i % len(world.pack_xy)]))
     env.process(order_source(world, rng))
 
     env.run(until=model.simulation.duration_s)

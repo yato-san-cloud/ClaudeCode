@@ -430,7 +430,7 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             w.kf(env.now, pos[0], pos[1], "idle")
 
 
-def packer_agent(world: World, p: Worker, station_xy, rng: random.Random):
+def packer_agent(world: World, p: Worker, station_xy):
     """A dedicated packer agent: pull totes from the finite staging buffer and
     pack them at its station. The agent itself is the server (one process per
     packer), so the packer headcount + staging capacity are the real constraint

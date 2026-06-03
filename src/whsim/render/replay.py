@@ -79,10 +79,15 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     # its footprint + an exact (t, wip) timeline so the 2D/3D viewers can colour it
     # by occupancy at the current playback time. Only present in staged mode.
     staging = None
-    if getattr(res, "staging_capacity", 0) > 0:
+    staging_events = [e for e in res.events
+                      if e["event"] in ("staging_put", "staging_get")]
+    # Only surface the buffer when it was actually used (manual non-conveyor path):
+    # with a conveyor/AGV the engine bypasses staging, so don't draw an empty box.
+    if getattr(res, "staging_capacity", 0) > 0 and staging_events:
+        win = res.replay_window_s or res.duration_s
         timeline = sorted(
-            ([round(e["t"], 1), int(e.get("wip", 0))] for e in res.events
-             if e["event"] in ("staging_put", "staging_get")),
+            ([round(e["t"], 1), int(e.get("wip", 0))] for e in staging_events
+             if e["t"] <= win),          # only the playback window keeps it light
             key=lambda p: p[0])
         sz = next((z for z in model.layout.zones if z.type == "staging"), None)
         if sz is not None:
