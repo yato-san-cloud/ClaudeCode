@@ -11,6 +11,7 @@ import { mountOnboarding } from './js/onboarding.js';
 import { mountTimetable } from './js/timetable.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
+import { mountNotes } from './js/notes.js';
 
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
@@ -87,7 +88,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
   export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
-  dataanalysis: null, materialflow: null, hasData: false, hasRun: false, preset: 'brand',
+  dataanalysis: null, materialflow: null, notes: null, hasData: false, hasRun: false, preset: 'brand',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
@@ -547,6 +548,17 @@ function mountMaterialFlowView() {
   });
 }
 
+function mountNotesView() {
+  if (!S.notes) {
+    S.notes = mountNotes($('notes'), {
+      getProject: () => S.project,
+      toast: (msg, kind) => toast(msg, kind),
+    });
+  } else {
+    S.notes.refresh();   // re-read the current project's board
+  }
+}
+
 // ---- readiness / 動線 (Cody home status + soft-gated result tabs) -----------
 // The product never blocks (every model is runnable from provisional values), so
 // the result tier is *soft*-gated: tabs stay visible but carry a 「要実行」 badge
@@ -750,7 +762,7 @@ function switchView(view) {
   // The chat home, analysis dashboards and timetable carry their own summaries.
   $('kpiBar').style.display =
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
-      || view === 'chat' || view === 'timetable')
+      || view === 'notes' || view === 'chat' || view === 'timetable')
       ? 'none' : '';
   // Soft guidance: opening a run-gated result view before any run nudges toward 実行.
   const tabBtn = document.querySelector(`.tab[data-tab="${view}"]`);
@@ -769,6 +781,7 @@ function switchView(view) {
   if (view === 'export') mountExport();
   if (view === 'dataanalysis') mountDataAnalysisView();
   if (view === 'materialflow') mountMaterialFlowView();
+  if (view === 'notes') mountNotesView();
   if (view === 'timetable') mountTimetableView();
   if (view === 'chat' && S.chat) S.chat.focus();
 }

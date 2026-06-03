@@ -779,6 +779,31 @@ async def api_import_table(name: str, file: UploadFile, kind: str = "shipments",
     }
 
 
+@app.get("/api/projects/{name}/notes")
+def api_notes_list(name: str, anchor: str | None = None):
+    """知見ボード: anchored notes for a project (newest first)."""
+    from whsim import notes
+    return {"notes": notes.list_notes(_open(name), anchor)}
+
+
+@app.post("/api/projects/{name}/notes")
+def api_notes_add(name: str, payload: dict):
+    """Post a note pinned to an anchor (生産性/工程/シナリオ/設計/結果/general…)."""
+    from whsim import notes
+    p = payload or {}
+    try:
+        return notes.add_note(_open(name), p.get("anchor", "general"),
+                              p.get("author", ""), p.get("text", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/projects/{name}/notes/{note_id}")
+def api_notes_delete(name: str, note_id: str):
+    from whsim import notes
+    return {"ok": notes.delete_note(_open(name), note_id)}
+
+
 @app.post("/api/projects/{name}/generate-missing")
 def api_generate_missing(name: str):
     """不足データ作成: derive missing masters (商品マスタ/ピック頻度/在庫) from the
