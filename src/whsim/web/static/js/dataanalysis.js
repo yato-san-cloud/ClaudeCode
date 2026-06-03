@@ -147,6 +147,48 @@ function insightList(ins) {
   }).join('')}</div>`;
 }
 
+// 24-hour total required-headcount area chart.
+function headcountChart(hours) {
+  if (!hours || !hours.length) return '<div class="da-empty">データなし</div>';
+  const W = 560, H = 150, P = 24;
+  const max = Math.max(1, ...hours);
+  const bw = (W - 2 * P) / hours.length;
+  const bars = hours.map((v, i) => {
+    const h = (v / max) * (H - 2 * P);
+    const x = P + i * bw, y = H - P - h;
+    const lbl = i % 6 === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--ink-tertiary,#889)">${i}</text>` : '';
+    return `<rect x="${(x + 0.6).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 1.2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--accent,#2f7bff)" opacity="0.8"/>` +
+      (v > 0 && v === max ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" font-size="9" text-anchor="middle" fill="var(--ink-secondary,#567)">${v}</text>` : '') + lbl;
+  }).join('');
+  return svg(W, H, bars);
+}
+
+function staffingCard(s) {
+  if (!s || !s.processes || !s.processes.length) return '';
+  const rows = s.processes.map((p) =>
+    `<tr><td>${p.id}</td><td style="text-align:right">${fmt(p.daily_volume)}</td>` +
+    `<td style="text-align:right;color:var(--ink-tertiary,#889)">${p.productivity}${p.unit}</td>` +
+    `<td style="text-align:right;font-weight:700">${p.peak_headcount} 名</td>` +
+    `<td style="text-align:right">${p.man_hours} 人時</td></tr>`).join('');
+  return `<div class="da-card" style="grid-column:1/-1">
+    <h3>工程別 必要人員（実データ由来・平均日）</h3>
+    <div class="da-grid" style="margin-bottom:12px">
+      <div class="da-kpi"><div class="l">ピーク人員</div><div class="v">${s.peak_headcount} <small>名</small></div></div>
+      <div class="da-kpi"><div class="l">総工数</div><div class="v">${fmt(s.total_man_hours)} <small>人時/日</small></div></div>
+      <div class="da-kpi"><div class="l">対象稼働日数</div><div class="v">${fmt(s.operating_days)} <small>日</small></div></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr style="color:var(--ink-tertiary,#889);text-align:left">
+        <th>工程</th><th style="text-align:right">日量</th><th style="text-align:right">生産性</th>
+        <th style="text-align:right">ピーク</th><th style="text-align:right">工数</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <h3 style="margin:16px 0 6px">時間帯別 必要人員（合計）</h3>
+    ${headcountChart(s.total_headcount_by_hour)}
+    <div style="margin-top:12px"><button class="da-btn" data-act="to-timetable">タイムチャートで人員配置を見る →</button></div>
+  </div>`;
+}
+
 function render(el, b) {
   el.innerHTML =
     `<div class="da-bar">
@@ -164,6 +206,7 @@ function render(el, b) {
            <div class="da-card"><h3>ABC分析（上位SKU）</h3>${abcChart(b.abc_sku)}</div>
            <div class="da-card"><h3>曜日別ピーク</h3>${weekdayChart(b.peak && b.peak.by_weekday)}</div>
            <div class="da-card" style="grid-column:1/-1"><h3>時間帯別ピーク</h3>${hourChart(b.peak && b.peak.by_hour)}</div>
+           ${staffingCard(b.staffing)}
          </div>`
       : `<div class="da-empty"><b>WMSデータを分析</b>
            <div>「サンプルで試す」ですぐ確認、または出荷データを取り込んでください。</div></div>`);
@@ -202,6 +245,9 @@ export function mountDataAnalysis(el, opts = {}) {
     root.querySelector('[data-act="sample"]').onclick = () =>
       load(getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
     root.querySelector('[data-act="upload"]').onclick = () => fileInput.click();
+    const ttBtn = root.querySelector('[data-act="to-timetable"]');
+    if (ttBtn) ttBtn.onclick = () => document.dispatchEvent(new CustomEvent(
+      'whsim:load-timetable', { detail: { scenario: bundle && bundle.timetable_scenario } }));
     fileInput.onchange = () => {
       const f = fileInput.files[0];
       if (!f) return;

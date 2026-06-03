@@ -784,6 +784,17 @@ document.addEventListener('whsim:apply-run', (e) => {
   applyAndRun(edits);
 });
 
+// データ分析タブ → タイムチャート: place the day from the measured volumes.
+document.addEventListener('whsim:load-timetable', (e) => {
+  const scenario = e && e.detail && e.detail.scenario;
+  if (!scenario) { toast('先に物量を分析してください。', 'info'); return; }
+  switchView('timetable');           // mounts the timetable if needed
+  if (S.timetable && S.timetable.loadExternal) {
+    S.timetable.loadExternal(scenario);
+    toast('実データの物量でタイムチャートに人員配置しました。', 'ok');
+  }
+});
+
 // Re-resolve the cached canvas palette when the theme flips. draw2d already runs
 // in the RAF loop, so it just re-reads PALETTE on the next frame; force one draw
 // for the static (paused / no-replay) case so the canvas repaints immediately.

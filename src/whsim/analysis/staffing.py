@@ -113,3 +113,33 @@ def staffing_profile(shipments: pd.DataFrame | None,
         "operating_days": ndays_out,
         "daily": {k: round(v, 1) for k, v in daily.items()},
     }
+
+
+# Process-flow dependencies (input completes before its dependent starts).
+_DEPS = {"格納": ["入荷検品"], "検品": ["ピッキング"], "梱包": ["検品"], "出荷": ["梱包"]}
+_BAND = {"入荷": ["08:00", "16:00"], "出荷": ["09:00", "21:00"]}
+
+
+def timetable_scenario(shipments: pd.DataFrame | None,
+                       inbound: pd.DataFrame | None) -> dict:
+    """Build a generic timetable-solver payload (processes/productivity/scenario)
+    from the measured volumes, so the タイムチャート can place the day from real
+    data. Schema matches whsim.timetable.solve / timetable_solver.js."""
+    prof = staffing_profile(shipments, inbound)
+    processes, productivity, volumes = [], {}, {}
+    for p in prof["processes"]:
+        vk = f"{p['id']}_物量"
+        processes.append({
+            "id": p["id"], "section": p["section"], "worker_type": "PT",
+            "default_時間帯": _BAND.get(p["section"], ["09:00", "21:00"]),
+            "productivity_key": p["id"], "volume_key": vk,
+            "volume_unit": p["unit"].split("/")[0], "配置方式": "dynamic",
+            "固定人数": 0, "依存": _DEPS.get(p["id"], []),
+        })
+        productivity[p["id"]] = {"篁採用値": p["productivity"], "単位": p["unit"],
+                                 "fixed_hours": False}
+        volumes[vk] = int(round(p["daily_volume"]))
+    scenario = {"物量": volumes,
+                "制約": {"ピーク人数上限": 999, "Fマン上限": 99, "PT上限": 999}}
+    return {"processes": processes, "productivity": productivity,
+            "scenarios": {"実データ（平均日）": scenario}}

@@ -55,6 +55,7 @@ export function mountTimetable(targetEl, opts = {}) {
   let productivity = {};            // editable working copy (篁採用値)
   let volumes = {};                 // editable working copy of scenario 物量
   let constraints = {};             // editable working copy of scenario 制約
+  let pendingExternal = null;       // data-derived scenario queued before seed loads
   let result = null;
   let cursorSlot = 26;              // 13:00 default (typical peak)
   let recalcTimer = null;
@@ -614,6 +615,20 @@ export function mountTimetable(targetEl, opts = {}) {
     build();
     renderParams();
     recompute();
+    if (pendingExternal) { applyExternalScenario(pendingExternal); pendingExternal = null; }
+  }
+
+  // Merge a data-derived generic scenario (from 物量分析) into the seed and solve it.
+  function applyExternalScenario(payload) {
+    if (!seed || !payload || !payload.scenarios) return;
+    seed.processes = payload.processes || seed.processes;
+    seed.productivity = payload.productivity || seed.productivity;
+    Object.assign(seed.scenarios, payload.scenarios);
+    scenarioName = Object.keys(payload.scenarios)[0] || scenarioName;
+    loadScenario(scenarioName);
+    build();
+    renderParams();
+    recompute();
   }
 
   const onTheme = () => { if (result) { renderGantt(); renderStaffMap(); } };
@@ -626,6 +641,13 @@ export function mountTimetable(targetEl, opts = {}) {
     headcountAt,
     setMinute(min) { cursorSlot = Math.max(0, Math.min(N - 1, Math.floor(min / 30))); onCursor(); },
     setLayout(l) { layout = l || null; if (result) renderStaffMap(); },
+    // Load a data-derived generic scenario (from 物量分析) and solve it. Queues
+    // if the seed hasn't loaded yet (handoff can fire right after mount).
+    loadExternal(payload) {
+      if (!payload || !payload.scenarios) return;
+      if (!seed) { pendingExternal = payload; return; }
+      applyExternalScenario(payload);
+    },
     resize() { if (result) { renderGantt(); renderStaffMap(); } },
     destroy() {
       destroyed = true;
