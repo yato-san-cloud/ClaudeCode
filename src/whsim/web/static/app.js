@@ -617,6 +617,23 @@ async function uploadMapcsv(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('地図取込に失敗しました: ' + e.message, 'error'); }
 }
 
+async function generateMissing() {
+  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
+  setBtnBusy($('genMissingBtn'), true, '生成中…');
+  try {
+    const r = await api(`/api/projects/${S.project}/generate-missing`, { method: 'POST' });
+    const lines = (r.generated && r.generated.length)
+      ? r.generated.map(g => `<span class="ok">＋ ${g}</span>`)
+      : ['<span class="warn">生成できる不足データはありませんでした。</span>'];
+    $('importLog').innerHTML = lines.join('\n');
+    if (r.provenance_summary) $('provenance').textContent = r.provenance_summary;
+    await openProject(S.project);  // refresh headline/provenance/readiness
+    toast('不足データを生成しました。', 'ok');
+    cody('excited', '不足していたマスタを実データから補ったよ。これで実行できる。');
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('生成に失敗しました: ' + e.message, 'error'); }
+  finally { setBtnBusy($('genMissingBtn'), false); }
+}
+
 async function uploadCad(file) {
   if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
   const fd = new FormData(); fd.append('file', file);
@@ -1042,6 +1059,7 @@ function initUI() {
   $('distInput').onchange = () => $('distInput').files[0] && uploadDistances($('distInput').files[0]);
   $('mapcsvBtn').onclick = () => $('mapcsvInput').click();
   $('mapcsvInput').onchange = () => $('mapcsvInput').files[0] && uploadMapcsv($('mapcsvInput').files[0]);
+  $('genMissingBtn').onclick = generateMissing;
   ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => {
     e.preventDefault(); dz.classList.add('drag');
   }));

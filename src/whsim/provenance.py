@@ -29,6 +29,7 @@ _JP = {
 class Source(str, Enum):
     IMPORTED = "imported"        # came from the customer's dropped data
     INTERVIEW = "interview"      # the salesperson confirmed/typed it
+    GENERATED = "generated"      # inferred/estimated to fill a gap (not real input)
     PROVISIONAL = "provisional"  # template default, nobody has touched it
 
 
@@ -56,23 +57,30 @@ class Provenance:
             self.subtrees[subtree] = source
 
     def confidence(self) -> float:
-        """Fraction of subtrees backed by real input (imported or confirmed)."""
+        """Fraction of subtrees backed by *real* input (imported or confirmed).
+
+        Generated/estimated subtrees are intentionally excluded — inferred data is
+        not real data, and the % must never overstate that."""
         if not self.subtrees:
             return 0.0
-        real = sum(1 for s in self.subtrees.values() if s is not Source.PROVISIONAL)
+        real = sum(1 for s in self.subtrees.values()
+                   if s in (Source.IMPORTED, Source.INTERVIEW))
         return real / len(self.subtrees)
 
     def summary(self) -> str:
         imported = [_JP.get(k, k) for k, v in self.subtrees.items()
                     if v is Source.IMPORTED]
+        generated = [_JP.get(k, k) for k, v in self.subtrees.items()
+                     if v is Source.GENERATED]
         provisional = [_JP.get(k, k) for k, v in self.subtrees.items()
                        if v is Source.PROVISIONAL]
         pct = round(self.confidence() * 100)
-        return (
-            f"実データ {pct}% ／ "
-            f"取り込み済み: {('・'.join(imported)) or 'なし'} ／ "
-            f"テンプレ仮値: {('・'.join(provisional)) or 'なし'}"
-        )
+        parts = [f"実データ {pct}%",
+                 f"取り込み済み: {('・'.join(imported)) or 'なし'}"]
+        if generated:
+            parts.append(f"生成・推計: {'・'.join(generated)}")
+        parts.append(f"テンプレ仮値: {('・'.join(provisional)) or 'なし'}")
+        return " ／ ".join(parts)
 
     def to_dict(self) -> dict:
         return {

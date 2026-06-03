@@ -721,6 +721,24 @@ async def api_import_mapcsv(name: str, file: UploadFile):
             "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
 
 
+@app.post("/api/projects/{name}/generate-missing")
+def api_generate_missing(name: str):
+    """不足データ作成: derive missing masters (商品マスタ/ピック頻度/在庫) from the
+    real demand already in the model, then re-slot. Marked GENERATED in provenance
+    so the % real-data figure never overstates inferred data."""
+    from whsim import datagen, design
+    proj = _open(name)
+    model = proj.load_model()
+    summary = datagen.generate_missing(model)
+    design.materialize_racks(model)   # re-peg generated items onto storage slots
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    for st in summary.get("subtrees", []):
+        prov.mark(st, Source.GENERATED)
+    proj.save_provenance(prov)
+    return {**summary, "provenance_summary": prov.summary()}
+
+
 @app.post("/api/projects/{name}/assign-inventory")
 def api_assign_inventory(name: str, payload: dict | None = None):
     """Slot the loaded inventory (SKUs) onto the created storage locations."""
