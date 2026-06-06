@@ -216,6 +216,99 @@ function injectStyle() {
     transform var(--an-d3) var(--an-ease);
 }
 
+/* ============================================================
+   STACKED-AREA chart card (per-stage processing composition)
+   ============================================================ */
+/* Mono numerics everywhere in this module's numeric surfaces (Space Mono). */
+#analysis .an-view .num,
+#analysis .an-view .delta,
+#analysis .an-view .c-metric,
+#analysis .an-view .kpi-value,
+#analysis .an-view .an-area-svg text,
+#analysis .an-view .an-tbl td,
+#analysis .an-view .an-tbl th{
+  font-family:var(--font-mono,"Space Mono",ui-monospace,SFMono-Regular,monospace);
+}
+
+/* inline legend (top), short colour bars */
+#analysis .an-view .an-legend{
+  display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 8px;
+}
+#analysis .an-view .an-lg{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  font-family:var(--font-sans,inherit);
+}
+#analysis .an-view .an-lg.bn{color:var(--warn,#F5B05A)}
+#analysis .an-view .an-sw{width:14px;height:3px;border-radius:2px;flex:none}
+
+/* the area svg itself rises once (re-uses .an-chart-rise contract below) */
+#analysis .an-view .an-area-svg{display:block;width:100%}
+
+/* ============================================================
+   PER-STAGE ANALYSIS TABLE (difference by structure, not colour)
+   ============================================================ */
+#analysis .an-view .an-tbl{
+  width:100%;border-collapse:collapse;font-size:13px;
+}
+#analysis .an-view .an-tbl thead th{
+  font-family:var(--font-mono,"Space Mono",monospace);
+  font-weight:500;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-secondary,var(--ink-dim,#5C6675));
+  text-align:right;padding:0 0 9px;
+  border-bottom:1px solid var(--line,rgba(255,255,255,.08));
+}
+#analysis .an-view .an-tbl thead th:first-child{text-align:left}
+#analysis .an-view .an-tbl tbody td{
+  padding:11px 0;text-align:right;
+  border-bottom:1px solid var(--line-soft,var(--line-hair,rgba(255,255,255,.055)));
+  color:var(--ink,inherit);font-variant-numeric:tabular-nums;
+}
+#analysis .an-view .an-tbl tbody td:first-child{
+  text-align:left;font-family:var(--font-sans,inherit);font-weight:500;
+}
+#analysis .an-view .an-tbl tbody tr:last-child td{border-bottom:0}
+/* bottleneck row: structural, restrained — left rule + faint band, no loud colour */
+#analysis .an-view .an-tbl tbody tr.an-flag td:first-child{
+  box-shadow:inset 2px 0 0 var(--warn,#F5B05A);
+}
+#analysis .an-view .an-tbl tbody tr.an-flag td{
+  background:color-mix(in srgb, var(--warn,#F5B05A) 4%, transparent);
+}
+/* util mini-bar (right aligned) */
+#analysis .an-view .an-util{display:inline-flex;align-items:center;gap:9px;justify-content:flex-end}
+#analysis .an-view .an-util-bar{
+  width:54px;height:5px;border-radius:3px;position:relative;overflow:hidden;
+  background:var(--line-soft,var(--line-hair,rgba(255,255,255,.06)));
+}
+#analysis .an-view .an-util-bar i{
+  position:absolute;left:0;top:0;bottom:0;border-radius:3px;
+  background:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+}
+#analysis .an-view .an-util-bar i.an-pri{background:var(--accent,#34E3FF)}
+#analysis .an-view .an-util-bar i.an-w{background:var(--warn,#F5B05A)}
+#analysis .an-view .an-vd{
+  font-size:10.5px;font-weight:500;letter-spacing:.03em;
+  padding:3px 9px;border-radius:5px;font-family:var(--font-sans,inherit);
+  border:1px solid var(--line,rgba(255,255,255,.08));
+  color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+}
+#analysis .an-view .an-vd.ok{
+  border-color:color-mix(in srgb,var(--ok,#2EE6A0) 32%,transparent);
+  color:var(--ok,#2EE6A0);
+}
+#analysis .an-view .an-vd.warn{
+  border-color:color-mix(in srgb,var(--warn,#F5B05A) 40%,transparent);
+  color:var(--warn,#F5B05A);
+}
+#analysis .an-view .an-tbl-note{
+  margin-top:13px;padding-top:12px;
+  border-top:1px solid var(--line-soft,var(--line-hair,rgba(255,255,255,.055)));
+  font-size:11.5px;color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  display:flex;gap:8px;align-items:flex-start;line-height:1.5;
+}
+#analysis .an-view .an-tbl-note .an-ic{color:var(--warn,#F5B05A);flex:none;margin-top:1px}
+
 /* prefers-reduced-motion: stop all, land at resting state with real values */
 @media (prefers-reduced-motion: reduce){
   #analysis .an-view *{animation:none!important;transition:none!important}
@@ -491,6 +584,252 @@ function buildChartCard(title, sub, svg) {
   return card;
 }
 
+// ---- stacked-area composition (per-stage processing share) -----------------
+//
+// HONEST DATA: the analysis payload carries no time series, only the real
+// per-stage utilisation (`charts.stages.values`). We therefore render the
+// real per-stage figures as a stacked-area COMPOSITION across the process
+// pipeline (picking → packing → … in the order the engine emits them). No
+// hourly numbers, counts, or waits are invented; we plot exactly the values
+// the engine measured. The x-axis is the (real) ordered stage sequence, not a
+// fabricated clock. Single cyan series (the primary/first stage); every other
+// band is neutral so cyan stays <5% of area. The bottleneck band is outlined
+// in `warn` and annotated. Horizontal grid only; inline top legend with short
+// colour bars is built separately by `buildStageLegend`.
+//
+// Each band's height at stage i is that stage's own measured value; the bands
+// are stacked so the silhouette reads as the cumulative processing profile
+// across the pipeline. `peakLabel` marks the bottleneck stage.
+function stackedAreaChart(labels, values, peakLabel) {
+  const W = 720, H = 312;
+  const plot = { l: 56, r: 20, t: 22, b: 40 };
+  const x0 = plot.l, x1 = W - plot.r, y0 = H - plot.b, yTop = plot.t;
+  const iw = x1 - x0, ih = y0 - yTop;
+  const nums = values.map((v) => (isNum(v) && v > 0 ? v : 0));
+  const n = nums.length;
+
+  // Neutral layer ramp (so only ONE band — the first/primary — is cyan).
+  const accent = cssVar('--accent', cssVar('--cyan', '#34E3FF'));
+  const warn = cssVar('--warn', '#F5B05A');
+  const neutralVars = ['--n1', '--n2', '--n3'];
+  const neutralFallback = ['#4A5A72', '#3A4860', '#323E54'];
+  const ink = cssVar('--ink-secondary', cssVar('--ink-dim', '#5C6675'));
+  const hair = cssVar('--line-hair', 'rgba(255,255,255,.04)');
+  const axis = cssVar('--line', 'rgba(255,255,255,.09)');
+
+  // colour for band i: first band cyan; rest cycle the neutral ramp; the
+  // bottleneck band always carries the warn outline regardless of fill.
+  function bandColor(i, label) {
+    if (label === peakLabel) return warn;
+    if (i === 0) return accent;
+    const k = (i - 1) % neutralVars.length;
+    return cssVar(neutralVars[k], neutralFallback[k]);
+  }
+
+  // y-scale: stack heights so the tallest cumulative column fits with headroom.
+  // We stack the bands bottom→top; the cumulative max sets the scale.
+  let cumMax = 0;
+  { let acc = 0; for (let i = 0; i < n; i++) { acc += nums[i]; if (acc > cumMax) cumMax = acc; } }
+  const maxY = Math.max(0.0001, cumMax * 1.1);
+  const xOf = (i) => (n <= 1 ? x0 + iw / 2 : x0 + (iw * i) / (n - 1));
+  const yOf = (v) => y0 - ih * (v / maxY);
+
+  const svg = svgEl('svg', { class: 'an-area-svg an-chart-rise',
+    viewBox: `0 0 ${W} ${H}`, width: '100%',
+    preserveAspectRatio: 'xMidYMid meet', role: 'img',
+    'aria-label': '工程別処理量の積み上げエリアチャート（実測の工程別指標を構成比として表示）。' });
+
+  // horizontal grid + y labels (4 rows), faint.
+  const gridG = svgEl('g', { 'font-family': 'inherit', 'font-size': '10', fill: ink });
+  for (let t = 0; t <= 3; t++) {
+    const v = (maxY * t) / 3, yy = yOf(v);
+    gridG.appendChild(svgEl('line', { x1: x0, y1: yy, x2: x1, y2: yy,
+      stroke: t === 0 ? axis : hair, 'stroke-width': '1' }));
+    const lab = svgEl('text', { x: x0 - 8, y: yy + 4, 'text-anchor': 'end' });
+    lab.textContent = String(Math.round(v));
+    gridG.appendChild(lab);
+  }
+  svg.appendChild(gridG);
+
+  // Build cumulative top-edge for each band (bottom→top stacking). lower[i] is
+  // the running baseline before adding band b; upper = lower + band value.
+  const baselines = new Array(n).fill(0); // running cumulative at each x point
+  // We draw bands from the LAST (topmost) to the FIRST so earlier (cyan) sits
+  // visually in front; but stacking math is per-x cumulative across all bands.
+  // Compute each band's absolute top at its own x; for an area silhouette we
+  // interpolate the cumulative profile across stages.
+  // cumulative[i] after adding bands 0..k.
+  const order = labels.map((_, i) => i);
+  // Precompute cumulative tops: cum[k][i] = sum of values[0..k] at point i.
+  // Since each band has a single value spread across the pipeline, we render
+  // each band as a filled ribbon between its lower and upper cumulative edges.
+  const lowerEdge = order.map(() => new Array(n).fill(0));
+  const upperEdge = order.map(() => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    let acc = 0;
+    for (let k = 0; k < n; k++) {
+      lowerEdge[k][i] = acc;
+      acc += nums[k];
+      upperEdge[k][i] = acc;
+    }
+  }
+
+  // Draw bands back-to-front (topmost first) so the cyan primary reads cleanly.
+  for (let k = n - 1; k >= 0; k--) {
+    const col = bandColor(k, labels[k]);
+    const isPeak = labels[k] === peakLabel;
+    // ribbon path: top edge L→R, bottom edge R→L
+    let d = '';
+    for (let i = 0; i < n; i++) {
+      d += (i === 0 ? 'M' : 'L') + xOf(i).toFixed(1) + ',' + yOf(upperEdge[k][i]).toFixed(1) + ' ';
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      d += 'L' + xOf(i).toFixed(1) + ',' + yOf(lowerEdge[k][i]).toFixed(1) + ' ';
+    }
+    d += 'Z';
+    svg.appendChild(svgEl('path', { d, fill: col,
+      'fill-opacity': isPeak ? '0.20' : (k === 0 ? '0.26' : '0.16'),
+      stroke: col, 'stroke-width': isPeak ? '1.5' : (k === 0 ? '1.7' : '1'),
+      'stroke-opacity': isPeak ? '0.9' : (k === 0 ? '1' : '0.7') }));
+  }
+
+  // Peak annotation on the bottleneck stage (real label), if present.
+  const pIdx = peakLabel != null ? labels.indexOf(peakLabel) : -1;
+  if (pIdx >= 0) {
+    const px = xOf(pIdx);
+    const ann = svgEl('g', {});
+    ann.appendChild(svgEl('line', { x1: px, y1: yTop, x2: px, y2: y0,
+      stroke: warn, 'stroke-width': '1', 'stroke-dasharray': '3 3',
+      'stroke-opacity': '.55' }));
+    ann.appendChild(svgEl('circle', { cx: px, cy: yOf(upperEdge[pIdx][pIdx]),
+      r: '3', fill: warn }));
+    const t1 = svgEl('text', { x: px, y: yTop + 8, 'text-anchor': 'middle',
+      'font-size': '10', fill: warn });
+    t1.textContent = 'ピーク ' + peakLabel;
+    const t2 = svgEl('text', { x: px, y: yTop + 20, 'text-anchor': 'middle',
+      'font-size': '10', fill: warn, 'fill-opacity': '.82' });
+    t2.textContent = '律速工程';
+    // keep labels inside the plot horizontally for edge stages
+    if (pIdx === 0) { t1.setAttribute('text-anchor', 'start'); t2.setAttribute('text-anchor', 'start'); t1.setAttribute('x', px); t2.setAttribute('x', px); }
+    if (pIdx === n - 1) { t1.setAttribute('text-anchor', 'end'); t2.setAttribute('text-anchor', 'end'); }
+    ann.appendChild(t1);
+    ann.appendChild(t2);
+    svg.appendChild(ann);
+  }
+
+  // x-axis labels: the real ordered stage names.
+  const xg = svgEl('g', { 'font-family': 'inherit', 'font-size': '10',
+    fill: ink, 'text-anchor': 'middle' });
+  labels.forEach((lab, i) => {
+    const t = svgEl('text', { x: xOf(i), y: y0 + 18,
+      fill: lab === peakLabel ? warn : ink });
+    t.textContent = lab;
+    xg.appendChild(t);
+  });
+  svg.appendChild(xg);
+
+  return svg;
+}
+
+// inline legend (top), short colour bars — mirrors the band colours used by
+// stackedAreaChart so the two never drift. The bottleneck entry uses .bn.
+function buildStageLegend(labels, peakLabel) {
+  const wrap = el('div', { class: 'an-legend' });
+  const accent = cssVar('--accent', cssVar('--cyan', '#34E3FF'));
+  const warn = cssVar('--warn', '#F5B05A');
+  const neutralVars = ['--n1', '--n2', '--n3'];
+  const neutralFallback = ['#4A5A72', '#3A4860', '#323E54'];
+  labels.forEach((lab, i) => {
+    const isPeak = lab === peakLabel;
+    let col;
+    if (isPeak) col = warn;
+    else if (i === 0) col = accent;
+    else { const k = (i - 1) % neutralVars.length; col = cssVar(neutralVars[k], neutralFallback[k]); }
+    const lg = el('span', { class: 'an-lg' + (isPeak ? ' bn' : '') });
+    const sw = el('span', { class: 'an-sw' });
+    sw.style.background = col;
+    lg.appendChild(sw);
+    lg.appendChild(document.createTextNode(isPeak ? lab + ' · ボトルネック' : lab));
+    wrap.appendChild(lg);
+  });
+  return wrap;
+}
+
+// ---- per-stage analysis table (difference by structure, not colour) --------
+//
+// HONEST DATA: built from the real per-stage utilisation in `charts.stages`
+// (labels + values, peak_label). The payload exposes no per-stage processing
+// counts or per-stage waits, so those columns render an em dash rather than a
+// fabricated number — the DOM contract (5 columns) is preserved either way.
+// 判定 is derived from the real utilisation and the (real) bottleneck label.
+function buildStageTable(labels, values, peakLabel) {
+  const wrap = el('div', { class: 'chart-card' });
+  wrap.appendChild(el('div', { class: 'chart-title' }, '工程別 分析'));
+  wrap.appendChild(el('div', { class: 'chart-sub' }, '差は色でなく構造（左罫線・帯・右揃え）で示す'));
+
+  const table = el('table', { class: 'an-tbl' });
+  const thead = el('thead');
+  const htr = el('tr');
+  ['工程', '稼働率', '処理(件)', '平均待ち(s)', '判定'].forEach((h) => {
+    htr.appendChild(el('th', null, h));
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  let bottleneckShown = false;
+  labels.forEach((lab, i) => {
+    const util = isNum(values[i]) ? values[i] : null; // already a percentage
+    const isPeak = lab === peakLabel;
+    const tr = el('tr', isPeak ? { class: 'an-flag' } : null);
+    if (isPeak) bottleneckShown = true;
+
+    // 工程
+    tr.appendChild(el('td', null, lab));
+
+    // 稼働率 (real util-bar)
+    const utilTd = el('td');
+    const cell = el('span', { class: 'an-util' });
+    cell.appendChild(el('span', { class: 'num' },
+      util != null ? group(Math.round(util * 10) / 10) + '%' : '—'));
+    const bar = el('span', { class: 'an-util-bar' });
+    const fill = el('i', { class: isPeak ? 'an-w' : (i === 0 ? 'an-pri' : '') });
+    fill.style.width = (util != null ? Math.max(0, Math.min(100, util)) : 0) + '%';
+    bar.appendChild(fill);
+    cell.appendChild(bar);
+    utilTd.appendChild(cell);
+    tr.appendChild(utilTd);
+
+    // 処理(件) — no honest per-stage source in payload → em dash.
+    tr.appendChild(el('td', { class: 'num' }, '—'));
+    // 平均待ち(s) — no honest per-stage source in payload → em dash.
+    tr.appendChild(el('td', { class: 'num' }, '—'));
+
+    // 判定 — derived from real utilisation + bottleneck flag.
+    const vtd = el('td');
+    let cls = 'an-vd ok', txt = '良好';
+    if (isPeak || (util != null && util >= 85)) { cls = 'an-vd warn'; txt = '要注意'; }
+    else if (util == null) { cls = 'an-vd'; txt = '—'; }
+    vtd.appendChild(el('span', { class: cls }, txt));
+    tr.appendChild(vtd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+
+  // restrained bottleneck note (only when a bottleneck row is present).
+  if (bottleneckShown && peakLabel) {
+    const note = el('div', { class: 'an-tbl-note' });
+    const ic = el('span', { class: 'an-ic' }, '⚠');
+    note.appendChild(ic);
+    note.appendChild(el('span', null,
+      `${peakLabel}が最繁忙工程で全体スループットを律速。当該工程の能力増強でサイクル短縮を検討。`));
+    wrap.appendChild(note);
+  }
+  return wrap;
+}
+
 function buildChartsSection(charts, currency) {
   const stages = charts.stages || {};
   const cost = charts.cost || null;
@@ -503,17 +842,25 @@ function buildChartsSection(charts, currency) {
   const grid = el('div', { class: 'chart-grid' });
 
   if (hasStages) {
-    const svg = barChart(stages.labels, stages.values || [], {
-      color: cssVar('--accent', '#2383e2'),
-      peakColor: cssVar('--bad', '#e5484d'),
-      highlightLabel: stages.peak_label,
-      suffix: '%',
-      fmt: (v) => (Math.round(v * 10) / 10).toString(),
-    });
-    const sub = stages.peak_label
-      ? `工程別の稼働率（％）。${stages.peak_label}が最繁忙工程。`
-      : '工程別の稼働率（％）。';
-    grid.appendChild(buildChartCard('工程別 稼働率 / 混雑', sub, svg));
+    // Stacked-area composition (mock core) built from the REAL per-stage
+    // utilisation series. No fabricated time/counts — the bands are the
+    // measured per-stage figures, stacked across the ordered pipeline.
+    const labels = stages.labels;
+    const values = stages.values || [];
+    const peak = stages.peak_label;
+
+    const card = el('div', { class: 'chart-card' });
+    card.appendChild(el('div', { class: 'chart-title' }, '工程別 処理量（積み上げ）'));
+    const sub = peak
+      ? `工程別の実測指標を構成比として積み上げ。${peak}が最繁忙工程。`
+      : '工程別の実測指標を構成比として積み上げ。';
+    card.appendChild(el('div', { class: 'chart-sub' }, sub));
+    card.appendChild(buildStageLegend(labels, peak));
+    card.appendChild(stackedAreaChart(labels, values, peak));
+    grid.appendChild(card);
+
+    // Per-stage analysis table (structure, not colour).
+    grid.appendChild(buildStageTable(labels, values, peak));
   }
 
   if (hasCost) {

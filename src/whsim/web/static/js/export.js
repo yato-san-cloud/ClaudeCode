@@ -205,6 +205,112 @@ const EXPORT_CSS = `
 #export table.proposal-kpis td { font-variant-numeric: tabular-nums; }
 
 /* ============================================================
+   Proposal sheet typography + document structure (mock-aligned)
+   Purely additive: lifts body type to 14px/1.6, gives sections an
+   uppercase ruled heading, and adds a KPI card grid. No markup the
+   public API depends on changes.
+   ============================================================ */
+#export .proposal-sheet {
+  font-size: 14px; line-height: 1.6; color: var(--x-paper-ink-1);
+}
+#export .proposal-sheet b { color: var(--x-paper-ink-0); }
+
+/* document header: logo · title · meta column */
+#export .doc-head {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding-bottom: 20px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--x-paper-line);
+}
+#export .doc-logo {
+  width: 48px; height: 48px; flex-shrink: 0;
+  border: 1.5px dashed #C9D1DE; border-radius: 8px;
+  display: grid; place-items: center;
+  color: var(--x-paper-ink-2); font-size: 9px;
+  text-align: center; line-height: 1.2; letter-spacing: 0.04em;
+}
+#export .doc-title { min-width: 0; }
+#export .doc-meta {
+  margin-left: auto; text-align: right;
+  font-size: 11px; color: var(--x-paper-ink-2); line-height: 1.85;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+#export .doc-meta b { color: var(--x-paper-ink-0); font-weight: 700; }
+
+/* section block + ruled, uppercase heading */
+#export .proposal-section { margin-top: 28px; }
+#export .sec-title {
+  font-size: 11px; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--x-paper-ink-2); font-weight: 600;
+  margin: 0 0 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+#export .sec-title > span:first-child { letter-spacing: -0.01em; }
+#export .sec-title::after { content: ""; flex: 1; height: 1px; background: var(--x-paper-line-2); }
+
+/* KPI card grid (replaces the bare 2-column table) */
+#export .kpi-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+}
+#export .kpi-card {
+  border: 1px solid var(--x-paper-line); border-radius: 9px;
+  padding: 12px 13px; background: var(--x-paper);
+}
+#export .kpi-card .k-label {
+  font-size: 10.5px; color: var(--x-paper-ink-2);
+  margin-bottom: 5px; letter-spacing: 0.02em;
+}
+#export .kpi-card .k-val {
+  font-variant-numeric: tabular-nums;
+  font-size: 22px; font-weight: 700; color: var(--x-paper-ink-0); line-height: 1.05;
+}
+#export .kpi-card .k-val .u {
+  font-size: 11px; font-weight: 400; color: var(--x-paper-ink-2); margin-left: 3px;
+}
+#export .kpi-card .k-sub {
+  font-size: 10.5px; margin-top: 5px; font-variant-numeric: tabular-nums;
+  color: var(--x-paper-ink-2);
+}
+@media (max-width: 560px) { #export .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* scenario comparison: right-aligned tabular numerics */
+#export table.proposal-scn { width: 100%; border-collapse: collapse; font-size: 12px; }
+#export table.proposal-scn th,
+#export table.proposal-scn td {
+  text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--x-paper-line-2);
+}
+#export table.proposal-scn th:first-child,
+#export table.proposal-scn td:first-child { text-align: left; }
+#export table.proposal-scn thead th {
+  font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--x-paper-ink-2); font-weight: 600;
+  border-bottom: 1px solid var(--x-paper-line);
+}
+#export table.proposal-scn td.num {
+  font-variant-numeric: tabular-nums; color: var(--x-paper-ink-0);
+}
+#export table.proposal-scn tbody tr:last-child td { border-bottom: none; }
+#export table.proposal-scn tr.hi td { background: rgba(52,227,255,0.06); }
+#export table.proposal-scn tr.hi td:first-child { color: var(--x-deep); font-weight: 600; }
+#export table.proposal-scn tr.hi td.num { color: var(--x-deep); font-weight: 700; }
+
+/* provenance footer mini-bar (only rendered when a value exists) */
+#export .prov-foot {
+  margin-top: 18px; border-top: 1px solid var(--x-paper-line); padding-top: 14px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  font-size: 10.5px; color: var(--x-paper-ink-2);
+}
+#export .prov-foot .lbl { letter-spacing: 0.04em; white-space: nowrap; }
+#export .prov-bar {
+  flex: 1; min-width: 120px; height: 8px; border-radius: 4px; overflow: hidden;
+  display: flex; border: 1px solid var(--x-paper-line);
+}
+#export .prov-bar .real { background: var(--x-cyan); }
+#export .prov-bar .est { background: #DCE2EC; }
+#export .prov-legend { display: flex; gap: 14px; }
+#export .prov-legend span { display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+#export .prov-legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* ============================================================
    Entrance choreography — once on enter, transform/opacity only
    ============================================================ */
 @keyframes x-sheet-in {
@@ -230,7 +336,9 @@ const EXPORT_CSS = `
   transform: scaleX(0);
   animation: x-rule-grow var(--x-dur-3) var(--x-ease-out) 260ms both;
 }
-#export .export-view.is-anim table.proposal-kpis tbody tr {
+#export .export-view.is-anim table.proposal-kpis tbody tr,
+#export .export-view.is-anim .kpi-card,
+#export .export-view.is-anim table.proposal-scn tbody tr {
   opacity: 0; will-change: opacity, transform;
   animation: x-fade-up var(--x-dur-3) var(--x-ease-out) both;
   animation-delay: var(--x-stagger, 0ms);
@@ -242,7 +350,9 @@ const EXPORT_CSS = `
   }
   #export .export-view.is-anim .export-panel,
   #export .export-view.is-anim .proposal-sheet,
-  #export .export-view.is-anim table.proposal-kpis tbody tr { opacity: 1 !important; transform: none !important; }
+  #export .export-view.is-anim table.proposal-kpis tbody tr,
+  #export .export-view.is-anim .kpi-card,
+  #export .export-view.is-anim table.proposal-scn tbody tr { opacity: 1 !important; transform: none !important; }
   #export .export-view.is-anim .proposal-verdict::before { transform: scaleX(1) !important; }
   #export .spinner { animation: none !important; }
 }
@@ -371,16 +481,20 @@ export class ExportView {
     } catch (_e) { /* ignore */ }
     if (reduce) return;
 
-    // Stagger the summary KPI rows ~36ms apart, after the sheet rises.
-    const rows = root.querySelectorAll('table.proposal-kpis tbody tr');
-    rows.forEach((tr, i) => { tr.style.setProperty('--x-stagger', (300 + i * 36) + 'ms'); });
+    // Stagger the entering groups ~36ms apart, after the sheet rises: KPI cards
+    // first, then the (optional) summary table rows / scenario rows.
+    const cards = root.querySelectorAll('.kpi-card');
+    cards.forEach((el, i) => { el.style.setProperty('--x-stagger', (300 + i * 36) + 'ms'); });
+    const base = 300 + cards.length * 36;
+    const rows = root.querySelectorAll('table.proposal-kpis tbody tr, table.proposal-scn tbody tr');
+    rows.forEach((tr, i) => { tr.style.setProperty('--x-stagger', (base + i * 36) + 'ms'); });
 
     root.classList.add('is-anim');
 
     // Settle: clear will-change once the entrance is done.
-    const settle = 300 + rows.length * 36 + 320;
+    const settle = base + rows.length * 36 + 320;
     this._motionTimers.push(window.setTimeout(() => {
-      root.querySelectorAll('.export-panel, .proposal-sheet, table.proposal-kpis tbody tr')
+      root.querySelectorAll('.export-panel, .proposal-sheet, .kpi-card, table.proposal-kpis tbody tr, table.proposal-scn tbody tr')
         .forEach((el) => { el.style.willChange = 'auto'; });
     }, settle));
 
@@ -778,24 +892,58 @@ export class ExportView {
     sheet.style.borderRadius = '10px';
     sheet.style.boxShadow = '0 1px 4px rgba(0,0,0,.06)';
 
-    // Title
+    // ---- Document header: logo · title block · meta column ----
+    // Customer / project metadata is not carried in the replay payload, so those
+    // rows render an honest em-dash placeholder rather than a fabricated value;
+    // the warehouse name and an issue date (the only metadata we actually have)
+    // are filled from real data.
     const whName = (typeof meta.name === 'string' && meta.name.trim()) ? meta.name.trim() : name;
+
+    const head = document.createElement('div');
+    head.className = 'doc-head';
+
+    const logo = document.createElement('div');
+    logo.className = 'doc-logo';
+    logo.innerHTML = 'LOGO<br>WHSiM';
+    head.appendChild(logo);
+
+    const titleBox = document.createElement('div');
+    titleBox.className = 'doc-title';
     const title = document.createElement('h1');
     title.className = 'proposal-title';
     title.textContent = `${whName} 倉庫運用 提案書`;
     title.style.fontSize = '22px';
     title.style.fontWeight = '700';
-    title.style.margin = '0 0 6px';
-    sheet.appendChild(title);
-
+    title.style.margin = '0 0 4px';
+    titleBox.appendChild(title);
     const sub = document.createElement('p');
     sub.className = 'proposal-subtitle';
     sub.style.fontSize = '12px';
-    sub.style.color = 'var(--muted, #6b7785)';
-    sub.style.margin = '0 0 16px';
-    const dur = isNum(meta.duration_s) ? `シミュレーション ${(meta.duration_s / 3600).toFixed(1)}時間相当` : '';
+    sub.style.color = 'var(--x-paper-ink-2)';
+    sub.style.letterSpacing = '0.04em';
+    sub.style.margin = '0';
+    const dur = isNum(meta.duration_s) ? `シミュレーション ${(meta.duration_s / 3600).toFixed(1)}時間相当` : 'WAREHOUSE OPERATIONS PROPOSAL';
     sub.textContent = dur;
-    sheet.appendChild(sub);
+    titleBox.appendChild(sub);
+    head.appendChild(titleBox);
+
+    // Meta column: issue date is real (今日); customer/project are placeholders.
+    const metaCol = document.createElement('div');
+    metaCol.className = 'doc-meta';
+    const issued = new Date().toISOString().slice(0, 10); // 発行日 (YYYY-MM-DD)
+    const metaRow = (label, value) => {
+      const row = document.createElement('div');
+      const b = document.createElement('b');
+      b.textContent = value;
+      row.appendChild(document.createTextNode(label + ' '));
+      row.appendChild(b);
+      return row;
+    };
+    metaCol.appendChild(metaRow('発行日', issued));
+    metaCol.appendChild(metaRow('顧客名', '—'));
+    metaCol.appendChild(metaRow('案件', '—'));
+    head.appendChild(metaCol);
+    sheet.appendChild(head);
 
     // Verdict headline
     const verdict = document.createElement('div');
@@ -808,7 +956,7 @@ export class ExportView {
     verdict.style.fontWeight = '700';
     verdict.style.padding = '12px 14px';
     verdict.style.borderRadius = '8px';
-    verdict.style.margin = '0 0 18px';
+    verdict.style.margin = '24px 0 0';
     if (bad) {
       verdict.style.color = 'var(--bad, #b30000)';
       verdict.style.background = 'rgba(179,0,0,.07)';
@@ -824,11 +972,12 @@ export class ExportView {
     }
     sheet.appendChild(verdict);
 
-    // KPI summary table
-    sheet.appendChild(this._buildSummaryTable(k));
+    // KPI card grid — the bare 2-column table promoted to big-number cards.
+    sheet.appendChild(this._section('主要KPI', this._buildKpiGrid(k)));
 
     // Proposal PNG
     if (this.pngUrl) {
+      const figWrap = this._section('レイアウト縮図と混雑ヒートマップ', null);
       const fig = document.createElement('figure');
       fig.className = 'proposal-figure';
       fig.style.margin = '20px 0 0';
@@ -840,10 +989,16 @@ export class ExportView {
       img.style.display = 'block';
       img.style.border = '1px solid var(--line, #e3e8ee)';
       img.style.borderRadius = '6px';
-      img.addEventListener('error', () => { fig.style.display = 'none'; });
+      img.addEventListener('error', () => { figWrap.style.display = 'none'; });
       fig.appendChild(img);
-      sheet.appendChild(fig);
+      figWrap.appendChild(fig);
+      sheet.appendChild(figWrap);
     }
+
+    // Scenario comparison — only when the replay actually carries scenarios
+    // (this endpoint typically does not, so it stays absent rather than faked).
+    const scn = this._buildScenarioTable(r);
+    if (scn) sheet.appendChild(this._section('シナリオ比較', scn));
 
     // Footer assumptions
     const footer = document.createElement('p');
@@ -858,7 +1013,228 @@ export class ExportView {
     footer.textContent = `前提: 人件費 ${labour}、AGV投資 ${capex}。本提案書はシミュレーション結果に基づく試算です。`;
     sheet.appendChild(footer);
 
+    // Provenance mini-bar ("N% your data") — rendered only when a real value is
+    // present in the replay payload; never fabricated.
+    const prov = this._buildProvenanceFoot(r);
+    if (prov) sheet.appendChild(prov);
+
     return sheet;
+  }
+
+  // A document section: ruled, uppercase heading + body. The first label span is
+  // tracked so it can carry the tighter heading letter-spacing from CSS.
+  _section(label, body) {
+    const sec = document.createElement('section');
+    sec.className = 'proposal-section';
+    const h = document.createElement('div');
+    h.className = 'sec-title';
+    const span = document.createElement('span');
+    span.textContent = label;
+    h.appendChild(span);
+    sec.appendChild(h);
+    if (body) sec.appendChild(body);
+    return sec;
+  }
+
+  // KPI card grid (repeat(3,1fr)): big mono value + label + sub-note. Only KPIs
+  // that actually exist in the replay's kpis are emitted; the once-on-enter
+  // count-up reuses the same data-x-* contract as the legacy summary table.
+  _buildKpiGrid(k) {
+    const compFrac = completionFraction(k);
+    const compPctScaled = compFrac != null ? (Math.abs(compFrac) <= 1 ? compFrac * 100 : compFrac) : null;
+    const hc = headcountOf(k);
+
+    // [label, valueText, unit|null, sub|null, countMeta|null, present]
+    const defs = [
+      ['スループット',
+        isNum(k.throughput_per_hr) ? num(k.throughput_per_hr, 1) : '—',
+        '件/時',
+        isNum(k.orders_completed) ? num(k.orders_completed, 0) + ' 件 完了' : null,
+        isNum(k.throughput_per_hr) ? { value: k.throughput_per_hr, dec: 1 } : null,
+        isNum(k.throughput_per_hr)],
+      ['出荷完了率',
+        compPctScaled != null ? compPctScaled.toFixed(1) : '—',
+        '%',
+        (isNum(k.orders_completed) && isNum(k.orders_arrived))
+          ? num(k.orders_completed, 0) + ' / ' + num(k.orders_arrived, 0) + ' 件' : null,
+        compPctScaled != null ? { value: compPctScaled, dec: 1 } : null,
+        compPctScaled != null],
+      ['1件あたりコスト',
+        isNum(k.total_cost_per_order) ? num(k.total_cost_per_order, 0) : '—',
+        '円/件',
+        isNum(k.monthly_cost) ? '月間 ' + yen(k.monthly_cost, 0) : null,
+        isNum(k.total_cost_per_order) ? { value: k.total_cost_per_order, dec: 0, group: true, prefix: '¥' } : null,
+        isNum(k.total_cost_per_order)],
+      ['必要人員',
+        isNum(hc) ? num(hc, 0) : '—',
+        '名',
+        this._headcountSub(k),
+        isNum(hc) ? { value: hc, dec: 0 } : null,
+        isNum(hc)],
+      ['投資回収',
+        (isNum(k.payback_months) && k.payback_months > 0) ? num(k.payback_months, 1) : '—',
+        'ヶ月',
+        isNum(k.capex_total) && k.capex_total > 0 ? '投資 ' + yen(k.capex_total, 0) : null,
+        (isNum(k.payback_months) && k.payback_months > 0) ? { value: k.payback_months, dec: 1 } : null,
+        isNum(k.payback_months) && k.payback_months > 0],
+      ['仮置き最大WIP',
+        isNum(k.wip_max) ? num(k.wip_max, 0) : '—',
+        'トート',
+        isNum(k.staging_capacity) && k.staging_capacity > 0 ? '上限 ' + num(k.staging_capacity, 0) : null,
+        isNum(k.wip_max) ? { value: k.wip_max, dec: 0 } : null,
+        isNum(k.wip_max) && (k.staging_capacity == null || k.staging_capacity > 0)],
+    ];
+
+    const grid = document.createElement('div');
+    grid.className = 'kpi-grid';
+    defs.filter((d) => d[5]).forEach(([label, valueText, unit, sub, count]) => {
+      const card = document.createElement('div');
+      card.className = 'kpi-card';
+
+      const lab = document.createElement('div');
+      lab.className = 'k-label';
+      lab.textContent = label;
+      card.appendChild(lab);
+
+      const val = document.createElement('div');
+      val.className = 'k-val tnum';
+      const prefix = count && count.prefix ? count.prefix : '';
+      const valSpan = document.createElement('span');
+      valSpan.textContent = prefix + valueText;
+      // Count-up tags drive only the 0 -> value animation; text stays authoritative.
+      if (count && isNum(count.value)) {
+        valSpan.setAttribute('data-x-count', String(count.value));
+        valSpan.setAttribute('data-x-dec', String(count.dec || 0));
+        if (count.group) valSpan.setAttribute('data-x-group', '1');
+        if (count.prefix) valSpan.setAttribute('data-x-prefix', count.prefix);
+      }
+      val.appendChild(valSpan);
+      if (unit) {
+        const u = document.createElement('span');
+        u.className = 'u';
+        u.textContent = unit;
+        val.appendChild(u);
+      }
+      card.appendChild(val);
+
+      if (sub) {
+        const s = document.createElement('div');
+        s.className = 'k-sub';
+        s.textContent = sub;
+        card.appendChild(s);
+      }
+      grid.appendChild(card);
+    });
+    return grid;
+  }
+
+  _headcountSub(k) {
+    const parts = [];
+    if (isNum(k.n_pickers)) parts.push('ピッカー ' + num(k.n_pickers, 0));
+    if (isNum(k.n_packers)) parts.push('梱包 ' + num(k.n_packers, 0));
+    if (isNum(k.n_agvs) && k.n_agvs > 0) parts.push('AGV ' + num(k.n_agvs, 0));
+    return parts.length ? parts.join(' · ') : null;
+  }
+
+  // Scenario comparison table — rendered only when the replay carries a
+  // non-empty `scenarios` array. Each row: name + the numeric columns present.
+  // Returns null when there is nothing real to show.
+  _buildScenarioTable(r) {
+    const list = Array.isArray(r && r.scenarios) ? r.scenarios : null;
+    if (!list || !list.length) return null;
+
+    const cols = [
+      ['¥/件', (s) => isNum(s.total_cost_per_order) ? yen(s.total_cost_per_order, 0) : '—'],
+      ['必要人員', (s) => isNum(headcountOf(s)) ? num(headcountOf(s), 0) + '名' : '—'],
+      ['回収月数', (s) => (isNum(s.payback_months) && s.payback_months > 0) ? num(s.payback_months, 1) + 'ヶ月' : '—'],
+    ];
+
+    const table = document.createElement('table');
+    table.className = 'proposal-scn';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    const nameTh = document.createElement('th');
+    nameTh.textContent = 'シナリオ';
+    htr.appendChild(nameTh);
+    cols.forEach(([h]) => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
+    thead.appendChild(htr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    list.forEach((s) => {
+      const sc = s && typeof s === 'object' ? s : {};
+      const tr = document.createElement('tr');
+      if (sc.recommended === true) tr.className = 'hi';
+      const td0 = document.createElement('td');
+      td0.textContent = (typeof sc.name === 'string' && sc.name) ? sc.name : '—';
+      tr.appendChild(td0);
+      cols.forEach(([, fn]) => { const td = document.createElement('td'); td.className = 'num'; td.textContent = fn(sc); tr.appendChild(td); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  // Provenance footer ("実データ N%"): a two-segment bar. Reads a real fraction
+  // from replay.provenance (number 0-1 or 0-100, or {real_pct}/{real}). Returns
+  // null when no value exists — nothing is invented.
+  _buildProvenanceFoot(r) {
+    const realPct = this._provenancePct(r);
+    if (realPct == null) return null;
+    const real = Math.max(0, Math.min(100, realPct));
+    const est = 100 - real;
+
+    const foot = document.createElement('div');
+    foot.className = 'prov-foot';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'lbl';
+    lbl.textContent = 'データ出所';
+    foot.appendChild(lbl);
+
+    const bar = document.createElement('div');
+    bar.className = 'prov-bar';
+    bar.title = `実データ ${real.toFixed(0)}% / 生成・推計 ${est.toFixed(0)}%`;
+    const realSeg = document.createElement('div');
+    realSeg.className = 'real';
+    realSeg.style.width = real + '%';
+    const estSeg = document.createElement('div');
+    estSeg.className = 'est';
+    estSeg.style.width = est + '%';
+    bar.appendChild(realSeg);
+    bar.appendChild(estSeg);
+    foot.appendChild(bar);
+
+    const legend = document.createElement('div');
+    legend.className = 'prov-legend';
+    const leg = (color, text) => {
+      const span = document.createElement('span');
+      const i = document.createElement('i');
+      i.style.background = color;
+      span.appendChild(i);
+      span.appendChild(document.createTextNode(text));
+      return span;
+    };
+    legend.appendChild(leg('var(--x-cyan)', `実データ ${real.toFixed(0)}%`));
+    legend.appendChild(leg('#DCE2EC', `生成・推計 ${est.toFixed(0)}%`));
+    foot.appendChild(legend);
+
+    return foot;
+  }
+
+  // Best-effort extraction of a real-data percentage (0-100) from whatever shape
+  // a provenance value might take; null when nothing usable is present.
+  _provenancePct(r) {
+    const p = r && r.provenance;
+    if (p == null) return null;
+    if (isNum(p)) return Math.abs(p) <= 1 ? p * 100 : p;
+    if (typeof p === 'object') {
+      const cand = [p.real_pct, p.real_percent, p.real, p.your_data_pct, p.percent];
+      for (const v of cand) {
+        if (isNum(v)) return Math.abs(v) <= 1 ? v * 100 : v;
+      }
+    }
+    return null;
   }
 
   _buildSummaryTable(k) {

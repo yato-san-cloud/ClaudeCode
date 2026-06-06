@@ -226,21 +226,19 @@ function draw2d() {
     rt.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
     ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
   }
-  // forklifts (moving, orange diamond-ish squares)
+  // forklifts (moving ▲ — matches the legend glyph & 3D view)
   for (const fk of (rep.forklifts || [])) {
     const [x, y, st] = interp(fk.keyframes, S.t);
     ctx.fillStyle = st === 'putaway' ? '#e65100' : '#ffb74d';
     ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
-    ctx.fillRect(X(x) - 7, Y(y) - 5, 14, 10);
-    ctx.strokeRect(X(x) - 7, Y(y) - 5, 14, 10);
+    agentGlyph(X(x), Y(y), 'forklift', 7);
   }
-  // AGVs (moving squares, distinct from round workers)
+  // AGVs (moving ◆ — matches the legend glyph, distinct from round workers)
   for (const ag of (rep.agvs || [])) {
     const [x, y, st] = interp(ag.keyframes, S.t);
     ctx.fillStyle = AGV_COLOR[st] || '#1f78b4';
     ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
-    ctx.fillRect(X(x) - 6, Y(y) - 5, 12, 10);
-    ctx.strokeRect(X(x) - 6, Y(y) - 5, 12, 10);
+    agentGlyph(X(x), Y(y), 'agv', 6);
   }
   // 仮置き(staging) buffer: WIP heat rectangle + live 滞留数 (staged mode only).
   const sg = rep.staging;
@@ -303,11 +301,19 @@ function drawStagingRing(cx, cy, sg) {
   const frac = Math.min(1, wip / Math.max(sg.capacity, 1));
   const col = frac < 0.60 ? '#34e3ff' : frac < 0.85 ? '#f5b05a' : '#ff5a78';
   const R = 13;
+  // Gentle pulse when nearly full (≥85%) and actively playing — a Mini-Metro
+  // "overcrowding" cue. Restores globalAlpha so nothing downstream is affected.
+  const pulse = (frac >= 0.85 && S.playing)
+    ? 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(performance.now() / 280))
+    : 1;
+  const a0 = ctx.globalAlpha;
   ctx.lineWidth = 3; ctx.lineCap = 'round';
   ctx.strokeStyle = 'rgba(126,160,200,0.20)';
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
+  ctx.globalAlpha = a0 * pulse;
   ctx.strokeStyle = col;
   ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI); ctx.stroke();
+  ctx.globalAlpha = a0;
   ctx.lineWidth = 1; ctx.lineCap = 'butt';
 }
 
@@ -317,8 +323,14 @@ function drawStagingRing(cx, cy, sg) {
 function drawBottleneck(rep, X, Y) {
   const k = rep.kpis;
   if (!k || !k.bottleneck_jp) return;
-  const stage = { 'ピッキング': 'picking', '梱包': 'packing' }[k.bottleneck_jp] || null;
-  const z = (rep.zones || []).find(zz => zz.type === stage);
+  // Map the bottleneck label back to a zone type across ALL stages
+  // (入荷/検品/格納/ピッキング/梱包/出荷…), not just picking/packing. Built by
+  // inverting ZONE_JP so any zone type can match; unmatched => nothing drawn.
+  const JP_TO_TYPE = Object.fromEntries(
+    Object.entries(ZONE_JP).map(([type, jp]) => [jp, type]));
+  const extra = { '検品': 'inspection', '格納': 'storage' }; // synonyms not in ZONE_JP
+  const stage = JP_TO_TYPE[k.bottleneck_jp] || extra[k.bottleneck_jp] || null;
+  const z = stage ? (rep.zones || []).find(zz => zz.type === stage) : null;
   if (!z) return;
   const cx = X(z.x + z.w / 2), cy = Y(z.y + z.h / 2);
   ctx.fillStyle = 'rgba(245,176,90,0.12)';
