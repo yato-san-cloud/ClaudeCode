@@ -13,6 +13,79 @@ from whsim.render.shelves import shelf_runs
 from whsim.schema.model import WarehouseModel
 
 
+def _productivity_series(res: RunResult) -> list[dict]:
+    """A playback-head-synced productivity timeline for the live graph.
+
+    Buckets the replay window into ~30s intervals (capped at ~120 points) and,
+    per bucket, reports cumulative completions (`done`), the bucket's throughput
+    in orders/hour (`rate`), the 仮置き WIP at that time forward-filled from
+    staging events (`wip`), and a best-effort count of concurrently active work
+    (`active`). Purely additive; returns [] when there are no events / no window
+    so callers never break.
+    """
+    events = getattr(res, "events", None) or []
+    win = res.replay_window_s or res.duration_s or 0.0
+    if win <= 0 or not events:
+        return []
+
+    # Bucket geometry: ~30s buckets, but never more than ~120 points.
+    target = 30.0
+    n = max(1, int(round(win / target)))
+    n = min(n, 120)
+    step = win / n
+
+    completes = sorted(e["t"] for e in events
+                       if e.get("event") == "order_complete" and e.get("t", 0) <= win)
+
+    # staging WIP samples (t, wip) within the window, for forward-fill.
+    wip_samples = sorted(
+        ((e["t"], int(e.get("wip", 0))) for e in events
+         if e.get("event") in ("staging_put", "staging_get") and e.get("t", 0) <= win),
+        key=lambda p: p[0])
+
+    # Active work intervals from pick_start/pick_done pairs per worker, so we can
+    # count how many were mid-pick at each bucket time. Best-effort: skipped if
+    # the pairing is incomplete.
+    open_by_worker: dict = {}
+    intervals: list[tuple[float, float]] = []
+    for e in sorted(events, key=lambda x: x.get("t", 0)):
+        ev = e.get("event")
+        if ev == "pick_start":
+            open_by_worker[e.get("worker")] = e.get("t", 0.0)
+        elif ev == "pick_done":
+            wid = e.get("worker")
+            if wid in open_by_worker:
+                intervals.append((open_by_worker.pop(wid), e.get("t", 0.0)))
+
+    series: list[dict] = []
+    ci = 0          # cursor into completes
+    wi = 0          # cursor into wip_samples
+    last_wip = 0
+    done = 0
+    for k in range(1, n + 1):
+        edge = win if k == n else step * k
+        bstart = step * (k - 1)
+        in_bucket = 0
+        while ci < len(completes) and completes[ci] <= edge:
+            in_bucket += 1
+            ci += 1
+        done += in_bucket
+        rate = in_bucket * 3600.0 / step if step > 0 else 0.0
+        while wi < len(wip_samples) and wip_samples[wi][0] <= edge:
+            last_wip = wip_samples[wi][1]
+            wi += 1
+        active = sum(1 for s, e2 in intervals if s <= edge and e2 > bstart) \
+            if intervals else 0
+        series.append({
+            "t": round(edge, 1),
+            "done": done,
+            "rate": round(rate, 1),
+            "wip": last_wip,
+            "active": active,
+        })
+    return series
+
+
 def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     by_sku = model.item_by_sku()
     _nav = NavNetwork.from_model(model)  # MapMaker-style waypoint/Delaunay net
@@ -127,5 +200,6 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "doors": doors,
         "routes": routes,
         "staging": staging,
+        "series": _productivity_series(res),
         "kpis": kpis,
     }

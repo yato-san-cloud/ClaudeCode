@@ -11,6 +11,8 @@ provenance never overstates it.
 
 from __future__ import annotations
 
+import json
+
 import duckdb
 import pandas as pd
 
@@ -92,4 +94,233 @@ def base_volumes(model: WarehouseModel) -> dict:
         "in_cases": round(float(in_cases), 1),
         "in_estimated": in_estimated,
         "out_estimated": out_estimated,
+    }
+
+
+# --- ①DuckDB analysis views (ABC / weekday / time-series) ------------------
+
+_WEEKDAY_JP = ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def _line_frame(model: WarehouseModel) -> pd.DataFrame:
+    """Flatten outbound orders into a tidy per-line DataFrame.
+
+    Columns: order_id, sku, qty, arrival_s. ``arrival_s`` is the order's offset
+    from the simulation start; weekday/hour are derived from it as a synthetic
+    timeline (the model carries no wall-clock dates), so the views still surface
+    the *shape* of demand even for profile/template-only models."""
+    rows = []
+    for o in model.orders.outbound:
+        a = float(getattr(o, "arrival_s", 0.0) or 0.0)
+        for ln in o.lines:
+            rows.append({
+                "order_id": o.order_id,
+                "sku": ln.sku,
+                "qty": int(ln.qty or 0),
+                "arrival_s": a,
+            })
+    cols = ["order_id", "sku", "qty", "arrival_s"]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def analysis_views(model: WarehouseModel, *, top_n: int = 20) -> dict:
+    """ABC / weekday / time-series aggregations over outbound data, via DuckDB.
+
+    Pure over the model; returns plain JSON-able dicts. With no order data every
+    section is empty (never raises), so the BI view degrades gracefully."""
+    df = _line_frame(model)
+    out: dict = {
+        "engine": f"DuckDB {duckdb.__version__}",
+        "has_data": bool(len(df)),
+        "abc": [],
+        "by_weekday": [],
+        "daily": [],
+        "hourly": [],
+    }
+    if df.empty:
+        return out
+
+    # Item master for friendly SKU names (optional).
+    names = {it.sku: (it.name or it.sku) for it in model.items}
+
+    con = duckdb.connect()
+    try:
+        con.register("lines", df)
+
+        # ABC: per-SKU outbound share, ranked, with cumulative share + A/B/C.
+        abc = con.execute(
+            """
+            WITH agg AS (
+                SELECT sku, sum(qty) AS qty, count(*) AS lines
+                FROM lines GROUP BY sku
+            ), tot AS (SELECT sum(qty) AS t FROM agg)
+            SELECT a.sku, a.qty, a.lines,
+                   a.qty / nullif(t.t, 0) AS share,
+                   sum(a.qty) OVER (ORDER BY a.qty DESC
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+                       / nullif(t.t, 0) AS cum_share
+            FROM agg a, tot t
+            ORDER BY a.qty DESC
+            """).fetchdf()
+        if not abc.empty:
+            prev = abc["cum_share"].shift(fill_value=0.0)
+            abc["rank"] = pd.cut(prev, bins=[-0.001, 0.7, 0.9, 1.001],
+                                 labels=["A", "B", "C"]).astype(str)
+            head = abc.head(top_n)
+            out["abc"] = [
+                {"sku": r.sku, "name": names.get(r.sku, r.sku),
+                 "qty": float(r.qty), "lines": int(r.lines),
+                 "share": round(float(r.share or 0), 4),
+                 "cum_share": round(float(r.cum_share or 0), 4),
+                 "rank": r.rank}
+                for r in head.itertuples(index=False)
+            ]
+            # Class rollup (count of SKUs + qty share per A/B/C).
+            roll = abc.groupby("rank", as_index=False).agg(
+                skus=("sku", "size"), qty=("qty", "sum"))
+            out["abc_summary"] = [
+                {"rank": r.rank, "skus": int(r.skus), "qty": float(r.qty)}
+                for r in roll.itertuples(index=False)
+            ]
+
+        # Weekday: derive day index from arrival_s (synthetic timeline).
+        wk = con.execute(
+            """
+            SELECT (floor(arrival_s / 86400.0))::BIGINT % 7 AS wd,
+                   sum(qty) AS qty, count(*) AS lines,
+                   count(distinct order_id) AS orders
+            FROM lines GROUP BY wd ORDER BY wd
+            """).fetchdf()
+        if not wk.empty:
+            out["by_weekday"] = [
+                {"weekday": _WEEKDAY_JP[int(r.wd) % 7],
+                 "qty": float(r.qty), "lines": int(r.lines),
+                 "orders": int(r.orders)}
+                for r in wk.itertuples(index=False)
+            ]
+
+        # Daily time-series (only meaningful if arrivals span >1 day).
+        span_days = float(df["arrival_s"].max()) / 86400.0
+        if span_days >= 1.0:
+            daily = con.execute(
+                """
+                SELECT (floor(arrival_s / 86400.0))::BIGINT AS day,
+                       sum(qty) AS qty, count(*) AS lines,
+                       count(distinct order_id) AS orders
+                FROM lines GROUP BY day ORDER BY day
+                """).fetchdf()
+            out["daily"] = [
+                {"day": int(r.day), "qty": float(r.qty),
+                 "lines": int(r.lines), "orders": int(r.orders)}
+                for r in daily.itertuples(index=False)
+            ]
+
+        # Hourly time-series (hour-of-day).
+        hourly = con.execute(
+            """
+            SELECT (floor(arrival_s / 3600.0))::BIGINT % 24 AS hour,
+                   sum(qty) AS qty, count(*) AS lines,
+                   count(distinct order_id) AS orders
+            FROM lines GROUP BY hour ORDER BY hour
+            """).fetchdf()
+        if not hourly.empty:
+            out["hourly"] = [
+                {"hour": int(r.hour), "qty": float(r.qty),
+                 "lines": int(r.lines), "orders": int(r.orders)}
+                for r in hourly.itertuples(index=False)
+            ]
+    finally:
+        con.close()
+    return out
+
+
+# --- ②仮値派生をモデルへ保存 (provenance=generated) -------------------------
+
+# Stored under projects/<name>/bi.json so the canonical schema stays untouched
+# (and the 400/schema tests are unaffected). Every field is defaulted.
+def derive_volumes(model: WarehouseModel, params: dict) -> dict:
+    """Pure 仮値→派生物量 calculation.
+
+    Given the base volumes (DuckDB) plus provisional assumptions
+    (cases_per_pallet, pallet_prod[allets/hr], lines_per_order?, peak_factor?),
+    derive inbound/outbound pallet counts and handling-hour estimates. Inputs
+    are clamped to sane ranges so a bad slider value never blows up."""
+    base = base_volumes(model)
+
+    def _pos(v, default):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return float(default)
+        return f if f > 0 else float(default)
+
+    cases_per_pallet = _pos(params.get("cases_per_pallet"), 40.0)
+    pallet_prod = _pos(params.get("pallet_prod"), 20.0)  # pallets handled / hr
+    lines_per_order = _pos(
+        params.get("lines_per_order"),
+        base["out_lines"] / base["out_orders"] if base["out_orders"] else 1.0)
+    peak_factor = _pos(params.get("peak_factor"), 1.0)
+
+    in_pallets = base["in_cases"] / cases_per_pallet if cases_per_pallet else 0.0
+    out_pallets = base["out_cases"] / cases_per_pallet if cases_per_pallet else 0.0
+    in_pallets_peak = in_pallets * peak_factor
+    in_hours = in_pallets_peak / pallet_prod if pallet_prod else 0.0
+
+    return {
+        "inputs": {
+            "cases_per_pallet": round(cases_per_pallet, 2),
+            "pallet_prod": round(pallet_prod, 2),
+            "lines_per_order": round(lines_per_order, 2),
+            "peak_factor": round(peak_factor, 2),
+        },
+        "derived": {
+            "in_pallets": round(in_pallets, 1),
+            "out_pallets": round(out_pallets, 1),
+            "in_pallets_peak": round(in_pallets_peak, 1),
+            "inbound_handling_hours": round(in_hours, 2),
+        },
+        "base": base,
+    }
+
+
+def _bi_file(proj):
+    return proj.root / "bi.json"
+
+
+def load_bi_config(proj) -> dict:
+    """Read the persisted BI 仮値/派生 config; empty (valid) dict on any error so
+    nothing wedges the project (mirrors Project.load_* recovery)."""
+    try:
+        text = _bi_file(proj).read_text("utf-8")
+        d = json.loads(text) if text.strip() else {}
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def apply_derivation(proj, params: dict) -> dict:
+    """Persist 仮値→派生物量 to projects/<name>/bi.json and mark the related
+    provenance subtree GENERATED (inferred data, not real input).
+
+    Thin I/O around the pure ``derive_volumes``: load model, compute, write,
+    update provenance. Returns ``{saved, provenance_summary}``."""
+    from whsim.provenance import Source
+
+    model = proj.load_model()
+    result = derive_volumes(model, params or {})
+
+    # Persist (atomic, same convention as project.py writes).
+    from whsim.project import _write_json
+    _write_json(_bi_file(proj), result)
+
+    # The derivation fills the orders/物量 picture from provisional assumptions:
+    # mark 'orders' GENERATED so "実データ N%" never overstates inferred volume.
+    prov = proj.load_provenance()
+    prov.mark("orders", Source.GENERATED)
+    proj.save_provenance(prov)
+
+    return {
+        "saved": result,
+        "saved_to": "bi.json",
+        "provenance_summary": prov.summary(),
     }

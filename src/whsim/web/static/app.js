@@ -271,6 +271,105 @@ function draw2d() {
   if (sg) drawStagingRing(X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2), sg);
   drawBottleneck(rep, X, Y);
   drawLegend(rep, w, h, P);
+  drawLiveHUD(ctx, rep, S.t);
+}
+
+// 再生ヘッド同期のライブ生産性HUD: a small playhead-synced line chart of
+// throughput (rate, 件/h) over time, plus live cumulative 完了 and 仮置き WIP.
+// Drawn only when the replay carries `rep.series` ([{t, done, rate, wip}]);
+// absent => nothing drawn (full backward compatibility). Read-only: it reads
+// the replay + the current playhead `t` and never mutates any state. Restores
+// every ctx property it touches so the rest of draw2d is unaffected.
+function drawLiveHUD(ctx, rep, t) {
+  const series = rep && rep.series;
+  if (!Array.isArray(series) || series.length < 2) return;
+
+  // Geometry: small panel pinned top-right of the canvas.
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const pad = 10, W = Math.min(220, cw - 2 * pad), H = 84;
+  const x0 = cw - W - pad, y0 = pad;
+  // Plot rect inside the panel (room for header text on top).
+  const plX = x0 + 10, plY = y0 + 28, plW = W - 20, plH = H - 38;
+
+  // Domains. Use the playback window for x (matches the loop's S.window wrap)
+  // so the playhead position is consistent with the scrubber; fall back to the
+  // series' own time span if the window is missing.
+  const tMax = (typeof S.window === 'number' && S.window > 0)
+    ? S.window : (series[series.length - 1].t || 1);
+  let rMax = 0;
+  for (const p of series) { const r = +p.rate || 0; if (r > rMax) rMax = r; }
+  if (rMax <= 0) rMax = 1;
+
+  const PX = (tt) => plX + (Math.max(0, Math.min(tt, tMax)) / tMax) * plW;
+  const PY = (rr) => plY + plH - (Math.max(0, Math.min(rr, rMax)) / rMax) * plH;
+
+  // Live values at the current playhead (step-hold like the staging timeline).
+  let cur = series[0];
+  for (let i = 0; i < series.length; i++) { if (series[i].t <= t) cur = series[i]; else break; }
+  const curRate = Math.round(+cur.rate || 0);
+  const curDone = Math.round(+cur.done || 0);
+  const curWip = Math.round(+cur.wip || 0);
+
+  const reduce = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const cyan = '#34e3ff';
+  const a0 = ctx.globalAlpha;
+  ctx.save();
+
+  // Translucent panel.
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(11,19,32,0.72)';
+  ctx.strokeStyle = 'rgba(126,160,200,0.18)'; ctx.lineWidth = 1;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x0, y0, W, H, 6); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillRect(x0, y0, W, H); ctx.strokeRect(x0, y0, W, H); }
+
+  // Header: live throughput readout in a Space Mono-ish monospace face.
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.font = '600 13px "Space Mono", ui-monospace, monospace';
+  ctx.fillStyle = cyan;
+  ctx.fillText(`${curRate} 件/h`, x0 + 10, y0 + 18);
+  // Cumulative done + staging WIP, smaller, with semantic colours.
+  ctx.font = '10px "Space Mono", ui-monospace, monospace';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#9fb4c8';
+  const wipCol = curWip > 0 ? '#f5b05a' : '#9fb4c8';
+  ctx.fillText(`完了 ${curDone}`, x0 + W - 56, y0 + 18);
+  ctx.fillStyle = wipCol;
+  ctx.fillText(`仮置 ${curWip}`, x0 + W - 10, y0 + 18);
+
+  // Baseline of the plot.
+  ctx.strokeStyle = 'rgba(126,160,200,0.20)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(plX, plY + plH); ctx.lineTo(plX + plW, plY + plH); ctx.stroke();
+
+  // Future portion (t >= playhead): faint line.
+  ctx.lineWidth = 1.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = cyan; ctx.globalAlpha = 0.22;
+  ctx.beginPath();
+  series.forEach((p, i) => { const xx = PX(p.t), yy = PY(p.rate);
+    i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
+  ctx.stroke();
+
+  // Past portion (t <= playhead): solid line, clipped to the playhead x.
+  const phX = PX(t);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(plX, plY, Math.max(0, phX - plX), plH); ctx.clip();
+  ctx.globalAlpha = 1; ctx.strokeStyle = cyan; ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  series.forEach((p, i) => { const xx = PX(p.t), yy = PY(p.rate);
+    i ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy); });
+  ctx.stroke();
+  ctx.restore();
+
+  // Playhead vertical line + current-value dot.
+  ctx.globalAlpha = 1; ctx.strokeStyle = reduce ? 'rgba(52,227,255,0.6)' : cyan;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(phX, plY); ctx.lineTo(phX, plY + plH); ctx.stroke();
+  ctx.fillStyle = cyan;
+  ctx.beginPath(); ctx.arc(phX, PY(cur.rate), 2.6, 0, 7); ctx.fill();
+
+  ctx.restore();
+  ctx.globalAlpha = a0; ctx.lineWidth = 1; ctx.lineCap = 'butt';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
 
 // Role → symbol (Mini-Metro style). Shapes match the V3 mock & 3D view:

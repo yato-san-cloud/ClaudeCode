@@ -89,11 +89,41 @@ export function mountBI(el, opts = {}) {
   let vol = null;       // base volumes from DuckDB
   let cpp = 40;         // 仮値: cases per pallet
   let palletProd = 18;  // 仮値: 格納 productivity (PL/h)
+  let qtyPerCase = 0;   // 仮値: pieces per case (行→ピース / ケース→ピース検算); 0 = seed from data
+  let linesPerOrder = 0;// 仮値: lines per order (受注→出荷ライン); 0 = seed from data
+  let peak = 1.0;       // 仮値: peak-day factor (日量→ピーク係数)
+  let showPeak = false; // right pane: 平常 vs ピーク toggle
+
+  // Seed 仮値 from server volumes once, so sliders open near the real numbers.
+  function seedRecipes() {
+    if (!vol) return;
+    if (!qtyPerCase) {
+      const q = Number(vol.avg_case_qty);
+      qtyPerCase = q > 0 ? Math.round(q) : 12;
+    }
+    if (!linesPerOrder) {
+      const lpo = (vol.out_orders > 0) ? (vol.out_lines || 0) / vol.out_orders : 0;
+      linesPerOrder = lpo > 0 ? Math.max(1, Math.round(lpo * 10) / 10) : 1.5;
+    }
+  }
 
   function derived() {
     const inCases = (vol && vol.in_cases) || 0;
     const inPallets = cpp > 0 ? Math.ceil(inCases / cpp) : 0;
-    return { inPallets, putawayMh: palletProd > 0 ? inPallets / palletProd : 0 };
+    // 行→ピース: complete pieces from lines×入数, or 検算 if pieces already exist.
+    const outLines = (vol && vol.out_lines) || 0;
+    const piecesFromLines = Math.round(outLines * qtyPerCase);
+    const piecesActual = (vol && vol.out_pieces) || 0;
+    // 受注→出荷ライン: complete lines from orders×明細数 when lines are missing.
+    const outOrders = (vol && vol.out_orders) || 0;
+    const linesFromOrders = Math.round(outOrders * linesPerOrder);
+    // ケース→ピース 検算: out_pieces ≈ out_cases × 入数.
+    const outCases = (vol && vol.out_cases) || 0;
+    const piecesFromCases = Math.round(outCases * qtyPerCase);
+    return {
+      inPallets, putawayMh: palletProd > 0 ? inPallets / palletProd : 0,
+      piecesFromLines, piecesActual, linesFromOrders, piecesFromCases,
+    };
   }
 
   // Per-process daily volume + man-hours. 格納 is pallet-driven (the live link).
@@ -109,17 +139,21 @@ export function mountBI(el, opts = {}) {
       const v = drv[p.driver] || 0;
       const prod = p.derived ? palletProd : p.prod;
       const mh = prod > 0 ? v / prod : 0;
-      return { ...p, volume: v, prod, man_hours: mh };
+      // 日量→ピーク係数: scale to a peak-day staffing assumption.
+      const mhPeak = mh * peak;
+      return { ...p, volume: v, prod, man_hours: mh, man_hours_peak: mhPeak };
     });
   }
 
   function render() {
     if (!getProject()) { root.innerHTML = '<div class="bi-empty">プロジェクトを選択してください。</div>'; return; }
     if (!vol) { root.innerHTML = '<div class="bi-empty">物量を集計中…</div>'; return; }
+    seedRecipes();
     const d = derived();
     const procs = processes();
-    const maxMh = Math.max(1, ...procs.map((p) => p.man_hours));
-    const totalMh = procs.reduce((s, p) => s + p.man_hours, 0);
+    const mhKey = (p) => (showPeak ? p.man_hours_peak : p.man_hours);
+    const maxMh = Math.max(1, ...procs.map(mhKey));
+    const totalMh = procs.reduce((s, p) => s + mhKey(p), 0);
     const estOut = vol.out_estimated ? '<span class="bi-est">推計</span>' : '';
     const estIn = vol.in_estimated ? '<span class="bi-est">推計</span>' : '';
 
@@ -155,66 +189,209 @@ export function mountBI(el, opts = {}) {
         <div class="bi-chain" id="bi-chain">入荷ケース ${fmt(vol.in_cases)} ÷ ${cpp} = ${fmt(d.inPallets)} PL → ÷ ${palletProd} PL/h = ${fmt(d.putawayMh, 1)} 人時</div>
       </div>`;
 
+    // 行 → ピース: complete pieces from lines×入数, or 検算 against the actual.
+    const hasPieces = (vol.out_pieces || 0) > 0;
+    const linesPiecesOut = hasPieces
+      ? `<div class="bi-out"><div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">実績ピース/日</div>
+            <div class="big" style="font-size:22px">${fmt(d.piecesActual)}<span class="u">点</span></div></div>
+          <div style="margin-left:auto;text-align:right"><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">検算（行×入数）</div>
+            <div class="big" id="bi-lp" style="font-size:22px">${fmt(d.piecesFromLines)}<span class="u">点</span></div></div></div>`
+      : `<div class="bi-out"><div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">出荷ピース/日（補完）</div>
+            <div class="big" id="bi-lp">${fmt(d.piecesFromLines)}<span class="u">点</span></div></div></div>`;
+    const linesPiecesCard = `
+      <div class="bi-derive">
+        <div class="dl">行 → ピース（仮値で${hasPieces ? '検算' : '補完'}）<span class="bi-est">推計</span></div>
+        <div class="bi-row">
+          <label>1行あたり入数(仮値)</label>
+          <input type="range" id="bi-qpc" min="1" max="48" step="1" value="${qtyPerCase}">
+          <span class="rv" id="bi-qpc-v">${qtyPerCase} 点/行</span>
+        </div>
+        ${linesPiecesOut}
+        <div class="bi-chain" id="bi-lp-chain">出荷行 ${fmt(vol.out_lines)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromLines)} 点${hasPieces ? `（実績 ${fmt(d.piecesActual)} 点との差 ${fmt(d.piecesFromLines - d.piecesActual)} 点）` : ''}</div>
+      </div>`;
+
+    // 受注 → 出荷ライン: complete lines from orders×明細数 (補完 when lines missing).
+    const linesMissing = (vol.out_lines || 0) <= 0;
+    const ordersLinesCard = `
+      <div class="bi-derive">
+        <div class="dl">受注 → 出荷ライン（仮値で${linesMissing ? '補完' : '検算'}）<span class="bi-est">推計</span></div>
+        <div class="bi-row">
+          <label>1受注あたり明細数(仮値)</label>
+          <input type="range" id="bi-lpo" min="1" max="20" step="0.1" value="${linesPerOrder}">
+          <span class="rv" id="bi-lpo-v">${fmt(linesPerOrder, 1)} 行/件</span>
+        </div>
+        <div class="bi-out">
+          <div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">出荷行/日（受注×明細数）</div>
+            <div class="big" id="bi-lo" style="font-size:24px">${fmt(d.linesFromOrders)}<span class="u">行</span></div></div>
+          ${linesMissing ? '' : `<div style="margin-left:auto;text-align:right"><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">実績行/日</div>
+            <div class="big" style="font-size:22px">${fmt(vol.out_lines)}<span class="u">行</span></div></div>`}
+        </div>
+        <div class="bi-chain" id="bi-lo-chain">出荷オーダー ${fmt(vol.out_orders)} × ${fmt(linesPerOrder, 1)} 行 = ${fmt(d.linesFromOrders)} 行${linesMissing ? '' : `（実績 ${fmt(vol.out_lines)} 行との差 ${fmt(d.linesFromOrders - (vol.out_lines || 0))} 行）`}</div>
+      </div>`;
+
+    // ケース → ピース 検算: out_pieces ≈ out_cases × 入数 (shares 入数 slider).
+    const casePiecesCard = ((vol.out_cases || 0) > 0 && hasPieces) ? `
+      <div class="bi-derive">
+        <div class="dl">ケース → ピース 検算<span class="bi-est">推計</span></div>
+        <div class="bi-out">
+          <div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">実績ピース/日</div>
+            <div class="big" style="font-size:22px">${fmt(d.piecesActual)}<span class="u">点</span></div></div>
+          <div style="margin-left:auto;text-align:right"><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">ケース×入数</div>
+            <div class="big" id="bi-cp" style="font-size:22px">${fmt(d.piecesFromCases)}<span class="u">点</span></div></div>
+        </div>
+        <div class="bi-chain" id="bi-cp-chain">出荷ケース ${fmt(vol.out_cases)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromCases)} 点（実績との差 ${fmt(d.piecesFromCases - d.piecesActual)} 点）</div>
+      </div>` : '';
+
+    // 日量 → ピーク係数: scales the right-pane man-hours to a peak-day assumption.
+    const peakCard = `
+      <div class="bi-derive">
+        <div class="dl">日量 → ピーク係数（仮値で人時をスケール）<span class="bi-est">推計</span></div>
+        <div class="bi-row">
+          <label>ピーク係数(仮値)</label>
+          <input type="range" id="bi-peak" min="1" max="2" step="0.05" value="${peak}">
+          <span class="rv" id="bi-peak-v">×${fmt(peak, 2)}</span>
+        </div>
+        <div class="bi-row">
+          <label>右の人時表示</label>
+          <label style="flex:1;display:flex;align-items:center;gap:6px;font-size:11px">
+            <input type="checkbox" id="bi-peak-tog" ${showPeak ? 'checked' : ''} style="flex:0 0 auto;accent-color:var(--accent)">
+            ピーク日で表示（×${fmt(peak, 2)}）
+          </label>
+        </div>
+        <div class="bi-chain">合計人時にピーク係数を乗じ、ピーク日の必要人員を見積もります。</div>
+      </div>`;
+
     root.innerHTML = `
       <section class="bi-pane">
         <div class="bi-h"><h3>物量BI</h3><span class="sub">取込→集計→仮値で派生</span>
           <span class="bi-badge" style="margin-left:auto">${esc(vol.engine || 'DuckDB')}</span></div>
         ${baseGrid}
         ${deriveCard}
-        <div class="bi-chain">※ パレット数は実値が無いため「ケース数 ÷ 積載数(仮値)」で派生。実データが入れば差し替わります（provenance＝生成・推計）。</div>
+        ${linesPiecesCard}
+        ${ordersLinesCard}
+        ${casePiecesCard}
+        ${peakCard}
+        <div class="bi-chain">※ 派生値は実値が無いため仮値で派生／補完。実データが入れば差し替わります（provenance＝生成・推計）。</div>
       </section>
       <section class="bi-pane" id="bi-right">
-        <div class="bi-h"><h3>マテリアルフロー</h3><span class="sub">物量 → 人時（仮値とライブ連動）</span></div>
+        ${rightHeader()}
         ${renderFlow(procs, maxMh, totalMh)}
       </section>`;
 
     wire();
   }
 
+  function rightHeader() {
+    const mode = showPeak ? `ピーク日 ×${fmt(peak, 2)}` : '平常日';
+    return `<div class="bi-h"><h3>マテリアルフロー</h3><span class="sub">物量 → 人時（仮値とライブ連動・${mode}）</span></div>`;
+  }
+
   function renderFlow(procs, maxMh, totalMh) {
+    const mhOf = (p) => (showPeak ? p.man_hours_peak : p.man_hours);
     const card = (p) => `
       <div class="bi-proc${p.derived ? ' derived' : ''}">
-        <div class="pn"><b>${esc(p.id)}</b><div class="pv">${fmt(p.volume)} ${esc(driverUnit(p.driver))} ÷ ${fmt(p.prod)} ${esc(p.unit)}</div>
-          <div class="bi-bar"><i style="width:${Math.min(100, (p.man_hours / maxMh) * 100)}%"></i></div></div>
-        <div class="mh" data-mh="${p.id}">${fmt(p.man_hours, 1)}<span class="u">人時</span></div>
+        <div class="pn"><b>${esc(p.id)}</b><div class="pv">${fmt(p.volume)} ${esc(driverUnit(p.driver))} ÷ ${fmt(p.prod)} ${esc(p.unit)}${showPeak ? ` ×${fmt(peak, 2)}` : ''}</div>
+          <div class="bi-bar"><i style="width:${Math.min(100, (mhOf(p) / maxMh) * 100)}%"></i></div></div>
+        <div class="mh" data-mh="${p.id}">${fmt(mhOf(p), 1)}<span class="u">人時</span></div>
       </div>`;
     const inb = procs.filter((p) => p.sec === '入荷');
     const out = procs.filter((p) => p.sec === '出荷');
+    const totalLabel = showPeak ? `合計 必要人時/日（ピーク ×${fmt(peak, 2)}）` : '合計 必要人時/日';
     return `
       <div class="bi-sec">入荷</div>${inb.map(card).join('')}
       <div class="bi-sec">出荷</div>${out.map(card).join('')}
-      <div class="bi-total"><span>合計 必要人時/日</span><span class="tv" id="bi-totalmh">${fmt(totalMh, 1)} 人時</span></div>`;
+      <div class="bi-total"><span>${totalLabel}</span><span class="tv" id="bi-totalmh">${fmt(totalMh, 1)} 人時</span></div>`;
   }
 
   function driverUnit(dr) {
     return { in_cases: 'ケース', in_pallets: 'PL', out_lines: '行', out_orders: '件' }[dr] || '';
   }
 
-  // Live update on slider input — recompute the derivation + the right pane only
-  // (no server round-trip; DuckDB already did the base aggregation).
+  // Live update on slider input — recompute every 仮値 derivation + the right
+  // pane (no server round-trip; DuckDB already did the base aggregation). Each
+  // recipe updates its own out/chain in place; the right pane uses the peak-aware
+  // key so the ピーク係数 + toggle reflect immediately.
+  const setText = (sel, txt) => { const n = root.querySelector(sel); if (n) n.textContent = txt; };
+  const setHTML = (sel, html) => { const n = root.querySelector(sel); if (n) n.innerHTML = html; };
+
+  function repaintRight() {
+    const procs = processes();
+    const mhKey = (p) => (showPeak ? p.man_hours_peak : p.man_hours);
+    const maxMh = Math.max(1, ...procs.map(mhKey));
+    const totalMh = procs.reduce((s, p) => s + mhKey(p), 0);
+    const right = root.querySelector('#bi-right');
+    if (right) right.innerHTML = `${rightHeader()}${renderFlow(procs, maxMh, totalMh)}`;
+  }
+
   function wire() {
-    const cppEl = root.querySelector('#bi-cpp');
-    const ppEl = root.querySelector('#bi-pp');
-    const update = () => {
+    const on = (sel, ev, fn) => { const n = root.querySelector(sel); if (n) n[ev] = fn; };
+
+    // ケース → パレット (existing): drives 格納 pallets + putaway 人時.
+    const updateCpp = () => {
+      const cppEl = root.querySelector('#bi-cpp');
+      const ppEl = root.querySelector('#bi-pp');
       cpp = parseInt(cppEl.value, 10);
       palletProd = parseInt(ppEl.value, 10);
-      root.querySelector('#bi-cpp-v').textContent = `${cpp} c/PL`;
-      root.querySelector('#bi-pp-v').textContent = `${palletProd} PL/h`;
+      setText('#bi-cpp-v', `${cpp} c/PL`);
+      setText('#bi-pp-v', `${palletProd} PL/h`);
       const d = derived();
-      root.querySelector('#bi-pallets').innerHTML = `${fmt(d.inPallets)}<span class="u">PL</span>`;
-      root.querySelector('#bi-putmh').innerHTML = `${fmt(d.putawayMh, 1)}<span class="u">人時</span>`;
-      root.querySelector('#bi-chain').textContent =
-        `入荷ケース ${fmt(vol.in_cases)} ÷ ${cpp} = ${fmt(d.inPallets)} PL → ÷ ${palletProd} PL/h = ${fmt(d.putawayMh, 1)} 人時`;
-      // right pane recompute (only the flow markup)
-      const procs = processes();
-      const maxMh = Math.max(1, ...procs.map((p) => p.man_hours));
-      const totalMh = procs.reduce((s, p) => s + p.man_hours, 0);
-      const right = root.querySelector('#bi-right');
-      // keep the header, replace the flow
-      right.innerHTML = `<div class="bi-h"><h3>マテリアルフロー</h3><span class="sub">物量 → 人時（仮値とライブ連動）</span></div>${renderFlow(procs, maxMh, totalMh)}`;
+      setHTML('#bi-pallets', `${fmt(d.inPallets)}<span class="u">PL</span>`);
+      setHTML('#bi-putmh', `${fmt(d.putawayMh, 1)}<span class="u">人時</span>`);
+      setText('#bi-chain',
+        `入荷ケース ${fmt(vol.in_cases)} ÷ ${cpp} = ${fmt(d.inPallets)} PL → ÷ ${palletProd} PL/h = ${fmt(d.putawayMh, 1)} 人時`);
+      repaintRight();
     };
-    if (cppEl) cppEl.oninput = update;
-    if (ppEl) ppEl.oninput = update;
+    on('#bi-cpp', 'oninput', updateCpp);
+    on('#bi-pp', 'oninput', updateCpp);
+
+    // 行 → ピース + ケース → ピース 検算 (share the 入数 slider).
+    const updateQpc = () => {
+      const el = root.querySelector('#bi-qpc');
+      qtyPerCase = parseInt(el.value, 10);
+      setText('#bi-qpc-v', `${qtyPerCase} 点/行`);
+      const d = derived();
+      const hasPieces = (vol.out_pieces || 0) > 0;
+      setHTML('#bi-lp', `${fmt(d.piecesFromLines)}<span class="u">点</span>`);
+      setText('#bi-lp-chain',
+        `出荷行 ${fmt(vol.out_lines)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromLines)} 点${hasPieces ? `（実績 ${fmt(d.piecesActual)} 点との差 ${fmt(d.piecesFromLines - d.piecesActual)} 点）` : ''}`);
+      // ケース → ピース 検算 shares this slider when present.
+      setHTML('#bi-cp', `${fmt(d.piecesFromCases)}<span class="u">点</span>`);
+      setText('#bi-cp-chain',
+        `出荷ケース ${fmt(vol.out_cases)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromCases)} 点（実績との差 ${fmt(d.piecesFromCases - d.piecesActual)} 点）`);
+    };
+    on('#bi-qpc', 'oninput', updateQpc);
+
+    // 受注 → 出荷ライン.
+    const updateLpo = () => {
+      const el = root.querySelector('#bi-lpo');
+      linesPerOrder = Math.round(parseFloat(el.value) * 10) / 10;
+      setText('#bi-lpo-v', `${fmt(linesPerOrder, 1)} 行/件`);
+      const d = derived();
+      const linesMissing = (vol.out_lines || 0) <= 0;
+      setHTML('#bi-lo', `${fmt(d.linesFromOrders)}<span class="u">行</span>`);
+      setText('#bi-lo-chain',
+        `出荷オーダー ${fmt(vol.out_orders)} × ${fmt(linesPerOrder, 1)} 行 = ${fmt(d.linesFromOrders)} 行${linesMissing ? '' : `（実績 ${fmt(vol.out_lines)} 行との差 ${fmt(d.linesFromOrders - (vol.out_lines || 0))} 行）`}`);
+    };
+    on('#bi-lpo', 'oninput', updateLpo);
+
+    // 日量 → ピーク係数: factor slider + 平常/ピーク toggle, both repaint right.
+    const updatePeak = () => {
+      const el = root.querySelector('#bi-peak');
+      peak = Math.round(parseFloat(el.value) * 100) / 100;
+      setText('#bi-peak-v', `×${fmt(peak, 2)}`);
+      const tog = root.querySelector('#bi-peak-tog');
+      const togLabel = tog && tog.parentElement;
+      if (togLabel) togLabel.innerHTML = `<input type="checkbox" id="bi-peak-tog" ${showPeak ? 'checked' : ''} style="flex:0 0 auto;accent-color:var(--accent)"> ピーク日で表示（×${fmt(peak, 2)}）`;
+      on('#bi-peak-tog', 'onchange', updateToggle);
+      repaintRight();
+    };
+    const updateToggle = () => {
+      const tog = root.querySelector('#bi-peak-tog');
+      showPeak = !!(tog && tog.checked);
+      repaintRight();
+    };
+    on('#bi-peak', 'oninput', updatePeak);
+    on('#bi-peak-tog', 'onchange', updateToggle);
   }
 
   async function load() {

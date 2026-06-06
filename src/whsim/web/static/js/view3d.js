@@ -141,6 +141,10 @@ export class Scene3D {
     this._staffGeom = null;
     this._rackMaterials = []; // rack mats (preset tweaks their emissiveIntensity)
     this._textures = []; // CanvasTextures to dispose
+    this._shadowSprites = []; // { sprite, follow } soft blob shadows under agents
+    this._heat = null;        // { mesh, mat } instanced congestion patches
+    this._hud = null;         // DOM overlay { root, ... } or null
+    this._intro = null;       // intro camera tween state or null
     this._preset = 'brand';
 
     const meta = this.replay.meta || {};
@@ -197,12 +201,27 @@ export class Scene3D {
     this._buildAgvs();
     this._buildForklifts();
     this._buildRoutes();
+    this._buildHeat();           // 3D congestion patches (only if replay.heat)
+    this._buildContactShadows(); // soft blob shadows under moving agents
 
     // Apply the default art preset (mutates lights/renderer/scene only).
     this.setPreset(this._preset);
 
+    // Live productivity HUD (DOM overlay) — only when replay.series exists.
+    this._buildHud();
+    // Gentle one-shot intro camera move (skipped under reduced-motion).
+    this._startIntro();
+
     this._loop = this._loop.bind(this);
     this._raf = requestAnimationFrame(this._loop);
+  }
+
+  // Whether the user prefers reduced motion (disables intro camera move).
+  _reducedMotion() {
+    try {
+      return window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch (_e) { return false; }
   }
 
   // Track meshes so dispose() can free GPU resources.
@@ -355,24 +374,88 @@ export class Scene3D {
     this._staging = { mesh, timeline: sg.timeline || [], capacity: sg.capacity || 1 };
   }
 
+  // Racks: instead of one flat box per location, build a little shelving unit
+  // with visible tiers (a darker steel frame + ABC-tinted stored goods on each
+  // shelf). Everything is drawn with InstancedMesh — one draw call per piece
+  // type per ABC class — so thousands of locations stay cheap. Presets still tune
+  // the goods' emissive glow via `_rackMaterials`, exactly as before.
   _buildRacks() {
     const racks = this.replay.racks || [];
     if (racks.length === 0) return;
-    const geom = new THREE.BoxGeometry(0.8, 1.2, 0.8); // shared geometry
-    this._geometries.push(geom);
+    const RW = 0.8, RD = 0.8, RH = 1.2;   // overall unit footprint/height (unchanged)
+    const TIERS = 3;                       // visible shelf levels
+    const tierH = RH / TIERS;
+
+    // Group locations by ABC class so each class is one instanced batch.
+    const byClass = {};
     for (const r of racks) {
-      const color = ABC_COLOR[r.abc] || 0xfdcc8a;
-      const mat = new THREE.MeshStandardMaterial({
-        color, roughness: 0.78, metalness: 0.08,
+      const k = ABC_COLOR[r.abc] !== undefined ? r.abc : 'C';
+      (byClass[k] || (byClass[k] = [])).push(r);
+    }
+
+    // --- shared geometries (disposed in dispose via _geometries) ---
+    const frameGeom = new THREE.BoxGeometry(RW, RH, RD);        // open steel cage
+    const shelfGeom = new THREE.BoxGeometry(RW * 0.96, 0.05, RD * 0.96); // tier boards
+    const boxGeom = new THREE.BoxGeometry(RW * 0.72, tierH * 0.62, RD * 0.72); // goods
+    this._geometries.push(frameGeom, shelfGeom, boxGeom);
+
+    // Steel frame material (shared, neutral). Goods get a per-class material so
+    // presets can pulse their emissive glow.
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: 0x3b434d, roughness: 0.6, metalness: 0.45,
+      emissive: new THREE.Color(0x10151c), emissiveIntensity: 0.0,
+    });
+    const shelfMat = new THREE.MeshStandardMaterial({
+      color: 0x6b727b, roughness: 0.7, metalness: 0.3,
+    });
+    this._materials.push(frameMat, shelfMat);
+
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const sc = new THREE.Vector3(1, 1, 1);
+    const pos = new THREE.Vector3();
+
+    for (const cls of Object.keys(byClass)) {
+      const list = byClass[cls];
+      const color = ABC_COLOR[cls] || 0xfdcc8a;
+      const goodsMat = new THREE.MeshStandardMaterial({
+        color, roughness: 0.82, metalness: 0.05,
         emissive: new THREE.Color(color), emissiveIntensity: 0.06,
       });
-      const mesh = new THREE.Mesh(geom, mat);
-      mesh.position.set(r.x || 0, 0.6, r.y || 0);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.scene.add(mesh);
-      this._materials.push(mat);
-      this._rackMaterials.push(mat); // preset adjusts emissiveIntensity (night glow)
+      this._materials.push(goodsMat);
+      this._rackMaterials.push(goodsMat); // preset adjusts emissiveIntensity (night glow)
+
+      const n = list.length;
+      const frames = new THREE.InstancedMesh(frameGeom, frameMat, n);
+      const shelves = new THREE.InstancedMesh(shelfGeom, shelfMat, n * TIERS);
+      const goods = new THREE.InstancedMesh(boxGeom, goodsMat, n * TIERS);
+      frames.castShadow = frames.receiveShadow = true;
+      shelves.castShadow = shelves.receiveShadow = true;
+      goods.castShadow = goods.receiveShadow = true;
+
+      let si = 0, gi = 0;
+      for (let i = 0; i < n; i++) {
+        const r = list[i];
+        const x = r.x || 0, z = r.y || 0;
+        // Frame cage centered at half height.
+        pos.set(x, RH / 2, z);
+        m4.compose(pos, q, sc); frames.setMatrixAt(i, m4);
+        // Shelf boards + a goods box on each tier.
+        for (let t = 0; t < TIERS; t++) {
+          const y = tierH * (t + 0.5);
+          pos.set(x, tierH * t + 0.02, z);
+          m4.compose(pos, q, sc); shelves.setMatrixAt(si++, m4);
+          pos.set(x, y, z);
+          m4.compose(pos, q, sc); goods.setMatrixAt(gi++, m4);
+        }
+      }
+      frames.instanceMatrix.needsUpdate = true;
+      shelves.instanceMatrix.needsUpdate = true;
+      goods.instanceMatrix.needsUpdate = true;
+      this.scene.add(frames, shelves, goods);
+      // InstancedMesh shares the tracked geom/mat; nothing extra to dispose,
+      // but the meshes themselves hold no GPU buffers beyond instanceMatrix
+      // which is freed when the geometry is disposed.
     }
   }
 
@@ -883,6 +966,336 @@ export class Scene3D {
     }
   }
 
+  // -- 3D congestion heat patches ------------------------------------------
+  // If the replay carries a `heat` grid, lay glowing floor tiles (green→red by
+  // intensity) just above the floor. Accepts either a 2D array `heat.cells`
+  // (rows of [0..1]) with `heat.grid_m`, or a flat list `heat.patches` of
+  // {x,y,v}. Purely additive: absent/empty → nothing drawn. One InstancedMesh
+  // (single draw call) keeps it cheap; emissive colour is baked per instance.
+  _buildHeat() {
+    this._heat = null;
+    const heat = this.replay.heat;
+    if (!heat) return;
+    // Normalize to a list of { x, y, v(0..1), size } cells.
+    const cells = [];
+    const grid = (heat.grid_m && heat.grid_m > 0) ? heat.grid_m : meta_grid(this.replay);
+    if (Array.isArray(heat.patches)) {
+      for (const p of heat.patches) {
+        if (!p) continue;
+        const v = Math.max(0, Math.min(1, +p.v || +p.value || 0));
+        if (v <= 0.001) continue;
+        cells.push({ x: +p.x || 0, y: +p.y || 0, v, size: +p.size || grid });
+      }
+    } else if (Array.isArray(heat.cells)) {
+      // Find max for normalization (defensive if values aren't pre-normalized).
+      let mx = 0;
+      for (const row of heat.cells) {
+        if (!Array.isArray(row)) continue;
+        for (const c of row) if (+c > mx) mx = +c;
+      }
+      const norm = mx > 0 ? mx : 1;
+      for (let r = 0; r < heat.cells.length; r++) {
+        const row = heat.cells[r];
+        if (!Array.isArray(row)) continue;
+        for (let c = 0; c < row.length; c++) {
+          const v = Math.max(0, Math.min(1, (+row[c] || 0) / norm));
+          if (v <= 0.02) continue;
+          cells.push({ x: (c + 0.5) * grid, y: (r + 0.5) * grid, v, size: grid });
+        }
+      }
+    }
+    if (cells.length === 0) return;
+
+    const geom = new THREE.PlaneGeometry(1, 1);
+    this._geometries.push(geom);
+    // Emissive so patches read as glowing zones under any preset lighting.
+    const mat = new THREE.MeshStandardMaterial({
+      transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      depthWrite: false, roughness: 1.0, metalness: 0.0,
+      emissive: new THREE.Color(0xffffff), emissiveIntensity: 0.9,
+    });
+    this._materials.push(mat);
+    const inst = new THREE.InstancedMesh(geom, mat, cells.length);
+
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    q.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)); // lay flat
+    const pos = new THREE.Vector3();
+    const sc = new THREE.Vector3(1, 1, 1);
+    const col = new THREE.Color();
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      pos.set(c.x, 0.03, c.y);
+      sc.set(c.size * 0.96, c.size * 0.96, 1);
+      m4.compose(pos, q, sc);
+      inst.setMatrixAt(i, m4);
+      // Green (low) → yellow → red (high) via HSL hue 0.33→0.
+      col.setHSL((1 - c.v) * 0.33, 0.9, 0.5);
+      inst.setColorAt(i, col);
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    inst.renderOrder = 2;
+    this.scene.add(inst);
+    this._heat = { mesh: inst, mat };
+  }
+
+  // -- Soft contact shadows --------------------------------------------------
+  // A faint radial-gradient blob sprite under each moving agent (worker / AGV /
+  // forklift). Cheaper & softer than per-object cast shadows for fast movers,
+  // and always grounds them visually. Sprites are tracked for dispose. Each
+  // `follow` holds the agent ref + a getter for its current (x, z) and a y/scale.
+  _buildContactShadows() {
+    this._shadowSprites = [];
+    const tex = this._makeBlobTexture();
+    this._shadowTex = tex;
+    const mkSprite = (size) => {
+      const mat = new THREE.SpriteMaterial({
+        map: tex, color: 0x000000, transparent: true, opacity: 0.32,
+        depthWrite: false,
+      });
+      this._materials.push(mat);
+      const sp = new THREE.Sprite(mat);
+      sp.scale.set(size, size, 1);
+      sp.position.y = 0.04;
+      sp.center.set(0.5, 0.5);
+      // Keep flat on the floor: sprites face the camera by default, but a small
+      // contact blob reads fine billboarded; we instead lock it flat via a tiny
+      // rotation trick is not available on Sprite, so we keep it billboarded —
+      // it stays near the floor and is visually a soft contact patch.
+      this.scene.add(sp);
+      return sp;
+    };
+    for (const w of this._workers) {
+      this._shadowSprites.push({ sprite: mkSprite(1.4), kind: 'worker', ref: w });
+    }
+    for (const a of this._agvs) {
+      this._shadowSprites.push({ sprite: mkSprite(1.8), kind: 'agv', ref: a });
+    }
+    for (const f of this._forklifts) {
+      this._shadowSprites.push({ sprite: mkSprite(2.2), kind: 'forklift', ref: f });
+    }
+  }
+
+  // Radial soft-alpha blob used by contact shadows. Cached as a CanvasTexture.
+  _makeBlobTexture() {
+    const S = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = S; canvas.height = S;
+    const ctx = canvas.getContext('2d');
+    const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, 'rgba(0,0,0,0.85)');
+    g.addColorStop(0.6, 'rgba(0,0,0,0.35)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+    const tex = new THREE.CanvasTexture(canvas);
+    this._textures.push(tex);
+    return tex;
+  }
+
+  // -- Live productivity HUD (DOM overlay) ----------------------------------
+  // Only built when replay.series exists & is non-empty. A small absolutely-
+  // positioned panel inside the container with a sparkline (canvas 2D) and live
+  // numeric readouts (done / rate / wip), synced to getTime() each frame. Does
+  // NOT touch the three.js render — pure DOM, so it can never break the scene.
+  _buildHud() {
+    this._hud = null;
+    const series = this.replay.series;
+    if (!Array.isArray(series) || series.length === 0) return;
+    // Container must be a positioning context for absolute children.
+    try {
+      const cs = window.getComputedStyle(this.container);
+      if (cs && cs.position === 'static') this.container.style.position = 'relative';
+    } catch (_e) { /* ignore */ }
+
+    const root = document.createElement('div');
+    root.className = 'whsim-hud3d';
+    root.style.cssText = [
+      'position:absolute', 'right:10px', 'bottom:10px', 'z-index:5',
+      'width:220px', 'padding:8px 10px', 'border-radius:8px',
+      'background:rgba(15,20,29,0.72)', 'backdrop-filter:blur(4px)',
+      'color:#e6edf3', 'font:11px/1.35 system-ui,-apple-system,sans-serif',
+      'pointer-events:none', 'box-shadow:0 2px 10px rgba(0,0,0,0.35)',
+      'border:1px solid rgba(0,184,212,0.25)',
+    ].join(';');
+
+    const title = document.createElement('div');
+    title.textContent = '生産性 (ライブ)';
+    title.style.cssText = 'color:#00b8d4;font-weight:600;margin-bottom:4px;letter-spacing:.02em';
+    root.appendChild(title);
+
+    const canvas = document.createElement('canvas');
+    const CW = 200, CH = 48;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = CW * dpr; canvas.height = CH * dpr;
+    canvas.style.cssText = `width:${CW}px;height:${CH}px;display:block`;
+    root.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const readout = document.createElement('div');
+    readout.style.cssText = 'display:flex;justify-content:space-between;margin-top:5px;gap:6px';
+    const mkStat = (label) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'text-align:center;flex:1';
+      const v = document.createElement('div');
+      v.style.cssText = 'font-size:14px;font-weight:700;color:#fff';
+      v.textContent = '–';
+      const l = document.createElement('div');
+      l.style.cssText = 'font-size:9px;color:#8b98a8';
+      l.textContent = label;
+      wrap.appendChild(v); wrap.appendChild(l);
+      readout.appendChild(wrap);
+      return v;
+    };
+    const vDone = mkStat('完了');
+    const vRate = mkStat('件/時');
+    const vWip = mkStat('滞留');
+    root.appendChild(readout);
+    this.container.appendChild(root);
+
+    // Precompute axis maxima once.
+    let maxRate = 1, maxT = 0;
+    for (const s of series) {
+      if ((s.rate || 0) > maxRate) maxRate = s.rate;
+      if ((s.t || 0) > maxT) maxT = s.t;
+    }
+    this._hud = {
+      root, canvas, ctx, CW, CH, series, maxRate, maxT,
+      vDone, vRate, vWip, lastIdx: -1, lastHeadX: -1,
+    };
+    this._drawHudSpark(); // initial static draw
+  }
+
+  // Draw the sparkline grid + filled rate curve (static part; the moving head is
+  // overlaid each frame in _updateHud via a cheap redraw only when index moves).
+  _drawHudSpark(headFrac) {
+    const h = this._hud;
+    if (!h) return;
+    const { ctx, CW, CH, series, maxRate } = h;
+    ctx.clearRect(0, 0, CW, CH);
+    // baseline
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, CH - 0.5); ctx.lineTo(CW, CH - 0.5); ctx.stroke();
+    const n = series.length;
+    const xOf = (i) => (n <= 1 ? CW : (i / (n - 1)) * CW);
+    const yOf = (r) => CH - 2 - (Math.max(0, r) / maxRate) * (CH - 4);
+    // Filled area under the rate curve.
+    ctx.beginPath();
+    ctx.moveTo(0, CH);
+    for (let i = 0; i < n; i++) ctx.lineTo(xOf(i), yOf(series[i].rate || 0));
+    ctx.lineTo(CW, CH);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, CH);
+    grad.addColorStop(0, 'rgba(0,184,212,0.55)');
+    grad.addColorStop(1, 'rgba(0,184,212,0.04)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    // Curve stroke.
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const x = xOf(i), y = yOf(series[i].rate || 0);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#00d4f0';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Playback head marker.
+    if (typeof headFrac === 'number') {
+      const hx = Math.max(0, Math.min(1, headFrac)) * CW;
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, CH); ctx.stroke();
+    }
+  }
+
+  // Per-frame HUD sync: find the series bucket at the current playback time and
+  // update the numeric readouts + head marker. Cheap: only repaints when the
+  // bucket index or head position actually changes.
+  _updateHud(t) {
+    const h = this._hud;
+    if (!h) return;
+    const series = h.series;
+    // Locate the latest bucket whose edge <= t (forward-fill).
+    let idx = 0;
+    for (let i = 0; i < series.length; i++) {
+      if ((series[i].t || 0) <= t) idx = i; else break;
+    }
+    const headFrac = h.maxT > 0 ? Math.min(1, t / h.maxT) : 0;
+    const headX = Math.round(headFrac * h.CW);
+    if (idx !== h.lastIdx) {
+      const s = series[idx] || {};
+      h.vDone.textContent = (s.done != null) ? String(s.done) : '–';
+      h.vRate.textContent = (s.rate != null) ? String(Math.round(s.rate)) : '–';
+      h.vWip.textContent = (s.wip != null) ? String(s.wip) : '–';
+      h.lastIdx = idx;
+    }
+    if (headX !== h.lastHeadX) {
+      this._drawHudSpark(headFrac);
+      h.lastHeadX = headX;
+    }
+  }
+
+  // -- Intro camera move -----------------------------------------------------
+  // One-shot gentle orbit/zoom into the overview preset on startup. Skipped when
+  // the user prefers reduced motion. Tweens camera position only (target stays);
+  // disables OrbitControls during the tween and restores afterwards so it never
+  // fights user input. Any user interaction cancels it early.
+  _startIntro() {
+    this._intro = null;
+    if (this._reducedMotion()) return;
+    const cx = this.bounds.width / 2;
+    const cz = this.bounds.depth / 2;
+    const span = Math.max(this.bounds.width, this.bounds.depth);
+    // Start: high, far, slightly rotated; End: the default framing set in ctor.
+    const from = new THREE.Vector3(cx - span * 0.5, span * 1.6, cz + span * 1.6);
+    const to = this.camera.position.clone();
+    this.camera.position.copy(from);
+    this.controls.enabled = false;
+    const cancel = () => this._cancelIntro();
+    this._introCancel = cancel;
+    this.renderer.domElement.addEventListener('pointerdown', cancel, { once: true });
+    this.renderer.domElement.addEventListener('wheel', cancel, { once: true, passive: true });
+    this._intro = { from, to, start: (performance.now ? performance.now() : Date.now()), dur: 2200 };
+  }
+
+  _cancelIntro() {
+    if (!this._intro) return;
+    // Snap to the intended final framing and re-enable controls.
+    this.camera.position.copy(this._intro.to);
+    this._intro = null;
+    if (this.controls) this.controls.enabled = true;
+  }
+
+  // Advance the intro tween; returns when finished (restoring controls).
+  _updateIntro() {
+    const it = this._intro;
+    if (!it) return;
+    const now = performance.now ? performance.now() : Date.now();
+    let f = (now - it.start) / it.dur;
+    if (f >= 1) { this._cancelIntro(); return; }
+    f = Math.max(0, Math.min(1, f));
+    const e = f < 0.5 ? 2 * f * f : 1 - Math.pow(-2 * f + 2, 2) / 2; // easeInOutQuad
+    this.camera.position.lerpVectors(it.from, it.to, e);
+  }
+
+  // Per-frame: keep contact-shadow blobs under their agents.
+  _updateContactShadows() {
+    if (!this._shadowSprites || this._shadowSprites.length === 0) return;
+    for (const s of this._shadowSprites) {
+      const sp = s.sprite;
+      if (s.kind === 'forklift') {
+        const p = s.ref.group.position;
+        sp.position.set(p.x, 0.04, p.z);
+      } else {
+        const p = s.ref.mesh.position;
+        sp.position.set(p.x, 0.04, p.z);
+      }
+    }
+  }
+
   // Per-frame: interpolate each worker's position + state color.
   _updateWorkers(t) {
     for (const w of this._workers) {
@@ -945,10 +1358,13 @@ export class Scene3D {
   _loop() {
     if (this._disposed) return;
     const t = this.getTime() || 0;
+    this._updateIntro();          // gentle one-shot camera move (if active)
     this._updateWorkers(t);
     this._updateAgvs(t);
     this._updateForklifts(t);
     this._updateStaging(t);
+    this._updateContactShadows(); // keep blob shadows under moving agents
+    this._updateHud(t);           // sync DOM productivity overlay (if present)
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this._raf = requestAnimationFrame(this._loop);
@@ -967,6 +1383,25 @@ export class Scene3D {
     if (this._disposed) return;
     this._disposed = true;
     if (this._raf) cancelAnimationFrame(this._raf);
+    // Cancel any pending intro tween + its one-shot listeners.
+    if (this._introCancel && this.renderer && this.renderer.domElement) {
+      this.renderer.domElement.removeEventListener('pointerdown', this._introCancel);
+      this.renderer.domElement.removeEventListener('wheel', this._introCancel);
+    }
+    this._intro = null;
+    this._introCancel = null;
+    // Remove the DOM HUD overlay (no GPU resources; pure DOM).
+    if (this._hud && this._hud.root && this._hud.root.parentNode) {
+      this._hud.root.parentNode.removeChild(this._hud.root);
+    }
+    this._hud = null;
+    // Remove contact-shadow sprites (their materials are tracked in _materials,
+    // the shared blob texture in _textures — both freed below).
+    for (const s of this._shadowSprites) {
+      if (s && s.sprite) this.scene.remove(s.sprite);
+    }
+    this._shadowSprites = [];
+    this._heat = null;
     if (this.controls) this.controls.dispose();
     for (const g of this._geometries) { if (g && g.dispose) g.dispose(); }
     for (const m of this._materials) { if (m && m.dispose) m.dispose(); }

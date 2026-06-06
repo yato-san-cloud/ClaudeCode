@@ -124,6 +124,23 @@ def api_bi_volumes(name: str):
     return bi.base_volumes(_open(name).load_model())
 
 
+@app.get("/api/projects/{name}/bi/analysis")
+def api_bi_analysis(name: str):
+    """分析ビュー: ABC・曜日別物量・(あれば)日次/時間別の時系列を DuckDB で集計。
+    データが無ければ各セクション空で返す（落ちない）。"""
+    from whsim import bi
+    return bi.analysis_views(_open(name).load_model())
+
+
+@app.post("/api/projects/{name}/bi/apply")
+def api_bi_apply(name: str, payload: dict | None = None):
+    """仮値→派生物量をプロジェクト(bi.json)に保存し、orders サブツリーの
+    provenance を GENERATED にマーク。本文: {cases_per_pallet, pallet_prod,
+    lines_per_order?, peak_factor?}。"""
+    from whsim import bi
+    return bi.apply_derivation(_open(name), payload or {})
+
+
 @app.get("/api/materialflow/seed")
 def api_materialflow_seed():
     """Material-flow skeleton (process flow + units/productivity) for the
