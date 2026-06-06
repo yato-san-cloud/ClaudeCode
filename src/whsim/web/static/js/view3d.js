@@ -150,6 +150,8 @@ export class Scene3D {
     this._rackMaterials = []; // rack mats (preset tweaks their emissiveIntensity)
     this._textures = []; // CanvasTextures to dispose
     this._shadowSprites = []; // { sprite, follow } soft blob shadows under agents
+    this._glowSprites = [];   // { sprite, mat, kind, ref, base } additive activity halos
+    this._glowEnabled = true; // gated off by fps auto-degrade (tier 3)
     this._heat = null;        // { mesh, mat } instanced congestion patches
     this._hud = null;         // DOM overlay { root, ... } or null
     this._intro = null;       // intro camera tween state or null
@@ -217,6 +219,7 @@ export class Scene3D {
     this._buildRoutes();
     this._buildHeat();           // 3D congestion patches (only if replay.heat)
     this._buildContactShadows(); // soft blob shadows under moving agents
+    this._buildGlowHalos();      // additive cyan activity halos (pseudo-bloom)
 
     // Reduced-motion users get a fully static scene (belts + glow pulse off).
     if (this._reducedMotion()) this._beltSpeed = 0;
@@ -1193,6 +1196,96 @@ export class Scene3D {
     return tex;
   }
 
+  // -- Additive activity glow halos (pseudo-bloom) --------------------------
+  // A soft radial cyan billboard Sprite riding on top of each active agent
+  // (worker / AGV+tote / forklift). This is a CHEAP approximation of bloom: one
+  // shared CanvasTexture + AdditiveBlending makes overlapping active machines
+  // "bleed" light, reading like a glow without any post-processing pass (none is
+  // vendored). It rides the SAME activity ramp as the existing emissive pulse
+  // (worker.glow / agv.glow + a new forklift glow), so it appears only while the
+  // agent works/moves and fully vanishes when idle. depthWrite:false keeps it
+  // from occluding; depthTest stays true so it tucks naturally behind geometry.
+  _buildGlowHalos() {
+    this._glowSprites = [];
+    const tex = this._makeGlowTexture();
+    this._glowTex = tex;
+    // One SpriteMaterial per sprite (so each can ramp its own opacity), but all
+    // share the single additive CanvasTexture above. Tracked for dispose.
+    const mkSprite = (size, yLift) => {
+      const mat = new THREE.SpriteMaterial({
+        map: tex, color: GLOW_CYAN, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      this._materials.push(mat);
+      const sp = new THREE.Sprite(mat);
+      sp.scale.set(size, size, 1);
+      sp.position.y = yLift;
+      sp.center.set(0.5, 0.5);
+      sp.visible = false; // hidden until activity ramps it up
+      this.scene.add(sp);
+      return { sprite: sp, mat };
+    };
+    for (const w of this._workers) {
+      const s = mkSprite(2.2, 0.7);
+      this._glowSprites.push({ ...s, kind: 'worker', ref: w, base: 2.2 });
+    }
+    for (const a of this._agvs) {
+      const s = mkSprite(2.6, AGV_Y + 0.2);
+      this._glowSprites.push({ ...s, kind: 'agv', ref: a, base: 2.6 });
+    }
+    for (const f of this._forklifts) {
+      // Forklifts have no glow ramp of their own yet; seed one for the halo.
+      if (f.glow === undefined) f.glow = 0;
+      const s = mkSprite(3.0, 0.9);
+      this._glowSprites.push({ ...s, kind: 'forklift', ref: f, base: 3.0 });
+    }
+  }
+
+  // Radial cyan gradient (transparent core→edge) sized for additive blending.
+  // Black edge so AdditiveBlending contributes nothing outside the falloff.
+  // Cached as a CanvasTexture, shared by every halo sprite.
+  _makeGlowTexture() {
+    const S = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = S; canvas.height = S;
+    const ctx = canvas.getContext('2d');
+    const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0.0, 'rgba(190,245,255,0.95)');
+    g.addColorStop(0.35, 'rgba(0,212,240,0.45)');
+    g.addColorStop(1.0, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+    const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    this._textures.push(tex);
+    return tex;
+  }
+
+  // Per-frame: follow each agent and ramp halo opacity/scale off the SAME glow
+  // value used by the emissive pulse, so the two read as one effect. No `new`
+  // per frame; sprites/material/texture are reused. Gated by fps auto-degrade.
+  _updateGlowHalos() {
+    if (!this._glowSprites || this._glowSprites.length === 0) return;
+    if (!this._glowEnabled) return;
+    // Reduced-motion holds glow steady-off (workers/AGVs already skip ramping),
+    // so halos naturally stay hidden; nothing extra to do here.
+    for (const h of this._glowSprites) {
+      const ref = h.ref;
+      const g = ref.glow || 0;
+      const sp = h.sprite;
+      if (g <= 0.01) { if (sp.visible) sp.visible = false; continue; }
+      sp.visible = true;
+      // Follow the agent's current ground position.
+      const p = (h.kind === 'forklift') ? ref.group.position : ref.mesh.position;
+      sp.position.x = p.x;
+      sp.position.z = p.z;
+      // Ramp opacity + a gentle scale breath with activity intensity.
+      h.mat.opacity = g * 0.6;
+      const s = h.base * (0.85 + 0.25 * g);
+      sp.scale.set(s, s, 1);
+    }
+  }
+
   // -- Live productivity HUD (DOM overlay) ----------------------------------
   // Only built when replay.series exists & is non-empty. A small absolutely-
   // positioned panel inside the container with a sparkline (canvas 2D) and live
@@ -1430,7 +1523,8 @@ export class Scene3D {
 
   // Per-frame: interpolate each moving forklift's position (same sampler) and
   // yaw it toward its direction of travel using a small look-ahead sample.
-  _updateForklifts(t) {
+  _updateForklifts(t, dt) {
+    const glowOn = this._beltSpeed !== 0; // reduced-motion → hold glow off
     for (const f of this._forklifts) {
       const s = sampleKeyframes(f.keyframes, t);
       f.group.position.set(s.x, 0, s.y);
@@ -1443,11 +1537,15 @@ export class Scene3D {
         vx = s.x - behind.x;
         vz = s.y - behind.y;
       }
-      if (vx * vx + vz * vz > 1e-6) {
+      const moving = vx * vx + vz * vz > 1e-6;
+      if (moving) {
         // Model's forks face +Z, so yaw rotates +Z onto (vx, vz).
         f.yaw = Math.atan2(vx, vz);
       }
       f.group.rotation.y = f.yaw;
+      // Drive the activity halo (forklifts have no emissive ramp of their own).
+      const active = (glowOn && moving) ? 1 : 0;
+      f.glow = approach(f.glow || 0, active, dt, 4);
     }
   }
 
@@ -1475,10 +1573,11 @@ export class Scene3D {
     this._updateIntro();          // gentle one-shot camera move (if active)
     this._updateWorkers(t, dt);
     this._updateAgvs(t, dt);
-    this._updateForklifts(t);
+    this._updateForklifts(t, dt);
     this._updateStaging(t);
     this._updateBelts(dt);        // scroll conveyor tread textures (delta-based)
     this._updateContactShadows(); // keep blob shadows under moving agents
+    this._updateGlowHalos();      // additive cyan activity halos (pseudo-bloom)
     this._updateHud(t);           // sync DOM productivity overlay (if present)
     this._monitorFps(dt);         // auto-degrade if frame time gets heavy
     this.controls.update();
@@ -1490,8 +1589,9 @@ export class Scene3D {
   // Lightweight rolling-average frame timer. If sustained fps drops below a
   // floor, shed cost in a safe order. There is NO post-processing in this build
   // (no EffectComposer/Bloom vendored), so the only levers are: (1) stop the
-  // conveyor belt texture scroll, then (2) disable dynamic shadow updates. Both
-  // are additive/reversible and never touch geometry or the data contract.
+  // conveyor belt texture scroll, (2) disable dynamic shadow updates, then (3)
+  // drop the additive glow halos (the pseudo-bloom). All are additive/reversible
+  // and never touch geometry or the data contract.
   _monitorFps(dt) {
     if (dt <= 0) return;
     const f = this._fps || (this._fps = {
@@ -1501,7 +1601,7 @@ export class Scene3D {
     const inst = 1 / dt;
     f.ema = f.ema * 0.9 + inst * 0.1;
     // Only act after a short warm-up window of sustained low fps.
-    if (f.ema < 30 && f.level < 2) {
+    if (f.ema < 30 && f.level < 3) {
       f.acc += dt;
       if (f.acc > 2.0) { this._degrade(f); f.acc = 0; }
     } else {
@@ -1509,8 +1609,8 @@ export class Scene3D {
     }
   }
 
-  // Shed one tier of cost (belts → shadows). Reduced-motion already froze belts,
-  // so this mainly drops shadow map updates on weak GPUs.
+  // Shed one tier of cost (belts → shadows → glow halos). Reduced-motion already
+  // froze belts, so this mainly drops shadow updates / halos on weak GPUs.
   _degrade(f) {
     if (f.level === 0) {
       // Tier 1: freeze conveyor scroll (cheapest visual to lose).
@@ -1520,6 +1620,11 @@ export class Scene3D {
       // Tier 2: stop updating cast shadows (keeps the last shadow frame static).
       if (this.renderer) this.renderer.shadowMap.autoUpdate = false;
       f.level = 2;
+    } else if (f.level === 2) {
+      // Tier 3: drop the additive glow halos and hide any showing now.
+      this._glowEnabled = false;
+      for (const h of this._glowSprites) { if (h.sprite) h.sprite.visible = false; }
+      f.level = 3;
     }
   }
 
@@ -1554,6 +1659,13 @@ export class Scene3D {
       if (s && s.sprite) this.scene.remove(s.sprite);
     }
     this._shadowSprites = [];
+    // Remove additive glow halos (their SpriteMaterials are tracked in
+    // _materials, the shared glow CanvasTexture in _textures — both freed below).
+    for (const h of this._glowSprites) {
+      if (h && h.sprite) this.scene.remove(h.sprite);
+    }
+    this._glowSprites = [];
+    this._glowTex = null;
     this._heat = null;
     if (this.controls) this.controls.dispose();
     for (const g of this._geometries) { if (g && g.dispose) g.dispose(); }

@@ -20,7 +20,7 @@
 //       runScenarios(): Promise<object>
 //       getAnalysis(): Promise<object>
 //     }
-//   controller: { el, focus(), reset(), addCody(text,{mood}), destroy() }
+//   controller: { el, focus(), reset(), addCody(text,{mood}), ask(text), destroy() }
 //
 // Self-contained vanilla ES module: no framework, no build step, no own CSS
 // (the shell owner ships the styles). Defensive throughout — any fetch or
@@ -882,6 +882,17 @@ export function mountChat(targetEl, opts = {}) {
     persist();
   }
 
+  // Programmatically ask Cody a question (e.g. delegated from another view).
+  // Mirrors the suggestion-chip path: fill the composer and submit.
+  function ask(text) {
+    if (destroyed) return;
+    const q = typeof text === 'string' ? text.trim() : '';
+    if (!q || busy) return;
+    input.value = q;
+    autoGrow();
+    submit();
+  }
+
   function destroy() {
     destroyed = true;
     hideTyping();
@@ -896,6 +907,7 @@ export function mountChat(targetEl, opts = {}) {
     focus,
     reset,
     addCody,
+    ask,
     destroy,
     // Switch the displayed thread to a project's saved conversation.
     loadFor,

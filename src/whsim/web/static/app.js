@@ -1044,7 +1044,12 @@ function updatePhaseHint(view) {
 
 function mountBIAnalyticsView() {
   if (!S.bianalytics) {
-    S.bianalytics = mountBIAnalytics($('bianalytics'), { getProject: () => S.project, toast: (m, k) => toast(m, k) });
+    S.bianalytics = mountBIAnalytics($('bianalytics'), {
+      getProject: () => S.project,
+      toast: (m, k) => toast(m, k),
+      // Delegate a free-text question to Cody: jump to the chat view and ask.
+      askCody: (q) => { switchView('chat'); if (S.chat && S.chat.ask) S.chat.ask(q); },
+    });
   } else { S.bianalytics.refresh(); }
 }
 
@@ -1150,6 +1155,13 @@ async function applyAndRun(edits) {
 document.addEventListener('whsim:apply-run', (e) => {
   const edits = e && e.detail && e.detail.edits;
   applyAndRun(edits);
+});
+
+// Cross-view drill navigation: a module asks the shell to switch views
+// (e.g. 分析BI "物量BIで見る →" / "人員設計へ →").
+document.addEventListener('whsim:nav', (e) => {
+  const view = e && e.detail && e.detail.view;
+  if (typeof view === 'string' && view) switchView(view);
 });
 
 // データ分析タブ → タイムチャート: place the day from the measured volumes.

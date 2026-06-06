@@ -76,6 +76,14 @@ function injectStyle() {
   .bia-card .imp{font-size:11.5px;color:var(--ink-secondary);line-height:1.45}
   .bia-card .go{margin-top:auto;font-family:var(--font-mono);font-size:10px;color:var(--ink-tertiary)}
 
+  /* ── ②b drill links (cross-view nav) ── */
+  .bia-drill{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
+  .bia-drill a{font-family:var(--font-sans);font-size:11px;color:var(--bia-accent);
+    cursor:pointer;text-decoration:none;
+    transition:opacity var(--dur-1,120ms) var(--ease-out,ease)}
+  .bia-drill a:hover{opacity:.7}
+  @media (prefers-reduced-motion:reduce){.bia-drill a{transition:none}}
+
   /* ── shared chart shell ── */
   .bia-chart{background:var(--bg-panel);border:1px solid var(--line-hair);border-radius:var(--r-lg);padding:16px}
   .bia-ch-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px}
@@ -124,6 +132,14 @@ export function mountBIAnalytics(el, opts = {}) {
   injectStyle();
   const getProject = opts.getProject || (() => null);
   const toast = opts.toast || (() => {});
+  // Optional Cody delegation: when a question matches no keyword rule and this
+  // is a function, the raw question is handed to Cody. Back-compatible: when
+  // unset, the legacy "近い質問" suggestion list is shown instead.
+  const askCody = typeof opts.askCody === 'function' ? opts.askCody : null;
+
+  // Drill: ask PM-side to switch the active view. This file only fires the event;
+  // the host listens for `whsim:nav` and performs the actual view switch.
+  const nav = (view) => document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view } }));
 
   const root = document.createElement('div');
   root.className = 'bia';
@@ -193,8 +209,13 @@ export function mountBIAnalytics(el, opts = {}) {
       setAnswer(`データ範囲は <span class="hit">${fmt(d.length)}日分</span>（${esc(d[0].label || '')}〜${esc(d[d.length - 1].label || '')}）、合計 <b>${fmt(total)}</b>。`);
       return;
     }
-    // fall-through: suggest nearest questions
+    // fall-through (no rule matched): delegate to Cody if available, else suggest.
     clearDim();
+    if (askCody) {
+      askCody(q);
+      setAnswer(`<span class="sug">この質問はルールに当てはまらなかったので、<b>Codyに聞きました</b>。</span>`);
+      return;
+    }
     setAnswer(`<span class="sug">うまく解釈できませんでした。近い質問: ${EXAMPLES.slice(0, 3).map((e) => `<u data-ex="${esc(e)}">${esc(e)}</u>`).join(' / ')}</span>`);
     root.querySelectorAll('[data-ex]').forEach((u) => { u.onclick = () => runExample(u.dataset.ex); });
   }
@@ -458,6 +479,10 @@ export function mountBIAnalytics(el, opts = {}) {
       <div class="kic">${esc(c.kic)}</div>
       <div class="fact">${c.fact}</div>
       <div class="imp">${esc(c.imp)}</div>
+      <div class="bia-drill">
+        <a data-nav="bi" role="link" tabindex="0">物量BIで見る →</a>
+        <a data-nav="timetable" role="link" tabindex="0">人員設計へ →</a>
+      </div>
       <div class="go">→ 該当チャートへ</div>
     </div>`;
   }
@@ -474,6 +499,12 @@ export function mountBIAnalytics(el, opts = {}) {
 
   function wireInsights() {
     root.querySelectorAll('[data-go]').forEach((c) => { c.onclick = () => focus(c.dataset.go); });
+    // drill links fire `whsim:nav` and must not bubble into the card's focus()
+    root.querySelectorAll('[data-nav]').forEach((a) => {
+      const go = (e) => { e.stopPropagation(); e.preventDefault(); nav(a.dataset.nav); };
+      a.onclick = go;
+      a.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') go(e); });
+    });
   }
 
   function wireCharts() {
