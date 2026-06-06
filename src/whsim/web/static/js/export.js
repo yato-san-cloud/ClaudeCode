@@ -14,6 +14,240 @@
 // render as "—"; absent project/run shows a friendly placeholder; empty
 // keyframes contribute 0.
 
+// ---- scoped style injection -------------------------------------------------
+//
+// A single <style> tag, keyed by a unique id, scoped entirely under `#export`
+// so it cannot leak into the rest of the dark app chrome. Purely additive: it
+// restyles the existing DOM produced below (no markup/behaviour changes) to
+// match the V3 proposal mock — white printable proposal sheet, quiet dark
+// export cards, one accented verdict bar, tabular numerics, and a single
+// once-on-enter motion pass that fully stops under reduced-motion.
+
+const EXPORT_STYLE_ID = 'whsim-export-style-v3';
+
+function injectStyle() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(EXPORT_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = EXPORT_STYLE_ID;
+  style.textContent = EXPORT_CSS;
+  document.head.appendChild(style);
+}
+
+// All rules are namespaced under `#export` (the mount container) so nothing
+// here affects the dark app shell. Motion uses transform/opacity only.
+const EXPORT_CSS = `
+#export {
+  --x-ease-out: cubic-bezier(.16,1,.3,1);
+  --x-ease-in: cubic-bezier(.4,0,1,1);
+  --x-dur-1: 120ms;
+  --x-dur-2: 180ms;
+  --x-dur-3: 240ms;
+
+  --x-panel: #0E1726;
+  --x-panel-2: #111E33;
+  --x-ink-0: #EAF2FA;
+  --x-ink-1: #9FB2C8;
+  --x-ink-2: #607389;
+  --x-line: rgba(255,255,255,0.07);
+  --x-line-strong: rgba(255,255,255,0.12);
+  --x-cyan: #34E3FF;
+  --x-cyan-hi: #7EF6FF;
+  --x-tech: #2F7BFF;
+  --x-deep: #0C5F86;
+
+  --x-paper: #FFFFFF;
+  --x-paper-ink-0: #0B1220;
+  --x-paper-ink-1: #3D4A60;
+  --x-paper-ink-2: #8593A8;
+  --x-paper-line: #E7EBF1;
+  --x-paper-line-2: #F0F2F6;
+  --x-paper-tint: #F7F9FC;
+  --x-ok-ink: #0E7A52;
+  --x-warn-ink: #9A6212;
+  --x-err-ink: #C0334C;
+}
+#export .export-view { display: block; }
+#export .tnum, #export .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* ---- export panel: dark, quiet card grid ---- */
+#export .export-panel {
+  border: 1px solid var(--x-line);
+  border-radius: 12px;
+  background: var(--x-panel);
+  padding: 16px;
+  margin: 0 auto 18px;
+  max-width: 794px;
+}
+#export .export-head { margin-bottom: 12px; }
+#export .export-h2 {
+  font-size: 14px; letter-spacing: 0.04em; font-weight: 600;
+  margin: 0 0 3px; color: var(--x-ink-0);
+}
+#export .export-desc { font-size: 11.5px; color: var(--x-ink-2); margin: 0; line-height: 1.5; }
+
+#export .export-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
+#export .export-actions-secondary {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--x-line);
+}
+
+/* document download buttons styled as quiet cards */
+#export .export-doc-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  border: 1px solid var(--x-line); border-radius: 8px;
+  background: rgba(255,255,255,0.015);
+  color: var(--x-ink-0);
+  padding: 11px 13px; font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; position: relative;
+  transition:
+    border-color var(--x-dur-1) var(--x-ease-out),
+    background var(--x-dur-1) var(--x-ease-out),
+    box-shadow var(--x-dur-1) var(--x-ease-out),
+    transform var(--x-dur-1) var(--x-ease-out);
+}
+#export .export-doc-btn::before {
+  content: ""; width: 8px; height: 8px; flex-shrink: 0; border-radius: 2px;
+  background: var(--x-panel-2); border: 1px solid var(--x-line-strong);
+  box-shadow: 0 0 0 0 rgba(52,227,255,0);
+  transition: box-shadow var(--x-dur-1) var(--x-ease-out), border-color var(--x-dur-1) var(--x-ease-out);
+}
+@media (hover: hover) {
+  #export .export-doc-btn:hover {
+    border-color: rgba(52,227,255,0.35);
+    background: rgba(52,227,255,0.035);
+    transform: translateY(-1px);
+  }
+  #export .export-doc-btn:hover::before {
+    border-color: rgba(52,227,255,0.45);
+    box-shadow: 0 0 10px rgba(52,227,255,0.55);
+  }
+}
+#export .export-doc-btn:active { transform: scale(.98); transition-timing-function: var(--x-ease-in); }
+#export .export-doc-btn:focus-visible { outline: 2px solid var(--x-cyan-hi); outline-offset: 2px; }
+#export .export-doc-btn[disabled] { cursor: default; opacity: 0.85; transform: none; }
+
+/* primary download: the one restrained cyan accent in the dark card grid */
+#export .export-doc-btn.primary {
+  color: #04121A; font-weight: 600;
+  background: linear-gradient(180deg, var(--x-cyan-hi), var(--x-cyan));
+  border-color: transparent;
+  box-shadow: 0 0 0 1px rgba(52,227,255,0.35), 0 6px 16px rgba(52,227,255,0.16);
+}
+#export .export-doc-btn.primary::before {
+  background: rgba(4,18,26,0.18); border-color: rgba(4,18,26,0.25);
+}
+@media (hover: hover) {
+  #export .export-doc-btn.primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
+}
+
+/* secondary link-style actions */
+#export .export-link-btn {
+  border: 1px solid var(--x-line); border-radius: 7px;
+  background: transparent; color: var(--x-ink-1);
+  padding: 7px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  transition:
+    border-color var(--x-dur-1) var(--x-ease-out),
+    color var(--x-dur-1) var(--x-ease-out),
+    background var(--x-dur-1) var(--x-ease-out),
+    transform var(--x-dur-1) var(--x-ease-out);
+}
+@media (hover: hover) {
+  #export .export-link-btn:hover {
+    border-color: rgba(52,227,255,0.32); color: var(--x-cyan-hi);
+    background: rgba(52,227,255,0.04);
+  }
+}
+#export .export-link-btn:active { transform: scale(.98); transition-timing-function: var(--x-ease-in); }
+#export .export-link-btn:focus-visible { outline: 2px solid var(--x-cyan-hi); outline-offset: 2px; }
+
+/* optimistic press feedback on doc buttons (visual only) */
+#export .export-doc-btn[data-busy="1"]::before { box-shadow: 0 0 10px rgba(52,227,255,0.55); }
+
+#export .spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.25); border-top-color: currentColor;
+  display: inline-block; vertical-align: -2px; margin-right: 7px;
+  animation: x-spin 700ms linear infinite;
+}
+#export .export-doc-btn.primary .spinner { border-color: rgba(4,18,26,0.30); border-top-color: #04121A; }
+@keyframes x-spin { to { transform: rotate(360deg); } }
+
+#export .export-empty, #export .export-loading {
+  max-width: 794px; margin: 0 auto;
+  border: 1px solid var(--x-line); border-radius: 12px;
+  background: var(--x-panel);
+}
+
+/* ---- proposal sheet: white, printable ---- */
+#export .proposal-sheet {
+  font-variant-numeric: tabular-nums;
+}
+#export .proposal-sheet::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--x-cyan), var(--x-tech) 60%, var(--x-deep));
+  border-radius: 10px 10px 0 0;
+}
+#export .proposal-sheet { position: relative; }
+#export .proposal-title { letter-spacing: -0.02em; }
+
+/* verdict bar — the single page accent, with a left rule that grows on enter */
+#export .proposal-verdict { position: relative; overflow: hidden; }
+#export .proposal-verdict::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; border-radius: 8px 0 0 8px;
+  background: currentColor; opacity: 0.55;
+  transform: scaleX(1); transform-origin: left center;
+}
+
+/* summary KPI table: tabular, right-aligned values */
+#export table.proposal-kpis td { font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   Entrance choreography — once on enter, transform/opacity only
+   ============================================================ */
+@keyframes x-sheet-in {
+  0%   { opacity: 0; transform: translateY(8px) scale(1); }
+  70%  { opacity: 1; transform: translateY(0) scale(1.005); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes x-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes x-rule-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+#export .export-view.is-anim .export-panel {
+  opacity: 0; will-change: opacity, transform;
+  animation: x-fade-up var(--x-dur-3) var(--x-ease-out) both;
+}
+#export .export-view.is-anim .proposal-sheet {
+  opacity: 0; will-change: opacity, transform;
+  animation: x-sheet-in var(--x-dur-3) var(--x-ease-out) 60ms both;
+}
+#export .export-view.is-anim .proposal-verdict::before {
+  transform: scaleX(0);
+  animation: x-rule-grow var(--x-dur-3) var(--x-ease-out) 260ms both;
+}
+#export .export-view.is-anim table.proposal-kpis tbody tr {
+  opacity: 0; will-change: opacity, transform;
+  animation: x-fade-up var(--x-dur-3) var(--x-ease-out) both;
+  animation-delay: var(--x-stagger, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #export *, #export *::before, #export *::after {
+    transition: none !important; animation: none !important;
+  }
+  #export .export-view.is-anim .export-panel,
+  #export .export-view.is-anim .proposal-sheet,
+  #export .export-view.is-anim table.proposal-kpis tbody tr { opacity: 1 !important; transform: none !important; }
+  #export .export-view.is-anim .proposal-verdict::before { transform: scaleX(1) !important; }
+  #export .spinner { animation: none !important; }
+}
+`;
+
 // ---- formatting helpers ----------------------------------------------------
 
 function isNum(v) {
@@ -120,7 +354,84 @@ export class ExportView {
     this.pngUrl = null;
     this._objectUrls = [];
     this._reqToken = 0;
+    this._motionTimers = [];
+    injectStyle();
     this.refresh();
+  }
+
+  // Once-on-enter motion: arm CSS entrance animations on the live DOM, assign
+  // stagger delays to the summary-table rows, and count up the already-rendered
+  // numeric cells. Fully no-ops under reduced-motion (final values stay put).
+  _armMotion() {
+    const root = this.root;
+    if (!root) return;
+    let reduce = false;
+    try {
+      reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (_e) { /* ignore */ }
+    if (reduce) return;
+
+    // Stagger the summary KPI rows ~36ms apart, after the sheet rises.
+    const rows = root.querySelectorAll('table.proposal-kpis tbody tr');
+    rows.forEach((tr, i) => { tr.style.setProperty('--x-stagger', (300 + i * 36) + 'ms'); });
+
+    root.classList.add('is-anim');
+
+    // Settle: clear will-change once the entrance is done.
+    const settle = 300 + rows.length * 36 + 320;
+    this._motionTimers.push(window.setTimeout(() => {
+      root.querySelectorAll('.export-panel, .proposal-sheet, table.proposal-kpis tbody tr')
+        .forEach((el) => { el.style.willChange = 'auto'; });
+    }, settle));
+
+    // Count-up the already-rendered numeric cells (<=600ms, ease-out).
+    this._motionTimers.push(window.setTimeout(() => this._countUpAll(), 260));
+  }
+
+  // rAF count-up over any element carrying a finished numeric string. We parse
+  // the rendered text (keeping prefix like ¥ and suffix like 件/時) so the final
+  // text is unchanged; we only animate from 0 -> value visually.
+  _countUpAll() {
+    const root = this.root;
+    if (!root) return;
+    const cells = root.querySelectorAll('[data-x-count]');
+    cells.forEach((el) => this._countUp(el));
+  }
+
+  _countUp(el) {
+    const target = parseFloat(el.getAttribute('data-x-count'));
+    if (!Number.isFinite(target)) return;
+    const dec = parseInt(el.getAttribute('data-x-dec') || '0', 10);
+    const group = el.getAttribute('data-x-group') === '1';
+    const prefix = el.getAttribute('data-x-prefix') || '';
+    const suffix = el.getAttribute('data-x-suffix') || '';
+    const final = el.textContent;
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+    const fmt = (v) => {
+      let s = v.toFixed(dec);
+      if (group) {
+        const parts = s.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        s = parts.join('.');
+      }
+      return prefix + s + suffix;
+    };
+    const dur = 600;
+    let start = null;
+    el.style.willChange = 'contents';
+    const frame = (ts) => {
+      if (!this.root) return; // disposed mid-flight
+      if (start === null) start = ts;
+      const p = Math.min(1, (ts - start) / dur);
+      el.textContent = fmt(target * easeOut(p));
+      if (p < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        el.textContent = final; // restore exact rendered string
+        el.style.willChange = 'auto';
+      }
+    };
+    requestAnimationFrame(frame);
   }
 
   _projectName() {
@@ -170,7 +481,15 @@ export class ExportView {
       });
   }
 
+  _clearMotionTimers() {
+    if (Array.isArray(this._motionTimers)) {
+      this._motionTimers.forEach((t) => { try { clearTimeout(t); } catch (_e) { /* ignore */ } });
+    }
+    this._motionTimers = [];
+  }
+
   _clearRoot() {
+    this._clearMotionTimers();
     if (this.root && this.root.parentNode === this.container) {
       this.container.removeChild(this.root);
     }
@@ -206,8 +525,10 @@ export class ExportView {
   _render(name) {
     // Clear loading text but keep root.
     this.root.textContent = '';
+    this.root.classList.remove('is-anim');
     this.root.appendChild(this._buildExportPanel(name));
     this.root.appendChild(this._buildProposal(name));
+    this._armMotion();
   }
 
   _toast(msg, kind) {
@@ -546,16 +867,33 @@ export class ExportView {
     const bnUtil = isNum(k.bottleneck_utilization) ? pct(k.bottleneck_utilization, 0) : null;
     const hc = headcountOf(k);
 
+    // Each item: [label, renderedText, countMeta|null]. countMeta drives the
+    // optional once-on-enter count-up; the rendered text is the source of truth
+    // and stays identical (count-up only animates 0 -> value, then restores it).
+    const compPctScaled = compFrac != null ? (Math.abs(compFrac) <= 1 ? compFrac * 100 : compFrac) : null;
     const items = [
-      ['スループット', isNum(k.throughput_per_hr) ? num(k.throughput_per_hr, 1) + ' 件/時' : '—'],
-      ['出荷完了率', compFrac != null ? pct(compFrac, 1) : '—'],
-      ['ボトルネック', bnName ? (bnName + (bnUtil ? ' ' + bnUtil : '')) : '—'],
-      ['必要人員', isNum(hc) ? num(hc, 0) + ' 名' : '—'],
-      ['1件あたりコスト', yen(k.total_cost_per_order, 1)],
-      ['月間コスト', yen(k.monthly_cost, 0)],
+      ['スループット',
+        isNum(k.throughput_per_hr) ? num(k.throughput_per_hr, 1) + ' 件/時' : '—',
+        isNum(k.throughput_per_hr) ? { value: k.throughput_per_hr, dec: 1, suffix: ' 件/時' } : null],
+      ['出荷完了率',
+        compFrac != null ? pct(compFrac, 1) : '—',
+        compPctScaled != null ? { value: compPctScaled, dec: 1, suffix: '%' } : null],
+      ['ボトルネック',
+        bnName ? (bnName + (bnUtil ? ' ' + bnUtil : '')) : '—', null],
+      ['必要人員',
+        isNum(hc) ? num(hc, 0) + ' 名' : '—',
+        isNum(hc) ? { value: hc, dec: 0, suffix: ' 名' } : null],
+      ['1件あたりコスト',
+        yen(k.total_cost_per_order, 1),
+        isNum(k.total_cost_per_order) ? { value: k.total_cost_per_order, dec: 1, group: true, prefix: '¥' } : null],
+      ['月間コスト',
+        yen(k.monthly_cost, 0),
+        isNum(k.monthly_cost) ? { value: k.monthly_cost, dec: 0, group: true, prefix: '¥' } : null],
     ];
     if (isNum(k.payback_months) && k.payback_months > 0) {
-      items.push(['投資回収', num(k.payback_months, 1) + ' ヶ月']);
+      items.push(['投資回収',
+        num(k.payback_months, 1) + ' ヶ月',
+        { value: k.payback_months, dec: 1, suffix: ' ヶ月' }]);
     }
 
     const table = document.createElement('table');
@@ -565,7 +903,7 @@ export class ExportView {
     table.style.fontSize = '13px';
 
     const tbody = document.createElement('tbody');
-    items.forEach(([label, value]) => {
+    items.forEach(([label, value, count]) => {
       const tr = document.createElement('tr');
       const th = document.createElement('th');
       th.scope = 'row';
@@ -577,11 +915,22 @@ export class ExportView {
       th.style.background = 'var(--surface, #f5f7fa)';
       th.style.border = '1px solid var(--line, #e3e8ee)';
       const td = document.createElement('td');
+      td.className = 'tnum';
       td.textContent = value;
       td.style.textAlign = 'right';
       td.style.padding = '8px 12px';
       td.style.fontWeight = '700';
       td.style.border = '1px solid var(--line, #e3e8ee)';
+      // Tag numeric value cells so the once-on-enter count-up can animate them.
+      // The rendered text above is authoritative; these attributes only drive
+      // the optional 0 -> value animation and are ignored under reduced-motion.
+      if (count && isNum(count.value)) {
+        td.setAttribute('data-x-count', String(count.value));
+        td.setAttribute('data-x-dec', String(count.dec || 0));
+        if (count.group) td.setAttribute('data-x-group', '1');
+        if (count.prefix) td.setAttribute('data-x-prefix', count.prefix);
+        if (count.suffix) td.setAttribute('data-x-suffix', count.suffix);
+      }
       tr.appendChild(th);
       tr.appendChild(td);
       tbody.appendChild(tr);

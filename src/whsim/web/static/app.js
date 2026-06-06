@@ -138,8 +138,12 @@ function draw2d() {
   ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
   ctx.strokeRect(X(0), Y(b.depth), b.width * sc, b.depth * sc);
   for (const z of rep.zones) {
-    ctx.fillStyle = hexA(z.color || '#eeeeee', 0.32);
+    // V3 viewport: zones read as outlined figures (faint fill + crisp outline)
+    // rather than flat colour fills. Same colour token, just lighter weight.
+    ctx.fillStyle = hexA(z.color || '#eeeeee', 0.12);
     ctx.fillRect(X(z.x), Y(z.y + z.h), z.w * sc, z.h * sc);
+    ctx.strokeStyle = hexA(z.color || '#8a93a0', 0.55); ctx.lineWidth = 1;
+    ctx.strokeRect(X(z.x), Y(z.y + z.h), z.w * sc, z.h * sc);
     ctx.fillStyle = P.zoneInk; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(ZONE_JP[z.type] || z.type, X(z.x + z.w / 2), Y(z.y + z.h / 2));
   }
@@ -254,13 +258,103 @@ function draw2d() {
     ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(`仮置 ${wip}/${sg.capacity}`, X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2));
   }
-  // workers (round) — includes dedicated packer agents (role="packer", "pack" red)
+  // workers — role decides the glyph (●picker ▲forklift ■packer/inspector),
+  // state still tints the fill. Falls back to the legacy round dot for any
+  // unknown role, so older replays render identically.
   for (const wk of rep.workers) {
     const [x, y, st] = interp(wk.keyframes, S.t);
     ctx.fillStyle = STATE_COLOR[st] || '#999';
     ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
-    ctx.beginPath(); ctx.arc(X(x), Y(y), 6, 0, 7); ctx.fill(); ctx.stroke();
+    agentGlyph(X(x), Y(y), wk.role, 6);
   }
+  // V3 viewport extras (additive; each guarded so absent data = legacy render):
+  // staging fill-ring + bottleneck ⚠ marker + bottom-left legend.
+  if (sg) drawStagingRing(X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2), sg);
+  drawBottleneck(rep, X, Y);
+  drawLegend(rep, w, h, P);
+}
+
+// Role → symbol (Mini-Metro style). Shapes match the V3 mock & 3D view:
+// ● picker, ◆ AGV, ▲ forklift, ■ packer / inspector. Fill/stroke are set by
+// the caller (state colour). Unknown roles fall back to the round dot.
+function agentGlyph(cx, cy, role, r) {
+  ctx.beginPath();
+  if (role === 'forklift') {                       // ▲
+    ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 0.9, cy + r * 0.75);
+    ctx.lineTo(cx - r * 0.9, cy + r * 0.75); ctx.closePath();
+  } else if (role === 'agv') {                      // ◆
+    ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy);
+    ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath();
+  } else if (role === 'packer' || role === 'inspector') { // ■
+    ctx.rect(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7);
+  } else {                                          // ● picker / fallback
+    ctx.arc(cx, cy, r, 0, 7);
+  }
+  ctx.fill(); ctx.stroke();
+}
+
+// 仮置きバッファ充満リング (Mini Metro): a perimeter arc over the staging box
+// centre showing live WIP / capacity, cyan→amber→red by threshold. Additive to
+// the existing staging heat rectangle; only called when rep.staging exists.
+function drawStagingRing(cx, cy, sg) {
+  const tl = sg.timeline || [];
+  let wip = 0;
+  for (let i = 0; i < tl.length; i++) { if (tl[i][0] <= S.t) wip = tl[i][1]; else break; }
+  const frac = Math.min(1, wip / Math.max(sg.capacity, 1));
+  const col = frac < 0.60 ? '#34e3ff' : frac < 0.85 ? '#f5b05a' : '#ff5a78';
+  const R = 13;
+  ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(126,160,200,0.20)';
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
+  ctx.strokeStyle = col;
+  ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI); ctx.stroke();
+  ctx.lineWidth = 1; ctx.lineCap = 'butt';
+}
+
+// Bottleneck ⚠ overlay: read the bottleneck stage from the replay's KPIs and
+// drop a warning marker on the matching zone centre. No KPIs / no matching
+// zone => nothing drawn (full backward compatibility).
+function drawBottleneck(rep, X, Y) {
+  const k = rep.kpis;
+  if (!k || !k.bottleneck_jp) return;
+  const stage = { 'ピッキング': 'picking', '梱包': 'packing' }[k.bottleneck_jp] || null;
+  const z = (rep.zones || []).find(zz => zz.type === stage);
+  if (!z) return;
+  const cx = X(z.x + z.w / 2), cy = Y(z.y + z.h / 2);
+  ctx.fillStyle = 'rgba(245,176,90,0.12)';
+  ctx.strokeStyle = '#f5b05a'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(cx, cy - 16, 11, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f5b05a'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('⚠', cx, cy - 15);
+  ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 1;
+}
+
+// Small bottom-left legend (role glyphs). Drawn only when the replay actually
+// carries moving agents, so an empty layout stays clean.
+function drawLegend(rep, w, h, P) {
+  const items = [];
+  if ((rep.workers || []).some(o => o.role === 'picker' || !o.role)) items.push(['picker', 'ピッカー']);
+  if ((rep.agvs || []).length || (rep.workers || []).some(o => o.role === 'agv')) items.push(['agv', 'AGV']);
+  if ((rep.forklifts || []).length || (rep.workers || []).some(o => o.role === 'forklift')) items.push(['forklift', 'フォーク']);
+  if ((rep.workers || []).some(o => o.role === 'packer' || o.role === 'inspector')) items.push(['packer', '検品/梱包']);
+  if (!items.length) return;
+  const pad = 10, lh = 16, bw = 96, bh = items.length * lh + 10;
+  const x0 = pad, y0 = h - bh - pad;
+  ctx.fillStyle = 'rgba(11,19,32,0.72)'; ctx.strokeStyle = 'rgba(126,160,200,0.18)';
+  ctx.lineWidth = 1;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x0, y0, bw, bh, 6); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillRect(x0, y0, bw, bh); ctx.strokeRect(x0, y0, bw, bh); }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.font = '10px sans-serif';
+  items.forEach(([role, label], i) => {
+    const gy = y0 + 9 + i * lh;
+    ctx.fillStyle = '#34e3ff'; ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.6;
+    agentGlyph(x0 + 12, gy, role, 4);
+    ctx.fillStyle = P.zoneInk || '#8a93a0';
+    ctx.fillText(label, x0 + 24, gy);
+  });
+  ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 1;
 }
 function hexA(hex, a) {
   const n = parseInt(hex.slice(1), 16);

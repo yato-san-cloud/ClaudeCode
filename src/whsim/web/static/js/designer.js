@@ -228,6 +228,7 @@ export class Designer {
   _toggleHelp() {
     if (this._helpEl) { this._helpEl.remove(); this._helpEl = null; return; }
     const box = document.createElement('div');
+    box.classList.add('dz-enter');
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-label', '設計エディタのヘルプ');
     box.style.cssText = 'position:absolute;top:48px;right:16px;z-index:30;width:320px;max-width:calc(100% - 32px);'
@@ -314,11 +315,110 @@ export class Designer {
     this.model = m;
   }
 
+  // ---- scoped V3 polish (Figma-flavoured): cosmetic + motion only ----------
+  // One-time <style> injected on first mount. Every rule is scoped under
+  // `.designer-root` so it can never leak into the rest of the app, and it only
+  // touches transform / opacity / colour / shadow / border — never layout flow,
+  // never any element's behaviour. Motion uses the app's existing tokens
+  // (--ease-out / --dur-*) and fully degrades under prefers-reduced-motion.
+  _injectStyle() {
+    if (document.getElementById('designer-v3-style')) return;
+    const s = document.createElement('style');
+    s.id = 'designer-v3-style';
+    s.textContent = `
+    /* press feedback shared by all designer buttons (transform only) */
+    .designer-root button{
+      transition:background var(--dur-1,90ms) var(--ease-out,ease),
+        color var(--dur-1,90ms) var(--ease-out,ease),
+        border-color var(--dur-1,90ms) var(--ease-out,ease),
+        box-shadow var(--dur-1,90ms) var(--ease-out,ease),
+        transform var(--dur-1,90ms) var(--ease-out,ease);
+    }
+    @media (hover:hover){
+      .designer-root button:not(:disabled):hover{
+        border-color:var(--accent,#2383E2);
+        color:var(--ink-primary,#16202e);
+      }
+      .designer-root button.primary:not(:disabled):hover{
+        color:var(--bg-app,#fff);filter:brightness(1.05);
+      }
+    }
+    .designer-root button:not(:disabled):active{transform:scale(.97)}
+    .designer-root button:disabled{opacity:.45;cursor:default}
+    .designer-root button:focus-visible{
+      outline:2px solid var(--accent,#2383E2);outline-offset:2px;
+    }
+    /* selects & numeric inputs: focus ring + hover hairline */
+    .designer-root select,.designer-root input{
+      transition:border-color var(--dur-1,90ms) var(--ease-out,ease),
+        box-shadow var(--dur-1,90ms) var(--ease-out,ease);
+    }
+    @media (hover:hover){
+      .designer-root select:hover,.designer-root input:hover{
+        border-color:var(--accent-ring,rgba(35,131,226,.35));
+      }
+    }
+    .designer-root select:focus,.designer-root input:focus{
+      outline:none;border-color:var(--accent,#2383E2);
+      box-shadow:0 0 0 3px var(--accent-tint,rgba(35,131,226,.12));
+    }
+    /* canvas frame polish: soft inset + lift on hover (cosmetic only) */
+    .designer-root .dz-canvas-wrap{
+      transition:border-color var(--dur-2,160ms) var(--ease-out,ease),
+        box-shadow var(--dur-2,160ms) var(--ease-out,ease);
+      box-shadow:0 1px 2px rgba(15,23,32,.04);
+    }
+    @media (hover:hover){
+      .designer-root .dz-canvas-wrap:hover{
+        border-color:var(--accent-ring,rgba(35,131,226,.35));
+        box-shadow:0 6px 22px rgba(15,23,32,.08),
+          0 0 0 1px var(--accent-tint,rgba(35,131,226,.12));
+      }
+    }
+    /* the active canvas gets a whisper-thin cyan accent edge (brand <5%) */
+    .designer-root .dz-canvas-wrap::after{
+      content:"";position:absolute;inset:0;border-radius:8px;pointer-events:none;
+      box-shadow:inset 0 0 0 1px rgba(52,227,255,.10);
+      opacity:0;transition:opacity var(--dur-2,160ms) var(--ease-out,ease);
+    }
+    .designer-root .dz-canvas-wrap:hover::after{opacity:1}
+    /* side panels & help popover: gentle entrance (opacity + scale .985->1) */
+    .designer-root .dz-enter{animation:dz-enter var(--dur-2,160ms) var(--ease-out,ease) both}
+    @keyframes dz-enter{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:scale(1)}}
+    /* canvas wrap also lifts its accent edge while a field inside the panel is
+       focused (keyboard users get the same affordance as hover) */
+    .designer-root .dz-canvas-wrap:focus-within{
+      border-color:var(--accent-ring,rgba(35,131,226,.35));
+    }
+    /* tool-tab / palette toggle row buttons: a touch more lift on hover so the
+       active (filled) state reads as raised, like a Figma toolbar (cosmetic) */
+    @media (hover:hover){
+      .designer-root button:not(:disabled):not(.primary):hover{
+        box-shadow:0 1px 2px rgba(15,23,32,.06);
+      }
+    }
+    /* checkbox / toggle: subtle accent on hover (transform/colour only) */
+    @media (hover:hover){
+      .designer-root input[type=checkbox]:hover{accent-color:var(--accent,#2383E2)}
+    }
+    .designer-root input[type=checkbox]{
+      transition:accent-color var(--dur-1,90ms) var(--ease-out,ease)}
+    /* help popover entrance reuse */
+    @media (prefers-reduced-motion:reduce){
+      .designer-root *,.designer-root *::after{
+        animation:none!important;transition:none!important;
+      }
+    }
+    `;
+    document.head.appendChild(s);
+  }
+
   // ---- shell: top tool tabs, body, save row --------------------------------
   _buildShell() {
     const c = this.container;
     c.innerHTML = '';
     c.classList.add('designer-root');
+    this._injectStyle();
     c.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0;gap:8px;font-size:13px;position:relative;';
 
     // tool switch bar
@@ -421,6 +521,7 @@ export class Designer {
       this._renderLayoutBar(left);
       const wrap = document.createElement('div');
       wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+      wrap.classList.add('dz-canvas-wrap');
       this.canvas = document.createElement('canvas');
       this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.layoutBrush ? 'crosshair' : 'default'};`;
       wrap.appendChild(this.canvas);
@@ -430,6 +531,7 @@ export class Designer {
     } else {
       const wrap = document.createElement('div');
       wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+      wrap.classList.add('dz-canvas-wrap');
       this.canvas = document.createElement('canvas');
       // equip/building tools are click-to-place: a crosshair signals placement.
       this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
@@ -440,6 +542,7 @@ export class Designer {
 
     this.side = document.createElement('div');
     this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
+    this.side.classList.add('dz-enter');
     this.body.appendChild(this.side);
 
     this.ctx = this.canvas.getContext('2d');
@@ -558,6 +661,7 @@ export class Designer {
     // floor canvas
     const wrap = document.createElement('div');
     wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+    wrap.classList.add('dz-canvas-wrap');
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
     wrap.appendChild(this.canvas);
@@ -567,6 +671,7 @@ export class Designer {
     // right column: live 動線一覧 table
     this.side = document.createElement('div');
     this.side.style.cssText = 'width:300px;flex:0 0 300px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
+    this.side.classList.add('dz-enter');
     this.body.appendChild(this.side);
 
     this.ctx = this.canvas.getContext('2d');
@@ -1603,6 +1708,7 @@ export class Designer {
     // floor canvas (clickable zones)
     const wrap = document.createElement('div');
     wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+    wrap.classList.add('dz-canvas-wrap');
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.flowMode ? 'pointer' : 'default'};`;
     wrap.appendChild(this.canvas);
@@ -1613,6 +1719,7 @@ export class Designer {
     // right column: the workflow strip + pick strategy + (in-context) method panel
     this.side = document.createElement('div');
     this.side.style.cssText = 'width:340px;flex:0 0 340px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
+    this.side.classList.add('dz-enter');
     this.body.appendChild(this.side);
 
     this.ctx = this.canvas.getContext('2d');

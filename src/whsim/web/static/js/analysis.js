@@ -26,6 +26,10 @@
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
+// Unique id for the scoped stylesheet this module injects (additive over the
+// shell's styles.css .an-* rules; everything is confined under #analysis).
+const STYLE_ID = 'whsim-an-v3-style';
+
 // ---- small helpers ----------------------------------------------------------
 
 function isNum(v) {
@@ -68,6 +72,174 @@ function svgEl(tag, attrs) {
   const node = document.createElementNS(SVGNS, tag);
   if (attrs) for (const k in attrs) node.setAttribute(k, attrs[k]);
   return node;
+}
+
+// ---- scoped stylesheet (additive over styles.css; confined to #analysis) ----
+//
+// Everything here is namespaced under `#analysis` so it can only ever refine the
+// analysis view — never the rest of the app. It REFINES the shell's .an-* rules
+// (luminance hierarchy, tabular numerics, single-accent series, white-alpha
+// borders) and carries the enter-only motion layer (transform/opacity only,
+// `--ease-out`/`--dur-*` tokens, full `prefers-reduced-motion` stop). Injected
+// once; idempotent.
+function injectStyle() {
+  if (document.getElementById(STYLE_ID)) return;
+  const css = `
+#analysis .an-view{
+  --an-ease:var(--ease-out,cubic-bezier(.16,1,.3,1));
+  --an-d1:var(--dur-1,120ms);
+  --an-d2:var(--dur-2,180ms);
+  --an-d3:var(--dur-3,240ms);
+  --an-d-up:#34D399;
+  --an-d-dn:#F87171;
+}
+
+/* All numerics tabular + grouped (Stripe data clarity). */
+#analysis .an-view .kpi-value,
+#analysis .an-view .kpi-hero .kpi-value,
+#analysis .an-view .num,
+#analysis .an-view .delta,
+#analysis .an-view .c-metric{
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+}
+
+/* ---- hero: luminance-lifted cells, single-accent rail ---- */
+#analysis .an-view .kpi-hero-cell{
+  position:relative;overflow:hidden;
+  transition:border-color var(--an-d1) var(--an-ease),
+    background-color var(--an-d1) var(--an-ease),
+    transform var(--an-d1) var(--an-ease);
+}
+#analysis .an-view .kpi-hero-cell::after{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:var(--accent);opacity:0;
+  transition:opacity var(--an-d2) var(--an-ease);
+}
+@media(hover:hover){
+  #analysis .an-view .kpi-hero-cell:hover{border-color:var(--line-strong,rgba(255,255,255,.14))}
+  #analysis .an-view .kpi-hero-cell:hover::after{opacity:.55}
+}
+#analysis .an-view .kpi-hero-cell .kpi-value{letter-spacing:-.015em}
+
+/* delta: arrow + sign + muted colour + 60px sparkline (triple-encoded) */
+#analysis .an-view .delta{display:inline-flex;align-items:center;gap:5px}
+#analysis .an-view .delta.up{color:var(--an-d-up)}
+#analysis .an-view .delta.down{color:var(--an-d-dn)}
+#analysis .an-view .delta .an-arw{font-size:9px;line-height:1}
+#analysis .an-view .an-spark{display:block;flex:none;color:currentColor}
+#analysis .an-view .an-spark polyline{
+  stroke-dasharray:var(--an-len,80);
+  stroke-dashoffset:var(--an-len,80);
+}
+
+/* ---- standard KPI cards: lifted surface, quiet hover ---- */
+#analysis .an-view .kpi-card{
+  transition:border-color var(--an-d1) var(--an-ease),
+    background-color var(--an-d1) var(--an-ease),
+    transform var(--an-d1) var(--an-ease);
+}
+@media(hover:hover){
+  #analysis .an-view .kpi-card:hover{
+    border-color:var(--line-strong,rgba(255,255,255,.14));
+    transform:translateY(-1px);
+  }
+}
+
+/* ---- callouts: quiet hover lift ---- */
+#analysis .an-view .callout{
+  transition:transform var(--an-d1) var(--an-ease),
+    border-color var(--an-d1) var(--an-ease);
+}
+@media(hover:hover){
+  #analysis .an-view .callout:hover{transform:translateY(-1px)}
+}
+#analysis .an-view .c-apply,
+#analysis .an-view .c-action{
+  transition:transform var(--an-d1) var(--an-ease),
+    filter var(--an-d1) var(--an-ease);
+}
+#analysis .an-view .c-apply:active{transform:scale(.97)}
+
+/* ---- chart cards: quiet chrome ---- */
+#analysis .an-view .chart-card{
+  transition:border-color var(--an-d1) var(--an-ease);
+}
+@media(hover:hover){
+  #analysis .an-view .chart-card:hover{border-color:var(--line-strong,rgba(255,255,255,.14))}
+}
+
+/* ============================================================
+   MOTION — enter-only, transform/opacity, ease-out
+   ============================================================ */
+
+/* (1) stagger fade-in for hero cells + KPI cards (translateY 6px -> 0) */
+#analysis .an-view .kpi-hero-cell,
+#analysis .an-view .kpi-card{
+  opacity:0;transform:translateY(6px);will-change:transform,opacity;
+}
+#analysis .an-view .kpi-hero-cell.an-in,
+#analysis .an-view .kpi-card.an-in{
+  opacity:1;transform:none;
+  transition:opacity var(--an-d2) var(--an-ease),
+    transform var(--an-d2) var(--an-ease);
+}
+#analysis .an-view .kpi-hero-cell.an-settled,
+#analysis .an-view .kpi-card.an-settled{will-change:auto}
+
+/* sections + callouts: gentle one-shot rise */
+#analysis .an-view .callout,
+#analysis .an-view .chart-card{
+  opacity:0;transform:translateY(6px);will-change:transform,opacity;
+}
+#analysis .an-view .callout.an-in,
+#analysis .an-view .chart-card.an-in{
+  opacity:1;transform:none;
+  transition:opacity var(--an-d3) var(--an-ease),
+    transform var(--an-d3) var(--an-ease);
+}
+
+/* (2) sparkline draw-on, once (stroke-dashoffset) */
+#analysis .an-view .an-spark.an-draw polyline{
+  transition:stroke-dashoffset 560ms var(--an-ease);
+  stroke-dashoffset:0;
+}
+
+/* (3) chart rise: opacity + tiny scaleY from bottom, once */
+#analysis .an-view svg.an-chart-rise{
+  transform-box:fill-box;transform-origin:bottom;
+  opacity:0;transform:scaleY(.97);
+}
+#analysis .an-view svg.an-chart-rise.an-in{
+  opacity:1;transform:none;
+  transition:opacity var(--an-d3) var(--an-ease),
+    transform var(--an-d3) var(--an-ease);
+}
+
+/* prefers-reduced-motion: stop all, land at resting state with real values */
+@media (prefers-reduced-motion: reduce){
+  #analysis .an-view *{animation:none!important;transition:none!important}
+  #analysis .an-view .kpi-hero-cell,
+  #analysis .an-view .kpi-card,
+  #analysis .an-view .callout,
+  #analysis .an-view .chart-card{opacity:1!important;transform:none!important}
+  #analysis .an-view .an-spark polyline{stroke-dashoffset:0!important}
+  #analysis .an-view svg.an-chart-rise{opacity:1!important;transform:none!important}
+}
+`;
+  const style = el('style', { id: STYLE_ID });
+  style.textContent = css;
+  document.head.appendChild(style);
+}
+
+// Honour the reduced-motion preference (re-checked at each render).
+function prefersReducedMotion() {
+  try {
+    return window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_e) {
+    return false;
+  }
 }
 
 // ---- icons (24x24 outline, stroke=currentColor — colour via .c-icon) --------
@@ -160,9 +332,45 @@ function buildInsightsSection(insights) {
 
 function valueSpan(value, unit) {
   const wrap = document.createDocumentFragment();
-  wrap.appendChild(el('span', { class: 'num' }, isNum(value) ? group(value) : String(value)));
+  const span = el('span', { class: 'num' }, isNum(value) ? group(value) : String(value));
+  // Stamp the raw target + decimal count so the (display-only) count-up
+  // animation can render intermediate frames with identical formatting and
+  // land EXACTLY on the real value. Non-numeric values are left untouched.
+  if (isNum(value)) {
+    const frac = Math.abs(value).toString().split('.')[1];
+    span.dataset.count = String(value);
+    span.dataset.decimals = String(frac ? frac.length : 0);
+  }
+  wrap.appendChild(span);
   if (unit) wrap.appendChild(el('span', { class: 'kpi-unit' }, unit));
   return wrap;
+}
+
+// Format a numeric to N decimals WITH thousands separators (count-up frames).
+function fmtCount(value, decimals) {
+  const neg = value < 0 ? '-' : '';
+  const fixed = Math.abs(value).toFixed(decimals);
+  const [intPart, frac] = fixed.split('.');
+  const g = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return neg + g + (frac ? '.' + frac : '');
+}
+
+// A 60x20 sparkline whose slope encodes the delta direction. Purely a visual
+// flourish keyed off the existing delta.dir — it invents no data labels and is
+// drawn-on once. `dir` is 'up' | 'down'.
+function deltaSparkline(dir) {
+  const up = dir === 'up';
+  // Gentle, slightly noisy monotone trend (8 points across 60px).
+  const ys = up
+    ? [15, 14, 14.5, 12, 12.5, 9, 9.5, 6]
+    : [6, 7, 6.5, 9, 8.5, 11, 11.5, 14];
+  const pts = ys.map((y, i) => `${(i * 60) / 7},${y}`).join(' ');
+  const svg = svgEl('svg', { class: 'an-spark', width: '60', height: '20',
+    viewBox: '0 0 60 20', 'aria-hidden': 'true' });
+  svg.appendChild(svgEl('polyline', { fill: 'none', stroke: 'currentColor',
+    'stroke-width': '1.4', 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    points: pts }));
+  return svg;
 }
 
 function buildHero(heroItems) {
@@ -175,7 +383,12 @@ function buildHero(heroItems) {
     val.appendChild(valueSpan(h.value, h.unit));
     cell.appendChild(val);
     if (h.delta && (h.delta.dir === 'up' || h.delta.dir === 'down')) {
-      cell.appendChild(el('div', { class: 'delta ' + h.delta.dir }, h.delta.text || ''));
+      const d = el('div', { class: 'delta ' + h.delta.dir });
+      const arw = el('span', { class: 'an-arw' }, h.delta.dir === 'up' ? '▲' : '▼');
+      d.appendChild(arw);
+      d.appendChild(el('span', null, h.delta.text || ''));
+      d.appendChild(deltaSparkline(h.delta.dir));
+      cell.appendChild(d);
     }
     grid.appendChild(cell);
   });
@@ -238,8 +451,8 @@ function barChart(labels, values, opts) {
   const hair = cssVar('--line-hair', 'rgba(55,53,47,0.09)');
   const faint = cssVar('--ink-secondary', 'rgba(55,53,47,0.45)');
 
-  const s = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%',
-    role: 'img' });
+  const s = svgEl('svg', { class: 'an-chart-rise', viewBox: `0 0 ${W} ${H}`,
+    width: '100%', role: 'img' });
   // gridlines + y labels
   for (let t = 0; t <= 4; t++) {
     const v = (maxY * t) / 4, yy = yOf(v);
@@ -317,9 +530,95 @@ function buildChartsSection(charts, currency) {
   return sec;
 }
 
+// ---- motion controller (enter-only; transform/opacity; CLS=0) ---------------
+
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+// rAF count-up from 0 to the stamped target. Display-only: the final frame
+// lands EXACTLY on the real value with identical grouping/decimals. Height is
+// fixed by the resting text so there is no layout shift (CLS=0).
+function countUp(span, dur) {
+  const target = parseFloat(span.dataset.count);
+  if (!Number.isFinite(target)) return;
+  const decimals = parseInt(span.dataset.decimals || '0', 10);
+  const start = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - start) / dur);
+    span.textContent = fmtCount(target * easeOutCubic(t), decimals);
+    if (t < 1) requestAnimationFrame(tick);
+    else span.textContent = fmtCount(target, decimals);
+  }
+  requestAnimationFrame(tick);
+}
+
+// Drive the one-shot enter sequence over a freshly-rendered .an-view.
+//  - reduced motion: land everything at rest immediately (real values kept).
+//  - otherwise: stagger cards (30ms), count up numbers (<=600ms), draw
+//    sparklines + rise charts once. No loops; will-change cleared on settle.
+function animateView(root) {
+  const numSpans = Array.from(root.querySelectorAll('.num[data-count]'));
+  const cards = Array.from(root.querySelectorAll('.kpi-hero-cell, .kpi-card'));
+  const callouts = Array.from(root.querySelectorAll('.callout, .chart-card'));
+  const sparks = Array.from(root.querySelectorAll('.an-spark'));
+  const charts = Array.from(root.querySelectorAll('svg.an-chart-rise'));
+
+  // Measure each sparkline so its draw-on dash length is exact.
+  sparks.forEach((svg) => {
+    const pl = svg.querySelector('polyline');
+    if (!pl) return;
+    try { svg.style.setProperty('--an-len', pl.getTotalLength().toFixed(1)); }
+    catch (_e) { /* getTotalLength unsupported — CSS fallback length applies */ }
+  });
+
+  if (prefersReducedMotion()) {
+    cards.forEach((c) => c.classList.add('an-in'));
+    callouts.forEach((c) => c.classList.add('an-in'));
+    charts.forEach((c) => c.classList.add('an-in'));
+    sparks.forEach((s) => s.classList.add('an-draw'));
+    // Numbers already hold their real (grouped) value in the markup — nothing
+    // else to do; the count-up is purely a visual flourish.
+    return;
+  }
+
+  // Hold numeric values at 0 until their card animates in (the count-up gives
+  // them life). Non-card numbers (charts area) are left as-is.
+  numSpans.forEach((span) => {
+    const decimals = parseInt(span.dataset.decimals || '0', 10);
+    span.textContent = fmtCount(0, decimals);
+  });
+
+  // Callouts + verdict rise first (above the fold context).
+  requestAnimationFrame(() => {
+    callouts.forEach((c, i) => {
+      window.setTimeout(() => c.classList.add('an-in'), i * 30);
+    });
+
+    // KPI cards stagger in, then count up + draw their sparkline.
+    cards.forEach((card, i) => {
+      window.setTimeout(() => {
+        card.classList.add('an-in');
+        card.querySelectorAll('.num[data-count]').forEach((span) => {
+          countUp(span, 600);
+        });
+        card.querySelectorAll('.an-spark').forEach((s) => s.classList.add('an-draw'));
+        card.addEventListener('transitionend', function once() {
+          card.classList.add('an-settled');
+          card.removeEventListener('transitionend', once);
+        });
+      }, i * 30);
+    });
+
+    // Charts rise once, after the cards have begun.
+    window.setTimeout(() => {
+      charts.forEach((c) => c.classList.add('an-in'));
+    }, cards.length * 30 + 80);
+  });
+}
+
 // ---- mount ------------------------------------------------------------------
 
 function render(targetEl, payload) {
+  injectStyle();
   targetEl.innerHTML = '';
   const root = el('div', { class: 'an-view' });
 
@@ -354,6 +653,10 @@ function render(targetEl, payload) {
   if (chartsSec) root.appendChild(chartsSec);
 
   targetEl.appendChild(root);
+
+  // Kick off the one-time enter sequence now the DOM is live (so getTotalLength
+  // and layout are valid). Guarded so a failure here never blanks the view.
+  try { animateView(root); } catch (_e) { /* visuals only — never fatal */ }
 }
 
 export async function mountAnalysis(targetEl, projectName) {
