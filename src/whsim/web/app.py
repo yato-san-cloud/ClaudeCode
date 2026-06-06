@@ -141,6 +141,20 @@ def api_bi_apply(name: str, payload: dict | None = None):
     return bi.apply_derivation(_open(name), payload or {})
 
 
+@app.get("/api/projects/{name}/timetable/from-bi")
+def api_timetable_from_bi(name: str):
+    """Read the BI-saved 仮値 derivation (bi.json) back into a timetable scenario,
+    so the pallet-driven 格納 volume etc. feed 人員設計. {available:false} when no
+    BI derivation has been applied yet."""
+    from whsim import bi
+    from whsim.analysis import staffing
+    vols = staffing.volumes_from_bi(bi.load_bi_config(_open(name)))
+    if vols is None:
+        return {"available": False}
+    return {"available": True, "volumes": vols,
+            "scenario": staffing.scenario_from_volumes(vols)}
+
+
 @app.get("/api/materialflow/seed")
 def api_materialflow_seed():
     """Material-flow skeleton (process flow + units/productivity) for the

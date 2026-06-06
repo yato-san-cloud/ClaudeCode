@@ -155,6 +155,77 @@ def scenario_from_volumes(volumes_by_process: dict) -> dict:
             "scenarios": {"実データ（平均日）": scenario}}
 
 
+def volumes_from_bi(bi_cfg: dict) -> dict | None:
+    """Read the saved BI 仮値派生 (projects/<name>/bi.json) back into a per-process
+    物量 dict keyed by GENERIC_PROCESSES ids — the bridge BI → タイムチャート/人員設計.
+
+    `bi_cfg` is the dict persisted by ``bi.apply_derivation`` /
+    read by ``bi.load_bi_config(proj)``: ``{inputs, derived, base}`` where
+
+    - ``base``    carries measured outbound/inbound (out_lines/out_pieces/
+      out_orders/out_cases/in_pieces/in_cases),
+    - ``derived`` carries the pallet-driven figures (in_pallets / out_pallets /
+      in_pallets_peak / inbound_handling_hours),
+    - ``inputs``  carries the 仮値 (incl. ``peak_factor``).
+
+    Mapping to processes (GENERIC_PROCESSES ids):
+
+    - 入荷検品  ← base.in_lines if present, else base.in_cases (cases ≈ receiving lines)
+    - 格納      ← derived.in_pallets (pallet-driven 物量; the BI thesis number)
+    - ピッキング ← base.out_lines
+    - 検品      ← base.out_lines
+    - 梱包      ← base.out_orders
+    - 出荷      ← base.out_orders
+
+    A ``peak_factor`` (from ``inputs`` or ``derived``/``base``) scales every
+    volume so the staffing reflects a peak day. Returns ``None`` (never raises) if
+    the config is missing/empty or yields no positive volume, so callers can fall
+    back to measured/estimated paths.
+    """
+    if not isinstance(bi_cfg, dict) or not bi_cfg:
+        return None
+    base = bi_cfg.get("base") if isinstance(bi_cfg.get("base"), dict) else {}
+    derived = bi_cfg.get("derived") if isinstance(bi_cfg.get("derived"), dict) else {}
+    inputs = bi_cfg.get("inputs") if isinstance(bi_cfg.get("inputs"), dict) else {}
+
+    def num(d: dict, *keys) -> float:
+        for k in keys:
+            v = d.get(k)
+            if v is None:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if f > 0:
+                return f
+        return 0.0
+
+    # Receiving lines: prefer an explicit in_lines, else cases (≈受入行) as a proxy.
+    in_lines = num(base, "in_lines", "in_cases")
+    # 格納 is pallet-driven — the headline 仮値派生 number; fall back to pieces.
+    in_pallets = num(derived, "in_pallets") or num(base, "in_pieces")
+    out_lines = num(base, "out_lines")
+    out_orders = num(base, "out_orders", "out_lines")
+
+    volumes = {
+        "入荷検品": in_lines,
+        "格納": in_pallets,
+        "ピッキング": out_lines,
+        "検品": out_lines,
+        "梱包": out_orders,
+        "出荷": out_orders,
+    }
+    if not any(v > 0 for v in volumes.values()):
+        return None
+
+    peak = num(inputs, "peak_factor") or num(derived, "peak_factor") \
+        or num(base, "peak_factor") or 1.0
+    if peak and peak != 1.0:
+        volumes = {k: v * peak for k, v in volumes.items()}
+    return {k: round(v, 1) for k, v in volumes.items()}
+
+
 def timetable_scenario(shipments: pd.DataFrame | None,
                        inbound: pd.DataFrame | None) -> dict:
     """Generic timetable payload from *measured* volumes (analysis → staffing)."""

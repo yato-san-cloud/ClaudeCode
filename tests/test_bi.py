@@ -115,3 +115,37 @@ def test_apply_endpoint_saves_and_marks_generated(tmp_path, monkeypatch):
     assert bi.load_bi_config(proj)["derived"]
     # GENERATED is excluded from the "real data" confidence figure.
     assert proj.load_provenance().subtrees["orders"].value == "generated"
+
+
+# --- ③仮値→タイムチャート読み戻し (staffing.volumes_from_bi) -----------------
+
+def test_volumes_from_bi_maps_and_scales():
+    from whsim.analysis import staffing
+    cfg = {"inputs": {"peak_factor": 2.0},
+           "base": {"out_lines": 100, "out_orders": 40, "in_cases": 50, "in_lines": 50},
+           "derived": {"in_pallets": 12}}
+    v = staffing.volumes_from_bi(cfg)
+    assert v["格納"] == 24.0            # in_pallets 12 × peak 2
+    assert v["ピッキング"] == 200.0     # out_lines 100 × peak 2
+    # round-trips into a timetable scenario payload
+    sc = staffing.scenario_from_volumes(v)
+    assert "processes" in sc and "productivity" in sc
+
+
+def test_volumes_from_bi_empty_is_none():
+    from whsim.analysis import staffing
+    assert staffing.volumes_from_bi({}) is None
+    assert staffing.volumes_from_bi({"base": {}, "derived": {}}) is None
+
+
+def test_timetable_from_bi_endpoint(tmp_path, monkeypatch):
+    import whsim.project as pm
+    monkeypatch.setattr(pm, "PROJECTS_DIR", tmp_path / "projects")
+    c = TestClient(app)
+    c.post("/api/projects", json={"name": "tb_rb", "template": "ecommerce_small"})
+    # After applying a BI derivation, the saved 仮値 read back into a scenario.
+    # (the not-yet-applied → available:False path is covered by
+    #  test_volumes_from_bi_empty_is_none, avoiding project-dir persistence flake.)
+    c.post("/api/projects/tb_rb/bi/apply", json={"cases_per_pallet": 40, "pallet_prod": 20})
+    r = c.get("/api/projects/tb_rb/timetable/from-bi").json()
+    assert r["available"] is True and "scenario" in r and "volumes" in r

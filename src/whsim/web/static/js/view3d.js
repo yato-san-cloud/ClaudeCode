@@ -30,6 +30,14 @@ const AGV_COLOR = {
 // Height (m) at which AGV boxes ride, centered on their thin body.
 const AGV_Y = 0.2;
 
+// Cyan accent used for the "active machine glow" (WITNESS-beating chrome).
+const GLOW_CYAN = 0x00d4f0;
+// Agent states that read as "working/moving" → glow ramps up; others decay.
+const ACTIVE_WORKER = { travel: 1, carry: 1, pick: 1, pack: 1, inspect: 1 };
+const ACTIVE_AGV = { travel: 1, pickup: 1, dropoff: 1 };
+// States in which an AGV/forklift is hauling a load → show its tote box.
+const CARRY_AGV = { pickup: 1, dropoff: 1, travel: 1 };
+
 // Render / art presets. Each tweaks background, fog, light intensities/colors
 // and tone-mapping exposure ONLY — never static geometry. See setPreset().
 // `shadow`: enable hard cast shadows for this preset; `shadowOpacity` controls
@@ -146,6 +154,10 @@ export class Scene3D {
     this._hud = null;         // DOM overlay { root, ... } or null
     this._intro = null;       // intro camera tween state or null
     this._preset = 'brand';
+    this._belts = [];         // animated conveyor belt mats { mat, speed }
+    this._beltSpeed = 1;      // global multiplier (0 = static, e.g. reduced-motion)
+    this._fps = null;         // fps monitor / auto-degrade state or null
+    this._clock = new THREE.Clock(); // delta-time source for belt flow
 
     const meta = this.replay.meta || {};
     const bounds = meta.bounds || { width: 20, depth: 20 };
@@ -155,7 +167,9 @@ export class Scene3D {
     const h = Math.max(1, container.clientHeight);
 
     // Renderer.
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true, powerPreference: 'high-performance',
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(w, h);
     // Modern color handling: sRGB output + soft filmic tone mapping.
@@ -203,6 +217,9 @@ export class Scene3D {
     this._buildRoutes();
     this._buildHeat();           // 3D congestion patches (only if replay.heat)
     this._buildContactShadows(); // soft blob shadows under moving agents
+
+    // Reduced-motion users get a fully static scene (belts + glow pulse off).
+    if (this._reducedMotion()) this._beltSpeed = 0;
 
     // Apply the default art preset (mutates lights/renderer/scene only).
     this.setPreset(this._preset);
@@ -485,8 +502,14 @@ export class Scene3D {
     const BELT_W = 0.5;   // belt width (m)
     const BELT_H = 0.18;  // belt thickness (m)
     const yMid = 0.12;    // raised slightly off the floor
+    // One shared scrolling belt-tread texture for every segment's TOP face. The
+    // map.offset is advanced every frame (delta-based) in _updateBelts() so the
+    // tread appears to flow toward the conveyor's downstream end — a cheap,
+    // GPU-only motion cue. Reduced-motion leaves it static (_beltSpeed = 0).
+    const beltTex = this._makeBeltTexture();
     for (const c of conveyors) {
       const pts = c.points || [];
+      const dir = (c.speed_mps || 0) < 0 ? -1 : 1; // flow direction along the chain
       for (let i = 0; i < pts.length - 1; i++) {
         const p0 = pts[i];
         const p1 = pts[i + 1];
@@ -497,10 +520,23 @@ export class Scene3D {
         if (len <= 0) continue;
         // Box's local X is its length; rotate about Y to align to the segment.
         const geom = new THREE.BoxGeometry(len, BELT_H, BELT_W);
-        const mat = new THREE.MeshStandardMaterial({
+        // Side rails / structure stay matte gray; the belt tread (the moving
+        // texture) is a separate, lightly-emissive material so it reads under any
+        // preset. Six-material BoxGeometry: index 2 is the +Y (top) face.
+        const railMat = new THREE.MeshStandardMaterial({
           color: 0x9aa3ad, roughness: 0.35, metalness: 0.7,
         });
-        const mesh = new THREE.Mesh(geom, mat);
+        const treadTex = beltTex.clone();
+        treadTex.needsUpdate = true;
+        // Repeat the tread ~1 per metre along the run so motion speed reads right.
+        treadTex.repeat.set(Math.max(1, Math.round(len)), 1);
+        this._textures.push(treadTex);
+        const treadMat = new THREE.MeshStandardMaterial({
+          color: 0x2b323b, roughness: 0.55, metalness: 0.25, map: treadTex,
+          emissive: new THREE.Color(0x121821), emissiveIntensity: 0.25,
+        });
+        const mats = [railMat, railMat, treadMat, railMat, railMat, railMat];
+        const mesh = new THREE.Mesh(geom, mats);
         mesh.position.set(
           (p0[0] || 0) + dx / 2, yMid, (p0[1] || 0) + dz / 2,
         );
@@ -508,8 +544,50 @@ export class Scene3D {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.scene.add(mesh);
-        this._track(geom, mat);
+        // railMat is shared per-segment; track both materials + geom for dispose.
+        this._geometries.push(geom);
+        this._materials.push(railMat, treadMat);
+        // Speed: belt linear speed (m/s) scaled to texture repeats; sign = flow.
+        const sp = Math.min(2.5, Math.abs(c.speed_mps || 0.6) || 0.6) * dir;
+        this._belts.push({ mat: treadMat, speed: sp });
       }
+    }
+  }
+
+  // Belt-tread texture: dark rubber with light chevron/cleat bands across the
+  // run so scrolling map.offset reads as forward motion. Cached as a base
+  // CanvasTexture; each segment clones it (cheap, shares the canvas bitmap).
+  _makeBeltTexture() {
+    const S = 64;
+    const canvas = document.createElement('canvas');
+    canvas.width = S; canvas.height = S;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#20262e';
+    ctx.fillRect(0, 0, S, S);
+    // Two light cleat bands per tile (perpendicular to flow = vertical here).
+    ctx.fillStyle = 'rgba(150,165,180,0.55)';
+    ctx.fillRect(2, 0, 5, S);
+    ctx.fillRect(Math.round(S / 2) + 2, 0, 5, S);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(2, 0, 2, S);
+    ctx.fillRect(Math.round(S / 2) + 2, 0, 2, S);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    this._textures.push(tex);
+    return tex;
+  }
+
+  // Per-frame: scroll each conveyor belt's tread texture by delta * speed.
+  // _beltSpeed gates it globally (0 under reduced-motion or fps auto-degrade).
+  _updateBelts(dt) {
+    if (this._belts.length === 0 || this._beltSpeed === 0) return;
+    const d = dt * this._beltSpeed;
+    for (const b of this._belts) {
+      const m = b.mat.map;
+      if (!m) continue;
+      m.offset.x = (m.offset.x + d * b.speed * 0.5) % 1;
     }
   }
 
@@ -794,15 +872,18 @@ export class Scene3D {
     const geom = new THREE.SphereGeometry(0.6, 16, 12);
     this._geometries.push(geom);
     for (const wk of workers) {
+      // Cyan emissive baked in but starting dark; pulsed up while the worker is
+      // moving/working (mirrors the AGV active-glow) — purely additive.
       const mat = new THREE.MeshStandardMaterial({
         color: STATE_COLOR.idle, roughness: 0.45, metalness: 0.05,
+        emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(0, 0.7, 0);
       mesh.castShadow = true;
       this.scene.add(mesh);
       this._materials.push(mat);
-      this._workers.push({ mesh, keyframes: wk.keyframes || [] });
+      this._workers.push({ mesh, keyframes: wk.keyframes || [], glow: 0 });
     }
   }
 
@@ -863,16 +944,34 @@ export class Scene3D {
     if (agvs.length === 0) return;
     const geom = new THREE.BoxGeometry(1.0, 0.35, 1.4); // shared, flat & low
     this._geometries.push(geom);
+    // Shared little tote box that rides on an AGV while it hauls a load. Created
+    // once per AGV (never per frame); toggled visible by carry state each frame.
+    const toteGeom = new THREE.BoxGeometry(0.7, 0.5, 0.95);
+    this._geometries.push(toteGeom);
     for (const a of agvs) {
+      // Cyan emissive baked in but starting dark; pulsed up while the AGV works.
       const mat = new THREE.MeshStandardMaterial({
         color: AGV_COLOR.idle, roughness: 0.35, metalness: 0.55,
+        emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
       });
       const mesh = new THREE.Mesh(geom, mat);
       mesh.position.set(0, AGV_Y, 0);
       mesh.castShadow = true;
       this.scene.add(mesh);
       this._materials.push(mat);
-      this._agvs.push({ mesh, keyframes: a.keyframes || [] });
+      // Carried tote: a child of the AGV mesh so it follows position + needs no
+      // separate per-frame placement. Lightly cyan-emissive cardboard.
+      const toteMat = new THREE.MeshStandardMaterial({
+        color: 0xc9a36b, roughness: 0.85, metalness: 0.05,
+        emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
+      });
+      this._materials.push(toteMat);
+      const tote = new THREE.Mesh(toteGeom, toteMat);
+      tote.position.set(0, 0.42, 0); // sits on top of the flat AGV body
+      tote.castShadow = true;
+      tote.visible = false;
+      mesh.add(tote);
+      this._agvs.push({ mesh, keyframes: a.keyframes || [], mat, tote, glow: 0 });
     }
   }
 
@@ -1296,23 +1395,36 @@ export class Scene3D {
     }
   }
 
-  // Per-frame: interpolate each worker's position + state color.
-  _updateWorkers(t) {
+  // Per-frame: interpolate each worker's position + state color, and ramp a
+  // subtle cyan working-glow up while active / decay it to dark when idle.
+  _updateWorkers(t, dt) {
+    const glowOn = this._beltSpeed !== 0; // reduced-motion → hold glow steady-off
     for (const w of this._workers) {
       const s = sampleKeyframes(w.keyframes, t);
       w.mesh.position.set(s.x, 0.7, s.y);
       const color = STATE_COLOR[s.state] !== undefined ? STATE_COLOR[s.state] : STATE_COLOR.idle;
       w.mesh.material.color.set(color);
+      const active = (glowOn && ACTIVE_WORKER[s.state]) ? 1 : 0;
+      w.glow = approach(w.glow, active, dt, 4);
+      w.mesh.material.emissiveIntensity = w.glow * 0.35;
     }
   }
 
-  // Per-frame: interpolate each AGV's position + action color (same sampler).
-  _updateAgvs(t) {
+  // Per-frame: interpolate each AGV's position + action color (same sampler),
+  // ramp its cyan working-glow up/down, and show the carried tote while hauling.
+  _updateAgvs(t, dt) {
     for (const a of this._agvs) {
       const s = sampleKeyframes(a.keyframes, t);
       a.mesh.position.set(s.x, AGV_Y, s.y);
       const color = AGV_COLOR[s.state] !== undefined ? AGV_COLOR[s.state] : AGV_COLOR.idle;
       a.mesh.material.color.set(color);
+      const active = ACTIVE_AGV[s.state] ? 1 : 0;
+      a.glow = approach(a.glow, active, dt, 4);
+      a.mat.emissiveIntensity = a.glow * 0.55;
+      if (a.tote) {
+        a.tote.visible = !!CARRY_AGV[s.state];
+        a.tote.material.emissiveIntensity = a.glow * 0.35;
+      }
     }
   }
 
@@ -1358,16 +1470,57 @@ export class Scene3D {
   _loop() {
     if (this._disposed) return;
     const t = this.getTime() || 0;
+    // Frame delta (s), clamped so a backgrounded tab can't jump animations.
+    const dt = Math.min(0.1, this._clock.getDelta());
     this._updateIntro();          // gentle one-shot camera move (if active)
-    this._updateWorkers(t);
-    this._updateAgvs(t);
+    this._updateWorkers(t, dt);
+    this._updateAgvs(t, dt);
     this._updateForklifts(t);
     this._updateStaging(t);
+    this._updateBelts(dt);        // scroll conveyor tread textures (delta-based)
     this._updateContactShadows(); // keep blob shadows under moving agents
     this._updateHud(t);           // sync DOM productivity overlay (if present)
+    this._monitorFps(dt);         // auto-degrade if frame time gets heavy
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this._raf = requestAnimationFrame(this._loop);
+  }
+
+  // -- FPS monitor / auto-degrade -------------------------------------------
+  // Lightweight rolling-average frame timer. If sustained fps drops below a
+  // floor, shed cost in a safe order. There is NO post-processing in this build
+  // (no EffectComposer/Bloom vendored), so the only levers are: (1) stop the
+  // conveyor belt texture scroll, then (2) disable dynamic shadow updates. Both
+  // are additive/reversible and never touch geometry or the data contract.
+  _monitorFps(dt) {
+    if (dt <= 0) return;
+    const f = this._fps || (this._fps = {
+      ema: 60, acc: 0, level: 0, savedBelt: this._beltSpeed,
+    });
+    // Exponential moving average of instantaneous fps.
+    const inst = 1 / dt;
+    f.ema = f.ema * 0.9 + inst * 0.1;
+    // Only act after a short warm-up window of sustained low fps.
+    if (f.ema < 30 && f.level < 2) {
+      f.acc += dt;
+      if (f.acc > 2.0) { this._degrade(f); f.acc = 0; }
+    } else {
+      f.acc = Math.max(0, f.acc - dt * 0.5);
+    }
+  }
+
+  // Shed one tier of cost (belts → shadows). Reduced-motion already froze belts,
+  // so this mainly drops shadow map updates on weak GPUs.
+  _degrade(f) {
+    if (f.level === 0) {
+      // Tier 1: freeze conveyor scroll (cheapest visual to lose).
+      this._beltSpeed = 0;
+      f.level = 1;
+    } else if (f.level === 1) {
+      // Tier 2: stop updating cast shadows (keeps the last shadow frame static).
+      if (this.renderer) this.renderer.shadowMap.autoUpdate = false;
+      f.level = 2;
+    }
   }
 
   resize() {
@@ -1416,12 +1569,25 @@ export class Scene3D {
     this._staffMeshes = [];
     this._staffMats = [];
     this._rackMaterials = [];
+    // Belt mats/textures are tracked in _materials/_textures (freed above); just
+    // drop the per-frame update list + fps state so nothing dangles.
+    this._belts = [];
+    this._fps = null;
     if (this.renderer) {
       this.renderer.dispose();
       const el = this.renderer.domElement;
       if (el && el.parentNode) el.parentNode.removeChild(el);
     }
   }
+}
+
+// Frame-rate-independent exponential approach of `cur` toward `target`.
+// `rate` is the responsiveness (larger = snappier). Used to ramp emissive glow
+// up/down smoothly without per-frame allocation. Safe for dt<=0 / NaN.
+function approach(cur, target, dt, rate) {
+  if (!(dt > 0)) return cur;
+  const k = 1 - Math.exp(-rate * dt);
+  return cur + (target - cur) * k;
 }
 
 // Read meta.grid_m defensively, defaulting to 1m.

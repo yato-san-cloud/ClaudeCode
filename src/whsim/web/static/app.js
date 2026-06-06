@@ -11,6 +11,7 @@ import { mountOnboarding } from './js/onboarding.js';
 import { mountJourney } from './js/journey.js';
 import { mountOverview } from './js/overview.js';
 import { mountBI } from './js/bi.js';
+import { mountBIAnalytics } from './js/bianalytics.js';
 import { mountPhaseHint } from './js/phasehint.js';
 import { mountTimetable } from './js/timetable.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
@@ -92,7 +93,7 @@ const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキン
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
   export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
-  dataanalysis: null, materialflow: null, notes: null, journey: null, overview: null, bi: null, phaseHint: null,
+  dataanalysis: null, materialflow: null, notes: null, journey: null, overview: null, bi: null, bianalytics: null, phaseHint: null,
   hasData: false, hasRun: false, preset: 'brand',
   t: 0, window: 1, playing: true, speed: 60, view: 'chat',
 };
@@ -988,7 +989,7 @@ function switchView(view) {
   $('kpiBar').style.display =
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
-      || view === 'bi')
+      || view === 'bi' || view === 'bianalytics')
       ? 'none' : '';
   // Soft guidance: opening a run-gated result view before any run nudges toward 実行.
   const tabBtn = document.querySelector(`.tab[data-tab="${view}"]`);
@@ -1011,6 +1012,7 @@ function switchView(view) {
   if (view === 'timetable') mountTimetableView();
   if (view === 'overview') mountOverviewView();
   if (view === 'bi') mountBIView();
+  if (view === 'bianalytics') mountBIAnalyticsView();
   if (view === 'chat' && S.chat) S.chat.focus();
   // Keep the 5-phase stepper highlight + the per-phase hint banner in sync with
   // whatever drove the view change (journey click, Cody, or programmatic).
@@ -1021,6 +1023,7 @@ function switchView(view) {
 // viewId → phase id (mirrors journey.js PHASES). Cross-cutting views map to null.
 const VIEW_PHASE = {
   overview: 'intake', dataanalysis: 'analyze',
+  bianalytics: 'analyze',
   bi: 'design', design: 'design', materialflow: 'design', timetable: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate',
   viewpng: 'propose', compare: 'propose', export: 'propose',
@@ -1037,6 +1040,12 @@ function updatePhaseHint(view) {
   else if (phase === 'analyze') empty = !S.hasData;
   else if (phase === 'intake') empty = !S.project;
   S.phaseHint.show(phase, { empty });
+}
+
+function mountBIAnalyticsView() {
+  if (!S.bianalytics) {
+    S.bianalytics = mountBIAnalytics($('bianalytics'), { getProject: () => S.project, toast: (m, k) => toast(m, k) });
+  } else { S.bianalytics.refresh(); }
 }
 
 // Mount the 物量BI split view (ETL→material-flow); refresh on revisit.
