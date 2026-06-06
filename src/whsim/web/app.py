@@ -1006,6 +1006,11 @@ def _run_blocking(proj: Project) -> dict:
     import numpy as np
     np.save(run_dir / "heatmap.npy", heat)
     replay = build_replay(model, res, metrics)
+    # Carry provenance so the proposal sheet's "実データ N%" bar lights up
+    # (real_pct = imported + confirmed share; never fabricated).
+    _prov = proj.load_provenance()
+    replay["provenance"] = {"real_pct": round(_prov.confidence() * 100, 1),
+                            "summary": _prov.summary()}
     (run_dir / "replay.json").write_text(
         json.dumps(replay, ensure_ascii=False), "utf-8")
     render_png(model, heat, metrics, proj.load_provenance().summary(),
