@@ -116,6 +116,14 @@ def api_templates():
     return templates.list_templates()
 
 
+@app.get("/api/projects/{name}/bi/volumes")
+def api_bi_volumes(name: str):
+    """物量BI: base volumes aggregated in DuckDB. Pallet/case derivations are done
+    client-side from provisional 仮値 (so sliders feel instant)."""
+    from whsim import bi
+    return bi.base_volumes(_open(name).load_model())
+
+
 @app.get("/api/materialflow/seed")
 def api_materialflow_seed():
     """Material-flow skeleton (process flow + units/productivity) for the
