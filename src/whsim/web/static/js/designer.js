@@ -977,6 +977,82 @@ export class Designer {
         : '壁: 床をクリックで頂点追加、ダブルクリックか「壁を確定」で完了';
       ctx.fillText(hint, 8, 8);
     }
+
+    // Figma-flavoured selection chrome (additive overlay; reads state only).
+    this._drawSelectionChrome();
+  }
+
+  // ---- selection chrome (Figma-style, additive, read-only) ------------------
+  // Draws a cyan bounding box + 8 resize handles + a centred "W × H m" tag and
+  // light edge rulers for the currently selected LAYOUT zone. Purely cosmetic:
+  // reads this.selected / this.model / this._view only, mutates no state, adds
+  // no listeners. No selection (or non-zone selection) → draws nothing, so the
+  // prior behaviour is byte-for-byte preserved.
+  _drawSelectionChrome() {
+    if (this.tool !== 'layout') return;
+    if (!this.selected || this.selected.kind !== 'zone') return;
+    const z = (this.model.layout.zones || []).find((q) => q.id === this.selected.id);
+    if (!z) return;
+    const ctx = this.ctx;
+    const CY = '#34E3FF';                            // mock accent (Cyan)
+    // box corners in pixels (y is flipped via _Y; top-left = smaller py)
+    const x0 = this._X(z.x), x1 = this._X(z.x + z.w);
+    const yTop = this._Y(z.y + z.h), yBot = this._Y(z.y);
+    const bx = Math.min(x0, x1), by = Math.min(yTop, yBot);
+    const bw = Math.abs(x1 - x0), bh = Math.abs(yBot - yTop);
+    if (!(bw > 0) || !(bh > 0)) return;
+
+    ctx.save();
+
+    // light edge rulers: faint ticks projecting the selection extent onto the
+    // top and left margins (cheap; a few stroke calls).
+    ctx.strokeStyle = hexA(CY, 0.5);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(bx, 0); ctx.lineTo(bx, 6);            // top ruler: left extent
+    ctx.moveTo(bx + bw, 0); ctx.lineTo(bx + bw, 6);  // top ruler: right extent
+    ctx.moveTo(0, by); ctx.lineTo(6, by);            // left ruler: top extent
+    ctx.moveTo(0, by + bh); ctx.lineTo(6, by + bh);  // left ruler: bottom extent
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // bounding box
+    ctx.strokeStyle = CY;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    // 8 handles: 4 corners + 4 edge midpoints (small filled squares)
+    const HS = 7, h = HS / 2;
+    const xs = [bx, bx + bw / 2, bx + bw];
+    const ys = [by, by + bh / 2, by + bh];
+    ctx.fillStyle = CY;
+    ctx.strokeStyle = this.pal.selInk || '#fff';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        if (i === 1 && j === 1) continue;            // skip centre
+        ctx.fillRect(xs[i] - h, ys[j] - h, HS, HS);
+        ctx.strokeRect(xs[i] - h, ys[j] - h, HS, HS);
+      }
+    }
+
+    // dimension tag centred under the box: "W.x × H.x m" (Space Mono)
+    const text = `${(+z.w || 0).toFixed(1)} × ${(+z.h || 0).toFixed(1)} m`;
+    ctx.font = '700 11px "Space Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const tw = ctx.measureText(text).width;
+    const padX = 7, tagH = 16;
+    const tagX = bx + bw / 2 - tw / 2 - padX;
+    const tagY = by + bh + 7;
+    ctx.fillStyle = CY;
+    ctx.beginPath();                                 // rounded-ish pill (rects)
+    ctx.fillRect(tagX, tagY, tw + padX * 2, tagH);
+    ctx.fillStyle = '#04141a';                       // mock ink-on-cyan
+    ctx.fillText(text, bx + bw / 2, tagY + 3);
+
+    ctx.restore();
   }
 
   _drawWall(pts, thickness, sel, draft) {

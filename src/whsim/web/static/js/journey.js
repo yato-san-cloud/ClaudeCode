@@ -92,6 +92,12 @@ function injectStyle() {
   .jn-sub:hover{border-color:var(--accent,#2f7bff)}
   .jn-sub.is-active{background:var(--accent,#2f7bff);border-color:var(--accent,#2f7bff);color:#04222c}
   .jn-sub-hint{font-size:11px;color:var(--ink-tertiary,#8195a8);margin-left:4px;white-space:nowrap}
+  /* Visible keyboard focus ring (does not affect mouse interaction visuals). */
+  .jn-pill:focus-visible,.jn-pin:focus-visible,.jn-sub:focus-visible{
+    outline:2px solid var(--accent,#2f7bff);outline-offset:2px}
+  /* Visually-hidden live region for screen-reader status announcements. */
+  .jn-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
   @media (max-width:700px){
     .jn{padding:8px 8px 6px}
     /* Stack: the 5-phase stepper takes the full first line (horizontally
@@ -124,6 +130,8 @@ export function mountJourney(el, opts = {}) {
   el.appendChild(root);
 
   let activeView = PHASES[0].views[0];
+  // View id whose sub-tab should regain focus after a keyboard-driven re-render.
+  let pendingFocusView = null;
 
   function phaseStatus(phase, state) {
     const locked = RUN_REQUIRED.has(phase.id) && !state.hasRun;
@@ -147,17 +155,28 @@ export function mountJourney(el, opts = {}) {
     const steps = PHASES.map((p) => {
       const { locked, done } = phaseStatus(p, state);
       const isActive = p.id === activePhaseId;
+      // Visual flag + a text/aria equivalent so state is not conveyed by colour/icon alone.
       let flag = '';
-      if (locked) flag = '🔒';
-      else if (done) flag = '✓';
+      let flagLabel = '';
+      if (locked) { flag = '🔒'; flagLabel = 'ロック中'; }
+      else if (done) { flag = '✓'; flagLabel = '完了'; }
       const cls = ['jn-pill'];
       if (isActive) cls.push('is-active');
       if (done) cls.push('is-done');
       if (locked) cls.push('is-locked');
       const title = locked ? 'シミュレーション実行後に確認できます' : esc(p.goal);
-      return `<button class="${cls.join(' ')}" data-phase="${p.id}" title="${title}" aria-current="${isActive ? 'step' : 'false'}">
-        <span class="jn-pill-head"><span class="jn-pill-no">${p.no}</span><span>${esc(p.title)}</span>
-          <span class="jn-pill-flag">${flag}</span></span>
+      // Accessible name: ordinal + title + (state). aria-current marks the active step.
+      // Locked pills are aria-disabled (not native disabled) so the existing
+      // click-through-to-empty-state behaviour is preserved.
+      const flagAria = flag
+        ? `<span class="jn-pill-flag" aria-hidden="true">${flag}</span><span class="jn-sr">（${flagLabel}）</span>`
+        : '<span class="jn-pill-flag" aria-hidden="true"></span>';
+      const describedBy = locked ? ' aria-describedby="jn-lock-reason"' : '';
+      return `<button class="${cls.join(' ')}" data-phase="${p.id}" title="${title}"`
+        + ` aria-current="${isActive ? 'step' : 'false'}"`
+        + (locked ? ' aria-disabled="true"' : '') + describedBy + `>
+        <span class="jn-pill-head"><span class="jn-pill-no" aria-hidden="true">${p.no}</span><span>${esc(p.title)}</span>
+          ${flagAria}</span>
         <span class="jn-pill-goal">${esc(p.goal)}</span>
       </button>`;
     }).join('');
@@ -175,7 +194,13 @@ export function mountJourney(el, opts = {}) {
       const { locked } = phaseStatus(p, state);
       subs = p.views.map((v) => {
         const isActive = v === activeView;
-        return `<button class="jn-sub${isActive ? ' is-active' : ''}" data-view="${v}">${esc(VIEW_LABEL[v] || v)}</button>`;
+        // role=tab + aria-selected + aria-controls(panel id) + roving tabindex.
+        // Panel ids follow the `panel-<view>` convention; tabpanel role is applied
+        // to the referenced panel if present (see wire()).
+        return `<button class="jn-sub${isActive ? ' is-active' : ''}" data-view="${v}"`
+          + ` role="tab" id="jn-tab-${v}" aria-controls="panel-${v}"`
+          + ` aria-selected="${isActive ? 'true' : 'false'}" tabindex="${isActive ? '0' : '-1'}"`
+          + `>${esc(VIEW_LABEL[v] || v)}</button>`;
       }).join('');
       if (locked) {
         subs += '<span class="jn-sub-hint">🔒 実行するとここで結果を確認できます</span>';
@@ -187,14 +212,36 @@ export function mountJourney(el, opts = {}) {
       subs = `<span class="jn-sub-hint">${esc(label)}</span>`;
     }
 
+    // Stepper is a step-ordered navigation landmark (not a tablist, per WAI-ARIA
+    // APG: phases are a process, sub-views are the tabs).
     root.innerHTML =
-      `<div class="jn-top">
-         <div class="jn-steps" role="navigation" aria-label="進行ステップ">${steps}</div>
+      `<nav class="jn-top" aria-label="進行ステップ">
+         <div class="jn-steps">${steps}</div>
          <div class="jn-pins">${pins}</div>
-       </div>
-       <div class="jn-subs" role="tablist">${subs}</div>`;
+         <span id="jn-lock-reason" class="jn-sr">この手順はシミュレーション実行後に確認できます</span>
+       </nav>
+       <div class="jn-subs" role="tablist" aria-label="サブビュー">${subs}</div>
+       <span class="jn-sr" aria-live="polite" data-jn-live></span>`;
 
+    announce(state, activePhaseId);
     wire();
+  }
+
+  // Announce the current step + sub-view (and any locked/data hint) politely.
+  function announce(state, activePhaseId) {
+    const live = root.querySelector('[data-jn-live]');
+    if (!live) return;
+    let msg = '';
+    if (activePhaseId) {
+      const p = PHASES.find((q) => q.id === activePhaseId);
+      const { locked } = phaseStatus(p, state);
+      msg = `${p.no} ${p.title}：${VIEW_LABEL[activeView] || activeView}`;
+      if (locked) msg += '（ロック中：実行後に確認できます）';
+      else if (DATA_HINTED.has(p.id) && !state.hasData) msg += '（データ取込後がおすすめ）';
+    } else {
+      msg = VIEW_LABEL[activeView] || activeView;
+    }
+    live.textContent = msg;
   }
 
   function wire() {
@@ -213,6 +260,40 @@ export function mountJourney(el, opts = {}) {
     root.querySelectorAll('[data-view]').forEach((b) => {
       b.onclick = () => select(b.dataset.view);
     });
+
+    // Sub-tab keyboard model (WAI-ARIA APG tabs): roving focus with
+    // ←/→/Home/End moving + selecting, Enter/Space activating.
+    const tabs = Array.from(root.querySelectorAll('.jn-sub[role="tab"]'));
+    tabs.forEach((tab, i) => {
+      // Ensure the controlled panel is a referenceable tabpanel when it exists.
+      const panel = document.getElementById(tab.getAttribute('aria-controls'));
+      if (panel) {
+        if (!panel.getAttribute('role')) panel.setAttribute('role', 'tabpanel');
+        if (!panel.getAttribute('aria-labelledby')) panel.setAttribute('aria-labelledby', tab.id);
+      }
+      tab.onkeydown = (e) => {
+        let next = -1;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % tabs.length;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + tabs.length) % tabs.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = tabs.length - 1;
+        else if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          pendingFocusView = tab.dataset.view;
+          select(tab.dataset.view);
+          return;
+        } else return;
+        e.preventDefault();
+        pendingFocusView = tabs[next].dataset.view;
+        select(tabs[next].dataset.view); // re-renders; focus restored below
+      };
+    });
+    // After a keyboard-driven re-render, keep focus on the now-selected tab.
+    if (pendingFocusView) {
+      const t = root.querySelector(`.jn-sub[role="tab"][data-view="${pendingFocusView}"]`);
+      pendingFocusView = null;
+      if (t) t.focus();
+    }
   }
 
   function select(viewId) {
