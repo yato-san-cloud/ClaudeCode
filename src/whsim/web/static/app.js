@@ -160,6 +160,19 @@ function draw2d() {
 
   ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
   ctx.strokeRect(X(0), Y(b.depth), b.width * sc, b.depth * sc);
+  // Congestion heatmap: translucent floor density underlay (calm cyan → hot red),
+  // drawn beneath zones/racks/agents so the live agents read on top. Presence-
+  // guarded so legacy replays are unaffected; cells are sparse + normalised in
+  // render/replay.py (_congestion_grid). A computed ramp like the staging HSL.
+  const cong = rep.congestion;
+  if (cong && cong.cells && cong.cells.length) {
+    const gm = cong.grid_m || 1, cw = gm * sc;
+    for (const [gx, gy, d] of cong.cells) {
+      if (!(d > 0)) continue;
+      ctx.fillStyle = `hsla(${(190 * (1 - d)).toFixed(0)},85%,55%,${(0.12 + 0.32 * d).toFixed(3)})`;
+      ctx.fillRect(X(gx * gm), Y((gy + 1) * gm), cw, cw);
+    }
+  }
   for (const z of rep.zones) {
     // V3 viewport: zones read as outlined figures (faint fill + crisp outline)
     // rather than flat colour fills. Same colour token, just lighter weight.

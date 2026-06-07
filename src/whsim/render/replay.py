@@ -7,10 +7,18 @@ worker keyframes (t, x, y, state); viewers linearly interpolate between frames.
 
 from __future__ import annotations
 
+import math
+
 from whsim.engine.navnet import NavNetwork
+from whsim.engine.routing import leg_cells
 from whsim.engine.run import RunResult
 from whsim.render.shelves import shelf_runs
 from whsim.schema.model import WarehouseModel
+
+# Keep the replay congestion grid coarse enough to stay cheap to ship and draw:
+# a sparse cell list bounded by this many non-empty cells (the resolution is
+# automatically coarsened for large floors so we never blow past it).
+_MAX_CONGEST_CELLS = 400
 
 
 def _productivity_series(res: RunResult) -> list[dict]:
@@ -84,6 +92,68 @@ def _productivity_series(res: RunResult) -> list[dict]:
             "active": active,
         })
     return series
+
+
+def _congestion_grid(model: WarehouseModel, res: RunResult) -> dict:
+    """Per-cell congestion (occupancy/dwell) for the 2D canvas heatmap overlay.
+
+    Mirrors the engine/png2d congestion logic: every agent leg is rasterised with
+    the same L-shaped `leg_cells` walk the engine uses for its heat grid, so the
+    canvas overlay matches the proposal PNG. We accumulate over agent keyframe
+    trajectories within the replay window (the keyframes ARE the recorded
+    trajectory samples), then normalise so the busiest cell == 1.0.
+
+    Always returned (never None) so the client can rely on the key; `cells` is
+    empty when nothing moved. The grid is coarsened for large floors so the cell
+    list stays sparse and bounded (≤ _MAX_CONGEST_CELLS). Tolerates degenerate
+    bounds (zero/negative width/depth) without dividing by zero.
+    """
+    width = max(float(getattr(model.layout.bounds, "width", 0.0) or 0.0), 0.0)
+    depth = max(float(getattr(model.layout.bounds, "depth", 0.0) or 0.0), 0.0)
+    win = res.replay_window_s or res.duration_s or 0.0
+
+    # Choose a cell size: start from the model's heatmap resolution, then coarsen
+    # until the worst-case full grid fits the cell budget (keeps it sane & sparse).
+    grid_m = float(getattr(model.simulation, "heatmap_grid_m", 1.0) or 1.0)
+    if grid_m <= 0:
+        grid_m = 1.0
+    if width > 0 and depth > 0:
+        while (math.ceil(width / grid_m) * math.ceil(depth / grid_m)
+               > _MAX_CONGEST_CELLS):
+            grid_m *= 1.5
+    nx = max(1, math.ceil(width / grid_m)) if width > 0 else 0
+    ny = max(1, math.ceil(depth / grid_m)) if depth > 0 else 0
+
+    empty = {"grid_m": round(grid_m, 3), "nx": nx, "ny": ny, "cells": []}
+    if nx == 0 or ny == 0:
+        return empty
+
+    # Gather every agent's trajectory (all carry (t, x, y, state) keyframes).
+    tracks: list[list] = []
+    tracks += [w.keyframes for w in res.workers]
+    for attr in ("helpers", "packers", "inspectors", "agvs", "forklifts"):
+        tracks += [a.keyframes for a in getattr(res, attr, []) if a.keyframes]
+
+    counts: dict[tuple[int, int], float] = {}
+    for kf in tracks:
+        for (t0, x0, y0, _s0), (t1, x1, y1, _s1) in zip(kf, kf[1:]):
+            if win and t0 > win:
+                break
+            for gx, gy in leg_cells((x0, y0), (x1, y1), grid_m):
+                if 0 <= gx < nx and 0 <= gy < ny:
+                    counts[(gx, gy)] = counts.get((gx, gy), 0.0) + 1.0
+
+    if not counts:
+        return empty
+
+    peak = max(counts.values())
+    if peak <= 0:
+        return empty
+    # Sparse, normalised cell list; drop near-zero cells to keep the payload light.
+    cells = [[gx, gy, round(c / peak, 3)]
+             for (gx, gy), c in counts.items() if c / peak >= 0.02]
+    cells.sort(key=lambda c: (c[1], c[0]))
+    return {"grid_m": round(grid_m, 3), "nx": nx, "ny": ny, "cells": cells}
 
 
 def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
@@ -200,6 +270,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "doors": doors,
         "routes": routes,
         "staging": staging,
+        "congestion": _congestion_grid(model, res),
         "series": _productivity_series(res),
         "kpis": kpis,
     }
