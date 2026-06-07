@@ -90,8 +90,8 @@ function injectStyle() {
   --an-d1:var(--dur-1,120ms);
   --an-d2:var(--dur-2,180ms);
   --an-d3:var(--dur-3,240ms);
-  --an-d-up:#34D399;
-  --an-d-dn:#F87171;
+  --an-d-up:var(--ok,#2E7D55);
+  --an-d-dn:var(--bad,#C4453F);
 }
 
 /* All numerics tabular + grouped (Stripe data clarity). */
@@ -236,11 +236,11 @@ function injectStyle() {
 }
 #analysis .an-view .an-lg{
   display:inline-flex;align-items:center;gap:6px;
-  font-size:11.5px;color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  font-size:var(--fs-xs,12px);color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
   font-family:var(--font-sans,inherit);
 }
 #analysis .an-view .an-lg.bn{color:var(--warn,#F5B05A)}
-#analysis .an-view .an-sw{width:14px;height:3px;border-radius:2px;flex:none}
+#analysis .an-view .an-sw{width:14px;height:3px;border-radius:var(--r-xs,4px);flex:none}
 
 /* the area svg itself rises once (re-uses .an-chart-rise contract below) */
 #analysis .an-view .an-area-svg{display:block;width:100%}
@@ -253,7 +253,7 @@ function injectStyle() {
 }
 #analysis .an-view .an-tbl thead th{
   font-family:var(--font-mono,"Space Mono",monospace);
-  font-weight:500;font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+  font-weight:500;font-size:var(--fs-micro,11px);letter-spacing:.08em;text-transform:uppercase;
   color:var(--ink-secondary,var(--ink-dim,#5C6675));
   text-align:right;padding:0 0 9px;
   border-bottom:1px solid var(--line,rgba(255,255,255,.08));
@@ -278,18 +278,18 @@ function injectStyle() {
 /* util mini-bar (right aligned) */
 #analysis .an-view .an-util{display:inline-flex;align-items:center;gap:9px;justify-content:flex-end}
 #analysis .an-view .an-util-bar{
-  width:54px;height:5px;border-radius:3px;position:relative;overflow:hidden;
+  width:54px;height:5px;border-radius:var(--r-xs,4px);position:relative;overflow:hidden;
   background:var(--line-soft,var(--line-hair,rgba(255,255,255,.06)));
 }
 #analysis .an-view .an-util-bar i{
-  position:absolute;left:0;top:0;bottom:0;border-radius:3px;
+  position:absolute;left:0;top:0;bottom:0;border-radius:var(--r-xs,4px);
   background:var(--ink-secondary,var(--ink-mut,#9AA4B2));
 }
 #analysis .an-view .an-util-bar i.an-pri{background:var(--accent,#34E3FF)}
 #analysis .an-view .an-util-bar i.an-w{background:var(--warn,#F5B05A)}
 #analysis .an-view .an-vd{
-  font-size:10.5px;font-weight:500;letter-spacing:.03em;
-  padding:3px 9px;border-radius:5px;font-family:var(--font-sans,inherit);
+  font-size:var(--fs-micro,11px);font-weight:500;letter-spacing:.03em;
+  padding:3px 9px;border-radius:var(--r-sm,6px);font-family:var(--font-sans,inherit);
   border:1px solid var(--line,rgba(255,255,255,.08));
   color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
 }
@@ -304,7 +304,7 @@ function injectStyle() {
 #analysis .an-view .an-tbl-note{
   margin-top:13px;padding-top:12px;
   border-top:1px solid var(--line-soft,var(--line-hair,rgba(255,255,255,.055)));
-  font-size:11.5px;color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  font-size:var(--fs-xs,12px);color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
   display:flex;gap:8px;align-items:flex-start;line-height:1.5;
 }
 #analysis .an-view .an-tbl-note .an-ic{color:var(--warn,#F5B05A);flex:none;margin-top:1px}
@@ -544,8 +544,10 @@ function barChart(labels, values, opts) {
   const hair = cssVar('--line-hair', 'rgba(55,53,47,0.09)');
   const faint = cssVar('--ink-secondary', 'rgba(55,53,47,0.45)');
 
+  const ariaLabel = o.ariaLabel
+    || ('棒グラフ。' + labels.map((lab, i) => `${lab}: ${isNum(nums[i]) ? group(nums[i]) : '—'}${o.suffix || ''}`).join('、') + '。');
   const s = svgEl('svg', { class: 'an-chart-rise', viewBox: `0 0 ${W} ${H}`,
-    width: '100%', role: 'img' });
+    width: '100%', role: 'img', 'aria-label': ariaLabel });
   // gridlines + y labels
   for (let t = 0; t <= 4; t++) {
     const v = (maxY * t) / 4, yy = yOf(v);
@@ -868,6 +870,10 @@ function buildChartsSection(charts, currency) {
     const svg = barChart(cost.labels, cost.values || [], {
       color: cssVar('--outbound', '#0d9488'),
       fmt: (v) => cur + group(Math.round(v * 100) / 100),
+      ariaLabel: '1件あたりコスト内訳の棒グラフ。' + (cost.labels || []).map((lab, i) => {
+        const v = (cost.values || [])[i];
+        return `${lab}: ${isNum(v) ? cur + group(Math.round(v * 100) / 100) : '—'}`;
+      }).join('、') + '。',
     });
     grid.appendChild(buildChartCard('1件あたりコスト内訳',
       `${cur} / 件。人件費と設備費の内訳。`, svg));
@@ -1010,7 +1016,7 @@ export async function mountAnalysis(targetEl, projectName) {
   if (!targetEl) return;
   // No project yet: show a friendly prompt instead of fetching /projects/null.
   if (typeof projectName !== 'string' || !projectName.trim()) {
-    targetEl._anPayload = null;
+    disposeAnalysis(targetEl);
     targetEl.innerHTML = '';
     targetEl.appendChild(el('p', { class: 'c-fact' },
       '先にプロジェクトを作成して「実行」すると、ここに分析が表示されます。'));
@@ -1039,9 +1045,26 @@ export async function mountAnalysis(targetEl, projectName) {
 
   // Re-render on theme change so the self-drawn SVG charts pick up new
   // CSS-variable colours (nice-to-have; harmless if the event never fires).
-  if (!targetEl._anThemeHandler) {
-    const handler = () => render(targetEl, targetEl._anPayload);
-    targetEl._anThemeHandler = handler;
-    document.addEventListener('themechange', handler);
+  // Exactly ONE listener per mounted instance: tear down the previous handler
+  // (from an earlier mount of this element) before registering the new one so
+  // listeners never pile up across tab switches. `disposeAnalysis` runs the
+  // same teardown for explicit unmount/dispose paths.
+  if (targetEl._anThemeHandler) {
+    document.removeEventListener('themechange', targetEl._anThemeHandler);
+    targetEl._anThemeHandler = null;
   }
+  const handler = () => render(targetEl, targetEl._anPayload);
+  targetEl._anThemeHandler = handler;
+  document.addEventListener('themechange', handler);
+}
+
+// Teardown: remove the themechange listener for a previously-mounted element
+// and drop its cached payload. Idempotent; safe to call on an unmounted element.
+export function disposeAnalysis(targetEl) {
+  if (!targetEl) return;
+  if (targetEl._anThemeHandler) {
+    document.removeEventListener('themechange', targetEl._anThemeHandler);
+    targetEl._anThemeHandler = null;
+  }
+  targetEl._anPayload = null;
 }

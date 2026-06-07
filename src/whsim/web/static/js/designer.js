@@ -232,7 +232,7 @@ export class Designer {
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-label', '設計エディタのヘルプ');
     box.style.cssText = 'position:absolute;top:48px;right:16px;z-index:30;width:320px;max-width:calc(100% - 32px);'
-      + 'background:var(--bg-panel);border:1px solid var(--line-strong);border-radius:10px;box-shadow:var(--sh-lg);'
+      + 'background:var(--bg-panel);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--sh-lg);'
       + 'padding:14px 16px;font-size:12px;color:var(--ink-secondary);line-height:1.7;';
     box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--ink-primary);">操作ヘルプ</div>'
       + '<div><b>レイアウト</b>: パレットを選んで床をクリックで配置。ゾーンをドラッグで移動、右下のハンドルでサイズ変更。</div>'
@@ -246,7 +246,7 @@ export class Designer {
       + '<div style="margin-top:8px;color:var(--ink-tertiary);">変更は「適用（保存）」を押すまでサーバーに保存されません。</div>';
     const close = document.createElement('button');
     close.textContent = '閉じる';
-    close.style.cssText = 'margin-top:10px;padding:5px 10px;border:1px solid var(--line-hair);border-radius:6px;background:var(--bg-app);color:var(--ink-primary);cursor:pointer;font-size:12px;';
+    close.style.cssText = 'margin-top:10px;padding:5px 10px;border:1px solid var(--line-hair);border-radius:var(--r-sm);background:var(--bg-app);color:var(--ink-primary);cursor:pointer;font-size:12px;';
     this._on(close, 'click', () => this._toggleHelp());
     box.appendChild(close);
     this.container.appendChild(box);
@@ -355,7 +355,7 @@ export class Designer {
     }
     @media (hover:hover){
       .designer-root select:hover,.designer-root input:hover{
-        border-color:var(--accent-ring,rgba(35,131,226,.35));
+        border-color:var(--line-strong);
       }
     }
     .designer-root select:focus,.designer-root input:focus{
@@ -377,7 +377,7 @@ export class Designer {
     }
     /* the active canvas gets a whisper-thin cyan accent edge (brand <5%) */
     .designer-root .dz-canvas-wrap::after{
-      content:"";position:absolute;inset:0;border-radius:8px;pointer-events:none;
+      content:"";position:absolute;inset:0;border-radius:var(--r-md);pointer-events:none;
       box-shadow:inset 0 0 0 1px rgba(52,227,255,.10);
       opacity:0;transition:opacity var(--dur-2,160ms) var(--ease-out,ease);
     }
@@ -487,6 +487,36 @@ export class Designer {
     this.body = document.createElement('div');
     this.body.style.cssText = 'flex:1;min-height:0;display:flex;gap:8px;flex-wrap:wrap;';
     c.appendChild(this.body);
+
+    // next-step footer: an unobtrusive "what now?" affordance pinned below the
+    // canvas (flex:none so it never steals canvas height). Editing happens in the
+    // body above; this row routes the user onward once the layout is shaped.
+    this._buildNextSteps(c);
+  }
+
+  // ---- next-step CTA row (実行する / タイムチャートを見る) -------------------
+  // Dispatches app-level events (app.js owns the actual run + navigation); the
+  // designer only signals intent so it stays decoupled from the host shell.
+  _buildNextSteps(parent) {
+    const foot = this._div(parent,
+      'flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:var(--sp-2);'
+      + 'padding-top:var(--sp-2);margin-top:var(--sp-1);border-top:1px solid var(--line-hair);');
+    const hint = this._div(foot,
+      'flex:1;min-width:0;font-size:var(--fs-xs);color:var(--ink-tertiary);');
+    hint.textContent = '配置ができたら次へ:';
+    // secondary: jump to the timetable view (ghost styling from _btn)
+    this._btn(foot, 'タイムチャートを見る →', () => {
+      document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view: 'timetable' } }));
+    });
+    // primary: apply + run the simulation
+    const run = document.createElement('button');
+    run.className = 'primary';
+    run.textContent = '実行する →';
+    run.style.cssText = 'padding:6px 12px;border-radius:var(--r-sm);font-size:var(--fs-sm);font-weight:700;cursor:pointer;';
+    this._on(run, 'click', () => {
+      document.dispatchEvent(new CustomEvent('whsim:apply-run', { detail: {} }));
+    });
+    foot.appendChild(run);
   }
 
   _selectTool(key) {
@@ -520,7 +550,7 @@ export class Designer {
       left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
       this._renderLayoutBar(left);
       const wrap = document.createElement('div');
-      wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+      wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
       wrap.classList.add('dz-canvas-wrap');
       this.canvas = document.createElement('canvas');
       this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.layoutBrush ? 'crosshair' : 'default'};`;
@@ -530,7 +560,7 @@ export class Designer {
       canvasHost = wrap;
     } else {
       const wrap = document.createElement('div');
-      wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+      wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
       wrap.classList.add('dz-canvas-wrap');
       this.canvas = document.createElement('canvas');
       // equip/building tools are click-to-place: a crosshair signals placement.
@@ -541,7 +571,7 @@ export class Designer {
     }
 
     this.side = document.createElement('div');
-    this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
+    this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);padding:10px;';
     this.side.classList.add('dz-enter');
     this.body.appendChild(this.side);
 
@@ -555,7 +585,7 @@ export class Designer {
   // ---- レイアウト control bar: object palette + underlay toggle + inventory ----
   _renderLayoutBar(parent) {
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);';
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
 
     const palLbl = document.createElement('span');
     palLbl.textContent = '配置:';
@@ -632,7 +662,7 @@ export class Designer {
     left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
 
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);';
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
     // mover selector
     const moverSel = this._select(bar, MOVER_OPTS, this.routeMover);
     this._on(moverSel, 'change', () => {
@@ -646,7 +676,7 @@ export class Designer {
     spLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);';
     bar.appendChild(spLbl);
     const spInp = this._num(this.routeSpeed, (v) => { this.routeSpeed = Math.max(0.1, v); }, 0.1);
-    spInp.style.cssText += ';width:70px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:6px;font-size:13px;background:var(--bg-app);color:var(--ink-primary);';
+    spInp.style.cssText += ';width:70px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:var(--r-sm);font-size:13px;background:var(--bg-app);color:var(--ink-primary);transition:border-color var(--dur-1) var(--ease-out);';
     bar.appendChild(spInp);
     this._btn(bar, '新規ルート', () => {
       if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
@@ -660,7 +690,7 @@ export class Designer {
 
     // floor canvas
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
     wrap.classList.add('dz-canvas-wrap');
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
@@ -670,7 +700,7 @@ export class Designer {
 
     // right column: live 動線一覧 table
     this.side = document.createElement('div');
-    this.side.style.cssText = 'width:300px;flex:0 0 300px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
+    this.side.style.cssText = 'width:300px;flex:0 0 300px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);padding:10px;';
     this.side.classList.add('dz-enter');
     this.body.appendChild(this.side);
 
@@ -1762,7 +1792,7 @@ export class Designer {
     left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
 
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);';
+    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
     // toggle: spatial flow-building mode (click zones in sequence)
     const flowBtn = this._btn(bar, this.flowMode ? '配置を終了' : '床図でフロー配置', () => {
       this.flowMode = !this.flowMode;
@@ -1783,7 +1813,7 @@ export class Designer {
 
     // floor canvas (clickable zones)
     const wrap = document.createElement('div');
-    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-app);overflow:hidden;';
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
     wrap.classList.add('dz-canvas-wrap');
     this.canvas = document.createElement('canvas');
     this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.flowMode ? 'pointer' : 'default'};`;
@@ -1794,7 +1824,7 @@ export class Designer {
 
     // right column: the workflow strip + pick strategy + (in-context) method panel
     this.side = document.createElement('div');
-    this.side.style.cssText = 'width:340px;flex:0 0 340px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:8px;background:var(--bg-sunken);padding:10px;';
+    this.side.style.cssText = 'width:340px;flex:0 0 340px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);padding:10px;';
     this.side.classList.add('dz-enter');
     this.body.appendChild(this.side);
 
@@ -1959,7 +1989,7 @@ export class Designer {
     const strip = this._div(s, 'display:flex;flex-direction:column;gap:0;margin:8px 0 14px;');
     order.forEach((st, i) => {
       const open = this.flowMethodStage === st.id;
-      const box = this._div(strip, `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:9px;cursor:pointer;border:2px solid ${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};background:${open ? hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.28) : hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.1)};`);
+      const box = this._div(strip, `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:var(--r-md);cursor:pointer;border:2px solid ${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};background:${open ? hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.28) : hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.1)};`);
       this._on(box, 'click', () => {
         this.flowMethodStage = (this.flowMethodStage === st.id) ? null : st.id;
         this._renderFlowSide(); this._drawFlowCanvas();
@@ -1970,7 +2000,7 @@ export class Designer {
       const zname = this._div(lblWrap, 'font-size:11px;color:var(--ink-secondary);');
       const z = st.zone ? this._zoneById(st.zone) : null;
       zname.textContent = z ? `場所: ${ZONE_JP[z.type] || z.type}` : '場所: 未割当';
-      const badge = this._div(box, `font-size:11px;color:#fff;background:${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};padding:2px 7px;border-radius:10px;white-space:nowrap;`);
+      const badge = this._div(box, `font-size:11px;color:#fff;background:${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};padding:2px 7px;border-radius:var(--r-pill);white-space:nowrap;`);
       badge.textContent = (METHOD_OPTS.find((o) => o.value === st.method) || {}).label || st.method;
       // arrow connector
       if (i < order.length - 1) {
@@ -2015,7 +2045,7 @@ export class Designer {
     st.method = work.transport;
 
     // live reverse-name banner (filled by the backend)
-    const banner = this._div(s, 'margin:6px 0 10px;padding:9px 11px;border-radius:9px;background:var(--accent-tint);border:1px solid var(--accent-ring);');
+    const banner = this._div(s, 'margin:6px 0 10px;padding:9px 11px;border-radius:var(--r-md);background:var(--accent-tint);border:1px solid var(--accent-ring);');
     this._methodBanner = banner;
     banner.innerHTML = '<div style="font-weight:700;color:var(--accent-ink);">＝ …</div>';
 
@@ -2158,7 +2188,7 @@ export class Designer {
     l.style.cssText = 'font-size:12px;flex:1;';
     row.appendChild(l);
     const inp = makeInput();
-    inp.style.cssText += ';width:96px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:6px;font-size:13px;background:var(--bg-app);color:var(--ink-primary);';
+    inp.style.cssText += ';width:96px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:var(--r-sm);font-size:13px;background:var(--bg-app);color:var(--ink-primary);transition:border-color var(--dur-1) var(--ease-out);';
     row.appendChild(inp);
     parent.appendChild(row);
     return inp;
@@ -2172,7 +2202,7 @@ export class Designer {
   }
   _select(parent, opts, value) {
     const sel = document.createElement('select');
-    sel.style.cssText = 'padding:5px 7px;border:1px solid var(--line-hair);border-radius:6px;font-size:13px;background:var(--bg-app);color:var(--ink-primary);';
+    sel.style.cssText = 'padding:5px 7px;border:1px solid var(--line-hair);border-radius:var(--r-sm);font-size:13px;background:var(--bg-app);color:var(--ink-primary);transition:border-color var(--dur-1) var(--ease-out);';
     for (const o of opts) {
       const op = document.createElement('option');
       op.value = o.value; op.textContent = o.label;
@@ -2185,7 +2215,7 @@ export class Designer {
   _btn(parent, text, onClick, css) {
     const b = document.createElement('button');
     b.textContent = text;
-    b.style.cssText = 'padding:6px 10px;border:1px solid var(--line-hair);border-radius:6px;background:var(--bg-app);color:var(--ink-primary);font-size:13px;cursor:pointer;' + (css || '');
+    b.style.cssText = 'padding:6px 10px;border:1px solid var(--line-hair);border-radius:var(--r-sm);background:var(--bg-app);color:var(--ink-primary);font-size:13px;cursor:pointer;' + (css || '');
     this._on(b, 'click', onClick);
     if (parent) parent.appendChild(b);
     return b;

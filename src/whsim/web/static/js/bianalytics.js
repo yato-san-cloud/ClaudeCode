@@ -3,17 +3,39 @@
 // and three hand-rolled SVG charts (ABC Pareto / weekday heatmap / time series).
 // Everything renders client-side from one GET — no server round-trip on interaction.
 //
-// World-view (strict): Void/panel surfaces from tokens, a single Cyan accent
-// (#34E3FF) + semantic green/amber/red only, Chakra(display)/Grotesk(sans)/
-// Space Mono(numerics). 120–180ms ease-out, no idle loops, reduced-motion safe,
-// data-ink maximised (hairline rules, no frames/shadows). Comments EN; UI JA.
+// World-view (strict): Void/panel surfaces from tokens, a single theme accent
+// (--accent, blue↔cyan per light/dark) + semantic green/amber/red only,
+// Chakra(display)/Grotesk(sans)/Space Mono(numerics). 120–180ms ease-out, no
+// idle loops, reduced-motion safe, data-ink maximised (hairline rules, no
+// frames/shadows). Comments EN; UI JA.
+//
+// Accent: injected CSS uses var(--accent) directly so it follows the theme.
+// Where SVG needs a literal colour string (stroke/fill attrs) we read --accent
+// once via getComputedStyle and refresh it on the `themechange` document event.
 
-const CYAN = '#34E3FF';          // the one accent (charts/highlights)
-const CYAN_40 = 'rgba(52,227,255,.40)';
-const GREY = 'var(--ink-tertiary)';
-const OK = 'var(--ok)';
+const ACCENT_FALLBACK = '#34E3FF';   // cyan fallback when --accent is unreadable
 const WARN = 'var(--warn)';
 const BAD = 'var(--bad)';
+const TIP_W = 220;                    // tooltip width (kept in sync with .bia-tip CSS)
+
+// Read the live --accent token (resolved hex) for use inside SVG attribute
+// strings. Refreshed on `themechange` so self-drawn charts follow the theme.
+function readAccent() {
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue('--accent').trim();
+  return v || ACCENT_FALLBACK;
+}
+// Convert a hex (#rgb/#rrggbb) accent to an rgba() string at the given alpha;
+// non-hex values fall back to the resolved fallback so charts never break.
+function accentAlpha(hex, a) {
+  let h = (hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) h = ACCENT_FALLBACK.slice(1);
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 const WD = ['月', '火', '水', '木', '金', '土', '日'];
 
@@ -37,29 +59,67 @@ function injectStyle() {
   s.id = 'bia-style';
   s.textContent = `
   #bianalytics.panel{overflow:auto}
-  .bia{--bia-accent:${CYAN};display:flex;flex-direction:column;gap:16px;max-width:1180px;
-    margin:0 auto;width:100%;padding:8px 2px 32px;color:var(--ink-primary);font-family:var(--font-sans)}
-  .bia-dim{opacity:.34;transition:opacity var(--dur-2,160ms) var(--ease-out,ease)}
+  .bia{display:flex;flex-direction:column;gap:var(--sp-4);max-width:1180px;
+    margin:0 auto;width:100%;padding:var(--sp-2) 2px var(--sp-8);color:var(--ink-primary);font-family:var(--font-sans)}
+  .bia-dim{opacity:.34;transition:opacity var(--dur-2) var(--ease-out)}
   @media (prefers-reduced-motion:reduce){.bia-dim{transition:none}}
+
+  /* ── enter-only motion (mirror of analysis.js .an-in idiom) ── */
+  .bia-anim{opacity:0;transform:translateY(6px);will-change:transform,opacity}
+  .bia-anim.bia-in{opacity:1;transform:none;
+    transition:opacity var(--dur-3) var(--ease-out),transform var(--dur-3) var(--ease-out)}
+  .bia-anim.bia-settled{will-change:auto}
+  @media (prefers-reduced-motion:reduce){
+    .bia-anim{opacity:1;transform:none}
+    .bia-anim.bia-in{transition:none}
+  }
+
+  /* ── loading spinner ── */
+  .bia-load{display:flex;align-items:center;justify-content:center;gap:var(--sp-3);
+    padding:var(--sp-8);color:var(--ink-tertiary);font-size:var(--fs-sm)}
+  .bia-spin{--bia-spin-sz:18px;width:var(--bia-spin-sz);height:var(--bia-spin-sz);
+    border-radius:var(--r-pill);border:2px solid var(--line-strong);
+    border-top-color:var(--accent);animation:bia-spin .7s linear infinite;flex:0 0 auto}
+  @keyframes bia-spin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.bia-spin{animation:none;border-top-color:var(--accent)}}
 
   /* ── ① question box (ThoughtSpot-style) ── */
   .bia-ask{position:relative}
-  .bia-ask-in{display:flex;align-items:center;gap:10px;background:var(--bg-panel);
+  .bia-ask-in{display:flex;align-items:center;gap:var(--sp-3);background:var(--bg-panel);
     border:1px solid var(--line-hair);border-radius:var(--r-lg);padding:11px 14px;
-    transition:border-color var(--dur-2,160ms) var(--ease-out,ease),box-shadow var(--dur-2,160ms) var(--ease-out,ease)}
-  .bia-ask-in:focus-within{border-color:var(--bia-accent);box-shadow:0 0 0 3px rgba(52,227,255,.16)}
-  .bia-ask-in .q{color:var(--bia-accent);font-family:var(--font-mono);font-size:14px;flex:0 0 auto}
+    transition:border-color var(--dur-2) var(--ease-out),box-shadow var(--dur-2) var(--ease-out)}
+  .bia-ask-in:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-tint-2)}
+  .bia-ask-in .q{color:var(--accent);font-family:var(--font-mono);font-size:14px;flex:0 0 auto}
   .bia-ask-in input{flex:1;min-width:0;border:none;background:transparent;outline:none;
     font:inherit;font-size:14.5px;color:var(--ink-primary)}
   .bia-ask-in input::placeholder{color:var(--ink-tertiary)}
-  .bia-ask-in .slash{font-family:var(--font-mono);font-size:10px;color:var(--ink-tertiary);
+  .bia-ask-in .slash{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--ink-tertiary);
     border:1px solid var(--line-hair);border-radius:var(--r-sm);padding:2px 6px;flex:0 0 auto}
-  .bia-answer{margin-top:8px;font-size:13px;color:var(--ink-secondary);line-height:1.5;
-    padding-left:4px;min-height:18px}
+  .bia-answer{margin-top:var(--sp-2);font-size:var(--fs-sm);color:var(--ink-secondary);line-height:1.5;
+    padding-left:var(--sp-1);min-height:18px}
   .bia-answer b{color:var(--ink-primary)}
-  .bia-answer .hit{color:var(--bia-accent);font-family:var(--font-mono);font-weight:700}
+  .bia-answer .hit{color:var(--accent);font-family:var(--font-mono);font-weight:700}
   .bia-answer .sug{color:var(--ink-tertiary)}
   .bia-answer .sug u{cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+
+  /* ── quick-chip example questions ── */
+  .bia-chips{display:flex;flex-wrap:wrap;gap:var(--sp-2);margin-top:var(--sp-2);padding-left:var(--sp-1)}
+  .bia-chip{appearance:none;font-family:var(--font-sans);font-size:var(--fs-xs);color:var(--ink-secondary);
+    background:var(--bg-sunken);border:1px solid var(--line-hair);border-radius:var(--r-pill);
+    padding:var(--sp-1) var(--sp-3);cursor:pointer;
+    transition:border-color var(--dur-2) var(--ease-out),color var(--dur-2) var(--ease-out)}
+  .bia-chip:hover{border-color:var(--accent);color:var(--ink-primary)}
+  @media (prefers-reduced-motion:reduce){.bia-chip{transition:none}}
+
+  /* ── cross-filter clear chip ── */
+  .bia-filterbar{display:flex;align-items:center;gap:var(--sp-2);min-height:24px;padding-left:var(--sp-1)}
+  .bia-fchip{appearance:none;display:inline-flex;align-items:center;gap:var(--sp-2);font-family:var(--font-mono);
+    font-size:var(--fs-micro);color:var(--accent);background:var(--accent-tint-2);
+    border:1px solid var(--accent);border-radius:var(--r-pill);padding:var(--sp-1) var(--sp-3);cursor:pointer;
+    transition:opacity var(--dur-1) var(--ease-out)}
+  .bia-fchip:hover{opacity:.75}
+  .bia-fchip .x{font-weight:700}
+  @media (prefers-reduced-motion:reduce){.bia-fchip{transition:none}}
 
   /* ── ② auto-insight cards ── */
   .bia-ins{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -67,20 +127,20 @@ function injectStyle() {
   .bia-card{background:var(--bg-panel);border:1px solid var(--line-hair);border-radius:var(--r-lg);
     padding:14px 15px;display:flex;flex-direction:column;gap:7px;cursor:pointer;
     transition:border-color var(--dur-2,160ms) var(--ease-out,ease),transform var(--dur-2,160ms) var(--ease-out,ease)}
-  .bia-card:hover{border-color:var(--bia-accent);transform:translateY(-2px)}
+  .bia-card:hover{border-color:var(--accent);transform:translateY(-2px)}
   @media (prefers-reduced-motion:reduce){.bia-card{transition:none}.bia-card:hover{transform:none}}
-  .bia-card .kic{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  .bia-card .kic{font-family:var(--font-mono);font-size:var(--fs-micro);letter-spacing:.12em;text-transform:uppercase;
     color:var(--ink-tertiary)}
-  .bia-card .fact{font-size:13.5px;color:var(--ink-primary);line-height:1.45}
-  .bia-card .fact .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-weight:700;color:var(--bia-accent)}
-  .bia-card .imp{font-size:11.5px;color:var(--ink-secondary);line-height:1.45}
+  .bia-card .fact{font-size:var(--fs-sm);color:var(--ink-primary);line-height:1.45}
+  .bia-card .fact .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent)}
+  .bia-card .imp{font-size:var(--fs-xs);color:var(--ink-secondary);line-height:1.45}
   .bia-card .go{margin-top:auto;font-family:var(--font-mono);font-size:10px;color:var(--ink-tertiary)}
 
   /* ── ②b drill links (cross-view nav) ── */
   .bia-drill{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
-  .bia-drill a{font-family:var(--font-sans);font-size:11px;color:var(--bia-accent);
+  .bia-drill a{font-family:var(--font-sans);font-size:var(--fs-xs);color:var(--accent);
     cursor:pointer;text-decoration:none;
-    transition:opacity var(--dur-1,120ms) var(--ease-out,ease)}
+    transition:opacity var(--dur-1) var(--ease-out)}
   .bia-drill a:hover{opacity:.7}
   @media (prefers-reduced-motion:reduce){.bia-drill a{transition:none}}
 
@@ -92,9 +152,20 @@ function injectStyle() {
   .bia-ch-h .leg{margin-left:auto;display:flex;gap:12px;font-size:10.5px;color:var(--ink-tertiary);
     font-family:var(--font-mono)}
   .bia-ch-h .leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+  .bia-leg{cursor:pointer;border-radius:var(--r-xs);padding:0 var(--sp-1);
+    transition:color var(--dur-1) var(--ease-out)}
+  .bia-leg:hover{color:var(--ink-secondary)}
+  .bia-leg.sel{color:var(--accent)}
+  @media (prefers-reduced-motion:reduce){.bia-leg{transition:none}}
   .bia svg{display:block;width:100%;height:auto}
   .bia svg text{font-family:var(--font-mono);fill:var(--ink-tertiary)}
   .bia svg .axt{fill:var(--ink-secondary)}
+  .bia svg .vlab{fill:var(--ink-secondary);font-variant-numeric:tabular-nums}
+  /* cross-filter: clickable marks + de-emphasised non-matching marks */
+  .bia-bar{cursor:pointer;transition:opacity var(--dur-2) var(--ease-out)}
+  .bia-bar.off{opacity:.22}
+  .bia-cell.off{opacity:.3}
+  @media (prefers-reduced-motion:reduce){.bia-bar{transition:none}}
 
   /* ── weekday heatmap ── */
   .bia-heat{display:flex;gap:6px}
@@ -103,26 +174,33 @@ function injectStyle() {
     cursor:pointer;transition:transform var(--dur-1,90ms) var(--ease-out,ease)}
   .bia-cell:hover{transform:translateY(-2px)}
   @media (prefers-reduced-motion:reduce){.bia-cell{transition:none}.bia-cell:hover{transform:none}}
-  .bia-cell.max{outline:2px solid var(--bia-accent);outline-offset:2px}
+  .bia-cell.max{outline:2px solid var(--accent);outline-offset:2px}
+  .bia-cell.sel{outline:2px solid var(--accent);outline-offset:2px}
   .bia-cell .wd{font-family:var(--font-display);font-size:12px;font-weight:600}
   .bia-cell .vv{font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums}
 
-  /* ── tooltip ── */
+  /* ── tooltip (fixed width 220px — mirrored by TIP_W to avoid reflow reads) ── */
   .bia-tip{position:fixed;z-index:50;pointer-events:none;opacity:0;transform:translateY(2px);
+    width:220px;box-sizing:border-box;
     background:var(--bg-app);border:1px solid var(--line-strong);border-radius:var(--r-md);
-    padding:7px 10px;font-size:11.5px;color:var(--ink-primary);box-shadow:0 4px 16px rgba(0,0,0,.16);
-    transition:opacity var(--dur-1,90ms) var(--ease-out,ease);white-space:nowrap}
+    padding:var(--sp-2) var(--sp-3);font-size:var(--fs-xs);color:var(--ink-primary);box-shadow:0 4px 16px rgba(0,0,0,.16);
+    transition:opacity var(--dur-1) var(--ease-out);white-space:normal}
   .bia-tip.on{opacity:1}
-  .bia-tip .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--bia-accent);font-weight:700}
+  .bia-tip .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--accent);font-weight:700}
 
   /* ── empty / scaffold ── */
   .bia-empty{background:var(--bg-panel);border:1px dashed var(--line-strong);border-radius:var(--r-lg);
     padding:30px;text-align:center;color:var(--ink-tertiary);font-size:13px;line-height:1.7}
   .bia-empty b{color:var(--ink-secondary)}
-  .bia-cta{display:inline-block;margin-top:12px;font-family:var(--font-mono);font-size:12px;
-    color:var(--bia-accent);border:1px solid var(--bia-accent);border-radius:var(--r-pill);
-    padding:6px 16px;cursor:pointer;transition:background var(--dur-2,160ms) var(--ease-out,ease)}
-  .bia-cta:hover{background:rgba(52,227,255,.10)}
+  .bia-empty-acts{display:flex;flex-wrap:wrap;gap:var(--sp-3);justify-content:center;align-items:center;margin-top:var(--sp-4)}
+  .bia-cta{display:inline-block;font-family:var(--font-mono);font-size:var(--fs-sm);
+    color:var(--accent);border:1px solid var(--accent);border-radius:var(--r-pill);
+    padding:var(--sp-2) var(--sp-5);cursor:pointer;transition:background var(--dur-2) var(--ease-out)}
+  .bia-cta:hover{background:var(--accent-tint-2)}
+  /* primary (filled) variant — the data-import call to action */
+  .bia-cta.primary{color:var(--bg-app);background:var(--accent);border-color:var(--accent);font-weight:700}
+  .bia-cta.primary:hover{opacity:.88;background:var(--accent)}
+  @media (prefers-reduced-motion:reduce){.bia-cta{transition:none}}
   .bia-scaffold{opacity:.5;filter:grayscale(.4)}
   `;
   document.head.appendChild(s);
@@ -141,6 +219,32 @@ export function mountBIAnalytics(el, opts = {}) {
   // the host listens for `whsim:nav` and performs the actual view switch.
   const nav = (view) => document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view } }));
 
+  // Live accent (resolved hex) for SVG attribute strings. Read once, refreshed on
+  // the `themechange` document event so self-drawn charts follow light/dark.
+  let accent = readAccent();
+  let accent40 = accentAlpha(accent, 0.4);
+  function onThemeChange() {
+    accent = readAccent();
+    accent40 = accentAlpha(accent, 0.4);
+    if (data && data.has_data) render();   // re-tint SVGs with the new accent
+  }
+  document.addEventListener('themechange', onThemeChange);
+
+  // ── intra-view cross-filter state ──────────────────────────────────────
+  // A single click on a bar / weekday cell / legend rank toggles a facet; every
+  // chart then re-renders from the already-fetched data with non-matching marks
+  // dimmed (no refetch). null on every field = no filter active.
+  let filterState = { abc: null, weekday: null, rank: null };
+  const filterActive = () => !!(filterState.abc || filterState.weekday || filterState.rank);
+  function clearFilter() {
+    filterState = { abc: null, weekday: null, rank: null };
+    render();
+  }
+  function toggleFilter(key, val) {
+    filterState[key] = filterState[key] === val ? null : val;
+    render();
+  }
+
   const root = document.createElement('div');
   root.className = 'bia';
   el.innerHTML = '';
@@ -155,13 +259,17 @@ export function mountBIAnalytics(el, opts = {}) {
     tip.classList.add('on');
     const px = (ev.clientX || 0) + 14;
     const py = (ev.clientY || 0) + 14;
-    tip.style.left = `${Math.min(px, window.innerWidth - tip.offsetWidth - 8)}px`;
+    // Tooltip width is fixed in CSS (TIP_W); use the constant rather than
+    // reading offsetWidth, which would force a layout reflow on every hover.
+    tip.style.left = `${Math.min(px, window.innerWidth - TIP_W - 8)}px`;
     tip.style.top = `${py}px`;
   };
   const hideTip = () => tip.classList.remove('on');
 
   let data = null;          // analysis payload
   let exIdx = 0, exTimer = 0;
+  let animatedOnce = false; // stagger fade-in only on first data arrival, not on
+                            // every filter/theme re-render
 
   // ── lightweight rule mapper: keyword → {section, answer} ──────────────
   // Pure string rules over Japanese keywords; never calls the server. Unknown
@@ -212,12 +320,13 @@ export function mountBIAnalytics(el, opts = {}) {
     // fall-through (no rule matched): delegate to Cody if available, else suggest.
     clearDim();
     if (askCody) {
+      // Show an inline handoff note first so the jump to Cody is not jarring.
+      setAnswer(`<span class="sug">Cody に聞いています…「<b>${esc(q)}</b>」</span>`);
       askCody(q);
-      setAnswer(`<span class="sug">この質問はルールに当てはまらなかったので、<b>Codyに聞きました</b>。</span>`);
       return;
     }
     setAnswer(`<span class="sug">うまく解釈できませんでした。近い質問: ${EXAMPLES.slice(0, 3).map((e) => `<u data-ex="${esc(e)}">${esc(e)}</u>`).join(' / ')}</span>`);
-    root.querySelectorAll('[data-ex]').forEach((u) => { u.onclick = () => runExample(u.dataset.ex); });
+    // [data-ex] clicks are handled by a single delegated listener on root (wireAsk).
   }
 
   function suggestNoData(section) {
@@ -294,6 +403,12 @@ export function mountBIAnalytics(el, opts = {}) {
   }
 
   // ── ③ ABC Pareto (SVG): bars desc + cumulative line on right axis ─────
+  // rankOf: A (cum≤70%) / B (≤90%) / C — used for both colour and rank filter.
+  function rankOf(r) {
+    if (r.rank === 'A' || r.rank === 'B' || r.rank === 'C') return r.rank;
+    if (r.cum != null) return r.cum <= 0.7 ? 'A' : r.cum <= 0.9 ? 'B' : 'C';
+    return 'C';
+  }
   function svgPareto() {
     const a = (data.abc || []).slice();
     if (!a.length) return scaffold('abc', 'ABCパレート', '物量降順の棒＋累積%線');
@@ -305,15 +420,25 @@ export function mountBIAnalytics(el, opts = {}) {
     const x = (i) => ml + i * bw;
     const yBar = (q) => mt + ih - (q / maxQ) * ih;
     const yCum = (c) => mt + ih - (c) * ih; // c is 0..1
-    const colOf = (r) => (r.rank === 'A' || (r.cum != null && r.cum <= 0.7) ? CYAN
-      : r.rank === 'B' || (r.cum != null && r.cum <= 0.9) ? CYAN_40 : 'var(--line-strong)');
-    // bars
-    let bars = '';
+    const colOf = (r) => { const k = rankOf(r); return k === 'A' ? accent : k === 'B' ? accent40 : 'var(--line-strong)'; };
+    // active cross-filter: a specific sku (bar) or a rank (legend) may be selected
+    const fSku = filterState.abc, fRank = filterState.rank;
+    const isMatch = (r) => (fSku == null || (r.sku || r.name) === fSku) && (fRank == null || rankOf(r) === fRank);
+    // bars (label the top few; hide labels on thin bars to avoid clutter)
+    const LABEL_TOP = Math.min(5, n);          // label at most the first 5 bars
+    let bars = '', vlabs = '';
     a.forEach((r, i) => {
       const h = mt + ih - yBar(r.qty || 0);
-      bars += `<rect class="bia-bar" data-i="${i}" x="${(x(i) + 1).toFixed(1)}" y="${yBar(r.qty || 0).toFixed(1)}" `
+      const off = filterActive() && !isMatch(r);
+      bars += `<rect class="bia-bar${off ? ' off' : ''}" data-i="${i}" data-sku="${esc(r.sku || r.name || '')}" `
+        + `x="${(x(i) + 1).toFixed(1)}" y="${yBar(r.qty || 0).toFixed(1)}" `
         + `width="${Math.max(1, bw - 2).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" `
         + `fill="${colOf(r)}" rx="1"></rect>`;
+      // value labels: only top-N bars and only when the bar is wide enough to read
+      if (i < LABEL_TOP && bw >= 16 && (r.qty || 0) > 0) {
+        vlabs += `<text class="vlab" x="${(x(i) + bw / 2).toFixed(1)}" y="${(yBar(r.qty || 0) - 4).toFixed(1)}" `
+          + `font-size="9" text-anchor="middle">${fmt(r.qty)}</text>`;
+      }
     });
     // cumulative polyline (use provided cum, else derive)
     let acc = 0; const tot = a.reduce((s, r) => s + (r.qty || 0), 0) || 1;
@@ -331,19 +456,23 @@ export function mountBIAnalytics(el, opts = {}) {
     [0, 0.5, 1].forEach((f) => {
       axis += `<text x="${ml + iw + 4}" y="${(yCum(f) + 3).toFixed(1)}" font-size="9">${pct(f)}</text>`;
     });
-    const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ABCパレート図">
+    const top = a[0];
+    const aria = `ABCパレート図。${fmt(n)}品目を物量降順で表示。最上位は ${esc(top.name || top.sku || '')}、物量 ${fmt(top.qty)}。`;
+    const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
       ${guide(0.7, '70%', WARN)}${guide(0.9, '90%', BAD)}
       ${bars}
-      <polyline points="${pts}" fill="none" stroke="${CYAN}" stroke-width="2" stroke-linejoin="round"></polyline>
-      ${a.map((r, i) => { let c2 = r.cum != null ? r.cum : 0; return `<circle cx="${(x(i) + bw / 2).toFixed(1)}" cy="${yCum(Math.min(1, c2)).toFixed(1)}" r="2" fill="${CYAN}"></circle>`; }).join('')}
+      ${vlabs}
+      <polyline points="${pts}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round"></polyline>
+      ${a.map((r, i) => { let c2 = r.cum != null ? r.cum : 0; return `<circle cx="${(x(i) + bw / 2).toFixed(1)}" cy="${yCum(Math.min(1, c2)).toFixed(1)}" r="2" fill="${accent}"></circle>`; }).join('')}
       ${axis}
     </svg>`;
+    // legend ranks are clickable filters (data-rank)
     return chartShell('abc', 'ABCパレート', `${fmt(n)}品目を物量降順で`, svg, [
-      [CYAN, 'A (〜70%)'], [CYAN_40, 'B (〜90%)'], ['var(--line-strong)', 'C'],
+      [accent, 'A (〜70%)', 'A'], [accent40, 'B (〜90%)', 'B'], ['var(--line-strong)', 'C', 'C'],
     ]);
   }
 
-  // ── ④ weekday mini-heatmap: 7 cyan-shade cells, ring on max ───────────
+  // ── ④ weekday mini-heatmap: 7 accent-shade cells, ring on max ─────────
   function heatWeekday() {
     const raw = data.by_weekday || [];
     if (!raw.length) return scaffold('weekday', '曜日別ヒートマップ', '7セルの濃淡');
@@ -351,17 +480,26 @@ export function mountBIAnalytics(el, opts = {}) {
     const byLabel = {}; raw.forEach((r) => { byLabel[r.label] = r.qty || 0; });
     const series = WD.every((d) => d in byLabel) ? WD.map((d) => ({ label: d, qty: byLabel[d] })) : raw;
     const max = Math.max(...series.map((r) => r.qty || 0), 1);
+    const mxRow = series.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), series[0]);
+    const fWd = filterState.weekday;
     const cells = series.map((r) => {
       const t = (r.qty || 0) / max;                 // 0..1
-      const a = 0.10 + t * 0.78;                     // alpha ramp on cyan
+      const a = 0.10 + t * 0.78;                     // alpha ramp on accent
       const isMax = (r.qty || 0) === max;
-      const ink = t > 0.55 ? '#04222c' : 'var(--ink-secondary)';
-      return `<div class="bia-cell${isMax ? ' max' : ''}" data-hd="${esc(r.label)}|${r.qty || 0}"
-        style="background:rgba(52,227,255,${a.toFixed(3)})">
+      const sel = fWd === r.label;
+      const off = filterActive() && fWd != null && !sel;
+      // high-contrast ink on dark cells; tertiary-ink-ish on faint cells
+      const ink = t > 0.55 ? 'var(--bg-app)' : 'var(--ink-secondary)';
+      return `<div class="bia-cell${isMax ? ' max' : ''}${sel ? ' sel' : ''}${off ? ' off' : ''}"
+        data-hd="${esc(r.label)}|${r.qty || 0}" data-wd="${esc(r.label)}" role="button" tabindex="0"
+        aria-label="${esc(r.label)}曜 物量 ${fmt(r.qty)}"
+        style="background:${accentAlpha(accent, +a.toFixed(3))}">
         <span class="wd" style="color:${ink}">${esc(r.label)}</span>
         <span class="vv" style="color:${ink}">${fmt(r.qty)}</span></div>`;
     }).join('');
-    return chartShell('weekday', '曜日別ヒートマップ', '濃いほど物量大', `<div class="bia-heat">${cells}</div>`, null);
+    const aria = `曜日別ヒートマップ。物量が最も多いのは ${esc(mxRow.label)}曜（${fmt(mxRow.qty)}）。`;
+    const heat = `<div class="bia-heat" role="img" aria-label="${esc(aria)}">${cells}</div>`;
+    return chartShell('weekday', '曜日別ヒートマップ', '濃いほど物量大', heat, null);
   }
 
   // ── ⑤ time series: daily area (faint cyan fill + line) + hourly sparkline
@@ -388,9 +526,18 @@ export function mountBIAnalytics(el, opts = {}) {
     const area = `${ml},${(mt + ih).toFixed(1)} ${line} ${(ml + iw).toFixed(1)},${(mt + ih).toFixed(1)}`;
     const labels = [0, Math.floor(n / 2), n - 1].filter((i, k, a) => a.indexOf(i) === k && i >= 0);
     const dots = d.map((r, i) => `<rect class="bia-pt" data-pt="${esc(r.label || '')}|${r.qty || 0}" x="${(x(i) - Math.max(3, iw / n / 2)).toFixed(1)}" y="${mt}" width="${Math.max(6, iw / n).toFixed(1)}" height="${ih}" fill="transparent"></rect>`).join('');
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="日次物量">
-      <polygon points="${area}" fill="rgba(52,227,255,.12)"></polygon>
-      <polyline points="${line}" fill="none" stroke="${CYAN}" stroke-width="2" stroke-linejoin="round"></polyline>
+    // y-axis: a couple of tick labels (max + mid) so the magnitude is legible
+    const yticks = [max, max / 2].map((v) => `<text x="${ml}" y="${(y(v) - 3).toFixed(1)}" font-size="8" text-anchor="start">${fmt(v)}</text>`).join('');
+    // peak callout: dot + value label on the highest day
+    const pi = d.reduce((bi, r, i) => ((r.qty || 0) > (d[bi].qty || 0) ? i : bi), 0);
+    const peak = `<circle cx="${x(pi).toFixed(1)}" cy="${y(d[pi].qty || 0).toFixed(1)}" r="3" fill="${accent}"></circle>`
+      + `<text class="vlab" x="${x(pi).toFixed(1)}" y="${(y(d[pi].qty || 0) - 6).toFixed(1)}" font-size="9" text-anchor="middle">${fmt(d[pi].qty)}</text>`;
+    const aria = `日次物量の推移。${fmt(n)}日分、最大は ${esc(d[pi].label || '')} の ${fmt(d[pi].qty)}。`;
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
+      <polygon points="${area}" fill="${accentAlpha(accent, 0.12)}"></polygon>
+      <polyline points="${line}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round"></polyline>
+      ${yticks}
+      ${peak}
       ${labels.map((i) => `<text x="${x(i).toFixed(1)}" y="${H - 6}" font-size="9" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(d[i].label || '')}</text>`).join('')}
       ${dots}
     </svg>`;
@@ -405,16 +552,23 @@ export function mountBIAnalytics(el, opts = {}) {
     const line = h.map((r, i) => `${x(i).toFixed(1)},${y(r.qty || 0).toFixed(1)}`).join(' ');
     const mxi = h.reduce((bi, r, i) => ((r.qty || 0) > (h[bi].qty || 0) ? i : bi), 0);
     const bars = h.map((r, i) => `<rect class="bia-pt" data-pt="${esc(r.label || '')}|${r.qty || 0}" x="${(x(i) - Math.max(3, iw / n / 2)).toFixed(1)}" y="${mt}" width="${Math.max(5, iw / n).toFixed(1)}" height="${ih}" fill="transparent"></rect>`).join('');
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="時間帯スパークライン">
-      <polyline points="${line}" fill="none" stroke="${CYAN_40}" stroke-width="1.5"></polyline>
-      <circle cx="${x(mxi).toFixed(1)}" cy="${y(h[mxi].qty || 0).toFixed(1)}" r="3" fill="${CYAN}"></circle>
+    const aria = `時間帯スパークライン。ピークは ${esc(h[mxi].label || '')}（${fmt(h[mxi].qty)}）。`;
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
+      <polyline points="${line}" fill="none" stroke="${accent40}" stroke-width="1.5"></polyline>
+      <circle cx="${x(mxi).toFixed(1)}" cy="${y(h[mxi].qty || 0).toFixed(1)}" r="3" fill="${accent}"></circle>
       <text x="${x(mxi).toFixed(1)}" y="${(y(h[mxi].qty || 0) - 6).toFixed(1)}" font-size="9" text-anchor="middle" class="axt">${esc(h[mxi].label || '')}</text>
       ${bars}
     </svg>`;
   }
 
   function chartShell(sec, title, sub, body, legend) {
-    const leg = legend ? `<div class="leg">${legend.map(([c, t]) => `<span><i style="background:${c}"></i>${esc(t)}</span>`).join('')}</div>` : '';
+    // legend rows: [colour, label] or [colour, label, rank] — a rank makes the
+    // row a clickable cross-filter (data-rank), with .sel showing the active one.
+    const leg = legend ? `<div class="leg">${legend.map(([c, t, rank]) => {
+      const sel = rank && filterState.rank === rank ? ' sel' : '';
+      const attrs = rank ? ` class="bia-leg${sel}" data-rank="${esc(rank)}" role="button" tabindex="0"` : '';
+      return `<span${attrs}><i style="background:${c}"></i>${esc(t)}</span>`;
+    }).join('')}</div>` : '';
     return `<section class="bia-chart" data-sec="${sec}">
       <div class="bia-ch-h"><h3>${esc(title)}</h3><span class="sub">${esc(sub)}</span>${leg}</div>
       ${body}</section>`;
@@ -435,17 +589,28 @@ export function mountBIAnalytics(el, opts = {}) {
       root.innerHTML = '<div class="bia-empty">プロジェクトを選択してください。</div>';
       return;
     }
-    if (!data) { root.innerHTML = '<div class="bia-empty">分析データを読み込み中…</div>'; return; }
+    if (!data) {
+      // animated spinner replaces the old plain "読み込み中…" text
+      root.innerHTML = `<div class="bia-load"><span class="bia-spin" aria-hidden="true"></span>
+        <span>分析データを読み込み中…</span></div>`;
+      return;
+    }
 
     if (!data.has_data) {
       root.innerHTML = `
         ${askBox()}
+        ${chipsRow()}
         <div class="bia-empty">
           <b>分析できる実データがまだありません。</b><br>
-          受注・出荷の明細を取り込むと、ABC・曜日・時間帯の分析がここに表示されます。<br>
-          <span class="bia-cta" data-bia="cta">① 取込へ</span>
+          受注・出荷の明細を取り込むと、ABC・曜日・時間帯の分析がここに表示されます。
+          <div class="bia-empty-acts">
+            <span class="bia-cta primary" data-bia="import">← データを取込む</span>
+            <span class="bia-cta" data-bia="cta">① 取込へ</span>
+          </div>
         </div>`;
       wireAsk();
+      const imp = root.querySelector('[data-bia="import"]');
+      if (imp) imp.onclick = () => nav('dataanalysis');
       const cta = root.querySelector('[data-bia="cta"]');
       if (cta) cta.onclick = () => { window.location.hash = '#/取込'; toast('①取込でデータを取り込んでください。', 'info'); };
       return;
@@ -454,6 +619,8 @@ export function mountBIAnalytics(el, opts = {}) {
     const ins = insights();
     root.innerHTML = `
       ${askBox()}
+      ${chipsRow()}
+      ${filterBar()}
       ${ins.length ? `<div class="bia-ins">${ins.map(insCard).join('')}</div>` : ''}
       ${svgPareto()}
       ${heatWeekday()}
@@ -461,6 +628,8 @@ export function mountBIAnalytics(el, opts = {}) {
     wireAsk();
     wireInsights();
     wireCharts();
+    wireFilterBar();
+    enterAnimate();
   }
 
   function askBox() {
@@ -472,6 +641,49 @@ export function mountBIAnalytics(el, opts = {}) {
       </div>
       <div class="bia-answer" data-bia="answer"></div>
     </div>`;
+  }
+
+  // example questions rendered as clickable quick-chips (click fills + submits)
+  function chipsRow() {
+    return `<div class="bia-chips" role="group" aria-label="質問の例">
+      ${EXAMPLES.map((e) => `<button type="button" class="bia-chip" data-ex="${esc(e)}">${esc(e)}</button>`).join('')}
+    </div>`;
+  }
+
+  // cross-filter clear chip — only present while a facet is active
+  function filterBar() {
+    if (!filterActive()) return '<div class="bia-filterbar"></div>';
+    const parts = [];
+    if (filterState.abc) parts.push(`SKU: ${filterState.abc}`);
+    if (filterState.rank) parts.push(`ランク: ${filterState.rank}`);
+    if (filterState.weekday) parts.push(`曜日: ${filterState.weekday}`);
+    const label = parts.join(' · ');
+    return `<div class="bia-filterbar">
+      <button type="button" class="bia-fchip" data-bia="clearf" aria-label="フィルタを解除">
+        ${esc(label)} <span class="x" aria-hidden="true">×</span> フィルタ解除</button>
+    </div>`;
+  }
+
+  // stagger fade-in: mirror of analysis.js .an-in/.an-settled idiom (no import).
+  // Runs once per data load; filter/theme re-renders skip it to avoid re-flashing.
+  function enterAnimate() {
+    if (animatedOnce) return;
+    animatedOnce = true;
+    const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
+    const items = Array.from(root.querySelectorAll('.bia-ins, .bia-chart'));
+    items.forEach((n) => n.classList.add('bia-anim'));
+    if (reduce) { items.forEach((n) => n.classList.add('bia-in', 'bia-settled')); return; }
+    requestAnimationFrame(() => {
+      items.forEach((n, i) => {
+        window.setTimeout(() => {
+          n.classList.add('bia-in');
+          n.addEventListener('transitionend', function once() {
+            n.classList.add('bia-settled');
+            n.removeEventListener('transitionend', once);
+          });
+        }, i * 40);
+      });
+    });
   }
 
   function insCard(c) {
@@ -490,10 +702,24 @@ export function mountBIAnalytics(el, opts = {}) {
   // ── wiring ────────────────────────────────────────────────────────────
   function wireAsk() {
     const inp = root.querySelector('[data-bia="q"]');
-    if (!inp) return;
-    inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); answerQuestion(inp.value); }
-      else if (e.key === 'Escape') { inp.value = ''; setAnswer(''); clearDim(); inp.blur(); }
+    if (inp) {
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); answerQuestion(inp.value); }
+        else if (e.key === 'Escape') { inp.value = ''; setAnswer(''); clearDim(); inp.blur(); }
+      });
+    }
+    bindExampleDelegation();
+  }
+
+  // Single delegated click handler on root for every [data-ex] (chips +
+  // inline "近い質問" suggestions) — avoids re-binding per question/chip.
+  let exDelegated = false;
+  function bindExampleDelegation() {
+    if (exDelegated) return;
+    exDelegated = true;
+    root.addEventListener('click', (e) => {
+      const ex = e.target.closest('[data-ex]');
+      if (ex && root.contains(ex)) { e.preventDefault(); runExample(ex.dataset.ex); }
     });
   }
 
@@ -508,21 +734,31 @@ export function mountBIAnalytics(el, opts = {}) {
   }
 
   function wireCharts() {
-    // ABC bars tooltip
+    // ABC bars: tooltip + click → cross-filter on that SKU
     root.querySelectorAll('.bia-bar').forEach((b) => {
       b.addEventListener('mousemove', (e) => {
         const r = (data.abc || [])[+b.dataset.i]; if (!r) return;
         showTip(`<b>${esc(r.name || r.sku)}</b><br>物量 <span class="n">${fmt(r.qty)}</span> · 累積 <span class="n">${pct(r.cum || 0)}</span>`, e);
       });
       b.addEventListener('mouseleave', hideTip);
+      b.addEventListener('click', () => { hideTip(); toggleFilter('abc', b.dataset.sku); });
     });
-    // weekday cells tooltip
+    // ABC legend ranks: click → cross-filter on rank A/B/C
+    root.querySelectorAll('.bia-leg').forEach((l) => {
+      const go = () => toggleFilter('rank', l.dataset.rank);
+      l.addEventListener('click', go);
+      l.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+    // weekday cells: tooltip + click → cross-filter on that weekday
     root.querySelectorAll('.bia-cell').forEach((c) => {
       c.addEventListener('mousemove', (e) => {
         const [lab, q] = (c.dataset.hd || '|').split('|');
         showTip(`<b>${esc(lab)}曜</b> · <span class="n">${fmt(+q)}</span>`, e);
       });
       c.addEventListener('mouseleave', hideTip);
+      const go = () => { hideTip(); toggleFilter('weekday', c.dataset.wd); };
+      c.addEventListener('click', go);
+      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
     });
     // time-series hover hotspots (daily area + hourly spark) → cross-highlight time section
     root.querySelectorAll('.bia-pt').forEach((p) => {
@@ -532,6 +768,11 @@ export function mountBIAnalytics(el, opts = {}) {
       });
       p.addEventListener('mouseleave', hideTip);
     });
+  }
+
+  function wireFilterBar() {
+    const clr = root.querySelector('[data-bia="clearf"]');
+    if (clr) clr.onclick = () => clearFilter();
   }
 
   // ── example placeholder rotation (gated: one-shot per visit, NOT a loop) ─
@@ -578,10 +819,17 @@ export function mountBIAnalytics(el, opts = {}) {
 
   load();
   return {
-    refresh() { data = null; render(); load(); },
+    refresh() {
+      data = null;
+      animatedOnce = false;                                    // re-animate next load
+      filterState = { abc: null, weekday: null, rank: null };  // drop stale facet
+      render();
+      load();
+    },
     dispose() {
       stopRotation();
       document.removeEventListener('keydown', onSlash);
+      document.removeEventListener('themechange', onThemeChange);
       if (tip.parentNode) tip.parentNode.removeChild(tip);
       el.innerHTML = '';
     },

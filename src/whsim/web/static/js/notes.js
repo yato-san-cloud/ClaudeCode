@@ -17,13 +17,15 @@ function injectStyle() {
   const s = document.createElement('style');
   s.id = 'nb-style';
   s.textContent = `
-  .nb{display:flex;flex-direction:column;gap:14px;max-width:820px;margin:0 auto;width:100%;padding:6px 2px 24px}
+  .nb{display:flex;flex-direction:column;gap:var(--sp-3);max-width:820px;margin:0 auto;width:100%;padding:6px 2px 24px}
   .nb h3{margin:0;font-size:15px;color:var(--ink-primary,#16202e)}
   .nb-form{display:flex;flex-direction:column;gap:8px;background:var(--bg-panel,#f7f6f3);
-    border:1px solid var(--line,rgba(120,140,170,.18));border-radius:13px;padding:14px}
+    border:1px solid var(--line,rgba(120,140,170,.18));border-radius:13px;padding:var(--sp-4)}
   .nb-row{display:flex;gap:8px;flex-wrap:wrap}
   .nb-form select,.nb-form input,.nb-form textarea{background:var(--bg-app,#fff);
-    border:1px solid var(--line,#ccd);border-radius:8px;padding:8px 10px;font:inherit;color:var(--ink-primary,#16202e)}
+    border:1px solid var(--line,#ccd);border-radius:8px;padding:8px 10px;font:inherit;color:var(--ink-primary,#16202e);
+    transition:border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out)}
+  .nb-form select:hover,.nb-form input:hover,.nb-form textarea:hover{border-color:var(--line-strong)}
   .nb-form textarea{width:100%;min-height:64px;resize:vertical}
   .nb-form input{flex:1;min-width:140px}
   .nb-post{align-self:flex-end;padding:8px 18px;border-radius:9px;border:none;cursor:pointer;
@@ -34,7 +36,10 @@ function injectStyle() {
   .nb-meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink-tertiary,#8195a8);margin-bottom:5px}
   .nb-chip{font-size:10px;font-weight:700;color:#04222c;background:var(--c,#8195a8);padding:1px 7px;border-radius:999px}
   .nb-who{color:var(--ink-secondary,#52677c);font-weight:600}
-  .nb-x{margin-left:auto;background:none;border:none;color:var(--ink-tertiary,#8195a8);cursor:pointer;font-size:14px}
+  .nb-x{margin-left:auto;background:none;border:none;color:var(--ink-tertiary,#8195a8);cursor:pointer;font-size:14px;
+    opacity:.7;border-radius:var(--r-xs);padding:0 var(--sp-1);
+    transition:opacity var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out)}
+  .nb-x:hover{opacity:1;background:var(--bg-hover)}
   .nb-text{font-size:13.5px;color:var(--ink-primary,#16202e);line-height:1.6;white-space:pre-wrap;word-break:break-word}
   .nb-empty{color:var(--ink-tertiary,#8195a8);text-align:center;padding:24px}
   `;

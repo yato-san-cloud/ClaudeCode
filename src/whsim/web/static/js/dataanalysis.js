@@ -5,9 +5,18 @@
 const SEV = {
   critical: { c: '#ff5a78', t: '重大' },
   warning:  { c: '#f5b05a', t: '注意' },
-  info:     { c: '#2f7bff', t: '情報' },
+  info:     { c: 'var(--accent)', t: '情報' },
 };
 const RANK_C = { A: '#ff5a78', B: '#f5b05a', C: '#2ee6a0' };
+
+// SVG <path>/<rect> paint attributes do NOT resolve CSS var(), so resolve the
+// brand accent to a concrete colour once and feed it to the chart builders.
+// Refreshed on the document `themechange` event (see mountDataAnalysis).
+function accentColor() {
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue('--accent').trim();
+  return v || '#2f7bff'; // blue (light) / cyan flip handled by the token itself
+}
 
 function injectStyle() {
   if (document.getElementById('da-style')) return;
@@ -16,44 +25,48 @@ function injectStyle() {
   s.textContent = `
   .da{display:flex;flex-direction:column;gap:16px;width:100%;padding:4px 2px 24px}
   .da-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .da-bar .da-btn{padding:9px 16px;border-radius:10px;border:1px solid var(--accent,#2f7bff);
-    background:color-mix(in srgb,var(--accent,#2f7bff) 14%,transparent);color:var(--accent,#2f7bff);
+  .da-bar .da-btn{padding:var(--sp-2) var(--sp-4);border-radius:10px;border:1px solid var(--accent);
+    background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);
     font-weight:600;cursor:pointer;font:inherit}
-  .da-bar .da-btn.primary{background:var(--accent,#2f7bff);color:#04222c;border:none}
+  .da-bar .da-btn.primary{background:var(--accent);color:#04222c;border:none}
   .da-bar .da-btn:hover{filter:brightness(1.07)}
-  .da-bar .da-hint{font-size:12px;color:var(--ink-tertiary,#8195a8)}
+  .da-bar .da-hint{font-size:var(--fs-xs);color:var(--ink-tertiary,#8195a8)}
   .da-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
   .da-kpi{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
-    border-radius:12px;padding:13px 15px}
-  .da-kpi .l{font-size:10.5px;letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);
+    border-radius:12px;padding:13px 15px;transition:border-color var(--dur-1) var(--ease-out)}
+  .da-kpi:hover{border-color:var(--line-strong)}
+  .da-kpi .l{font-size:var(--fs-micro);letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);
     text-transform:uppercase;margin-bottom:7px}
   .da-kpi .v{font-size:23px;font-weight:700;color:var(--ink-primary,#16202e);line-height:1.05}
   .da-kpi .v small{font-size:13px;font-weight:500;color:var(--ink-secondary,#52677c)}
-  .da-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .da-cards{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
   @media(max-width:900px){.da-cards{grid-template-columns:1fr}}
   .da-card{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
-    border-radius:14px;padding:18px}
+    border-radius:14px;padding:var(--sp-5)}
   .da-card h3{margin:0 0 14px;font-size:14px;font-weight:600;color:var(--ink-primary,#16202e)}
   .da-ins{display:flex;flex-direction:column;gap:9px}
   .da-i{display:flex;gap:11px;padding:11px 13px;border-radius:11px;border:1px solid var(--line,rgba(120,140,170,.18));
     background:var(--bg-app,#fff);border-left-width:4px}
   .da-i .ico{font-size:17px;line-height:1.3}
-  .da-i .ti{font-weight:600;color:var(--ink-primary,#16202e);font-size:13.5px}
-  .da-i .de{font-size:12px;color:var(--ink-secondary,#52677c);margin-top:3px;line-height:1.5}
-  .da-i .su{font-size:11.5px;color:var(--ink-tertiary,#8195a8);margin-top:5px}
+  .da-i .ti{font-weight:600;color:var(--ink-primary,#16202e);font-size:var(--fs-sm)}
+  .da-i .de{font-size:var(--fs-xs);color:var(--ink-secondary,#52677c);margin-top:3px;line-height:1.5}
+  .da-i .su{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);margin-top:5px}
   .da-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
     min-height:300px;text-align:center;color:var(--ink-tertiary,#8195a8)}
   .da-empty b{font-size:18px;color:var(--ink-primary,#16202e)}
-  .da-src{font-size:11px;color:var(--ink-tertiary,#8195a8);font-family:monospace}
+  .da-src{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);font-family:monospace}
   `;
   document.head.appendChild(s);
 }
 
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const pct = (n) => (n == null ? '—' : (n * 100).toFixed(0) + '%');
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function svg(w, h, body) {
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">${body}</svg>`;
+function svg(w, h, body, label) {
+  const a11y = label ? ` role="img" aria-label="${esc(label)}"` : '';
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block"${a11y}>${body}</svg>`;
 }
 
 // daily quantity line/area
@@ -66,12 +79,13 @@ function trendChart(rows) {
   const pts = rows.map((r, i) => [P + i * step, H - P - (r.qty / max) * (H - 2 * P)]);
   const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
   const area = `M${P} ${H - P} ` + pts.map((p) => `L${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ') + ` L${(W - P).toFixed(1)} ${H - P} Z`;
-  const ac = 'var(--accent,#2f7bff)';
+  const ac = accentColor();
   return svg(W, H,
     `<path d="${area}" fill="${ac}" opacity="0.12"/>` +
     `<path d="${line}" fill="none" stroke="${ac}" stroke-width="2"/>` +
     `<line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" stroke="var(--line,#ccd)" stroke-width="1"/>` +
-    `<text x="${P}" y="16" font-size="11" fill="var(--ink-tertiary,#889)">最大 ${fmt(max)}</text>`);
+    `<text x="${P}" y="16" font-size="11" fill="var(--ink-tertiary,#889)">最大 ${fmt(max)}</text>`,
+    `物量推移（日次）折れ線グラフ。最大 ${fmt(max)} ピース、${rows.length} 日分。`);
 }
 
 // ABC: top-N SKU bars colored by rank
@@ -87,7 +101,7 @@ function abcChart(rows) {
       `<rect x="64" y="${y + 3}" width="${w.toFixed(1)}" height="${rowH - 8}" rx="3" fill="${RANK_C[r.rank] || '#888'}"/>` +
       `<text x="${(70 + w).toFixed(1)}" y="${y + 12}" font-size="10" fill="var(--ink-tertiary,#889)">${fmt(r.qty)}</text>`;
   }).join('');
-  return svg(W, H, bars);
+  return svg(W, H, bars, `ABC分析。上位${top.length}SKUの物量を順位別に表示した横棒グラフ。`);
 }
 
 // peak: weekday bars
@@ -96,13 +110,14 @@ function weekdayChart(rows) {
   const W = 560, H = 180, P = 26;
   const max = Math.max(1, ...rows.map((r) => r.qty));
   const bw = (W - 2 * P) / rows.length;
+  const ac = accentColor();
   const bars = rows.map((r, i) => {
     const h = (r.qty / max) * (H - 2 * P);
     const x = P + i * bw, y = H - P - h;
-    return `<rect x="${(x + 4).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 8).toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="var(--accent,#2f7bff)" opacity="0.85"/>` +
+    return `<rect x="${(x + 4).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 8).toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${ac}" opacity="0.85"/>` +
       `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" font-size="11" text-anchor="middle" fill="var(--ink-secondary,#567)">${r.weekday}</text>`;
   }).join('');
-  return svg(W, H, bars);
+  return svg(W, H, bars, '曜日別ピーク物量の棒グラフ。');
 }
 
 function hourChart(rows) {
@@ -116,7 +131,7 @@ function hourChart(rows) {
     const lbl = r.hour % 6 === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--ink-tertiary,#889)">${r.hour}</text>` : '';
     return `<rect x="${(x + 1).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="#9b6bff" opacity="0.8"/>${lbl}`;
   }).join('');
-  return svg(W, H, bars);
+  return svg(W, H, bars, '時間帯別ピーク物量の棒グラフ（0〜23時）。');
 }
 
 function kpiCards(k) {
@@ -153,14 +168,15 @@ function headcountChart(hours) {
   const W = 560, H = 150, P = 24;
   const max = Math.max(1, ...hours);
   const bw = (W - 2 * P) / hours.length;
+  const ac = accentColor();
   const bars = hours.map((v, i) => {
     const h = (v / max) * (H - 2 * P);
     const x = P + i * bw, y = H - P - h;
     const lbl = i % 6 === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--ink-tertiary,#889)">${i}</text>` : '';
-    return `<rect x="${(x + 0.6).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 1.2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--accent,#2f7bff)" opacity="0.8"/>` +
+    return `<rect x="${(x + 0.6).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 1.2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${ac}" opacity="0.8"/>` +
       (v > 0 && v === max ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" font-size="9" text-anchor="middle" fill="var(--ink-secondary,#567)">${v}</text>` : '') + lbl;
   }).join('');
-  return svg(W, H, bars);
+  return svg(W, H, bars, `時間帯別の必要人員（合計）棒グラフ。最大 ${max} 名。`);
 }
 
 function staffingCard(s) {
@@ -258,8 +274,19 @@ export function mountDataAnalysis(el, opts = {}) {
   }
   render(root, bundle);
   wire();
+
+  // SVG paint attributes bake in the accent colour resolved at build time, so a
+  // light↔dark flip needs a re-render to pick up the new --accent. Re-render the
+  // current bundle (no refetch) and re-wire on the document `themechange` event;
+  // the listener is removed in dispose() to avoid leaks across remounts.
+  const onTheme = () => { render(root, bundle); wire(); };
+  document.addEventListener('themechange', onTheme);
+
   return {
-    dispose() { el.innerHTML = ''; },
+    dispose() {
+      document.removeEventListener('themechange', onTheme);
+      el.innerHTML = '';
+    },
     refresh() {},
   };
 }

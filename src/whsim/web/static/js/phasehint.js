@@ -45,22 +45,26 @@ function injectStyle() {
   const s = document.createElement('style');
   s.id = 'ph-style';
   s.textContent = `
-  .ph{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  .ph{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
     background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
-    border-left:4px solid var(--accent,#2f7bff);border-radius:12px;
-    padding:11px 16px;margin:0 auto 14px;max-width:1100px;width:100%}
+    border-left:4px solid var(--accent,#2f7bff);border-radius:var(--r-lg);
+    padding:var(--sp-3) var(--sp-4);margin:0 auto var(--sp-3);max-width:1100px;width:100%}
   .ph[hidden]{display:none}
   .ph-goal{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
   .ph-sub{font-size:14px;font-weight:600;color:var(--ink-primary,#16202e);line-height:1.4}
   .ph-empty{font-size:12.5px;color:var(--ink-secondary,#52677c);line-height:1.55}
   .ph.is-empty{border-left-color:var(--ink-tertiary,#8195a8)}
   .ph.is-empty .ph-sub{color:var(--ink-secondary,#52677c);font-weight:600;font-size:13px}
-  .ph-cta{flex:none;padding:9px 18px;border-radius:9px;border:none;cursor:pointer;
+  .ph-cta{flex:none;padding:9px 18px;border-radius:var(--r-md);border:none;cursor:pointer;
     background:var(--accent,#2f7bff);color:#04222c;font:inherit;font-weight:700;font-size:13.5px;
-    white-space:nowrap;transition:filter .12s ease}
-  .ph-cta:hover{filter:brightness(1.06)}
-  .ph-cta:active{filter:brightness(.94)}
+    white-space:nowrap;transition:background var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+  .ph-cta:hover{background:var(--accent-hover,#1A73CE);transform:translateY(-1px)}
+  .ph-cta:active{transform:translateY(0)}
   .ph-cta:focus-visible{outline:2px solid var(--accent,#2f7bff);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){
+    .ph-cta{transition:none}
+    .ph-cta:hover,.ph-cta:active{transform:none}
+  }
   @media (max-width:640px){
     .ph{align-items:stretch}
     .ph-goal{flex-basis:100%}

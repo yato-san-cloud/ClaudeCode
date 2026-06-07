@@ -33,9 +33,9 @@ function injectStyle() {
   .bi-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
   .bi-h h3{margin:0;font-family:var(--font-display);font-size:15px;font-weight:600;color:var(--ink-primary)}
   .bi-h .sub{font-size:11px;color:var(--ink-tertiary)}
-  .bi-badge{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.04em;padding:2px 7px;border-radius:999px;
+  .bi-badge{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.04em;padding:2px 7px;border-radius:var(--r-pill);
     border:1px solid var(--accent);color:var(--accent-ink);background:var(--accent-tint)}
-  .bi-est{font-family:var(--font-mono);font-size:9px;padding:1px 6px;border-radius:4px;
+  .bi-est{font-family:var(--font-mono);font-size:9px;padding:1px 6px;border-radius:var(--r-xs);
     background:var(--warn-tint);color:var(--warn-ink);border:1px solid var(--warn-line)}
   /* base metric grid */
   .bi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
@@ -59,7 +59,7 @@ function injectStyle() {
   .bi-sec{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-tertiary);
     margin:6px 0 2px;font-family:var(--font-mono)}
   .bi-proc{display:flex;align-items:center;gap:10px;background:var(--bg-app);border:1px solid var(--line-soft);
-    border-radius:var(--r-md);padding:10px 12px;transition:border-color var(--dur-2,160ms) var(--ease-out,ease)}
+    border-radius:var(--r-md);padding:10px 12px;transition:border-color var(--dur-2) var(--ease-out)}
   .bi-proc.derived{border-left:3px solid var(--accent)}
   .bi-proc .pn{flex:1;min-width:0}
   .bi-proc .pn b{font-size:13px;font-weight:600;color:var(--ink-primary)}
@@ -67,13 +67,16 @@ function injectStyle() {
   .bi-proc .mh{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:17px;font-weight:700;
     color:var(--ink-primary);text-align:right}
   .bi-proc .mh .u{font-size:10px;color:var(--ink-tertiary);font-weight:400;margin-left:2px}
-  .bi-bar{height:5px;border-radius:3px;background:var(--line-hair);overflow:hidden;margin-top:6px}
-  .bi-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width var(--dur-2,160ms) var(--ease-out,ease)}
+  .bi-bar{height:5px;border-radius:var(--r-xs);background:var(--line-hair);overflow:hidden;margin-top:6px}
+  .bi-bar i{display:block;height:100%;background:var(--accent);border-radius:var(--r-xs);transition:width var(--dur-2) var(--ease-out)}
   .bi-total{display:flex;justify-content:space-between;align-items:baseline;padding:10px 12px;
     border-top:1px solid var(--line-hair);margin-top:4px}
   .bi-total .tv{font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--ink-primary)}
   .bi-empty{color:var(--ink-tertiary);text-align:center;padding:28px}
-  @media (prefers-reduced-motion: reduce){ .bi-bar i,.bi-proc{transition:none} }
+  /* drill-context focus: gently emphasize the control the 分析BI sent us to */
+  .bi-focus{box-shadow:0 0 0 2px var(--accent);border-radius:var(--r-md);
+    transition:box-shadow var(--dur-2) var(--ease-out)}
+  @media (prefers-reduced-motion: reduce){ .bi-bar i,.bi-proc,.bi-focus{transition:none} }
   `;
   document.head.appendChild(s);
 }
@@ -82,6 +85,11 @@ export function mountBI(el, opts = {}) {
   injectStyle();
   const getProject = opts.getProject || (() => null);
   const toast = opts.toast || (() => {});
+  // Optional drill-context: the 分析BI view navigates here and may pass a focus
+  // hint (e.g. {peak:true} or {abc:'A'}). app.js wires opts.getFocus; refresh()
+  // can also take an explicit focus. Fully backward-compatible: no focus = today.
+  const getFocus = typeof opts.getFocus === 'function' ? opts.getFocus : (() => null);
+  let pendingFocus = null;  // focus to honour on the next render
   const root = document.createElement('div');
   el.innerHTML = '';
   el.appendChild(root);
@@ -279,6 +287,30 @@ export function mountBI(el, opts = {}) {
       </section>`;
 
     wire();
+    applyFocus();
+  }
+
+  // Resolve a focus hint (explicit pending one wins, else opts.getFocus()) and,
+  // if present, gently highlight + scroll the relevant control into view. Used
+  // by the 分析BI drill-down; a no-op when no focus is provided.
+  function applyFocus() {
+    const focus = pendingFocus || getFocus() || null;
+    pendingFocus = null;
+    if (!focus || typeof focus !== 'object') return;
+    let target = null;
+    if (focus.peak) {
+      // emphasize the ピーク係数 control (slider + 平常/ピーク toggle).
+      target = root.querySelector('#bi-peak') || root.querySelector('#bi-peak-tog');
+    } else if (focus.abc) {
+      // ABC drill: highlight the right-pane material-flow so the user lands on
+      // the per-process 人時 breakdown the ABC analysis pointed at.
+      target = root.querySelector('#bi-right');
+    }
+    if (!target) return;
+    const card = target.closest('.bi-derive, .bi-pane') || target;
+    card.classList.add('bi-focus');
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_e) { /* older browsers */ }
+    setTimeout(() => card.classList.remove('bi-focus'), 1800);
   }
 
   function rightHeader() {
@@ -291,7 +323,7 @@ export function mountBI(el, opts = {}) {
     const card = (p) => `
       <div class="bi-proc${p.derived ? ' derived' : ''}">
         <div class="pn"><b>${esc(p.id)}</b><div class="pv">${fmt(p.volume)} ${esc(driverUnit(p.driver))} ÷ ${fmt(p.prod)} ${esc(p.unit)}${showPeak ? ` ×${fmt(peak, 2)}` : ''}</div>
-          <div class="bi-bar"><i style="width:${Math.min(100, (mhOf(p) / maxMh) * 100)}%"></i></div></div>
+          <div class="bi-bar" role="img" aria-label="${esc(p.id)} ${fmt(mhOf(p), 1)} 人時（合計比 ${fmt((mhOf(p) / maxMh) * 100)}%）"><i style="width:${Math.min(100, (mhOf(p) / maxMh) * 100)}%"></i></div></div>
         <div class="mh" data-mh="${p.id}">${fmt(mhOf(p), 1)}<span class="u">人時</span></div>
       </div>`;
     const inb = procs.filter((p) => p.sec === '入荷');
@@ -406,5 +438,10 @@ export function mountBI(el, opts = {}) {
   }
 
   load();
-  return { refresh() { vol = null; render(); load(); }, dispose() { el.innerHTML = ''; } };
+  return {
+    // refresh() works as before; pass a focus hint (e.g. {peak:true}) to honour
+    // a 分析BI drill-down once the data finishes loading.
+    refresh(focus) { if (focus) pendingFocus = focus; vol = null; render(); load(); },
+    dispose() { el.innerHTML = ''; },
+  };
 }

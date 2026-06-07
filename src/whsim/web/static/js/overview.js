@@ -31,7 +31,7 @@ const OV_CSS = `
 .ov-meter{height:8px;border-radius:var(--r-pill);background:var(--bg-sunken);
   border:1px solid var(--line-hair);overflow:hidden;margin:7px 0 9px}
 .ov-meter span{display:block;height:100%;background:var(--accent);
-  border-radius:var(--r-pill);transition:width .35s ease}
+  border-radius:var(--r-pill);transition:width var(--dur-3) var(--ease-out)}
 .ov-chips{display:flex;flex-wrap:wrap;gap:6px}
 .ov-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
   padding:3px 9px;border-radius:var(--r-pill);border:1px solid var(--line-soft);
@@ -51,6 +51,12 @@ const OV_CSS = `
   box-shadow:var(--sh-sm)}
 .ov-next-btn:hover{background:var(--accent-hover)}
 .ov-next-side{margin-top:12px;font-size:12.5px;font-weight:600;color:var(--accent-ink)}
+.ov-next-link{margin:var(--sp-3) 0 0 var(--sp-3);padding:0;border:none;background:none;
+  font:inherit;font-size:var(--fs-sm);font-weight:600;color:var(--accent-ink);cursor:pointer;
+  border-bottom:1px solid transparent;transition:border-color var(--dur-1) var(--ease-out)}
+.ov-next-link:hover{border-bottom-color:var(--accent-ink)}
+.ov-next-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){.ov-next-link{transition:none}}
 .ov-card{background:var(--bg-panel);border:1px solid var(--line-hair);
   border-radius:var(--r-lg);padding:16px 18px;box-shadow:var(--sh-xs)}
 .ov-h3{margin:0 0 10px;font-size:14px;font-weight:700;color:var(--ink-primary)}
@@ -73,6 +79,11 @@ const OV_CSS = `
   border:1px solid var(--accent);background:var(--accent-tint);color:var(--accent-ink);
   font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
 .ov-cta:hover{background:var(--accent-tint)}
+.ov-cta.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;
+  box-shadow:var(--sh-sm);transition:background var(--dur-1) var(--ease-out)}
+.ov-cta.primary:hover{background:var(--accent-hover)}
+.ov-cta.primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){.ov-cta.primary{transition:none}}
 .ov-empty{text-align:center;padding:48px 20px;color:var(--ink-secondary)}
 .ov-empty-h{font-size:17px;font-weight:700;color:var(--ink-primary);margin-bottom:8px}
 .ov-empty p{font-size:13px;line-height:1.7;margin:0}
@@ -139,7 +150,12 @@ export function mountOverview(el, opts = {}) {
     if (!d.hasProject) return { title: 'プロジェクトを作成', hint: '左サイドバーで名前とテンプレを選んで「作成」。', target: null, act: null };
     if (!d.hasData) return { title: '顧客データを取り込む', hint: '左の「表データ(CSV/Excel)を取込」や ZIP ドロップへ。', target: 'dataanalysis', act: null };
     if (!d.hasItems) return { title: '不足データを生成', hint: '実データから商品マスタ等を補完します。', target: null, act: 'generate' };
-    if (!d.hasRun) return { title: 'シミュレーションを実行', hint: '左の「▶ シミュレーション実行」を押してください。', target: null, act: null };
+    if (!d.hasRun) return {
+      title: '設計を始める', hint: 'レイアウト・工程・人員を組んで試算へ。先に物量を確認するなら「分析」へ。',
+      nav: 'bi', primaryLabel: '設計を始める →',
+      secondary: { nav: 'dataanalysis', label: '分析を見る →' },
+      target: null, act: null,
+    };
     return { title: '結果を確認して提案へ', hint: '「分析」で読み解き、「提案PNG/エクスポート」へ。', target: 'analysis', act: null };
   }
 
@@ -202,7 +218,7 @@ export function mountOverview(el, opts = {}) {
     const listHtml = items.map((it) => {
       const cta = it.ok ? ''
         : it.act === 'generate'
-          ? `<button class="ov-cta" data-act="generate">不足データを生成</button>`
+          ? `<button class="ov-cta primary" data-act="generate">不足データを生成</button>`
           : it.target
             ? `<button class="ov-cta" data-go="${it.target}">${esc(it.ctaLabel)} →</button>`
             : '';
@@ -223,7 +239,7 @@ export function mountOverview(el, opts = {}) {
            <div class="ov-name">${esc(d.project)}</div>
            <div class="ov-tmpl">テンプレート: <b>${esc(d.template)}</b></div>
          </div>
-         <div class="ov-prov" title="${esc(d.summary)}">
+         <div class="ov-prov" title="${esc(d.summary)}" aria-live="polite">
            <div class="ov-prov-pct">実データ <b>${pct}%</b></div>
            <div class="ov-meter"><span style="width:${pct}%"></span></div>
            <div class="ov-chips">${chips}</div>
@@ -234,11 +250,16 @@ export function mountOverview(el, opts = {}) {
          <div class="ov-next-k">次にやること</div>
          <div class="ov-next-title">${esc(na.title)}</div>
          <div class="ov-next-hint">${esc(na.hint)}</div>
-         ${na.act === 'generate'
-           ? `<button class="ov-next-btn" data-act="generate">不足データを生成</button>`
-           : na.target
-             ? `<button class="ov-next-btn" data-go="${na.target}">${esc(na.title)}へ進む →</button>`
-             : `<div class="ov-next-side">← 左サイドバーで操作してください</div>`}
+         ${na.nav
+           ? `<button class="ov-next-btn" data-nav="${esc(na.nav)}">${esc(na.primaryLabel || (na.title + ' →'))}</button>`
+             + (na.secondary
+               ? `<button class="ov-next-link" data-nav="${esc(na.secondary.nav)}">${esc(na.secondary.label)}</button>`
+               : '')
+           : na.act === 'generate'
+             ? `<button class="ov-next-btn" data-act="generate">不足データを生成</button>`
+             : na.target
+               ? `<button class="ov-next-btn" data-go="${na.target}">${esc(na.title)}へ進む →</button>`
+               : `<div class="ov-next-side">← 左サイドバーで操作してください</div>`}
        </section>
 
        <section class="ov-card">
@@ -255,6 +276,10 @@ export function mountOverview(el, opts = {}) {
   function wire() {
     root.querySelectorAll('[data-go]').forEach((b) => {
       b.onclick = () => switchTo(b.dataset.go);
+    });
+    root.querySelectorAll('[data-nav]').forEach((b) => {
+      b.onclick = () => document.dispatchEvent(
+        new CustomEvent('whsim:nav', { detail: { view: b.dataset.nav } }));
     });
     root.querySelectorAll('[data-act="generate"]').forEach((b) => {
       b.onclick = () => runGenerate(b);

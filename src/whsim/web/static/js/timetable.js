@@ -43,10 +43,31 @@ function cssVar(name, fallback) {
   } catch (_e) { return fallback; }
 }
 
+// Scoped styles for elements this module adds on top of the styles.css tt-*
+// contract (the cursor-sync indicator). Token-only: no raw hex / px durations /
+// off-grid spacing. Injected once.
+function injectStyle() {
+  if (document.getElementById('tt-js-style')) return;
+  const s = document.createElement('style');
+  s.id = 'tt-js-style';
+  s.textContent = `
+  .tt-cursor-sync{display:inline-flex;align-items:center;gap:var(--sp-1);
+    font-size:var(--fs-micro);color:var(--ink-tertiary);white-space:nowrap;
+    opacity:0;transition:opacity var(--dur-2) var(--ease-out)}
+  .tt-cursor-sync.on{opacity:1}
+  .tt-cursor-sync i{width:var(--sp-1);height:var(--sp-1);border-radius:var(--r-pill);
+    background:var(--accent);flex:0 0 auto;transition:transform var(--dur-2) var(--ease-out)}
+  .tt-cursor-sync.moved i{transform:scale(1.6)}
+  @media (prefers-reduced-motion: reduce){ .tt-cursor-sync,.tt-cursor-sync i{transition:none} }
+  `;
+  document.head.appendChild(s);
+}
+
 export function mountTimetable(targetEl, opts = {}) {
   const target = typeof targetEl === 'string' ? document.querySelector(targetEl) : targetEl;
   if (!target) throw new Error('mountTimetable: target element not found');
   const o = opts && typeof opts === 'object' ? opts : {};
+  injectStyle();
 
   // ---- state ----
   let seed = null;                  // { processes, productivity, scenarios, ... }
@@ -70,6 +91,8 @@ export function mountTimetable(targetEl, opts = {}) {
   // Sub-containers (filled after seed loads).
   let elScenario, elKpis, elWarn, elCursor, elGantt, elGanttCanvas, elMatrix, elParams;
   let elMap, elMapCanvas, elMapTitle;
+  let elCursorSync;          // low-key "時刻連動中" indicator near the time cursor
+  let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
 
   function build() {
     root.innerHTML = '';
@@ -114,9 +137,16 @@ export function mountTimetable(targetEl, opts = {}) {
     elCursor.setAttribute('aria-label', '時刻');
     elCursor.oninput = () => { cursorSlot = parseInt(elCursor.value, 10) || 0; onCursor(); };
     const curRead = el('span', 'tt-cursor-read'); curRead.id = 'ttCursorRead';
+    // Low-key live cue: signals that the 2D/3D replay is following this time
+    // cursor (時刻連動). Static / token-styled; no toasts. Fades in on movement.
+    elCursorSync = el('div', 'tt-cursor-sync');
+    elCursorSync.setAttribute('aria-live', 'polite');
+    elCursorSync.appendChild(el('i'));
+    elCursorSync.appendChild(el('span', null, '時刻連動中（2D/3Dが追従）'));
     cur.appendChild(el('span', 'tt-cursor-label', '時刻'));
     cur.appendChild(elCursor);
     cur.appendChild(curRead);
+    cur.appendChild(elCursorSync);
     root.appendChild(cur);
 
     // Live staffing map — the warehouse floorplan with per-zone worker dots at
@@ -126,6 +156,8 @@ export function mountTimetable(targetEl, opts = {}) {
     elMapTitle = el('div', 'tt-section-title', 'ライブ配置マップ（その時刻に、どのゾーンへ何人）');
     elMap.appendChild(elMapTitle);
     elMapCanvas = el('canvas', 'tt-map-canvas');
+    elMapCanvas.setAttribute('role', 'img');
+    elMapCanvas.setAttribute('aria-label', 'ライブ配置マップ（指定時刻のゾーン別作業者配置）');
     elMap.appendChild(elMapCanvas);
     root.appendChild(elMap);
 
@@ -133,6 +165,8 @@ export function mountTimetable(targetEl, opts = {}) {
     elGantt = el('div', 'tt-gantt');
     elGantt.appendChild(el('div', 'tt-section-title', '配置ガント（30分 × 工程、色＝セクション、太線＝総人数）'));
     elGanttCanvas = el('canvas', 'tt-gantt-canvas');
+    elGanttCanvas.setAttribute('role', 'img');
+    elGanttCanvas.setAttribute('aria-label', '配置ガント（30分刻みのセクション別人数積み上げと総人数推移）');
     elGantt.appendChild(elGanttCanvas);
     elGantt.appendChild(ganttLegend());
     root.appendChild(elGantt);
@@ -287,7 +321,7 @@ export function mountTimetable(targetEl, opts = {}) {
     // peak-cap line
     const cap = constraints['ピーク人数上限'];
     if (cap && cap <= maxTotal) {
-      ctx.strokeStyle = '#e31a1c'; ctx.setLineDash([5, 4]); ctx.beginPath();
+      ctx.strokeStyle = cssVar('--bad', '#e31a1c'); ctx.setLineDash([5, 4]); ctx.beginPath();
       ctx.moveTo(padL, Y(cap)); ctx.lineTo(cssW - padR, Y(cap)); ctx.stroke(); ctx.setLineDash([]);
     }
     // cursor
@@ -319,6 +353,7 @@ export function mountTimetable(targetEl, opts = {}) {
     if (elMapTitle) {
       elMapTitle.textContent = `ライブ配置マップ — ${minToTime(minute)} 時点（総${hc.total}名）`;
     }
+    cv.setAttribute('aria-label', `ライブ配置マップ ${minToTime(minute)} 時点、総${hc.total}名のゾーン別作業者配置`);
     const shell = cssVar('--canvas-shell', '#bbb');
     const zoneInk = cssVar('--canvas-zone-ink', '#8a93a0');
     const pad = 14;
@@ -567,6 +602,14 @@ export function mountTimetable(targetEl, opts = {}) {
       read.textContent = `${minToTime(minute)}　総${hc.total}名${parts ? '（' + parts + '）' : ''}`;
     }
     if (elCursor && elCursor.value !== String(cursorSlot)) elCursor.value = String(cursorSlot);
+    // Show the low-key "時刻連動中" cue: the 2D/3D replay follows this cursor.
+    // Static once result exists; briefly re-emphasized so movement is felt.
+    if (elCursorSync) {
+      elCursorSync.classList.toggle('on', !!result);
+      if (syncFadeTimer) clearTimeout(syncFadeTimer);
+      elCursorSync.classList.add('moved');
+      syncFadeTimer = setTimeout(() => { if (elCursorSync) elCursorSync.classList.remove('moved'); }, 600);
+    }
     renderGantt();      // move the cursor line
     renderStaffMap();   // repaint workers for this time (the 時刻連動)
     if (typeof o.onChange === 'function') {
@@ -652,6 +695,7 @@ export function mountTimetable(targetEl, opts = {}) {
     destroy() {
       destroyed = true;
       if (recalcTimer) clearTimeout(recalcTimer);
+      if (syncFadeTimer) clearTimeout(syncFadeTimer);
       document.removeEventListener('themechange', onTheme);
       if (root.parentNode) root.parentNode.removeChild(root);
     },

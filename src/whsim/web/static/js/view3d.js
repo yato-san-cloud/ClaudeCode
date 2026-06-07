@@ -126,6 +126,10 @@ function sampleKeyframes(keyframes, t) {
   const span = k1[0] - k0[0];
   let f = span > 0 ? (t - k0[0]) / span : 0;
   f = Math.max(0, Math.min(1, f));
+  // Long, sparse spans look stiff under constant-velocity lerp; smoothstep eases
+  // their start/end. Short spans stay linear (cheap) and exact endpoints (f=0/1)
+  // are preserved either way, so this never alters the actual keyframe values.
+  if (span > 0.3) f = f * f * (3 - 2 * f);
   return {
     x: k0[1] + (k1[1] - k0[1]) * f,
     y: k0[2] + (k1[2] - k0[2]) * f,
@@ -201,6 +205,9 @@ export class Scene3D {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    // Default dampingFactor (0.05) is twitchy at warehouse scale; soften it so
+    // orbit/zoom glides to rest. controls.update() runs every frame in _loop().
+    this.controls.dampingFactor = 0.10;
     this.controls.target.set(cx, 0, cz);
     this.controls.update();
 
@@ -326,7 +333,9 @@ export class Scene3D {
     const reps = Math.max(1, Math.round(Math.max(this.bounds.width, this.bounds.depth) / (tileM * cells)));
     tex.repeat.set(reps, reps);
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = this.renderer.capabilities ? this.renderer.capabilities.getMaxAnisotropy() : 1;
+    // Clamp anisotropy to a sane max: full GPU anisotropy can be 16x and is
+    // wasted on a faint floor texture; cap at 8 for crisp-enough joints cheaply.
+    tex.anisotropy = Math.min(this.renderer.capabilities?.getMaxAnisotropy?.() ?? 1, 8);
     this._textures.push(tex);
     return tex;
   }
@@ -1279,9 +1288,17 @@ export class Scene3D {
       const p = (h.kind === 'forklift') ? ref.group.position : ref.mesh.position;
       sp.position.x = p.x;
       sp.position.z = p.z;
-      // Ramp opacity + a gentle scale breath with activity intensity.
-      h.mat.opacity = g * 0.6;
-      const s = h.base * (0.85 + 0.25 * g);
+      // Ramp opacity with a gentle gamma so low activity still reads as a glow
+      // (linear g felt dim); peak a touch brighter to sell the pseudo-bloom.
+      h.mat.opacity = Math.pow(g, 0.7) * 0.75;
+      // Scale breathes with activity, plus a subtle organic time-based sine so a
+      // steadily-working machine still feels alive. Reduced-motion (belts frozen)
+      // drops the breathing for a fully static halo.
+      let breath = 0;
+      if (this._beltSpeed !== 0) {
+        breath = Math.sin(this._clock.elapsedTime * 2.4 + h.base) * 0.05 * g;
+      }
+      const s = h.base * (0.85 + 0.25 * g + breath);
       sp.scale.set(s, s, 1);
     }
   }
@@ -1496,7 +1513,11 @@ export class Scene3D {
       const s = sampleKeyframes(w.keyframes, t);
       w.mesh.position.set(s.x, 0.7, s.y);
       const color = STATE_COLOR[s.state] !== undefined ? STATE_COLOR[s.state] : STATE_COLOR.idle;
-      w.mesh.material.color.set(color);
+      // Ease state→state color over ~100ms (frame-rate-independent) so idle→travel
+      // transitions don't pop. Target color cached on the entry (no per-frame new).
+      if (!w._target) w._target = new THREE.Color();
+      w._target.set(color);
+      w.mesh.material.color.lerp(w._target, 1 - Math.exp(-dt * 12));
       const active = (glowOn && ACTIVE_WORKER[s.state]) ? 1 : 0;
       w.glow = approach(w.glow, active, dt, 4);
       w.mesh.material.emissiveIntensity = w.glow * 0.35;
@@ -1510,7 +1531,11 @@ export class Scene3D {
       const s = sampleKeyframes(a.keyframes, t);
       a.mesh.position.set(s.x, AGV_Y, s.y);
       const color = AGV_COLOR[s.state] !== undefined ? AGV_COLOR[s.state] : AGV_COLOR.idle;
-      a.mesh.material.color.set(color);
+      // Ease action→action color over ~100ms (frame-rate-independent), matching
+      // the worker transition. Target color cached on the entry (no per-frame new).
+      if (!a._target) a._target = new THREE.Color();
+      a._target.set(color);
+      a.mesh.material.color.lerp(a._target, 1 - Math.exp(-dt * 12));
       const active = ACTIVE_AGV[s.state] ? 1 : 0;
       a.glow = approach(a.glow, active, dt, 4);
       a.mat.emissiveIntensity = a.glow * 0.55;
@@ -1539,10 +1564,16 @@ export class Scene3D {
       }
       const moving = vx * vx + vz * vz > 1e-6;
       if (moving) {
-        // Model's forks face +Z, so yaw rotates +Z onto (vx, vz).
+        // Model's forks face +Z, so yaw rotates +Z onto (vx, vz). Only update the
+        // target while actually moving (velocity ~0 → keep previous yaw, no NaN).
         f.yaw = Math.atan2(vx, vz);
       }
-      f.group.rotation.y = f.yaw;
+      // Slerp the group toward the target yaw over ~150–200ms instead of snapping.
+      // Cache scratch quaternions on the entry so there is no per-frame alloc.
+      if (!f._qTarget) { f._qTarget = new THREE.Quaternion(); f._eTarget = new THREE.Euler(); }
+      f._eTarget.set(0, f.yaw, 0);
+      f._qTarget.setFromEuler(f._eTarget);
+      f.group.quaternion.slerp(f._qTarget, 1 - Math.exp(-dt * 8));
       // Drive the activity halo (forklifts have no emissive ramp of their own).
       const active = (glowOn && moving) ? 1 : 0;
       f.glow = approach(f.glow || 0, active, dt, 4);
@@ -1562,7 +1593,9 @@ export class Scene3D {
     const hgt = 0.2 + util * 2.2;
     sg.mesh.scale.y = hgt;
     sg.mesh.position.y = hgt / 2;
-    sg.mesh.material.color.setHSL((1 - util) * 0.33, 0.85, 0.45); // green→red
+    // green→red by hue, and brighten lightness as it fills so a near-full buffer
+    // reads as a clearer urgency cue (dim when empty, hot when backed up).
+    sg.mesh.material.color.setHSL((1 - util) * 0.33, 0.85, 0.40 + util * 0.15);
   }
 
   _loop() {
@@ -1640,7 +1673,11 @@ export class Scene3D {
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
+    // Cancel the pending frame and null the handle so no zombie RAF can survive.
+    // The loop also bails on this._disposed before re-requesting, so a frame that
+    // fired between cancel and this flag set will exit without rescheduling.
     if (this._raf) cancelAnimationFrame(this._raf);
+    this._raf = null;
     // Cancel any pending intro tween + its one-shot listeners.
     if (this._introCancel && this.renderer && this.renderer.domElement) {
       this.renderer.domElement.removeEventListener('pointerdown', this._introCancel);

@@ -475,14 +475,22 @@ function hexA(hex, a) {
 }
 
 // ---- shared clock / render loop -------------------------------------------
+// The shared loop advances the global playhead (S.t) and the transport readout
+// for BOTH the 2D and 3D replay views (view3d reads S.t), so it always runs.
+// draw2d is the only 2D-specific cost and is gated on the active view. We skip
+// redundant DOM writes on the scrub/clock when their displayed value is
+// unchanged — form-control + textContent churn was a measurable per-frame cost.
 let lastTs = performance.now();
+let _lastScrub = -1, _lastClock = '';
 function loop(ts) {
   const dt = (ts - lastTs) / 1000; lastTs = ts;
   if (S.playing && S.replay) {
     S.t += dt * S.speed;
     if (S.t > S.window) S.t = 0;
-    $('scrub').value = String(Math.round((S.t / S.window) * 1000));
-    $('clock').textContent = (S.t / 60).toFixed(1) + ' 分';
+    const sv = Math.round((S.t / S.window) * 1000);
+    if (sv !== _lastScrub) { $('scrub').value = String(sv); _lastScrub = sv; }
+    const cv = (S.t / 60).toFixed(1) + ' 分';
+    if (cv !== _lastClock) { $('clock').textContent = cv; _lastClock = cv; }
   }
   if (S.view === 'view2d') draw2d();
   requestAnimationFrame(loop);
@@ -497,12 +505,17 @@ async function loadTemplates() {
 async function refreshProjects(select) {
   const ps = await api('/api/projects');
   const sel = $('projectSelect');
-  sel.innerHTML = '<option value="">（新規作成）</option>';
+  // Batch the rebuild into a fragment (one reflow instead of N appends).
+  const frag = document.createDocumentFragment();
+  const ph = document.createElement('option');
+  ph.value = ''; ph.textContent = '（新規作成）';
+  frag.appendChild(ph);
   ps.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p; opt.textContent = p;
-    sel.appendChild(opt);
+    frag.appendChild(opt);
   });
+  sel.replaceChildren(frag);
   if (select) sel.value = select;
   updateProjMenuState();
   if (S.onboarding && S.onboarding.refreshCTA) S.onboarding.refreshCTA();
@@ -531,6 +544,9 @@ async function openProject(name) {
   // Reset replay/analysis state and restore this project's chat thread.
   S.replay = null;
   S.hasRun = false;
+  // Invalidate the Designer model cache so the next design mount refetches
+  // /full (the model may have changed via import/generate on (re)open).
+  S._designerProj = null;
   // "% your data" > 0 ⇒ real customer data has been imported (not just template).
   S.hasData = /([1-9]\d*)\s*%/.test(m.provenance_summary || '');
   refreshReadiness();
@@ -542,6 +558,10 @@ async function openProject(name) {
 
 async function mountDesigner() {
   if (!S.project) return;
+  // Fast path: the Designer for this project is already live and its model has
+  // not been invalidated (openProject nulls S._designerProj on any model change)
+  // — just refit, skip the /full refetch + full rebuild. Big revisit snappiness.
+  if (S.designer && S._designerProj === S.project) { S.designer.resize(); return; }
   // Re-entrancy guard: tearing down the old Designer up-front (so a concurrent
   // mount can't orphan it), then bailing if the project/view changed while the
   // model fetch was in flight — otherwise two rapid mounts could leak listeners.
@@ -579,6 +599,7 @@ async function mountDesigner() {
     recommendWork: async () => api(`/api/projects/${S.project}/workmethod/recommend`),
   });
   S.designer.resize();
+  S._designerProj = proj;  // mark the cached model fresh for this project
 }
 async function openProjectQuiet() {
   const m = await api(`/api/projects/${S.project}/model`);
@@ -825,6 +846,7 @@ async function uploadZip(file) {
     S.hasData = true;
     await openProject(S.project); // refresh headline values (also refreshes readiness)
     if (S.dataanalysis) S.dataanalysis.refresh();
+    toast('データを取り込みました。', 'ok');
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 
@@ -1357,6 +1379,12 @@ function initUI() {
   S.journey = mountJourney($('journey'), {
     getState: () => S,
     onSelectView: (v) => switchView(v),
+    // Clicking a run-gated phase before any run: a toast explains the gate.
+    // (switchView already surfaces the matching Cody nudge for the opened view,
+    // so we don't double up on the companion here.)
+    onLockedAttempt: () => {
+      toast('この段階はシミュレーション実行後に確認できます。', 'info');
+    },
   });
   S.phaseHint = mountPhaseHint($('phaseHint'), {
     onCta: (target) => switchView(target),
@@ -1430,10 +1458,17 @@ function initUI() {
     uploadZip(f);
   });
 
+  // Coalesce resize bursts (window drag / orientation) into one rAF-aligned
+  // pass so we don't thrash canvas + WebGL + designer layout 20×/sec.
+  let _resizeRaf = 0;
   window.addEventListener('resize', () => {
-    fitCanvas();
-    if (S.scene3d) S.scene3d.resize();
-    if (S.designer) S.designer.resize();
+    if (_resizeRaf) return;
+    _resizeRaf = requestAnimationFrame(() => {
+      _resizeRaf = 0;
+      fitCanvas();
+      if (S.scene3d) S.scene3d.resize();
+      if (S.designer) S.designer.resize();
+    });
   });
   $('playBtn').disabled = true; $('scrub').disabled = true; // until a run exists
   // Default view is the Cody chat home: no replay transport, no KPI footer.
