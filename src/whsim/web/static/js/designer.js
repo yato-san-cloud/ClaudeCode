@@ -45,18 +45,43 @@ const LAYOUT_PALETTE = [
   { key: 'shipping', label: '出荷ゾーン', zoneType: 'shipping', w: 10, h: 6 },
   { key: 'staging', label: '一時保管ゾーン', zoneType: 'staging', w: 8, h: 5 },
 ];
-// Storage-equipment presets (mirror whsim.racktypes): bay×depth (m) + colour.
-// Drawing a 棚ブロック creates a SHELF area of the chosen type; cells fill at its
-// pitch (bays along the run, depth across).
+// Storage-equipment presets — the WITNESS-style object library (M3 設備パレット).
+// This is the JS twin of whsim.racktypes.RACK_TYPES (served at /api/racktypes);
+// we mirror the full catalog (label, bay×depth in metres, levels, per-cell
+// capacity, render colour, one-line desc) so the equipment palette can show
+// specs without a round-trip, and so the 2D colour + 3D geometry agree.
+// `silhouette` keys the tiny 2D icon family to view3d.js's geometry builders
+// (shelving / pallet-beam / nestainer-stack / flow-roller / asrs-crane) so a
+// palette card previews how that type actually renders in 3D. `levels`/`h`
+// mirror RACK_DIMS in view3d.js. If /api/racktypes is reachable the live catalog
+// overrides label/bay/depth/levels/capacity/color/desc at runtime
+// (see _loadRackCatalog), so a backend change to the presets flows through.
 const RACK_TYPES = {
-  light:     { label: '軽量棚', bay: 0.9, depth: 0.45, color: '#7fb0f2' },
-  medium:    { label: '中量棚', bay: 1.2, depth: 0.6, color: '#2ee6a0' },
-  pallet:    { label: 'パレットラック', bay: 1.1, depth: 1.1, color: '#f5b05a' },
-  nestainer: { label: 'ネステナー', bay: 1.1, depth: 1.4, color: '#9b6bff' },
-  flow:      { label: 'フローラック', bay: 1.0, depth: 1.5, color: '#34e3ff' },
-  asrs:      { label: '自動倉庫(AS/RS)', bay: 0.8, depth: 1.2, color: '#5cebff' },
+  light:     { label: '軽量棚', bay: 0.9, depth: 0.45, levels: 5, capacity: 30,
+               color: '#7fb0f2', silhouette: 'shelving', h: 2.0,
+               desc: '小物・ピース。手前ピッキング向き。' },
+  medium:    { label: '中量棚', bay: 1.2, depth: 0.6, levels: 4, capacity: 120,
+               color: '#2ee6a0', silhouette: 'shelving', h: 2.4,
+               desc: 'ケース・中量品の定番。' },
+  pallet:    { label: 'パレットラック', bay: 1.1, depth: 1.1, levels: 4, capacity: 800,
+               color: '#f5b05a', silhouette: 'pallet', h: 5.6,
+               desc: 'パレット保管。フォークリフト前提。' },
+  nestainer: { label: 'ネステナー', bay: 1.1, depth: 1.4, levels: 3, capacity: 600,
+               color: '#9b6bff', silhouette: 'nestainer', h: 3.6,
+               desc: 'ネステナー段積み。可搬・レイアウト自由。' },
+  flow:      { label: 'フローラック', bay: 1.0, depth: 1.5, levels: 3, capacity: 200,
+               color: '#34e3ff', silhouette: 'flow', h: 2.6,
+               desc: '流動棚。先入先出のピッキング。' },
+  asrs:      { label: '自動倉庫(AS/RS)', bay: 0.8, depth: 1.2, levels: 12, capacity: 2000,
+               color: '#5cebff', silhouette: 'asrs', h: 16.0,
+               desc: '高層自動倉庫。クレーン入出庫。' },
 };
+// Insertion order = catalog order; mutated in place if /api/racktypes returns a
+// different (or extended) ordering. The seed value matches racktypes.ORDER.
 const RACK_ORDER = ['light', 'medium', 'pallet', 'nestainer', 'flow', 'asrs'];
+// Unknown ids (e.g. a future backend preset) fall back to the generic shelving
+// silhouette so an extended catalog still renders a sensible card icon.
+const RACK_SILHOUETTE_FALLBACK = 'shelving';
 // Door palette for the 躯体 (building) tool: label, schema type, marker color.
 const DOOR_PALETTE = [
   { type: 'dock', label: 'ドックドア', color: '#1f78b4' },
@@ -200,6 +225,7 @@ export class Designer {
     this.noSnap = false;           // true while Ctrl held (disables edge snapping)
     this.layoutBrush = null;       // active palette key in レイアウト tool (null = select/move)
     this.shelfType = 'medium';     // storage-equipment preset applied to new 棚ブロック
+    this.rackPaletteOpen = true;   // M3: show the visual equipment palette in 棚 mode
     this.showUnderlay = true;      // draw DXF walls as a faint trace underlay in レイアウト
     this.equipBrush = 'agv';       // active palette key in 設備 tool
     this.doorBrush = 'dock';       // active door type in 躯体 tool
@@ -228,6 +254,47 @@ export class Designer {
     this._bindKeys();
     this._bindTheme();
     this._selectTool('layout');
+    // M3: pull the live storage-equipment catalog (/api/racktypes) so the palette
+    // tracks the backend presets; falls back silently to the seed RACK_TYPES.
+    this._loadRackCatalog();
+  }
+
+  // ---- M3: live storage-equipment catalog (/api/racktypes) -----------------
+  // Best-effort fetch of the server's rack-type presets. On success we merge the
+  // catalog into RACK_TYPES / RACK_ORDER (preserving our silhouette + height
+  // hints, which are view3d-side and not in the API) and repaint the active tool
+  // so the palette/legend pick up any label/spec/colour changes. Any failure is
+  // swallowed — the seed catalog already makes every model valid and runnable.
+  async _loadRackCatalog() {
+    try {
+      const res = await fetch('/api/racktypes', { headers: { Accept: 'application/json' } });
+      if (!res.ok) return;
+      const list = await res.json();
+      if (!Array.isArray(list) || !list.length) return;
+      const order = [];
+      for (const p of list) {
+        if (!p || !p.id) continue;
+        const seed = RACK_TYPES[p.id] || {};
+        RACK_TYPES[p.id] = {
+          label: p.label || seed.label || p.id,
+          bay: +p.bay || seed.bay || 1.0,
+          depth: +p.depth || seed.depth || 0.6,
+          levels: +p.levels || seed.levels || 1,
+          capacity: +p.capacity || seed.capacity || 0,
+          color: p.color || seed.color || '#888888',
+          desc: p.desc || seed.desc || '',
+          // silhouette/height are view3d-side hints, not part of the API.
+          silhouette: seed.silhouette || RACK_SILHOUETTE_FALLBACK,
+          h: seed.h || 2.4,
+        };
+        order.push(p.id);
+      }
+      if (order.length) { RACK_ORDER.length = 0; RACK_ORDER.push(...order); }
+      // ensure the active type still exists in the (possibly reordered) catalog.
+      if (!RACK_TYPES[this.shelfType]) this.shelfType = RACK_ORDER[0] || 'medium';
+      // repaint so the palette, legend and chip reflect the live catalog.
+      if (this.tool === 'layout' && this.layoutMode === 'shelf') this._renderTool();
+    } catch (_e) { /* offline / not-served: keep the seed catalog */ }
   }
 
   // Re-resolve the canvas palette and repaint when the app toggles light/dark.
@@ -291,6 +358,10 @@ export class Designer {
       + '<div><b>レイアウト（棚）</b>: 「棚」モードで保管ゾーン内に棚を自由配置。<b>棚を描く</b>＝角から角へドラッグ。'
       + '<b>棚一括生成</b>＝間口の向き・連結数を指定。<b>面積オート生成</b>＝矩形を描くと棚列＋通路を自動配置。'
       + '8つのハンドルでサイズ変更（複数選択は比率で拡大縮小）。<b>Ctrl</b>でエッジスナップ無効。</div>'
+      + '<div><b>設備パレット（棚）</b>: 6種の標準保管設備（軽量棚/中量棚/パレットラック/ネステナー/'
+      + 'フローラック/自動倉庫）をカードで選択。選んだ種別が「配置中」になり、描画・一括生成・面積生成に反映され、'
+      + '2Dの色と3Dの形状（パレットビーム/棚板/ローラ/クレーン）が切り替わります。棚を選択してカードを押すと、'
+      + 'その棚の種別を変更します。色↔種別の凡例はパレット下に表示。</div>'
       + '<div><b>設備</b>: 床をクリックで設置、マーカーで選択。コンベアは頂点を追加してダブルクリックで確定。</div>'
       + '<div><b>躯体</b>: 壁は頂点を追加してダブルクリックで確定。ドアは縁をクリックで配置。</div>'
       + '<div><b>フロー</b>: 工程をクリックで作業方法を設定。「床図でフロー配置」で工程→ゾーンを割当。</div>'
@@ -298,6 +369,7 @@ export class Designer {
       + '<div style="margin-top:6px;">ホイールで拡大縮小、中ボタンドラッグで移動、「全体表示」でリセット。</div>'
       + '<div style="margin-top:8px;border-top:1px solid var(--line-hair);padding-top:8px;">'
       + '<b>キーボード</b><br>選択を削除: <b>Delete</b> / 複製(棚): <b>D</b> / 取消: <b>Esc</b><br>'
+      + '棚種別を選ぶ(棚モード): <b>1〜6</b><br>'
       + '元に戻す: <b>Ctrl/⌘+Z</b> / やり直す: <b>Ctrl/⌘+Shift+Z</b></div>'
       + '<div style="margin-top:8px;color:var(--ink-tertiary);">変更は「適用（保存）」を押すまでサーバーに保存されません。</div>';
     const close = document.createElement('button');
@@ -804,13 +876,26 @@ export class Designer {
 
     const spacer = document.createElement('div'); spacer.style.flex = '1'; bar.appendChild(spacer);
 
-    // default rack type applied to new shelves
-    const rtLbl = document.createElement('span');
-    rtLbl.textContent = '棚種別:';
-    rtLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);';
-    bar.appendChild(rtLbl);
-    const rtSel = this._select(bar, RACK_ORDER.map((k) => ({ value: k, label: RACK_TYPES[k].label })), this.shelfType);
-    this._on(rtSel, 'change', () => { this.shelfType = rtSel.value; });
+    // M3: "配置中" chip — the active storage-equipment type, prominent so the user
+    // always knows what 棚を描く / 一括生成 / 面積オート生成 will produce. Clicking it
+    // toggles the visual equipment palette (rendered below the bar).
+    const active = RACK_TYPES[this.shelfType] || RACK_TYPES.medium;
+    const chip = document.createElement('button');
+    chip.setAttribute('aria-expanded', this.rackPaletteOpen ? 'true' : 'false');
+    chip.setAttribute('aria-label', `配置中の保管設備: ${active.label}。クリックで設備パレットを開閉`);
+    chip.title = '配置中の保管設備（クリックで設備パレットを開閉）';
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border:1px solid var(--line-strong);'
+      + 'border-radius:var(--r-pill);background:var(--bg-app);color:var(--ink-primary);font-size:12px;cursor:pointer;';
+    const sw = document.createElement('span');
+    sw.style.cssText = `width:13px;height:13px;border-radius:3px;flex:0 0 auto;background:${active.color};box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);`;
+    const chipTxt = document.createElement('span');
+    chipTxt.innerHTML = `<span style="color:var(--ink-tertiary);">配置中:</span> <b>${active.label}</b>`;
+    const caret = document.createElement('span');
+    caret.textContent = this.rackPaletteOpen ? '▴' : '▾';
+    caret.style.cssText = 'color:var(--ink-tertiary);font-size:10px;';
+    chip.appendChild(sw); chip.appendChild(chipTxt); chip.appendChild(caret);
+    this._on(chip, 'click', () => { this.rackPaletteOpen = !this.rackPaletteOpen; this._renderTool(); });
+    bar.appendChild(chip);
 
     // status / hint line
     this._layoutStatus = document.createElement('span');
@@ -819,12 +904,229 @@ export class Designer {
     bar.appendChild(this._layoutStatus);
 
     parent.appendChild(bar);
+
+    // M3: the visual equipment palette + the color→type legend live below the bar.
+    if (this.rackPaletteOpen) this._renderRackPalette(parent);
+    this._renderRackLegend(parent);
+  }
+
+  // ===========================================================================
+  // M3 — storage-equipment palette (WITNESS-style object library).
+  // A grid of selectable cards, one per rack type. Each card shows the Japanese
+  // label, the preset colour swatch, a tiny 2D silhouette hinting the 3D form
+  // (pallet beams vs shelving vs flow rollers vs AS/RS crane), and key specs
+  // (間口×奥行き / 段数 / 収容). Picking a card sets the *active* rack_type used by
+  // 棚を描く / 棚一括生成 / 面積オート生成. If shelves are currently selected, the
+  // card instead RE-ASSIGNS their rack_type (undoable) — selection takes priority
+  // so a card click is "apply to selection" when there is one.
+  // ===========================================================================
+  _renderRackPalette(parent) {
+    const wrap = this._div(parent,
+      'margin-top:2px;padding:8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);');
+    wrap.classList.add('dz-enter');
+    wrap.setAttribute('role', 'listbox');
+    wrap.setAttribute('aria-label', '保管設備パレット');
+    // header row: title + (contextual) "選択中の棚に適用" note + digit-shortcut hint.
+    const selCount = (this.selShelves && this.selShelves.size) || 0;
+    const head = this._div(wrap, 'display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;');
+    const ttl = this._div(head, 'font-size:12px;font-weight:700;color:var(--ink-secondary);');
+    ttl.textContent = '設備パレット';
+    const hint = this._div(head, 'font-size:11px;color:var(--ink-tertiary);');
+    hint.textContent = selCount
+      ? `カードを選ぶと選択中の ${selCount} 棚に適用`
+      : 'カードを選ぶと配置中の種別になります（1〜6キー）';
+    // card grid
+    const grid = this._div(wrap, 'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;');
+    RACK_ORDER.forEach((key, i) => {
+      const rt = RACK_TYPES[key];
+      if (!rt) return;
+      const isActive = !selCount && this.shelfType === key;
+      // a selected-shelf homogeneous type is highlighted as "current" too.
+      const selType = selCount ? this._selectionRackType() : null;
+      const isSelType = selCount && selType === key;
+      const card = document.createElement('button');
+      card.setAttribute('role', 'option');
+      card.setAttribute('aria-selected', (isActive || isSelType) ? 'true' : 'false');
+      card.setAttribute('aria-label',
+        `${rt.label}。間口${rt.bay}m×奥行${rt.depth}m、${rt.levels || 1}段、収容${rt.capacity || 0}。`
+        + (selCount ? '選択中の棚に適用' : `配置中にする（${i + 1}キー）`));
+      card.title = rt.desc || rt.label;
+      const on = isActive || isSelType;
+      card.style.cssText = 'text-align:left;display:flex;flex-direction:column;gap:6px;padding:9px;border-radius:var(--r-md);cursor:pointer;'
+        + `border:2px solid ${on ? rt.color : 'var(--line-hair)'};`
+        + `background:${on ? hexA(rt.color, 0.14) : 'var(--bg-app)'};color:var(--ink-primary);`;
+      // top row: silhouette icon + label + color swatch + (digit) badge
+      const top = this._div(card, 'display:flex;align-items:center;gap:7px;');
+      top.appendChild(this._rackIcon(rt));
+      const name = this._div(top, 'flex:1;min-width:0;font-size:12.5px;font-weight:700;line-height:1.25;'
+        + 'overflow:hidden;text-overflow:ellipsis;');
+      name.textContent = rt.label;
+      const sw2 = this._div(top, `width:12px;height:12px;border-radius:3px;flex:0 0 auto;background:${rt.color};box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);`);
+      sw2.setAttribute('aria-hidden', 'true');
+      if (i < 9) {
+        const kb = this._div(top, 'flex:0 0 auto;font-size:10px;color:var(--ink-tertiary);border:1px solid var(--line-hair);'
+          + 'border-radius:4px;padding:0 4px;line-height:15px;font-variant-numeric:tabular-nums;');
+        kb.textContent = String(i + 1);
+      }
+      // specs line: 間口×奥行き / 段数 / 収容
+      const specs = this._div(card, 'font-size:11px;color:var(--ink-secondary);line-height:1.45;');
+      specs.innerHTML =
+        `<span style="font-variant-numeric:tabular-nums;">間口 ${rt.bay} × 奥行 ${rt.depth} m</span>`
+        + `<br>段数 ${rt.levels || 1}・収容 ${rt.capacity || 0}`;
+      // desc (one line, muted)
+      if (rt.desc) {
+        const d = this._div(card, 'font-size:10.5px;color:var(--ink-tertiary);line-height:1.4;'
+          + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+        d.textContent = rt.desc;
+      }
+      this._on(card, 'click', () => this._pickRackType(key));
+      grid.appendChild(card);
+    });
+  }
+
+  // The homogeneous rack_type of the current selection, or null if mixed/empty.
+  _selectionRackType() {
+    const objs = this._selShelfObjs();
+    if (!objs.length) return null;
+    const t = objs[0].sh.rack_type;
+    return objs.every(({ sh }) => sh.rack_type === t) ? t : null;
+  }
+
+  // Pick a rack type from the palette. If shelves are selected, re-assign their
+  // rack_type (undoable, re-fits cells via the save→materialize path); otherwise
+  // set the active type used by new shelves and refresh the bulk/area defaults.
+  _pickRackType(key) {
+    if (!RACK_TYPES[key]) return;
+    if (this.selShelves && this.selShelves.size) {
+      this._assignRackTypeToSelection(key);
+      return;
+    }
+    this.shelfType = key;
+    this._syncRackDefaults(key);
+    this._renderTool();
+  }
+
+  // Re-assign the active rack_type to every selected shelf (M3 deliverable #4).
+  // Cells re-fit on save (materialize_racks reads rack_type), so the 2D colour
+  // and 3D geometry both update; we also nudge the active type for subsequent draws.
+  _assignRackTypeToSelection(key) {
+    const objs = this._selShelfObjs();
+    if (!objs.length) { this.shelfType = key; this._renderTool(); return; }
+    this._pushUndo();
+    objs.forEach(({ sh }) => {
+      sh.rack_type = key;
+      // drop any stale explicit cell pitch so cells re-fit at the new type's pitch.
+      delete sh.cell_w; delete sh.cell_d;
+    });
+    this.shelfType = key;
+    this._syncRackDefaults(key);
+    if (this._layoutStatus) {
+      this._layoutStatus.style.color = 'var(--ink-secondary)';
+      this._layoutStatus.textContent = `${objs.length} 棚を「${RACK_TYPES[key].label}」に変更しました。`;
+    }
+    this._renderTool();
+  }
+
+  // M3 deliverable #2: when the active type changes, refresh the bulk-gen and
+  // area-fill dialogs' 間口幅・奥行き so they propose this preset's bay×depth (mm).
+  // The user can still override inside the dialog; we only touch the cached
+  // dimension fields (not face/count/prefix/aisle preferences).
+  _syncRackDefaults(key) {
+    const rt = RACK_TYPES[key] || RACK_TYPES.medium;
+    if (this._bulkPrefs) {
+      this._bulkPrefs.frontage = Math.round(rt.bay * 1000);
+      this._bulkPrefs.depth = Math.round(rt.depth * 1000);
+    }
+    if (this._areaPrefs) {
+      this._areaPrefs.front = Math.round(rt.bay * 1000);
+      this._areaPrefs.depth = Math.round(rt.depth * 1000);
+    }
+  }
+
+  // ---- tiny 2D silhouette icon (24×20) hinting the rack's 3D form -----------
+  // Drawn on a small canvas so it scales crisply and matches view3d.js families:
+  //   shelving  — horizontal shelf boards (light/medium)
+  //   pallet    — orange load beams + a pallet unit (signature pallet rack)
+  //   nestainer — stacked nesting frames (段積み)
+  //   flow      — inclined roller lanes (FIFO flow)
+  //   asrs      — tall uprights + a crane column (high-bay AS/RS)
+  _rackIcon(rt) {
+    const W = 26, H = 22, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const c = document.createElement('canvas');
+    c.width = W * dpr; c.height = H * dpr;
+    c.style.cssText = `width:${W}px;height:${H}px;flex:0 0 auto;border-radius:3px;background:${hexA(rt.color, 0.12)};`;
+    c.setAttribute('aria-hidden', 'true');
+    const x = c.getContext('2d');
+    x.scale(dpr, dpr);
+    x.strokeStyle = rt.color; x.fillStyle = rt.color; x.lineWidth = 1.2; x.lineCap = 'round';
+    const sil = rt.silhouette || RACK_SILHOUETTE_FALLBACK;
+    const frame = () => { x.globalAlpha = 0.9; x.strokeRect(4, 3, W - 8, H - 6); x.globalAlpha = 1; };
+    if (sil === 'pallet') {
+      // two uprights + 2 thick (beam) shelves, a pallet block on the lower beam.
+      frame();
+      x.lineWidth = 2.2;
+      for (const yy of [9, 15]) { x.beginPath(); x.moveTo(4, yy); x.lineTo(W - 4, yy); x.stroke(); }
+      x.lineWidth = 1.2; x.globalAlpha = 0.55;
+      x.fillRect(8, 15.5, 9, 3.2);           // pallet load on bottom beam
+      x.globalAlpha = 1;
+    } else if (sil === 'flow') {
+      // inclined roller lanes (diagonal lines) → FIFO flow rack.
+      frame();
+      x.globalAlpha = 0.85;
+      for (const yy of [7, 12, 17]) { x.beginPath(); x.moveTo(5, yy); x.lineTo(W - 5, yy - 3); x.stroke(); }
+      x.globalAlpha = 1;
+    } else if (sil === 'nestainer') {
+      // stacked nesting frames: three trapezoid-ish stacked boxes.
+      x.globalAlpha = 0.9;
+      for (const yy of [4, 10, 16]) { x.strokeRect(6, yy, W - 12, 4.6); }
+      x.globalAlpha = 1;
+    } else if (sil === 'asrs') {
+      // tall uprights + many tiers + a crane column on the left (high-bay).
+      x.globalAlpha = 0.9; x.strokeRect(8, 2, W - 12, H - 4);
+      for (let yy = 5; yy < H - 3; yy += 3.5) { x.beginPath(); x.moveTo(8, yy); x.lineTo(W - 4, yy); x.stroke(); }
+      x.lineWidth = 2.2; x.beginPath(); x.moveTo(4, 2); x.lineTo(4, H - 2); x.stroke();  // crane mast
+      x.lineWidth = 1.2; x.globalAlpha = 1;
+    } else {
+      // shelving (light/medium): frame + evenly spaced horizontal boards.
+      frame();
+      x.globalAlpha = 0.85;
+      for (const yy of [8, 12, 16]) { x.beginPath(); x.moveTo(5, yy); x.lineTo(W - 5, yy); x.stroke(); }
+      x.globalAlpha = 1;
+    }
+    return c;
+  }
+
+  // ---- color→type legend (keeps the 2D canvas legible) ----------------------
+  // A compact, always-on swatch row under the shelf bar mapping each preset
+  // colour to its label, so coloured shelves on the canvas are self-describing.
+  _renderRackLegend(parent) {
+    const row = this._div(parent,
+      'display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:5px 8px;'
+      + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);margin-top:2px;');
+    row.setAttribute('aria-label', '棚種別の凡例');
+    const lbl = this._div(row, 'font-size:11px;color:var(--ink-tertiary);font-weight:700;');
+    lbl.textContent = '凡例:';
+    const selType = (this.selShelves && this.selShelves.size) ? this._selectionRackType() : null;
+    for (const key of RACK_ORDER) {
+      const rt = RACK_TYPES[key];
+      if (!rt) continue;
+      const on = selType ? selType === key : this.shelfType === key;
+      const item = this._div(row, 'display:inline-flex;align-items:center;gap:5px;font-size:11px;'
+        + `color:${on ? 'var(--ink-primary)' : 'var(--ink-secondary)'};${on ? 'font-weight:700;' : ''}`);
+      const sw = this._div(item, `width:11px;height:11px;border-radius:3px;flex:0 0 auto;background:${rt.color};`
+        + `box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);${on ? `outline:1.5px solid ${rt.color};outline-offset:1px;` : ''}`);
+      sw.setAttribute('aria-hidden', 'true');
+      const t = document.createElement('span');
+      t.textContent = rt.label;
+      item.appendChild(t);
+    }
   }
 
   _shelfHint() {
-    if (this.shelfBrush === 'area') return '面積オート生成: 保管ゾーン内でドラッグして矩形を描くと、棚列と通路を自動配置します。';
-    if (this.shelfBrush === 'draw') return '棚を描く: 角から角へドラッグで棚を1枚作成。クリックで選択、ハンドルでサイズ変更、Ctrlでスナップ無効。';
-    return '棚をクリックで選択（Shiftで追加選択）、ドラッグで移動、ハンドルでサイズ変更。';
+    const t = (RACK_TYPES[this.shelfType] || RACK_TYPES.medium).label;
+    if (this.shelfBrush === 'area') return `面積オート生成（${t}）: 保管ゾーン内でドラッグして矩形を描くと、棚列と通路を自動配置します。`;
+    if (this.shelfBrush === 'draw') return `棚を描く（${t}）: 角から角へドラッグで棚を1枚作成。クリックで選択、ハンドルでサイズ変更、Ctrlでスナップ無効。`;
+    return '棚をクリックで選択（Shiftで追加選択）、ドラッグで移動、ハンドルでサイズ変更。設備パレットから種別を選べます。';
   }
 
   _storageZones() {
@@ -2465,6 +2767,20 @@ export class Designer {
     if ((e.key === 'd' || e.key === 'D') && !meta && this.tool === 'layout'
         && this.layoutMode === 'shelf' && this.selShelves && this.selShelves.size) {
       e.preventDefault(); this._duplicateShelves(); return;
+    }
+    // M3: digit 1..N picks the storage-equipment type in the 棚 editor. With a
+    // selection it re-assigns those shelves' type; otherwise it sets the active
+    // type for new shelves. Scoped to shelf mode (and no modifier) so it never
+    // clashes with the tool tabs or browser chrome.
+    if (!meta && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)
+        && this.tool === 'layout' && this.layoutMode === 'shelf') {
+      const idx = parseInt(e.key, 10) - 1;
+      if (idx >= 0 && idx < RACK_ORDER.length) {
+        e.preventDefault();
+        if (!this.rackPaletteOpen) this.rackPaletteOpen = true;
+        this._pickRackType(RACK_ORDER[idx]);
+      }
+      return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (this.tool === 'layout' && this.layoutMode === 'shelf' && this.selShelves && this.selShelves.size) {
