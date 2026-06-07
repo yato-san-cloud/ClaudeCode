@@ -12,3 +12,6 @@ projects/
 
 # Generated demo data
 examples/*.zip
+
+# Claude Code local state / transient agent worktrees
+.claude/
