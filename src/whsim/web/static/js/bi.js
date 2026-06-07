@@ -73,6 +73,17 @@ function injectStyle() {
     border-top:1px solid var(--line-hair);margin-top:4px}
   .bi-total .tv{font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--ink-primary)}
   .bi-empty{color:var(--ink-tertiary);text-align:center;padding:28px}
+  /* error/retry state: never leave the view stuck on a spinner/blank */
+  .bi-err{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;
+    padding:32px 20px;color:var(--ink-secondary)}
+  .bi-err .bi-err-msg{font-size:13px;color:var(--ink-secondary)}
+  .bi-err .bi-err-detail{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-tertiary)}
+  .bi-retry{padding:8px 18px;border:1px solid var(--accent);border-radius:var(--r-md);
+    background:var(--accent);color:var(--ink-onAccent);font:inherit;font-weight:700;cursor:pointer;
+    transition:background var(--dur-1) var(--ease-out)}
+  .bi-retry:hover{background:var(--accent-hover)}
+  .bi-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){ .bi-retry{transition:none} }
   /* drill-context focus: gently emphasize the control the 分析BI sent us to */
   .bi-focus{box-shadow:0 0 0 2px var(--accent);border-radius:var(--r-md);
     transition:box-shadow var(--dur-2) var(--ease-out)}
@@ -95,6 +106,7 @@ export function mountBI(el, opts = {}) {
   el.appendChild(root);
 
   let vol = null;       // base volumes from DuckDB
+  let loadErr = null;   // last load() failure (null = none); drives the retry state
   let cpp = 40;         // 仮値: cases per pallet
   let palletProd = 18;  // 仮値: 格納 productivity (PL/h)
   let qtyPerCase = 0;   // 仮値: pieces per case (行→ピース / ケース→ピース検算); 0 = seed from data
@@ -153,8 +165,22 @@ export function mountBI(el, opts = {}) {
     });
   }
 
+  // Token-styled error + retry: if a fetch failed, show a recoverable message
+  // with a 再試行 button that re-runs load(); never leave a stuck spinner/blank.
+  function renderError() {
+    root.innerHTML = `
+      <div class="bi-err" role="alert">
+        <div class="bi-err-msg">読み込めませんでした</div>
+        ${loadErr ? `<div class="bi-err-detail">${esc(loadErr)}</div>` : ''}
+        <button type="button" class="bi-retry" id="bi-retry">再試行</button>
+      </div>`;
+    const btn = root.querySelector('#bi-retry');
+    if (btn) btn.onclick = () => { loadErr = null; vol = null; render(); load(); };
+  }
+
   function render() {
     if (!getProject()) { root.innerHTML = '<div class="bi-empty">プロジェクトを選択してください。</div>'; return; }
+    if (loadErr) { renderError(); return; }
     if (!vol) { root.innerHTML = '<div class="bi-empty">物量を集計中…</div>'; return; }
     seedRecipes();
     const d = derived();
@@ -433,15 +459,16 @@ export function mountBI(el, opts = {}) {
       const r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/volumes`);
       if (!r.ok) throw new Error(r.statusText);
       vol = await r.json();
+      loadErr = null;
       render();
-    } catch (e) { root.innerHTML = `<div class="bi-empty">物量の集計に失敗: ${esc(e.message)}</div>`; toast('物量BIの読み込みに失敗', 'error'); }
+    } catch (e) { loadErr = e && e.message ? e.message : String(e); render(); toast('物量BIの読み込みに失敗', 'error'); }
   }
 
   load();
   return {
     // refresh() works as before; pass a focus hint (e.g. {peak:true}) to honour
     // a 分析BI drill-down once the data finishes loading.
-    refresh(focus) { if (focus) pendingFocus = focus; vol = null; render(); load(); },
+    refresh(focus) { if (focus) pendingFocus = focus; loadErr = null; vol = null; render(); load(); },
     dispose() { el.innerHTML = ''; },
   };
 }

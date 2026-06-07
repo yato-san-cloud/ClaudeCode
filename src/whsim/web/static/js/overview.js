@@ -47,7 +47,7 @@ const OV_CSS = `
 .ov-next-title{margin-top:4px;font-size:19px;font-weight:700;color:var(--ink-primary)}
 .ov-next-hint{margin-top:4px;font-size:13px;color:var(--ink-secondary)}
 .ov-next-btn{margin-top:12px;padding:10px 20px;border:none;border-radius:var(--r-md);
-  background:var(--accent);color:#fff;font:inherit;font-weight:700;cursor:pointer;
+  background:var(--accent);color:var(--ink-onAccent);font:inherit;font-weight:700;cursor:pointer;
   box-shadow:var(--sh-sm)}
 .ov-next-btn:hover{background:var(--accent-hover)}
 .ov-next-side{margin-top:12px;font-size:12.5px;font-weight:600;color:var(--accent-ink)}
@@ -79,7 +79,7 @@ const OV_CSS = `
   border:1px solid var(--accent);background:var(--accent-tint);color:var(--accent-ink);
   font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
 .ov-cta:hover{background:var(--accent-tint)}
-.ov-cta.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;
+.ov-cta.primary{background:var(--accent);border-color:var(--accent);color:var(--ink-onAccent);font-weight:700;
   box-shadow:var(--sh-sm);transition:background var(--dur-1) var(--ease-out)}
 .ov-cta.primary:hover{background:var(--accent-hover)}
 .ov-cta.primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

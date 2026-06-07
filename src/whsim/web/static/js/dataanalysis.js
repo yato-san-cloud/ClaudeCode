@@ -7,15 +7,29 @@ const SEV = {
   warning:  { c: '#f5b05a', t: '注意' },
   info:     { c: 'var(--accent)', t: '情報' },
 };
-const RANK_C = { A: '#ff5a78', B: '#f5b05a', C: '#2ee6a0' };
+// SVG <path>/<rect> paint attributes do NOT resolve CSS var(), so resolve the
+// shared ABC-rank tokens (--rank-a/b/c — identical to analysis.js) to concrete
+// colours. Refreshed on the document `themechange` event (see mountDataAnalysis).
+function cssColor(name, fallback) {
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue(name).trim();
+  return v || fallback;
+}
+// Mutable rank palette; rebuilt on themechange so SVG fills track light/dark.
+let RANK_C = { A: '#1C5FA8', B: '#5B9BD5', C: '#B9D3EE' };
+function refreshRankColors() {
+  RANK_C = {
+    A: cssColor('--rank-a', '#1C5FA8'),
+    B: cssColor('--rank-b', '#5B9BD5'),
+    C: cssColor('--rank-c', '#B9D3EE'),
+  };
+}
 
 // SVG <path>/<rect> paint attributes do NOT resolve CSS var(), so resolve the
 // brand accent to a concrete colour once and feed it to the chart builders.
 // Refreshed on the document `themechange` event (see mountDataAnalysis).
 function accentColor() {
-  const v = getComputedStyle(document.documentElement)
-    .getPropertyValue('--accent').trim();
-  return v || '#2f7bff'; // blue (light) / cyan flip handled by the token itself
+  return cssColor('--accent', '#2383E2'); // cyan flip handled by the token itself
 }
 
 function injectStyle() {
@@ -28,7 +42,7 @@ function injectStyle() {
   .da-bar .da-btn{padding:var(--sp-2) var(--sp-4);border-radius:10px;border:1px solid var(--accent);
     background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);
     font-weight:600;cursor:pointer;font:inherit}
-  .da-bar .da-btn.primary{background:var(--accent);color:#04222c;border:none}
+  .da-bar .da-btn.primary{background:var(--accent);color:var(--ink-onAccent);border:none}
   .da-bar .da-btn:hover{filter:brightness(1.07)}
   .da-bar .da-hint{font-size:var(--fs-xs);color:var(--ink-tertiary,#8195a8)}
   .da-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
@@ -37,24 +51,36 @@ function injectStyle() {
   .da-kpi:hover{border-color:var(--line-strong)}
   .da-kpi .l{font-size:var(--fs-micro);letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);
     text-transform:uppercase;margin-bottom:7px}
-  .da-kpi .v{font-size:23px;font-weight:700;color:var(--ink-primary,#16202e);line-height:1.05}
-  .da-kpi .v small{font-size:13px;font-weight:500;color:var(--ink-secondary,#52677c)}
+  .da-kpi .v{font-size:var(--fs-title);font-weight:700;color:var(--ink-primary,#16202e);line-height:1.05}
+  .da-kpi .v small{font-size:var(--fs-sm);font-weight:500;color:var(--ink-secondary,#52677c)}
   .da-cards{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
   @media(max-width:900px){.da-cards{grid-template-columns:1fr}}
   .da-card{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
     border-radius:14px;padding:var(--sp-5)}
-  .da-card h3{margin:0 0 14px;font-size:14px;font-weight:600;color:var(--ink-primary,#16202e)}
+  .da-card h3{margin:0 0 14px;font-size:var(--fs-body);font-weight:600;color:var(--ink-primary,#16202e)}
   .da-ins{display:flex;flex-direction:column;gap:9px}
   .da-i{display:flex;gap:11px;padding:11px 13px;border-radius:11px;border:1px solid var(--line,rgba(120,140,170,.18));
     background:var(--bg-app,#fff);border-left-width:4px}
-  .da-i .ico{font-size:17px;line-height:1.3}
+  .da-i .ico{font-size:var(--fs-section);line-height:1.3}
   .da-i .ti{font-weight:600;color:var(--ink-primary,#16202e);font-size:var(--fs-sm)}
   .da-i .de{font-size:var(--fs-xs);color:var(--ink-secondary,#52677c);margin-top:3px;line-height:1.5}
   .da-i .su{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);margin-top:5px}
   .da-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
     min-height:300px;text-align:center;color:var(--ink-tertiary,#8195a8)}
-  .da-empty b{font-size:18px;color:var(--ink-primary,#16202e)}
+  .da-empty b{font-size:var(--fs-title);color:var(--ink-primary,#16202e)}
   .da-src{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);font-family:monospace}
+  .da-err{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:var(--sp-3);min-height:240px;text-align:center;
+    border:1px solid var(--line-hair,rgba(120,140,170,.18));border-radius:var(--r-3,14px);
+    background:var(--bg-sunken,#f7f6f3);padding:var(--sp-6)}
+  .da-err b{font-size:var(--fs-section);color:var(--ink-primary,#16202e)}
+  .da-err .da-err-msg{font-size:var(--fs-sm);color:var(--ink-secondary,#52677c);
+    font-family:monospace;max-width:48ch;word-break:break-word}
+  .da-err .da-retry{padding:var(--sp-2) var(--sp-5);border-radius:10px;border:none;
+    background:var(--accent);color:var(--ink-onAccent);font-weight:600;cursor:pointer;font:inherit;
+    transition:filter var(--dur-1,.12s) var(--ease-out,ease)}
+  .da-err .da-retry:hover{filter:brightness(1.07)}
+  @media(prefers-reduced-motion:reduce){.da-err .da-retry{transition:none}}
   `;
   document.head.appendChild(s);
 }
@@ -125,11 +151,12 @@ function hourChart(rows) {
   const W = 560, H = 160, P = 24;
   const max = Math.max(1, ...rows.map((r) => r.qty));
   const bw = (W - 2 * P) / rows.length;
+  const ac = accentColor();
   const bars = rows.map((r, i) => {
     const h = (r.qty / max) * (H - 2 * P);
     const x = P + i * bw, y = H - P - h;
     const lbl = r.hour % 6 === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--ink-tertiary,#889)">${r.hour}</text>` : '';
-    return `<rect x="${(x + 1).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="#9b6bff" opacity="0.8"/>${lbl}`;
+    return `<rect x="${(x + 1).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${ac}" opacity="0.55"/>${lbl}`;
   }).join('');
   return svg(W, H, bars, '時間帯別ピーク物量の棒グラフ（0〜23時）。');
 }
@@ -193,7 +220,7 @@ function staffingCard(s) {
       <div class="da-kpi"><div class="l">総工数</div><div class="v">${fmt(s.total_man_hours)} <small>人時/日</small></div></div>
       <div class="da-kpi"><div class="l">対象稼働日数</div><div class="v">${fmt(s.operating_days)} <small>日</small></div></div>
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+    <table style="width:100%;border-collapse:collapse;font-size:var(--fs-xs)">
       <thead><tr style="color:var(--ink-tertiary,#889);text-align:left">
         <th>工程</th><th style="text-align:right">日量</th><th style="text-align:right">生産性</th>
         <th style="text-align:right">ピーク</th><th style="text-align:right">工数</th></tr></thead>
@@ -230,6 +257,7 @@ function render(el, b) {
 
 export function mountDataAnalysis(el, opts = {}) {
   injectStyle();
+  refreshRankColors();
   const root = document.createElement('div');
   root.className = 'da';
   el.innerHTML = '';
@@ -237,19 +265,41 @@ export function mountDataAnalysis(el, opts = {}) {
   let bundle = null;
   const toast = opts.toast || (() => {});
 
-  async function load(promise, label) {
+  // `makePromise` is a thunk (not a bare promise) so the same fetch can be
+  // re-invoked by the error-state 再試行 button.
+  async function load(makePromise, label) {
     root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = true));
     const bar = root.querySelector('.da-hint');
     if (bar) bar.textContent = label;
     try {
-      bundle = await promise;
+      bundle = await makePromise();
       render(root, bundle);
       wire();
     } catch (e) {
       toast('分析に失敗しました: ' + e.message, 'error');
-      if (bar) bar.textContent = 'エラー: ' + e.message;
-      root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = false));
+      renderError(e, makePromise, label);
     }
+  }
+  // Replace the body (keeping the toolbar) with a token-styled error panel so
+  // the view is never left blank/stuck on a failed fetch.
+  function renderError(e, makePromise, label) {
+    root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = false));
+    const bar = root.querySelector('.da-hint');
+    if (bar) bar.textContent = 'エラーが発生しました';
+    let panel = root.querySelector('.da-err');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.className = 'da-err';
+      root.appendChild(panel);
+    }
+    panel.innerHTML =
+      `<b>読み込めませんでした</b>` +
+      `<div class="da-err-msg">${esc(e && e.message ? e.message : e)}</div>` +
+      `<button type="button" class="da-retry">再試行</button>`;
+    panel.querySelector('.da-retry').onclick = () => {
+      panel.remove();
+      load(makePromise, label);
+    };
   }
   async function getJSON(url, opt) {
     const r = await fetch(url, opt);
@@ -259,7 +309,7 @@ export function mountDataAnalysis(el, opts = {}) {
   function wire() {
     const fileInput = root.querySelector('[data-da-file]');
     root.querySelector('[data-act="sample"]').onclick = () =>
-      load(getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
+      load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
     root.querySelector('[data-act="upload"]').onclick = () => fileInput.click();
     const ttBtn = root.querySelector('[data-act="to-timetable"]');
     if (ttBtn) ttBtn.onclick = () => document.dispatchEvent(new CustomEvent(
@@ -267,9 +317,11 @@ export function mountDataAnalysis(el, opts = {}) {
     fileInput.onchange = () => {
       const f = fileInput.files[0];
       if (!f) return;
-      const fd = new FormData();
-      fd.append('shipments', f);
-      load(getJSON('/api/analysis/upload', { method: 'POST', body: fd }), `「${f.name}」を分析中…`);
+      load(() => {
+        const fd = new FormData();
+        fd.append('shipments', f);
+        return getJSON('/api/analysis/upload', { method: 'POST', body: fd });
+      }, `「${f.name}」を分析中…`);
     };
   }
   render(root, bundle);
@@ -279,7 +331,7 @@ export function mountDataAnalysis(el, opts = {}) {
   // light↔dark flip needs a re-render to pick up the new --accent. Re-render the
   // current bundle (no refetch) and re-wire on the document `themechange` event;
   // the listener is removed in dispose() to avoid leaks across remounts.
-  const onTheme = () => { render(root, bundle); wire(); };
+  const onTheme = () => { refreshRankColors(); render(root, bundle); wire(); };
   document.addEventListener('themechange', onTheme);
 
   return {

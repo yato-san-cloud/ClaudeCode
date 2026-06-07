@@ -21,21 +21,21 @@
   --ink-secondary: rgba(55,53,47,0.65);
   --ink-tertiary:  rgba(55,53,47,0.45);
   --ink-faint:     rgba(55,53,47,0.32);
-  --ink-onAccent:  #FFFFFF;
+  --ink-onAccent:  #04222C;   /* 暗インク: 鮮やかなシアン塗りの上で AA(7.58:1) */
 
   /* ---- Color · Line (境界) — hairlines ------------------------------------- */
   --line-hair:     rgba(55,53,47,0.09);
   --line-soft:     rgba(55,53,47,0.06);
   --line-strong:   rgba(55,53,47,0.16);
-  --line-focus:    #2383E2;
+  --line-focus:    #0E8FA8;
 
-  /* ---- Color · Accent (Notion ブルー) -------------------------------------- */
-  --accent:        #2383E2;
-  --accent-hover:  #1A73CE;
-  --accent-press:  #1668BE;
-  --accent-tint:   #E7F1FB;
-  --accent-tint-2: #D3E5F7;
-  --accent-ink:    #1A6BC0;
+  /* ---- Color · Accent (ブランド シアン / canonical は後段の上書きブロック) -- */
+  --accent:        #16C0DE;
+  --accent-hover:  #3AD3EE;
+  --accent-press:  #12A9C4;
+  --accent-tint:   #E4F8FC;
+  --accent-tint-2: #C4EEF6;
+  --accent-ink:    #0B7A90;
 
   /* ---- Color · Semantic (判定/状態) ---------------------------------------- */
   --ok:        #2E7D55;   --ok-ink:   #1E5C3D;
@@ -1850,17 +1850,23 @@ html[data-theme="dark"] .brand-tag{ color:#8FA6BD; }
 
 /* ===========================================================================
    WHSiM ブランド — アクセント調整 + 数値タイポ + 仕上げ磨き
-   既存トークンを上書き(後勝ち)。ライト=テックブルー / ダーク=シアン寄りハイライト。
+   CANONICAL: ブランドアクセントはシアン #34E3FF(単一の真実の源 / 後勝ち)。
+   ダーク(主)=明るいシアン + 暗いインク / ライト(副)=鮮やかなシアン + 暗いインク。
+   両テーマで同じ色相系・フォーカスリングと塗りを統一。WCAG AA を担保。
    数値は Space Mono(--num) で「データ/オペレーション」感に。
    =========================================================================== */
 :root{
   --num:"Space Mono","Roboto Mono",ui-monospace,monospace;
-  --accent:#2F7BFF; --accent-hover:#1F6BEF; --accent-press:#1A5FD8;
-  --accent-tint:#E9F1FF; --accent-tint-2:#CFE0FF; --accent-ink:#1857C9;
+  /* LIGHT(副): 鮮やかなシアン塗り + 暗インク #04222C(7.58:1, AA/AAA) */
+  --accent:#16C0DE; --accent-hover:#3AD3EE; --accent-press:#12A9C4;
+  --accent-tint:#E4F8FC; --accent-tint-2:#C4EEF6; --accent-ink:#0B7A90;
+  --ink-onAccent:#04222C;
+  --line-focus:#0E8FA8;
 }
 html[data-theme="dark"]{
-  --accent:#4FA8F2; --accent-hover:#6FBCFA; --accent-press:#3C97E6;
-  --accent-tint:#11283A; --accent-tint-2:#1B3A52; --accent-ink:#9FE6FF;
+  /* DARK(主): ベースのシアンランプを正とする(#34E3FF 上に #04222C, 10.69:1) */
+  --accent:#34E3FF; --accent-hover:#5CEBFF; --accent-press:#18C7E6;
+  --accent-tint:#0E2531; --accent-tint-2:#123642; --accent-ink:#7EF6FF;
   --line-focus:#34E3FF;
 }
 /* premium micro-polish: brand focus glow + crisper active tab */
