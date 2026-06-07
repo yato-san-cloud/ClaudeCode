@@ -8,6 +8,19 @@ free space form the navigation graph. ``path``/``distance`` connect endpoints to
 the nearest *visible* waypoint and run Dijkstra, yielding smooth aisle routes (and
 a network the 2D view can draw).
 
+**M4 — facing-aware open-face pick points.** On top of the Delaunay aisle net we
+add MapMaker's *open-face* pick points (the correctness core of
+``CartNetworkGenerator.setWaypointsForTargets``, decompiled lines ~217–279). For
+every authored shelf (and rack run) we probe the 4 side-midpoints, offset each
+outward along its normal by ``offset`` (~0.5 m, MapMaker's ``offset_mm = 500``),
+and keep a face **only if that offset point reaches the shelf centre without
+clipping another obstacle** — i.e. the face opens onto free aisle, not into a
+back-to-back neighbour or a wall. When the shelf carries an authored ``facing``
+we *prefer* that face; otherwise every geometrically-open face is kept. Kept pick
+points are wired into the waypoint graph, so routes approach a slot from the
+aisle and never cut through a rack, and back-to-back shelves are reachable only
+from their outer faces. "The drawn map IS the routing truth."
+
 This is the visualization/geometry layer; the engine's authoritative timing still
 uses the obstacle-aware grid (``engine.graph``). Both route around the same racks.
 """
@@ -18,6 +31,15 @@ import heapq
 from math import hypot
 
 import numpy as np
+
+# Outward offset for an open-face pick point, in metres. Ported verbatim intent
+# from MapMaker's CartNetworkGenerator.offset_mm = 500.0 (mm) → 0.5 m.
+_OPEN_FACE_OFFSET = 0.5
+
+# Map an authored ShelfArea.facing onto the side-midpoint it opens toward, in the
+# y-down floor frame whsim uses (y grows "down"/into the depth). The probe points
+# are: left = -x face, right = +x face, up = -y face, down = +y face.
+_FACING_SIDE = {"left": 0, "right": 1, "up": 2, "down": 3}
 
 
 def _seg_intersect(p1, p2, p3, p4, eps: float = 1e-9) -> bool:
@@ -33,13 +55,25 @@ def _seg_intersect(p1, p2, p3, p4, eps: float = 1e-9) -> bool:
 class NavNetwork:
     def __init__(self, width: float, depth: float,
                  obstacles: list[tuple[float, float, float, float]] | None = None,
-                 clearance: float = 0.7) -> None:
+                 clearance: float = 0.7,
+                 facings: list[str | None] | None = None,
+                 offset: float = _OPEN_FACE_OFFSET) -> None:
         self.width = max(float(width), 1e-6)
         self.depth = max(float(depth), 1e-6)
         self.obstacles = list(obstacles or [])
         self.clearance = clearance
+        self.offset = max(float(offset), 1e-6)
+        # Per-obstacle authored facing hint (advisory), aligned with `obstacles`.
+        # Absent / shorter list => treat the missing entries as None (all faces).
+        facings = list(facings or [])
+        self.facings: list[str | None] = [
+            (facings[i] if i < len(facings) else None)
+            for i in range(len(self.obstacles))
+        ]
         self.waypoints: list[tuple[float, float]] = []
         self.edges: list[tuple[int, int]] = []
+        # Indices (into self.waypoints) of the open-face pick points we appended.
+        self.pick_points: list[int] = []
         self._adj: dict[int, list[tuple[int, float]]] = {}
         self._build()
 
@@ -50,17 +84,72 @@ class NavNetwork:
                 return True
         return False
 
-    def _seg_free(self, a, b) -> bool:
-        """True if segment a-b does not cut through any obstacle rectangle."""
+    def _seg_free(self, a, b, ignore: int = -1) -> bool:
+        """True if segment a-b does not cut through any obstacle rectangle.
+
+        ``ignore`` (an index into ``self.obstacles``) skips one rectangle — used
+        for the open-face probe, which casts from a shelf's outward-offset point
+        toward its own centre and must ignore the shelf being probed (MapMaker's
+        ``obstacleScanner.isClipping_ignore(coord, center, shelf)``).
+        """
         mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-        if self._inside(mx, my):
-            return False
-        for (rx, ry, rw, rh) in self.obstacles:
+        for idx, (rx, ry, rw, rh) in enumerate(self.obstacles):
+            if idx == ignore:
+                continue
+            if rx + 1e-6 < mx < rx + rw - 1e-6 and ry + 1e-6 < my < ry + rh - 1e-6:
+                return False
             cs = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
             for i in range(4):
                 if _seg_intersect(a, b, cs[i], cs[(i + 1) % 4]):
                     return False
         return True
+
+    def _open_faces(self, idx: int) -> list[tuple[float, float]]:
+        """MapMaker open-face probe for obstacle ``idx``.
+
+        Port of ``CartNetworkGenerator.setWaypointsForTargets`` (decompiled lines
+        ~217–279): take the 4 side-midpoints, push each out along its outward
+        normal by ``self.offset``, and keep a face ONLY if the offset point can
+        reach the shelf centre without clipping *another* obstacle
+        (``isClipping_ignore(coord, center, shelf)``) and lands in free space
+        inside the floor. When this shelf has an authored ``facing`` we keep just
+        that face if it is open; if the preferred face is blocked we fall back to
+        every open face so a shelf is never stranded (MapMaker warns
+        "全面が塞がれている" only when *no* face opens).
+        """
+        rx, ry, rw, rh = self.obstacles[idx]
+        cx, cy = rx + rw / 2, ry + rh / 2
+        off = self.offset
+        # Side-midpoints in MapMaker's order [left(-x), right(+x), up(-y), down(+y)],
+        # each already pushed outward by `off` along the side's outward normal.
+        sides = [
+            (rx - off, cy),        # left   (-x)
+            (rx + rw + off, cy),   # right  (+x)
+            (cx, ry - off),        # up     (-y)
+            (cx, ry + rh + off),   # down   (+y)
+        ]
+        open_pts: list[tuple[float, float]] = []
+        open_sides: list[int] = []
+        for s, (px, py) in enumerate(sides):
+            # Clamp to the floor; a point shoved outside the building is not usable.
+            if not (0.0 <= px <= self.width and 0.0 <= py <= self.depth):
+                continue
+            # Open iff the offset point isn't buried in another obstacle AND it
+            # reaches the centre without clipping a *different* rectangle.
+            if self._inside(px, py):
+                continue
+            if not self._seg_free((px, py), (cx, cy), ignore=idx):
+                continue
+            open_pts.append((round(px, 2), round(py, 2)))
+            open_sides.append(s)
+        if not open_pts:
+            return []
+        # Advisory facing: prefer the authored face when it is geometrically open.
+        face = self.facings[idx]
+        pref = _FACING_SIDE.get(face) if face else None
+        if pref is not None and pref in open_sides:
+            return [open_pts[open_sides.index(pref)]]
+        return open_pts
 
     def _candidate_points(self) -> list[tuple[float, float]]:
         cl = self.clearance
@@ -116,8 +205,62 @@ class NavNetwork:
             adj[i].append((j, w))
             adj[j].append((i, w))
             edges.append((min(i, j), max(i, j)))
-        self.edges = sorted(set(edges))
         self._adj = adj
+        self.edges = sorted(set(edges))
+        # M4: append facing-aware open-face pick points and wire them in. Done
+        # after the aisle net exists so each pick point connects to the visible
+        # aisle waypoints (MapMaker's waypointsNeedingConnectingToFreeWaypoints).
+        self._add_pick_points()
+        self.edges = sorted(set(self.edges))
+
+    def _add_pick_points(self) -> None:
+        """Generate open-face pick points per obstacle and connect them in.
+
+        Each kept pick point becomes a waypoint connected to the nearby aisle
+        waypoints whose straight segment is unobstructed — the analogue of
+        MapMaker connecting each ``_free`` pick waypoint to its nearest free
+        waypoints (lines ~419–426). De-duplicated so coincident faces of adjacent
+        shelves collapse to one node, keeping the graph small.
+        """
+        base_n = len(self.waypoints)
+        if base_n == 0:
+            return
+        index_for: dict[tuple[float, float], int] = {
+            wp: i for i, wp in enumerate(self.waypoints)
+        }
+        for idx in range(len(self.obstacles)):
+            for pp in self._open_faces(idx):
+                if self._inside(*pp):
+                    continue
+                pi = index_for.get(pp)
+                if pi is None:
+                    pi = len(self.waypoints)
+                    self.waypoints.append(pp)
+                    self._adj[pi] = []
+                    index_for[pp] = pi
+                    self.pick_points.append(pi)
+                # Connect this pick point to nearby aisle waypoints it can see.
+                # Bounded fan-out (nearest ~12) keeps the graph sparse like the
+                # KD-tree n_nearestNeighbour cap MapMaker uses.
+                order = sorted(
+                    range(base_n),
+                    key=lambda k: hypot(self.waypoints[pi][0] - self.waypoints[k][0],
+                                        self.waypoints[pi][1] - self.waypoints[k][1]))
+                connected = 0
+                for k in order:
+                    if k == pi:
+                        continue
+                    if not self._seg_free(self.waypoints[pi], self.waypoints[k]):
+                        continue
+                    w = hypot(self.waypoints[pi][0] - self.waypoints[k][0],
+                              self.waypoints[pi][1] - self.waypoints[k][1])
+                    if not any(nb == k for nb, _ in self._adj[pi]):
+                        self._adj[pi].append((k, w))
+                        self._adj[k].append((pi, w))
+                        self.edges.append((min(pi, k), max(pi, k)))
+                    connected += 1
+                    if connected >= 12:
+                        break
 
     # ----------------------------------------------------------------- routing
     def _nearest_visible(self, p) -> int:
@@ -130,6 +273,26 @@ class NavNetwork:
             if d < bestd and self._seg_free(p, wp):
                 best, bestd = i, d
         return best if best >= 0 else backup
+
+    def _simplify(self, pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        """Line-of-sight smoothing: drop a waypoint when the straight segment from
+        the previous kept point to the next one is unobstructed. Keeps the first
+        and last points; only short-circuits genuine free shots, so routes stay
+        obstacle-free but flow as straight as the geometry allows."""
+        if len(pts) <= 2:
+            return pts
+        out = [pts[0]]
+        i = 0
+        n = len(pts)
+        while i < n - 1:
+            j = n - 1
+            while j > i + 1:
+                if self._seg_free(out[-1], pts[j]):
+                    break
+                j -= 1
+            out.append(pts[j])
+            i = j
+        return out
 
     def path(self, a, b) -> list[tuple[float, float]]:
         if len(self.waypoints) < 2:
@@ -150,7 +313,8 @@ class NavNetwork:
                 return [tuple(a), tuple(b)]
         chain.append(sa)
         chain.reverse()
-        return [tuple(a)] + [self.waypoints[i] for i in chain] + [tuple(b)]
+        route = [tuple(a)] + [self.waypoints[i] for i in chain] + [tuple(b)]
+        return self._simplify(route)
 
     def distance(self, a, b) -> float:
         pts = self.path(a, b)
@@ -187,6 +351,7 @@ class NavNetwork:
         width = float(getattr(bounds, "width", 80.0)) if bounds else 80.0
         depth = float(getattr(bounds, "depth", 40.0)) if bounds else 40.0
         obstacles: list[tuple[float, float, float, float]] = []
+        facings: list[str | None] = []
         for z in (getattr(layout, "zones", []) or []):
             if getattr(z, "type", None) != "storage":
                 continue
@@ -195,4 +360,6 @@ class NavNetwork:
                     obstacles.append((float(sh.x), float(sh.y), float(sh.w), float(sh.h)))
                 except (TypeError, ValueError, AttributeError):
                     continue
-        return cls(width, depth, obstacles)
+                # Advisory facing hint (None when unset / unknown).
+                facings.append(getattr(sh, "facing", None))
+        return cls(width, depth, obstacles, facings=facings)
