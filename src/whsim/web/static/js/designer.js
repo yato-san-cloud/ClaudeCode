@@ -1124,6 +1124,14 @@ export class Designer {
 
   _shelfHint() {
     const t = (RACK_TYPES[this.shelfType] || RACK_TYPES.medium).label;
+    // First-run empty state: the active storage zone has no shelves yet. Point at
+    // the three ways to start (draw / bulk-gen / area-fill) + the import path so a
+    // salesperson is never staring at an empty floor with no obvious next move.
+    const zone = this._activeStoreZone();
+    const noShelves = !zone || !(zone.shelves && zone.shelves.length);
+    if (noShelves && this.shelfBrush !== 'area' && this.shelfBrush !== 'draw') {
+      return 'まだ棚がありません。「棚を描く」で1枚ずつ、「棚一括生成」でまとめて、「面積オート生成」で矩形から自動配置。①取込のMapMakerレイアウトを読み込んでもOKです。';
+    }
     if (this.shelfBrush === 'area') return `面積オート生成（${t}）: 保管ゾーン内でドラッグして矩形を描くと、棚列と通路を自動配置します。`;
     if (this.shelfBrush === 'draw') return `棚を描く（${t}）: 角から角へドラッグで棚を1枚作成。クリックで選択、ハンドルでサイズ変更、Ctrlでスナップ無効。`;
     return '棚をクリックで選択（Shiftで追加選択）、ドラッグで移動、ハンドルでサイズ変更。設備パレットから種別を選べます。';

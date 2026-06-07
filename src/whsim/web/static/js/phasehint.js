@@ -21,7 +21,7 @@ const PHASES = {
     subtitle: 'レイアウトと工程・人員を組む',
     ctaText: 'シミュレーションを実行 →',
     ctaTargetView: null, // run action → opts.onRun()
-    empty: 'レイアウト・棚種別・動線を置くと、必要工数と人員配分を試算します。',
+    empty: '「棚」モードで保管棚を配置（棚を描く／一括生成／面積オート生成）。設備パレットで棚種別を選べます。①取込でMapMakerレイアウトを読み込めば、そのまま編集できます。',
   },
   validate: {
     subtitle: '捌けるかをKPIと動きで確認',

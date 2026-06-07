@@ -59,6 +59,39 @@ function toast(message, kind = 'info', ms = 4200) {
   return t;
 }
 
+// Toast with an inline primary action button (e.g. "③設計を開く →"). Clicking the
+// action runs `onAction` then dismisses; the row keeps the standard × dismiss.
+// Used to turn a passive "imported" confirmation into a one-tap next step so the
+// new MapMaker/3D power is discoverable right where the salesperson lands.
+function actionToast(message, actionLabel, onAction, kind = 'ok', ms = 9000) {
+  const t = toast(message, kind, ms);
+  if (!t) return null;
+  const close = t.querySelector('.toast-close');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'toast-action';
+  btn.textContent = actionLabel;
+  btn.onclick = () => {
+    try { if (typeof onAction === 'function') onAction(); }
+    finally {
+      t.classList.add('leaving');
+      setTimeout(() => t.remove(), 200);
+    }
+  };
+  // Sit between the message and the × so the CTA reads as the primary affordance.
+  if (close) t.insertBefore(btn, close); else t.appendChild(btn);
+  return t;
+}
+
+// Post-import nudge: a layout import (MapMaker .rmpm / 地図CSV / CAD) lands the
+// user on ①取込, but the value now lives in ③設計 (place/adjust shelves — "the
+// drawn map is the routing truth") and ④検証 (the realistic 3D). Surface a
+// one-tap path there instead of leaving them stranded on the import screen.
+function nudgeToDesign(summary) {
+  actionToast(summary + ' ③設計でレイアウトを調整できます。', '③設計を開く →',
+    () => switchView('design'), 'ok');
+}
+
 const STATE_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
                       pick: '#33a02c', pack: '#e31a1c', inspect: '#ffb300' };
 const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
@@ -963,6 +996,7 @@ async function uploadMapcsv(file) {
     $('importLog').innerHTML = lines.join('\n');
     await openProject(S.project); // refresh headline/provenance/readiness
     if (S.view === 'design') mountDesigner();
+    nudgeToDesign(`地図を取り込みました（棚${r.shelves}）。`);
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('地図取込に失敗しました: ' + e.message, 'error'); }
 }
 
@@ -979,7 +1013,7 @@ async function uploadRmpm(file) {
     $('importLog').innerHTML = lines.join('\n');
     await openProject(S.project); // refresh headline/provenance/readiness
     if (S.view === 'design') mountDesigner();
-    toast('MapMakerレイアウトを取り込みました。', 'ok');
+    nudgeToDesign(`MapMakerレイアウトを取り込みました（棚${r.shelves}）。`);
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取込に失敗しました: ' + e.message, 'error'); }
 }
 
@@ -1051,6 +1085,7 @@ async function uploadCad(file) {
     for (const w of (r.warnings || [])) lines.push(`<span class="warn">! ${w}</span>`);
     $('importLog').innerHTML = lines.join('\n');
     if (S.view === 'design') mountDesigner();
+    nudgeToDesign(`図面を取り込みました（壁${r.walls}）。`);
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
 }
 

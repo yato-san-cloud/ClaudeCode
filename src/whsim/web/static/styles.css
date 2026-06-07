@@ -1502,6 +1502,17 @@ html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
   font-size: 18px; cursor: pointer; border-radius: var(--r-xs);
 }
 .toast-close:hover { background: var(--bg-hover); color: var(--ink-primary); }
+/* Inline primary CTA inside an actionable toast (e.g. "③設計を開く →"). Matches
+   the app's accent button: filled accent, dark-on-accent ink, token radii. */
+.toast-action {
+  flex: none; align-self: center; padding: 5px 11px; border: 0; cursor: pointer;
+  border-radius: var(--r-sm); background: var(--accent); color: var(--ink-onAccent);
+  font: inherit; font-size: var(--fs-sm); font-weight: 700; white-space: nowrap;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.toast-action:hover { background: var(--accent-hover); }
+.toast-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .toast-action { transition: none; } }
 .toast.leaving { animation: toastOut 200ms var(--ease) forwards; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(8px); } }

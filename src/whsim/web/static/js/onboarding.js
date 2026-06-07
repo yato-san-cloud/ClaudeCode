@@ -20,8 +20,9 @@
 //
 // Vanilla ES module. No raw-HTML for any server/user string (textContent only).
 
-// Versioned: bumping re-introduces the (now 5-phase) guide once to existing users.
-const STORAGE_KEY = 'whsim-onboarded-v2';
+// Versioned: bumping re-introduces the guide once to existing users. v3 refreshes
+// the ③設計/④検証 copy to cover the new MapMaker shelf editor + realistic 3D.
+const STORAGE_KEY = 'whsim-onboarded-v3';
 
 const $ = (id) => document.getElementById(id);
 
@@ -123,10 +124,10 @@ export function mountOnboarding(opts = {}) {
   // Targets to spotlight: the 5-phase journey pills (degrade to a centered card
   // when a selector isn't present yet — renderStep handles target === null).
   const STEPS = [
-    { sel: '.jn-pill[data-phase="intake"]', title: '① 取込', text: '案件を作り、顧客データ（CSV/Excel/ZIP/CAD）を取り込みます。読めない項目は飛ばすだけで止まりません。手元に無ければ「サンプルでためす」でOK。' },
+    { sel: '.jn-pill[data-phase="intake"]', title: '① 取込', text: '案件を作り、顧客データ（CSV/Excel/ZIP/CAD/MapMakerレイアウト）を取り込みます。読めない項目は飛ばすだけで止まりません。手元に無ければ「サンプルでためす」でOK。' },
     { sel: '.jn-pill[data-phase="analyze"]', title: '② 分析', text: '取り込んだ出荷データから物量・波動・ABCを自動分析。現状の事実をここで掴みます。' },
-    { sel: '.jn-pill[data-phase="design"]', title: '③ 設計', text: 'レイアウト・棚・動線を組み、物量を工程ごとの人時へ、必要人員まで試算します。' },
-    { sel: '.jn-pill[data-phase="validate"]', title: '④ 検証', text: 'シミュレーションを実行し、処理能力・コスト・混雑をKPIと動きで確かめます。' },
+    { sel: '.jn-pill[data-phase="design"]', title: '③ 設計', text: 'レイアウトを描けます。「棚」モードで保管棚を自由配置（棚一括生成／面積オート生成）、設備パレットから棚種別（パレットラック等）を選択。描いた地図がそのまま動線になります。' },
+    { sel: '.jn-pill[data-phase="validate"]', title: '④ 検証', text: 'シミュレーションを実行し、処理能力・コスト・混雑をKPIで確認。「3Dビュー」では本物そっくりの棚と作業者の動きをドラッグで自由に見渡せます。' },
     { sel: '.jn-pill[data-phase="propose"]', title: '⑤ 提案', text: '提案PNG・シナリオ比較・提案書（PPTX/PDF）を出力。「実データN%」も併記されます。' },
     { sel: '.jn-pin[data-view="chat"]', title: '横断: OCTA と 知見', text: 'どのフェーズでもOCTAに相談でき、気づきは「知見」に残せます。フェーズ動線とは別レーンでいつでも使えます。' },
   ];

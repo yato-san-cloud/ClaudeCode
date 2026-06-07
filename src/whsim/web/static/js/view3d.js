@@ -49,6 +49,18 @@ const RACK_DIMS = {
 const RACK_DEFAULT = 'medium';
 function rackDims(rt) { return RACK_DIMS[rt] || RACK_DIMS[RACK_DEFAULT]; }
 
+// Legend metadata for the on-screen 3D guide: Japanese label + a swatch colour
+// matching the 2D editor/replay (RACK_COLOR in app.js) so the same rack reads as
+// the same colour across 2D and 3D. Display-only; never feeds geometry.
+const RACK_LEGEND = {
+  light:     { label: '軽量棚', sw: '#7fb0f2' },
+  medium:    { label: '中量棚', sw: '#2ee6a0' },
+  pallet:    { label: 'パレットラック', sw: '#f5b05a' },
+  nestainer: { label: 'ネステナー', sw: '#9b6bff' },
+  flow:      { label: 'フローラック', sw: '#34e3ff' },
+  asrs:      { label: '自動倉庫(AS/RS)', sw: '#5cebff' },
+};
+
 // Steel / accent colours shared by the realistic rack builders.
 const RACK_STEEL = 0x3b434d;     // upright frames / neutral structure
 const RACK_BEAM = 0xff7a1a;      // pallet-rack load beams (signature orange)
@@ -194,6 +206,7 @@ export class Scene3D {
     this._glowEnabled = true; // gated off by fps auto-degrade (tier 3)
     this._heat = null;        // { mesh, mat } instanced congestion patches
     this._hud = null;         // DOM overlay { root, ... } or null
+    this._info = null;        // controls-hint + legend DOM overlay or null
     this._intro = null;       // intro camera tween state or null
     this._preset = 'brand';
     this._belts = [];         // animated conveyor belt mats { mat, speed }
@@ -273,6 +286,9 @@ export class Scene3D {
 
     // Live productivity HUD (DOM overlay) — only when replay.series exists.
     this._buildHud();
+    // Controls hint + scene legend (DOM overlay) — tells the salesperson what
+    // they're looking at and how to move the camera. Pure DOM, no render change.
+    this._buildInfoOverlay();
     // Gentle one-shot intro camera move (skipped under reduced-motion).
     this._startIntro();
 
@@ -1932,6 +1948,127 @@ export class Scene3D {
     fx.lineMat.opacity = pulse * 0.55;
   }
 
+  // -- Controls hint + scene legend (DOM overlay) ---------------------------
+  // A small top-left panel that tells a non-technical salesperson (a) how to move
+  // the camera ("ドラッグで回転 / ホイールで拡大") and (b) what the realistic racks,
+  // agents and the amber pick-glow mean. The legend is data-driven (only rack
+  // types / agents actually present are shown) and starts collapsed if the user
+  // dismissed it before (localStorage). Pure DOM: never touches the three.js
+  // render contract, mirrors the HUD's card styling, and is removed in dispose().
+  _buildInfoOverlay() {
+    this._info = null;
+    // Container must be a positioning context for absolute children (the HUD may
+    // already have set this; setting it again is harmless).
+    try {
+      const cs = window.getComputedStyle(this.container);
+      if (cs && cs.position === 'static') this.container.style.position = 'relative';
+    } catch (_e) { /* ignore */ }
+
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('whsim-3d-legend') === 'off'; } catch (_e) { /* ignore */ }
+
+    const root = document.createElement('div');
+    root.className = 'whsim-info3d';
+    root.style.cssText = [
+      'position:absolute', 'left:10px', 'top:10px', 'z-index:5',
+      'max-width:230px', 'padding:8px 10px', 'border-radius:8px',
+      'background:rgba(15,20,29,0.72)', 'backdrop-filter:blur(4px)',
+      'color:#e6edf3', 'font:11px/1.4 system-ui,-apple-system,sans-serif',
+      'box-shadow:0 2px 10px rgba(0,0,0,0.35)',
+      'border:1px solid rgba(0,184,212,0.25)',
+    ].join(';');
+
+    // Header: controls hint + a collapse/expand toggle ("?" ⇄ "×").
+    const head = document.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:8px';
+    const hint = document.createElement('div');
+    hint.style.cssText = 'flex:1;color:#cfe8ef';
+    hint.innerHTML = '<span style="color:#00b8d4;font-weight:600">操作</span>'
+      + ' ドラッグで回転・ホイールで拡大';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.style.cssText = 'flex:none;width:20px;height:20px;line-height:1;padding:0;border:0;'
+      + 'border-radius:5px;background:rgba(255,255,255,0.08);color:#cfe8ef;font-size:13px;cursor:pointer';
+    head.appendChild(hint);
+    head.appendChild(toggle);
+    root.appendChild(head);
+
+    // Body: the legend (rack types present + agent roles + pick glow).
+    const body = document.createElement('div');
+    body.style.cssText = 'margin-top:7px;display:flex;flex-direction:column;gap:4px';
+
+    const swatchRow = (color, label, round) => {
+      const r = document.createElement('div');
+      r.style.cssText = 'display:flex;align-items:center;gap:7px';
+      const sw = document.createElement('span');
+      sw.style.cssText = `width:11px;height:11px;flex:0 0 auto;background:${color};`
+        + `border-radius:${round ? '50%' : '3px'};box-shadow:inset 0 0 0 1px rgba(0,0,0,0.25)`;
+      const tx = document.createElement('span');
+      tx.style.cssText = 'color:#cdd6e0';
+      tx.textContent = label;
+      r.appendChild(sw); r.appendChild(tx);
+      return r;
+    };
+
+    // Rack types actually present in this replay (dedup, in catalog order).
+    const present = new Set((this.replay.shelves || []).map((s) => s.rack_type || RACK_DEFAULT));
+    const rackKeys = Object.keys(RACK_LEGEND).filter((k) => present.has(k));
+    if (rackKeys.length) {
+      const cap = document.createElement('div');
+      cap.style.cssText = 'color:#8b98a8;margin-top:1px';
+      cap.textContent = '保管設備';
+      body.appendChild(cap);
+      for (const k of rackKeys) body.appendChild(swatchRow(RACK_LEGEND[k].sw, RACK_LEGEND[k].label, false));
+    }
+
+    // Agents present (workers/AGVs/forklifts) + the pick-event glow cue.
+    // Swatch colours mirror the live agent colours in the scene (worker pick
+    // state / AGV travel / forklift) so the legend reads true.
+    const agents = [];
+    if ((this.replay.workers || []).length) agents.push(['#33a02c', 'ピッカー（人）']);
+    if ((this.replay.agvs || []).length) agents.push(['#1f78b4', 'AGV']);
+    if ((this.replay.forklifts || []).length) agents.push(['#f57c00', 'フォークリフト']);
+    if (agents.length) {
+      const cap = document.createElement('div');
+      cap.style.cssText = 'color:#8b98a8;margin-top:3px';
+      cap.textContent = '作業者・搬送';
+      body.appendChild(cap);
+      for (const [c, l] of agents) body.appendChild(swatchRow(c, l, true));
+    }
+    // Pick-event glow: only meaningful when the replay carries pick targets.
+    const hasPickFx = (this.replay.workers || []).some(
+      (w) => Array.isArray(w.keyframes) && w.keyframes.some((kf) => kf && kf[4]));
+    if (hasPickFx) {
+      const cap = document.createElement('div');
+      cap.style.cssText = 'color:#8b98a8;margin-top:3px';
+      cap.textContent = '動き';
+      body.appendChild(cap);
+      body.appendChild(swatchRow('#ffe14d', 'ピック箇所が発光', false));
+    }
+
+    root.appendChild(body);
+    this.container.appendChild(root);
+
+    const apply = (isCollapsed) => {
+      body.hidden = isCollapsed;
+      toggle.textContent = isCollapsed ? '?' : '×';
+      toggle.setAttribute('aria-label', isCollapsed ? '凡例を開く' : '凡例を閉じる');
+      toggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+    };
+    // If there's nothing to legend (no racks/agents), keep just the controls hint.
+    const hasLegend = body.childElementCount > 0;
+    if (!hasLegend) { toggle.style.display = 'none'; }
+    else {
+      toggle.onclick = () => {
+        const next = !body.hidden;
+        apply(next);
+        try { localStorage.setItem('whsim-3d-legend', next ? 'off' : 'on'); } catch (_e) { /* ignore */ }
+      };
+    }
+    apply(hasLegend ? collapsed : true);
+    this._info = { root };
+  }
+
   // -- Live productivity HUD (DOM overlay) ----------------------------------
   // Only built when replay.series exists & is non-empty. A small absolutely-
   // positioned panel inside the container with a sparkline (canvas 2D) and live
@@ -2374,6 +2511,11 @@ export class Scene3D {
       this._hud.root.parentNode.removeChild(this._hud.root);
     }
     this._hud = null;
+    // Remove the controls-hint + legend DOM overlay (pure DOM, no GPU resources).
+    if (this._info && this._info.root && this._info.root.parentNode) {
+      this._info.root.parentNode.removeChild(this._info.root);
+    }
+    this._info = null;
     // Remove contact-shadow sprites (their materials are tracked in _materials,
     // the shared blob texture in _textures — both freed below).
     for (const s of this._shadowSprites) {
