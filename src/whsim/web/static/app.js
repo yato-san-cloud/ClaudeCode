@@ -307,9 +307,6 @@ function draw2d() {
   // V3 viewport extras (additive; each guarded so absent data = legacy render):
   // staging fill-ring + bottleneck ⚠ marker + bottom-left legend.
   if (sg) drawStagingRing(X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2), sg);
-  // TODO(P0-3): congestion heatmap overlay on the canvas. Deferred — needs a
-  // backend render/replay.py change to emit per-cell occupancy + visual
-  // verification not available in this environment.
   drawBottleneck(rep, X, Y);
   drawLegend(rep, w, h, P);
   drawLiveHUD(ctx, rep, S.t);
@@ -1244,6 +1241,7 @@ async function applyAndRun(edits) {
     if (a && Array.isArray(a.skipped) && a.skipped.length) {
       toast(`一部の変更は適用できませんでした（${a.skipped.length}件）。`, 'info');
     }
+    S._designerProj = null;  // apply-run changed the model → invalidate Designer cache
     await openProjectQuiet();
     const r = await doRun();
     $('status').textContent = `再実行が完了しました（${r.run}）。`;
