@@ -148,6 +148,53 @@ def test_xtab_cells_ranks_and_reconciliation():
     assert total_lines == sum(r["lines"] for r in v["by_weekday"])
 
 
+# --- ①c per-SKU × weekday breakdown (re-rankable ABC Pareto) ----------------
+
+def test_xtab_sku_empty_is_safe():
+    m = WarehouseModel()  # no outbound at all
+    v = bi.analysis_views(m)
+    assert v["has_data"] is False
+    assert v["xtab_sku"] == []
+
+
+def test_xtab_sku_cells_and_reconciliation():
+    m = WarehouseModel()
+    m.items = [Item(sku="A", name="alpha", case_qty=10), Item(sku="B", case_qty=10)]
+    day = 86400.0
+    hour = 3600.0
+    m.orders = Orders(outbound=[
+        Order(order_id="O1", arrival_s=2 * hour,            # weekday 0, hour 2
+              lines=[OrderLine(sku="A", qty=90), OrderLine(sku="B", qty=5)]),
+        Order(order_id="O2", arrival_s=day + 5 * hour,      # weekday 1, hour 5
+              lines=[OrderLine(sku="A", qty=80), OrderLine(sku="B", qty=5)]),
+    ])
+    v = bi.analysis_views(m)
+    xs = v["xtab_sku"]
+    assert xs, "xtab_sku should be populated"
+
+    # Every cell has the documented shape.
+    for cell in xs:
+        assert set(cell) == {"sku", "weekday", "qty", "lines"}
+        assert 0 <= cell["weekday"] <= 6
+
+    # Cells exist ONLY for SKUs that appear in abc[] (the top_n set).
+    abc_skus = {r["sku"] for r in v["abc"]}
+    assert {c["sku"] for c in xs} <= abc_skus
+
+    # Expected cells: A appears in weekday 0 (qty 90) and weekday 1 (qty 80).
+    cells = {(c["sku"], c["weekday"]): c for c in xs}
+    assert cells[("A", 0)]["qty"] == 90.0 and cells[("A", 0)]["lines"] == 1
+    assert cells[("A", 1)]["qty"] == 80.0 and cells[("A", 1)]["lines"] == 1
+
+    # Reconciliation: summing xtab_sku over weekday per sku == abc qty per sku.
+    abc_qty = {r["sku"]: r["qty"] for r in v["abc"]}
+    sku_qty = {}
+    for c in xs:
+        sku_qty[c["sku"]] = sku_qty.get(c["sku"], 0.0) + c["qty"]
+    for sku, q in sku_qty.items():
+        assert abs(q - abc_qty[sku]) < 1e-6
+
+
 # --- ②仮値→モデル保存 (provenance=generated) ------------------------------
 
 def test_derive_volumes_is_pure_and_clamps():

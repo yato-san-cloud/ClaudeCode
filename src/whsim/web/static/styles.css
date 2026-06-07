@@ -3,7 +3,8 @@
    Adopts the design handoff tokens (docs/design_handoff/source/tokens.css) and
    applies the hi-fi component treatments onto the LIVE markup's selectors.
    Near-white surfaces · warm near-black ink #37352F · hairline borders ·
-   Notion blue #2383E2 accent · subtle shadows · calm tabs · confident verdict.
+   Cyan brand accent (dark #34E3FF / light #16C0DE; single source of truth here)
+   · subtle shadows · calm tabs · confident verdict.
    Restyles existing selectors only; never renames/removes JS-depended hooks.
    ============================================================================= */
 
@@ -1841,7 +1842,7 @@ h1,h2,h3,h4,.brand{ font-family:var(--font-display); }
 html[data-theme="dark"] .wm-t{
   background:linear-gradient(180deg,#FBFEFF,#A9EBFB 60%,#34E3FF);
   -webkit-background-clip:text; background-clip:text; color:transparent; }
-html[data-theme="dark"] .wm-stem{ background:linear-gradient(180deg,#34E3FF,#2F7BFF); }
+html[data-theme="dark"] .wm-stem{ background:linear-gradient(180deg,#34E3FF,#0E8FA8); }
 html[data-theme="dark"] .wm-cube-light{ display:none; }
 html[data-theme="dark"] .wm-cube-dark{ display:block; }
 html[data-theme="dark"] .brand-tag{ color:#8FA6BD; }

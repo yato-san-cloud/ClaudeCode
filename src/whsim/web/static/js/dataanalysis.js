@@ -2,11 +2,19 @@
 // サンプル or アップロード → /api/analysis/* → KPI・インサイト・チャートを描画.
 // 自己完結 (テーマは CSS 変数を参照、無ければフォールバック値).
 
+// Insight-card border colours, keyed by severity. Resolved from the theme
+// status tokens (critical→--bad, warning→--warn, info→--accent/--info) to
+// concrete hex so inline styles stay theme-consistent; rebuilt on themechange.
 const SEV = {
-  critical: { c: '#ff5a78', t: '重大' },
-  warning:  { c: '#f5b05a', t: '注意' },
-  info:     { c: 'var(--accent)', t: '情報' },
+  critical: { c: '#FF5A78', t: '重大' },
+  warning:  { c: '#F5B05A', t: '注意' },
+  info:     { c: '#34E3FF', t: '情報' },
 };
+function refreshSevColors() {
+  SEV.critical.c = cssColor('--bad', '#FF5A78');
+  SEV.warning.c = cssColor('--warn', '#F5B05A');
+  SEV.info.c = cssColor('--info', cssColor('--accent', '#34E3FF'));
+}
 // SVG <path>/<rect> paint attributes do NOT resolve CSS var(), so resolve the
 // shared ABC-rank tokens (--rank-a/b/c — identical to analysis.js) to concrete
 // colours. Refreshed on the document `themechange` event (see mountDataAnalysis).
@@ -29,7 +37,7 @@ function refreshRankColors() {
 // brand accent to a concrete colour once and feed it to the chart builders.
 // Refreshed on the document `themechange` event (see mountDataAnalysis).
 function accentColor() {
-  return cssColor('--accent', '#2383E2'); // cyan flip handled by the token itself
+  return cssColor('--accent', '#34E3FF'); // cyan brand; flip handled by the token itself
 }
 
 function injectStyle() {
@@ -258,6 +266,7 @@ function render(el, b) {
 export function mountDataAnalysis(el, opts = {}) {
   injectStyle();
   refreshRankColors();
+  refreshSevColors();
   const root = document.createElement('div');
   root.className = 'da';
   el.innerHTML = '';
@@ -331,7 +340,7 @@ export function mountDataAnalysis(el, opts = {}) {
   // light↔dark flip needs a re-render to pick up the new --accent. Re-render the
   // current bundle (no refetch) and re-wire on the document `themechange` event;
   // the listener is removed in dispose() to avoid leaks across remounts.
-  const onTheme = () => { refreshRankColors(); render(root, bundle); wire(); };
+  const onTheme = () => { refreshRankColors(); refreshSevColors(); render(root, bundle); wire(); };
   document.addEventListener('themechange', onTheme);
 
   return {

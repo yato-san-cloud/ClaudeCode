@@ -142,6 +142,10 @@ def analysis_views(model: WarehouseModel, *, top_n: int = 20) -> dict:
         # Facet domains so the client can render consistent axes.
         "xtab_weekdays": list(_WEEKDAY_JP),  # index = weekday 0..6 (0 = 月)
         "xtab_ranks": ["A", "B", "C"],
+        # Per-SKU × weekday breakdown (restricted to the ABC top_n set), so the
+        # client can RE-RANK the ABC Pareto under a weekday selection. Flat list
+        # of {sku, weekday 0-6, qty, lines}; empty when no data.
+        "xtab_sku": [],
     }
     if df.empty:
         return out
@@ -263,6 +267,29 @@ def analysis_views(model: WarehouseModel, *, top_n: int = 20) -> dict:
                  "hour": int(c.hour), "lines": int(c.lines),
                  "qty": float(c.qty), "orders": int(c.orders)}
                 for c in xt.itertuples(index=False)
+            ]
+
+            # Per-SKU × weekday breakdown, restricted to the ABC top_n set (the
+            # same SKUs surfaced in out["abc"]). Aggregated over hours so the
+            # client can re-rank the ABC Pareto under a weekday selection. Sum
+            # over weekday per sku reconciles to that SKU's abc qty. Weekday is
+            # floor(arrival_s/86400) % 7 (0 = 月), matching by_weekday/xtab.
+            top_skus = head[["sku"]]
+            con.register("top_skus", top_skus)
+            xs = con.execute(
+                """
+                SELECT l.sku                                       AS sku,
+                       (floor(l.arrival_s / 86400.0))::BIGINT % 7  AS weekday,
+                       coalesce(sum(l.qty), 0)                     AS qty,
+                       count(*)                                    AS lines
+                FROM lines l JOIN top_skus t ON l.sku = t.sku
+                GROUP BY l.sku, weekday
+                ORDER BY l.sku, weekday
+                """).fetchdf()
+            out["xtab_sku"] = [
+                {"sku": str(c.sku), "weekday": int(c.weekday),
+                 "qty": float(c.qty), "lines": int(c.lines)}
+                for c in xs.itertuples(index=False)
             ]
     finally:
         con.close()
