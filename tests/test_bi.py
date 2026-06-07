@@ -79,6 +79,75 @@ def test_analysis_views_abc_and_weekday():
     assert v["daily"]                        # span >= 1 day -> daily series present
 
 
+# --- ①b クロスタブ (true cross-filtering) -----------------------------------
+
+def test_xtab_empty_is_safe():
+    m = WarehouseModel()  # no outbound at all
+    v = bi.analysis_views(m)
+    assert v["has_data"] is False
+    assert v["xtab"] == []
+    # facet domains are still present so the client can render empty axes
+    assert v["xtab_ranks"] == ["A", "B", "C"]
+    assert len(v["xtab_weekdays"]) == 7
+
+
+def test_xtab_cells_ranks_and_reconciliation():
+    m = WarehouseModel()
+    m.items = [Item(sku="A", name="alpha", case_qty=10), Item(sku="B", case_qty=10)]
+    day = 86400.0
+    hour = 3600.0
+    m.orders = Orders(outbound=[
+        # A dominates qty -> rank A; B small -> rank B/C. Two weekdays, two hours.
+        Order(order_id="O1", arrival_s=2 * hour,            # weekday 0, hour 2
+              lines=[OrderLine(sku="A", qty=90), OrderLine(sku="B", qty=5)]),
+        Order(order_id="O2", arrival_s=day + 5 * hour,      # weekday 1, hour 5
+              lines=[OrderLine(sku="A", qty=80), OrderLine(sku="B", qty=5)]),
+    ])
+    v = bi.analysis_views(m)
+    xt = v["xtab"]
+    assert xt, "xtab should be populated"
+
+    # Every cell has the documented shape.
+    for cell in xt:
+        assert set(cell) == {"rank", "weekday", "hour", "lines", "qty", "orders"}
+        assert 0 <= cell["weekday"] <= 6
+        assert 0 <= cell["hour"] <= 23
+
+    # Ranks in xtab match the ABC ranks exactly (consistent ranking logic).
+    abc_rank = {r["sku"]: r["rank"] for r in v["abc"]}
+    assert abc_rank["A"] == "A"
+    xtab_ranks = {c["rank"] for c in xt}
+    assert xtab_ranks <= set(abc_rank.values())
+
+    # Expected cells: A appears in (wd0,h2) and (wd1,h5); B alongside it.
+    cells = {(c["rank"], c["weekday"], c["hour"]): c for c in xt}
+    a_wd0 = cells[("A", 0, 2)]
+    assert a_wd0["qty"] == 90.0 and a_wd0["lines"] == 1 and a_wd0["orders"] == 1
+
+    # Reconciliation (4a): summing xtab over weekday+hour per rank == ABC totals.
+    abc_qty_by_rank = {}
+    for r in v["abc"]:
+        abc_qty_by_rank[r["rank"]] = abc_qty_by_rank.get(r["rank"], 0.0) + r["qty"]
+    xtab_qty_by_rank = {}
+    for c in xt:
+        xtab_qty_by_rank[c["rank"]] = xtab_qty_by_rank.get(c["rank"], 0.0) + c["qty"]
+    assert xtab_qty_by_rank == {k: v for k, v in abc_qty_by_rank.items()}
+
+    # Reconciliation (4b): summing xtab over rank+hour per weekday == by_weekday.
+    wd_jp = v["xtab_weekdays"]
+    by_wd_qty = {r["weekday"]: r["qty"] for r in v["by_weekday"]}
+    xtab_qty_by_wd = {}
+    for c in xt:
+        label = wd_jp[c["weekday"]]
+        xtab_qty_by_wd[label] = xtab_qty_by_wd.get(label, 0.0) + c["qty"]
+    for label, q in xtab_qty_by_wd.items():
+        assert abs(q - by_wd_qty[label]) < 1e-6
+
+    # Lines also reconcile against the overall line total.
+    total_lines = sum(c["lines"] for c in xt)
+    assert total_lines == sum(r["lines"] for r in v["by_weekday"])
+
+
 # --- ②仮値→モデル保存 (provenance=generated) ------------------------------
 
 def test_derive_volumes_is_pure_and_clamps():

@@ -136,6 +136,12 @@ def analysis_views(model: WarehouseModel, *, top_n: int = 20) -> dict:
         "by_weekday": [],
         "daily": [],
         "hourly": [],
+        # Cross-tabulation for true client-side cross-filtering. Flat list of
+        # cells at rank × weekday × hour granularity; empty when no data.
+        "xtab": [],
+        # Facet domains so the client can render consistent axes.
+        "xtab_weekdays": list(_WEEKDAY_JP),  # index = weekday 0..6 (0 = 月)
+        "xtab_ranks": ["A", "B", "C"],
     }
     if df.empty:
         return out
@@ -228,6 +234,35 @@ def analysis_views(model: WarehouseModel, *, top_n: int = 20) -> dict:
                 {"hour": int(r.hour), "qty": float(r.qty),
                  "lines": int(r.lines), "orders": int(r.orders)}
                 for r in hourly.itertuples(index=False)
+            ]
+
+        # Cross-tab: aggregate LINES at rank × weekday × hour so the client can
+        # re-aggregate any chart under any facet selection without a refetch.
+        # Reuse the SAME per-SKU ranking computed for ABC above (consistent
+        # ranks); join lines -> rank, then GROUP BY in DuckDB. Weekday is
+        # floor(arrival_s/86400) % 7 (0 = 月, matching by_weekday); hour is
+        # floor(arrival_s/3600) % 24. arrival_s defaults to 0.0 in _line_frame,
+        # so a missing arrival buckets into weekday 0 / hour 0 (never skipped).
+        if not abc.empty:
+            ranks = abc[["sku", "rank"]]
+            con.register("ranks", ranks)
+            xt = con.execute(
+                """
+                SELECT r.rank                                   AS rank,
+                       (floor(l.arrival_s / 86400.0))::BIGINT % 7  AS weekday,
+                       (floor(l.arrival_s / 3600.0))::BIGINT % 24  AS hour,
+                       count(*)                                 AS lines,
+                       coalesce(sum(l.qty), 0)                  AS qty,
+                       count(distinct l.order_id)               AS orders
+                FROM lines l JOIN ranks r ON l.sku = r.sku
+                GROUP BY rank, weekday, hour
+                ORDER BY rank, weekday, hour
+                """).fetchdf()
+            out["xtab"] = [
+                {"rank": str(c.rank), "weekday": int(c.weekday),
+                 "hour": int(c.hour), "lines": int(c.lines),
+                 "qty": float(c.qty), "orders": int(c.orders)}
+                for c in xt.itertuples(index=False)
             ]
     finally:
         con.close()
