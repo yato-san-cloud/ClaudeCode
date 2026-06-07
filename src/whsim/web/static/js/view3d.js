@@ -30,6 +30,38 @@ const AGV_COLOR = {
 // Height (m) at which AGV boxes ride, centered on their thin body.
 const AGV_Y = 0.2;
 
+// --- Storage-equipment dimensions, mirrored from src/whsim/racktypes.py -------
+// One source of truth lives in Python (RACK_TYPES); this is its JS twin so the
+// 3D bay/depth/level numbers match the materialised location grid + the 2D PNG.
+// `bay`/`depth` are metres (one storage position); `levels` is the shelf count;
+// `h` is the realistic *overall rack height* in metres (NOT in racktypes.py —
+// added here because the engine only needs footprint, but the 3D needs height).
+// This is what FIXES the user's #1 complaint: racks are now 2.0–5.6–16 m tall,
+// taller than the 1.7 m human picker, so nothing "突き抜け"s anymore.
+const RACK_DIMS = {
+  light:     { bay: 0.9, depth: 0.45, levels: 5, h: 2.0 },   // 軽量棚
+  medium:    { bay: 1.2, depth: 0.60, levels: 4, h: 2.4 },   // 中量棚
+  pallet:    { bay: 1.1, depth: 1.10, levels: 4, h: 5.6 },   // パレットラック
+  nestainer: { bay: 1.1, depth: 1.40, levels: 3, h: 3.6 },   // ネステナー段積み
+  flow:      { bay: 1.0, depth: 1.50, levels: 3, h: 2.6 },   // フローラック
+  asrs:      { bay: 0.8, depth: 1.20, levels: 12, h: 16.0 }, // 自動倉庫(AS/RS)
+};
+const RACK_DEFAULT = 'medium';
+function rackDims(rt) { return RACK_DIMS[rt] || RACK_DIMS[RACK_DEFAULT]; }
+
+// Steel / accent colours shared by the realistic rack builders.
+const RACK_STEEL = 0x3b434d;     // upright frames / neutral structure
+const RACK_BEAM = 0xff7a1a;      // pallet-rack load beams (signature orange)
+const RACK_BOARD = 0x6b727b;     // shelf boards (light/medium)
+const PALLET_WOOD = 0xb08247;    // wooden pallet base under pallet loads
+const ROLLER_COLOR = 0x9aa3ad;   // flow-rack inclined roller lanes
+const ASRS_FRAME = 0x8d949c;     // AS/RS tower frame
+const ASRS_CRANE = 0xf0c020;     // AS/RS stacker-crane mast (hi-vis yellow)
+
+// Pick-event highlight: target cell pulse + connector colour.
+const PICK_GLOW = 0xffe14d;      // warm amber pulse on the reached cell
+const PICK_LINE = 0xffe14d;
+
 // Cyan accent used for the "active machine glow" (WITNESS-beating chrome).
 const GLOW_CYAN = 0x00d4f0;
 // Agent states that read as "working/moving" → glow ramps up; others decay.
@@ -109,13 +141,16 @@ const EQUIP_COLOR = {
   crane:     0x424a52,
 };
 
-// Sample [t, x, y, state] from a worker's sorted keyframe array (see spec).
+// Sample [t, x, y, state, hit?] from a worker's sorted keyframe array (see spec).
+// A keyframe may carry an optional 5th element `hit` ({run_id, along, sku, qty})
+// on `pick` frames; we surface the active frame's hit so the caller can drive the
+// pick-event viz. Backward-compatible: 4-tuple frames simply have `hit === null`.
 function sampleKeyframes(keyframes, t) {
-  if (!keyframes || keyframes.length === 0) return { x: 0, y: 0, state: 'idle' };
+  if (!keyframes || keyframes.length === 0) return { x: 0, y: 0, state: 'idle', hit: null };
   const first = keyframes[0];
-  if (t <= first[0]) return { x: first[1], y: first[2], state: 'idle' };
+  if (t <= first[0]) return { x: first[1], y: first[2], state: 'idle', hit: null };
   const last = keyframes[keyframes.length - 1];
-  if (t >= last[0]) return { x: last[1], y: last[2], state: last[3] };
+  if (t >= last[0]) return { x: last[1], y: last[2], state: last[3], hit: last[4] || null };
   // Linear scan for the bracketing pair k0 <= t < k1.
   let i = 0;
   for (; i < keyframes.length - 1; i++) {
@@ -134,6 +169,7 @@ function sampleKeyframes(keyframes, t) {
     x: k0[1] + (k1[1] - k0[1]) * f,
     y: k0[2] + (k1[2] - k0[2]) * f,
     state: k0[3],
+    hit: k0[4] || null,
   };
 }
 
@@ -227,6 +263,7 @@ export class Scene3D {
     this._buildHeat();           // 3D congestion patches (only if replay.heat)
     this._buildContactShadows(); // soft blob shadows under moving agents
     this._buildGlowHalos();      // additive cyan activity halos (pseudo-bloom)
+    this._buildPickFx();         // pooled pick-event pulse markers + connectors
 
     // Reduced-motion users get a fully static scene (belts + glow pulse off).
     if (this._reducedMotion()) this._beltSpeed = 0;
@@ -403,39 +440,438 @@ export class Scene3D {
     this._staging = { mesh, timeline: sg.timeline || [], capacity: sg.capacity || 1 };
   }
 
-  // Racks: instead of one flat box per location, build a little shelving unit
-  // with visible tiers (a darker steel frame + ABC-tinted stored goods on each
-  // shelf). Everything is drawn with InstancedMesh — one draw call per piece
-  // type per ABC class — so thousands of locations stay cheap. Presets still tune
-  // the goods' emissive glow via `_rackMaterials`, exactly as before.
+  // Racks: build realistic storage equipment from `replay.shelves` (the MapMaker
+  // run contract: {x, y0, y1, depth, pitch, rack_type, cells, [rect, facing,
+  // vertical]}). Each run is subdivided into BAYS at the rack type's bay pitch,
+  // oriented so the pick face opens toward the aisle (from `facing`), and built
+  // with per-rack_type realistic geometry (pallet beams, shelving tiers, flow
+  // roller lanes, AS/RS tower + crane). Everything is InstancedMesh — one draw
+  // call per (piece-type × rack_type), ABC tint via instanceColor on the load
+  // pieces — so hundreds of runs stay well under ~120 draw calls.
+  //
+  // Falls back to the legacy per-point builder when there are no shelf runs.
   _buildRacks() {
+    const shelves = this.replay.shelves || [];
+    if (shelves.length === 0) {
+      this._buildRacksFromPoints();   // legacy fallback (racks = location points)
+      return;
+    }
+
+    // 1) Expand every run into a flat list of BAYS. A bay is one storage cell with
+    //    a world centre (x,z), a yaw (so its pick face points to the aisle), a
+    //    width along the run, the rack_type, and an ABC class (from the matching
+    //    authored cell, else the run's modal class). This decouples geometry
+    //    construction (step 2) from layout maths.
+    const baysByType = {}; // rack_type -> [{x, z, yaw, bw, abc, cell}]
+    // Also remember, per run, the first bay's frame so pick-events can locate a
+    // target cell quickly (run_id + along → world position) without re-deriving.
+    this._shelfRuns = [];   // [{x0,z0, ux,uz, length, yaw, rt, dims}] per run
+    for (let ri = 0; ri < shelves.length; ri++) {
+      const run = shelves[ri];
+      const rt = RACK_DIMS[run.rack_type] ? run.rack_type : RACK_DEFAULT;
+      const dims = rackDims(rt);
+      const frame = this._runFrame(run, dims);   // axis + footprint of this run
+      this._shelfRuns.push({ ...frame, ri, rt, dims });
+      const cells = run.cells || [];
+      const bayW = frame.bayW;
+      const nBays = Math.max(1, Math.round(frame.length / bayW));
+      const list = baysByType[rt] || (baysByType[rt] = []);
+      for (let b = 0; b < nBays; b++) {
+        // Bay centre marches along the run's unit axis from its start.
+        const along = (b + 0.5) * (frame.length / nBays);
+        const x = frame.x0 + frame.ux * along;
+        const z = frame.z0 + frame.uz * along;
+        // ABC: prefer the authored cell nearest this bay's along-fraction.
+        const cell = cells.length
+          ? cells[Math.min(cells.length - 1, Math.floor((along / frame.length) * cells.length))]
+          : null;
+        const abc = cell && ABC_COLOR[cell.abc] !== undefined ? cell.abc : 'C';
+        list.push({ x, z, yaw: frame.yaw, bw: frame.length / nBays, abc, depth: dims.depth });
+      }
+    }
+
+    // 2) Build each rack_type's bays with its dedicated realistic builder. Each
+    //    builder pushes InstancedMeshes (low draw-call) into the scene.
+    for (const rt of Object.keys(baysByType)) {
+      const bays = baysByType[rt];
+      if (!bays.length) continue;
+      switch (rt) {
+        case 'pallet':    this._buildPalletRack(bays); break;
+        case 'flow':      this._buildFlowRack(bays); break;
+        case 'asrs':      this._buildAsrsRack(bays); break;
+        case 'nestainer': this._buildNestainer(bays); break;
+        case 'light':
+        case 'medium':
+        default:          this._buildShelving(bays, rt); break;
+      }
+    }
+  }
+
+  // Resolve a run's world-space frame: a start point (x0,z0), a unit axis (ux,uz)
+  // along which bays march, the run length, the bay width, a yaw that orients each
+  // bay so its pick face opens to the aisle, and the depth axis. Prefers the
+  // authored `rect`+`facing` (free-placed MapMaker shelves); otherwise derives a
+  // vertical run from the legacy {x, y0, y1, depth} column contract.
+  _runFrame(run, dims) {
+    const bayW = (run.pitch && run.pitch > 0.2) ? run.pitch : dims.bay;
+    if (run.rect && typeof run.rect.w === 'number') {
+      // Authored rectangle: bays run along its LONG edge; depth is the short edge.
+      const r = run.rect;
+      const vertical = run.vertical !== undefined ? run.vertical : (r.h >= r.w);
+      let x0, z0, ux, uz, length, depth;
+      if (vertical) {
+        // Long axis is +Z (depth of floor); centred on rect X.
+        x0 = r.x + r.w / 2; z0 = r.y; ux = 0; uz = 1; length = r.h; depth = r.w;
+      } else {
+        // Long axis is +X; centred on rect Y.
+        x0 = r.x; z0 = r.y + r.h / 2; ux = 1; uz = 0; length = r.w; depth = r.h;
+      }
+      // Yaw orients a bay's local +Z (its pick face) toward the aisle. The model
+      // bays face their depth normal; we yaw so the open face points per `facing`.
+      const yaw = this._facingYaw(run.facing, vertical);
+      return { x0, z0, ux, uz, length, bayW, yaw, depth };
+    }
+    // Legacy vertical column: x is the centre, y0..y1 the Y span, depth across.
+    const y0 = run.y0 || 0, y1 = run.y1 || 0;
+    const length = Math.max(0.1, Math.abs(y1 - y0));
+    return {
+      x0: run.x || 0, z0: Math.min(y0, y1), ux: 0, uz: 1,
+      length, bayW, yaw: 0, depth: run.depth || dims.depth,
+    };
+  }
+
+  // Map an authored facing (up/down/left/right, floor coords where +Y is "down")
+  // to a yaw that rotates a bay's local pick face (+Z) toward the aisle. Advisory
+  // only — the bays still read correctly if facing is absent (defaults open the
+  // face along the run's depth normal).
+  _facingYaw(facing, vertical) {
+    // Bay local +Z is the open/pick face. For a vertical run the depth normal is
+    // ±X; for a horizontal run it is ±Z. We rotate so +Z lands on the aisle side.
+    switch (facing) {
+      case 'left':  return -Math.PI / 2;  // face -X
+      case 'right': return Math.PI / 2;   // face +X
+      case 'up':    return Math.PI;       // face -Z
+      case 'down':  return 0;             // face +Z
+      default:      return vertical ? Math.PI / 2 : 0;
+    }
+  }
+
+  // Helper: make + register a standard rack material (tracked for dispose). When
+  // `glowable`, it is also registered in _rackMaterials so presets pulse its
+  // night-time emissive glow exactly like the legacy goods boxes.
+  _rackMat(opts, glowable) {
+    const mat = new THREE.MeshStandardMaterial(opts);
+    this._materials.push(mat);
+    if (glowable) this._rackMaterials.push(mat);
+    return mat;
+  }
+
+  // Push an InstancedMesh from a piece geometry + material, filling per-bay
+  // transforms via the supplied callback `place(i, bay) -> {pos, quat, scale}`
+  // returning scratch objects. `perBay` instances per bay. Optional `tintAbc`
+  // colours each instance by its bay's ABC class (instanceColor). Returns nothing
+  // (added straight to the scene). Keeps draw calls = (#piece-types × #rack-types).
+  _instancePieces(geom, mat, bays, perBay, place, tintAbc) {
+    const n = bays.length * perBay;
+    if (n === 0) return;
+    const inst = new THREE.InstancedMesh(geom, mat, n);
+    inst.castShadow = true;
+    inst.receiveShadow = true;
+    const m4 = new THREE.Matrix4();
+    const col = tintAbc ? new THREE.Color() : null;
+    let k = 0;
+    for (let i = 0; i < bays.length; i++) {
+      for (let j = 0; j < perBay; j++) {
+        const T = place(j, bays[i]);
+        m4.compose(T.pos, T.quat, T.scale);
+        inst.setMatrixAt(k, m4);
+        if (col) { col.setHex(ABC_COLOR[bays[i].abc] || ABC_COLOR.C); inst.setColorAt(k, col); }
+        k++;
+      }
+    }
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    this.scene.add(inst);
+    return inst;
+  }
+
+  // Shared scratch for placement callbacks (no per-instance allocation).
+  _scratch() {
+    if (!this._sc) {
+      this._sc = {
+        pos: new THREE.Vector3(), quat: new THREE.Quaternion(),
+        scale: new THREE.Vector3(1, 1, 1), euler: new THREE.Euler(),
+      };
+    }
+    return this._sc;
+  }
+
+  // パレットラック (pallet rack): tall steel uprights at each bay edge, two pairs
+  // of signature ORANGE load beams per level, and a wooden pallet + ABC-tinted
+  // load on each level. ~5.6 m tall — towers over the picker. 4 instanced pieces.
+  _buildPalletRack(bays) {
+    const dims = RACK_DIMS.pallet;
+    const H = dims.h, levels = dims.levels, depth = dims.depth;
+    const lvH = H / levels;
+    const s = this._scratch();
+    // Geometries (shared, tracked).
+    const uprightG = new THREE.BoxGeometry(0.10, H, 0.10);
+    const beamG = new THREE.BoxGeometry(1, 0.12, 0.08);     // x-scaled to bay width
+    const palletG = new THREE.BoxGeometry(1, 0.12, depth * 0.9);
+    const loadG = new THREE.BoxGeometry(1, lvH * 0.55, depth * 0.8);
+    this._geometries.push(uprightG, beamG, palletG, loadG);
+    const steelMat = this._rackMat({ color: RACK_STEEL, roughness: 0.55, metalness: 0.5,
+      emissive: new THREE.Color(0x10151c), emissiveIntensity: 0 });
+    const beamMat = this._rackMat({ color: RACK_BEAM, roughness: 0.45, metalness: 0.35,
+      emissive: new THREE.Color(RACK_BEAM), emissiveIntensity: 0.05 }, true);
+    const palletMat = this._rackMat({ color: PALLET_WOOD, roughness: 0.9, metalness: 0.02 });
+    const loadMat = this._rackMat({ color: 0xffffff, roughness: 0.85, metalness: 0.04,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.05 }, true);
+
+    // 4 uprights per bay (front/back × left/right), set near the bay edges.
+    this._instancePieces(uprightG, steelMat, bays, 4, (j, bay) => {
+      const sgnX = (j & 1) ? 0.5 : -0.5, sgnZ = (j & 2) ? 0.5 : -0.5;
+      this._bayLocal(s, bay, sgnX * (bay.bw - 0.1), H / 2, sgnZ * (depth - 0.1));
+      return s;
+    });
+    // Load beams: front & back beam at each level (2 × levels per bay).
+    this._instancePieces(beamG, beamMat, bays, 2 * levels, (j, bay) => {
+      const lvl = Math.floor(j / 2), front = (j % 2) ? 0.5 : -0.5;
+      this._bayLocal(s, bay, 0, lvH * (lvl + 0.5) - lvH * 0.5 + 0.06, front * (depth - 0.1));
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    }, false);
+    // Wooden pallet base per level.
+    this._instancePieces(palletG, palletMat, bays, levels, (j, bay) => {
+      this._bayLocal(s, bay, 0, lvH * j + 0.12, 0);
+      s.scale.set(bay.bw * 0.92, 1, 1);
+      return s;
+    });
+    // ABC-tinted load on each pallet.
+    this._instancePieces(loadG, loadMat, bays, levels, (j, bay) => {
+      this._bayLocal(s, bay, 0, lvH * j + 0.18 + lvH * 0.30, 0);
+      s.scale.set(bay.bw * 0.86, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // 軽量棚 / 中量棚 (light/medium shelving): a steel cage + a board on every tier
+  // with an ABC-tinted goods box. 2.0–2.4 m tall. 3 instanced pieces per type.
+  _buildShelving(bays, rt) {
+    const dims = rackDims(rt);
+    const H = dims.h, tiers = dims.levels, depth = dims.depth;
+    const tierH = H / tiers;
+    const s = this._scratch();
+    const frameG = new THREE.BoxGeometry(1, H, depth);          // x-scaled to bay
+    const boardG = new THREE.BoxGeometry(1, 0.04, depth * 0.96);
+    const goodsG = new THREE.BoxGeometry(1, tierH * 0.6, depth * 0.78);
+    this._geometries.push(frameG, boardG, goodsG);
+    // Open cage: a thin, low-metalness frame box reads as shelving uprights.
+    const frameMat = this._rackMat({ color: RACK_STEEL, roughness: 0.6, metalness: 0.45,
+      transparent: true, opacity: 0.32, emissive: new THREE.Color(0x10151c),
+      emissiveIntensity: 0 });
+    const boardMat = this._rackMat({ color: RACK_BOARD, roughness: 0.7, metalness: 0.3 });
+    const goodsMat = this._rackMat({ color: 0xffffff, roughness: 0.82, metalness: 0.05,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.06 }, true);
+    // Frame cage (1 per bay).
+    this._instancePieces(frameG, frameMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, H / 2, 0);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    // Boards + goods per tier.
+    this._instancePieces(boardG, boardMat, bays, tiers, (j, bay) => {
+      this._bayLocal(s, bay, 0, tierH * j + 0.02, 0);
+      s.scale.set(bay.bw * 0.96, 1, 1);
+      return s;
+    });
+    this._instancePieces(goodsG, goodsMat, bays, tiers, (j, bay) => {
+      this._bayLocal(s, bay, 0, tierH * (j + 0.5), 0);
+      s.scale.set(bay.bw * 0.8, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // フローラック (flow rack): inclined roller lanes feeding the pick face. We tilt
+  // each lane board about the run's cross-axis so cartons appear to roll forward.
+  // Steel frame + 3 inclined lanes + an ABC-tinted carton at the low (pick) end.
+  _buildFlowRack(bays) {
+    const dims = RACK_DIMS.flow;
+    const H = dims.h, lanes = dims.levels, depth = dims.depth;
+    const laneH = H / lanes;
+    const s = this._scratch();
+    const frameG = new THREE.BoxGeometry(1, H, depth);
+    const laneG = new THREE.BoxGeometry(1, 0.05, depth * 0.95);
+    const cartonG = new THREE.BoxGeometry(1, laneH * 0.4, depth * 0.3);
+    this._geometries.push(frameG, laneG, cartonG);
+    const frameMat = this._rackMat({ color: RACK_STEEL, roughness: 0.6, metalness: 0.45,
+      transparent: true, opacity: 0.3 });
+    const laneMat = this._rackMat({ color: ROLLER_COLOR, roughness: 0.4, metalness: 0.6 });
+    const cartonMat = this._rackMat({ color: 0xffffff, roughness: 0.85, metalness: 0.04,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.06 }, true);
+    const tilt = 0.14; // radians: gentle forward incline toward the pick face
+    this._instancePieces(frameG, frameMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, H / 2, 0);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    // Inclined lanes: tilt about the bay's local X (cross-run) so the +Z (pick)
+    // end dips. Compose bay yaw with the tilt via Euler order applied after.
+    this._instancePieces(laneG, laneMat, bays, lanes, (j, bay) => {
+      this._bayLocalTilt(s, bay, 0, laneH * (j + 0.55), 0, tilt);
+      s.scale.set(bay.bw * 0.96, 1, 1);
+      return s;
+    });
+    // Carton waiting at the low (pick-face) end of each lane.
+    this._instancePieces(cartonG, cartonMat, bays, lanes, (j, bay) => {
+      this._bayLocal(s, bay, 0, laneH * (j + 0.5) - laneH * 0.18, depth * 0.32);
+      s.scale.set(bay.bw * 0.7, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // ネステナー (nestainer): stacked nesting frames — a base frame + a stacked
+  // upper frame, each carrying an ABC-tinted load. Reads as portable steel cages
+  // stacked two high. 3 instanced pieces.
+  _buildNestainer(bays) {
+    const dims = RACK_DIMS.nestainer;
+    const H = dims.h, depth = dims.depth;
+    const stacks = 2, stackH = H / stacks;
+    const s = this._scratch();
+    const frameG = new THREE.BoxGeometry(1, stackH * 0.92, depth);
+    const postG = new THREE.BoxGeometry(0.08, stackH, 0.08);
+    const loadG = new THREE.BoxGeometry(1, stackH * 0.5, depth * 0.8);
+    this._geometries.push(frameG, postG, loadG);
+    const frameMat = this._rackMat({ color: RACK_STEEL, roughness: 0.6, metalness: 0.5,
+      transparent: true, opacity: 0.28 });
+    const postMat = this._rackMat({ color: RACK_STEEL, roughness: 0.55, metalness: 0.55 });
+    const loadMat = this._rackMat({ color: 0xffffff, roughness: 0.84, metalness: 0.04,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.06 }, true);
+    // 4 corner posts per stack.
+    this._instancePieces(postG, postMat, bays, 4 * stacks, (j, bay) => {
+      const st = Math.floor(j / 4), corner = j % 4;
+      const sgnX = (corner & 1) ? 0.5 : -0.5, sgnZ = (corner & 2) ? 0.5 : -0.5;
+      this._bayLocal(s, bay, sgnX * (bay.bw - 0.08), stackH * (st + 0.5), sgnZ * (depth - 0.08));
+      return s;
+    });
+    // ABC-tinted load per stack.
+    this._instancePieces(loadG, loadMat, bays, stacks, (j, bay) => {
+      this._bayLocal(s, bay, 0, stackH * j + stackH * 0.5, 0);
+      s.scale.set(bay.bw * 0.86, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // 自動倉庫 (AS/RS): a tall multi-level tower (~16 m) per bay column that vanishes
+  // into the fog, plus ONE shared stacker-crane mast sliding the front aisle. The
+  // tower is an instanced frame + many ABC-tinted totes; the crane is a single
+  // group, animated gently along the run in _updateAsrs.
+  _buildAsrsRack(bays) {
+    const dims = RACK_DIMS.asrs;
+    const H = dims.h, levels = dims.levels, depth = dims.depth;
+    const lvH = H / levels;
+    const s = this._scratch();
+    const towerG = new THREE.BoxGeometry(1, H, depth);
+    const toteG = new THREE.BoxGeometry(1, lvH * 0.6, depth * 0.7);
+    this._geometries.push(towerG, toteG);
+    const towerMat = this._rackMat({ color: ASRS_FRAME, roughness: 0.5, metalness: 0.55,
+      transparent: true, opacity: 0.22 });
+    const toteMat = this._rackMat({ color: 0xffffff, roughness: 0.8, metalness: 0.05,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.08 }, true);
+    this._instancePieces(towerG, towerMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, H / 2, 0);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    this._instancePieces(toteG, toteMat, bays, levels, (j, bay) => {
+      this._bayLocal(s, bay, 0, lvH * (j + 0.5), 0);
+      s.scale.set(bay.bw * 0.82, 1, 1);
+      return s;
+    }, true);
+    // A single hi-vis stacker crane mast that patrols the front of the AS/RS bays.
+    this._buildAsrsCrane(bays, H, depth);
+  }
+
+  // One stacker-crane mast (a tall thin column with a shuttle box) that slides
+  // along the AS/RS run's front face. Stored for a gentle per-frame patrol.
+  _buildAsrsCrane(bays, H, depth) {
+    if (!bays.length) return;
+    const g = new THREE.Group();
+    const mastG = new THREE.BoxGeometry(0.18, H, 0.18);
+    const railG = new THREE.BoxGeometry(0.3, 0.12, 0.3);
+    const shuttleG = new THREE.BoxGeometry(0.6, 0.5, depth * 0.8);
+    this._geometries.push(mastG, railG, shuttleG);
+    const craneMat = this._rackMat({ color: ASRS_CRANE, roughness: 0.4, metalness: 0.5,
+      emissive: new THREE.Color(ASRS_CRANE), emissiveIntensity: 0.12 });
+    const mast = new THREE.Mesh(mastG, craneMat); mast.position.y = H / 2; g.add(mast);
+    const base = new THREE.Mesh(railG, craneMat); base.position.y = 0.06; g.add(base);
+    const shuttle = new THREE.Mesh(shuttleG, craneMat); shuttle.position.y = H * 0.3; g.add(shuttle);
+    _enableShadows(g);
+    // Patrol axis: from the first to the last bay of this AS/RS set, offset to the
+    // pick face. Endpoints + the cross-axis offset are baked once.
+    const a = bays[0], b = bays[bays.length - 1];
+    // Cross-axis (pick face normal) from bay yaw.
+    const nx = Math.sin(a.yaw), nz = Math.cos(a.yaw);
+    const off = (a.depth || depth) * 0.7;
+    g.position.set(a.x + nx * off, 0, a.z + nz * off);
+    this.scene.add(g);
+    this._asrsCrane = {
+      group: g, shuttle, H,
+      ax: a.x + nx * off, az: a.z + nz * off,
+      bx: b.x + nx * off, bz: b.z + nz * off,
+    };
+  }
+
+  // Place scratch transform for a bay-local offset (dx along run width, y up, dz
+  // along depth), rotated by the bay yaw and translated to the bay centre.
+  _bayLocal(s, bay, dx, y, dz) {
+    s.euler.set(0, bay.yaw, 0);
+    s.quat.setFromEuler(s.euler);
+    // Rotate the local (dx, dz) offset by yaw into world XZ.
+    const cz = Math.cos(bay.yaw), sz = Math.sin(bay.yaw);
+    const wx = dx * cz + dz * sz;
+    const wz = -dx * sz + dz * cz;
+    s.pos.set(bay.x + wx, y, bay.z + wz);
+    s.scale.set(1, 1, 1);
+    return s;
+  }
+
+  // Like _bayLocal but adds a forward tilt (about the bay's local X) for flow-rack
+  // inclined lanes. Tilt + yaw are composed via a small Euler (YXZ).
+  _bayLocalTilt(s, bay, dx, y, dz, tilt) {
+    this._bayLocal(s, bay, dx, y, dz);
+    s.euler.set(tilt, bay.yaw, 0, 'YXZ');
+    s.quat.setFromEuler(s.euler);
+    return s;
+  }
+
+  // Legacy fallback: one small instanced shelving unit per location point (the
+  // pre-shelves behaviour), used only when `replay.shelves` is empty. Kept so old
+  // replays (or models with no authored/materialised shelves) still render racks.
+  _buildRacksFromPoints() {
     const racks = this.replay.racks || [];
     if (racks.length === 0) return;
-    const RW = 0.8, RD = 0.8, RH = 1.2;   // overall unit footprint/height (unchanged)
-    const TIERS = 3;                       // visible shelf levels
+    const RW = 0.8, RD = 0.8, RH = 2.0;   // raised to 2.0m so pickers don't tower
+    const TIERS = 4;
     const tierH = RH / TIERS;
 
-    // Group locations by ABC class so each class is one instanced batch.
     const byClass = {};
     for (const r of racks) {
       const k = ABC_COLOR[r.abc] !== undefined ? r.abc : 'C';
       (byClass[k] || (byClass[k] = [])).push(r);
     }
 
-    // --- shared geometries (disposed in dispose via _geometries) ---
-    const frameGeom = new THREE.BoxGeometry(RW, RH, RD);        // open steel cage
-    const shelfGeom = new THREE.BoxGeometry(RW * 0.96, 0.05, RD * 0.96); // tier boards
-    const boxGeom = new THREE.BoxGeometry(RW * 0.72, tierH * 0.62, RD * 0.72); // goods
+    const frameGeom = new THREE.BoxGeometry(RW, RH, RD);
+    const shelfGeom = new THREE.BoxGeometry(RW * 0.96, 0.05, RD * 0.96);
+    const boxGeom = new THREE.BoxGeometry(RW * 0.72, tierH * 0.62, RD * 0.72);
     this._geometries.push(frameGeom, shelfGeom, boxGeom);
 
-    // Steel frame material (shared, neutral). Goods get a per-class material so
-    // presets can pulse their emissive glow.
     const frameMat = new THREE.MeshStandardMaterial({
-      color: 0x3b434d, roughness: 0.6, metalness: 0.45,
+      color: RACK_STEEL, roughness: 0.6, metalness: 0.45,
       emissive: new THREE.Color(0x10151c), emissiveIntensity: 0.0,
     });
     const shelfMat = new THREE.MeshStandardMaterial({
-      color: 0x6b727b, roughness: 0.7, metalness: 0.3,
+      color: RACK_BOARD, roughness: 0.7, metalness: 0.3,
     });
     this._materials.push(frameMat, shelfMat);
 
@@ -452,7 +888,7 @@ export class Scene3D {
         emissive: new THREE.Color(color), emissiveIntensity: 0.06,
       });
       this._materials.push(goodsMat);
-      this._rackMaterials.push(goodsMat); // preset adjusts emissiveIntensity (night glow)
+      this._rackMaterials.push(goodsMat);
 
       const n = list.length;
       const frames = new THREE.InstancedMesh(frameGeom, frameMat, n);
@@ -466,10 +902,8 @@ export class Scene3D {
       for (let i = 0; i < n; i++) {
         const r = list[i];
         const x = r.x || 0, z = r.y || 0;
-        // Frame cage centered at half height.
         pos.set(x, RH / 2, z);
         m4.compose(pos, q, sc); frames.setMatrixAt(i, m4);
-        // Shelf boards + a goods box on each tier.
         for (let t = 0; t < TIERS; t++) {
           const y = tierH * (t + 0.5);
           pos.set(x, tierH * t + 0.02, z);
@@ -482,9 +916,6 @@ export class Scene3D {
       shelves.instanceMatrix.needsUpdate = true;
       goods.instanceMatrix.needsUpdate = true;
       this.scene.add(frames, shelves, goods);
-      // InstancedMesh shares the tracked geom/mat; nothing extra to dispose,
-      // but the meshes themselves hold no GPU buffers beyond instanceMatrix
-      // which is freed when the geometry is disposed.
     }
   }
 
@@ -878,24 +1309,79 @@ export class Scene3D {
     return this._preset;
   }
 
+  // Workers are now ~1.7 m HUMANS, not spheres — the fix for the user's #1
+  // complaint (spheres towered over the old 1.2 m racks and "突き抜け"-ed). Each
+  // figure is a small Group: legs + a state-coloured hi-vis vest torso + skin
+  // head + helmet + a near arm that REACHES on pick + a tote held when carrying.
+  // Geometry is shared across all workers; only the vest material is per-worker
+  // (so it can lerp to the state colour) plus a reused glow-emissive on the vest.
+  // The Group exposes a `position` proxy at floor level, so the existing contact
+  // shadows / glow halos (which read `ref.mesh.position`) keep working unchanged.
   _buildWorkers() {
     const workers = this.replay.workers || [];
     if (workers.length === 0) return;
-    const geom = new THREE.SphereGeometry(0.6, 16, 12);
-    this._geometries.push(geom);
+    // Shared geometries for the human figure (metres).
+    const legG = new THREE.BoxGeometry(0.18, 0.7, 0.22);
+    const torsoG = new THREE.BoxGeometry(0.46, 0.62, 0.28);   // hi-vis vest
+    const headG = new THREE.SphereGeometry(0.13, 14, 12);
+    const helmetG = new THREE.SphereGeometry(0.15, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    const armG = new THREE.BoxGeometry(0.11, 0.5, 0.11);
+    const toteG = new THREE.BoxGeometry(0.34, 0.26, 0.30);
+    this._geometries.push(legG, torsoG, headG, helmetG, armG, toteG);
+    // Shared non-vest materials.
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.8, metalness: 0.05 });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0b48a, roughness: 0.7, metalness: 0.02 });
+    const helmetMat = new THREE.MeshStandardMaterial({ color: 0xf2c200, roughness: 0.45, metalness: 0.1 });
+    const armMat = new THREE.MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.7, metalness: 0.05 });
+    const toteMat = new THREE.MeshStandardMaterial({ color: 0xc9a36b, roughness: 0.85, metalness: 0.04 });
+    this._materials.push(legMat, skinMat, helmetMat, armMat, toteMat);
+
     for (const wk of workers) {
-      // Cyan emissive baked in but starting dark; pulsed up while the worker is
-      // moving/working (mirrors the AGV active-glow) — purely additive.
-      const mat = new THREE.MeshStandardMaterial({
-        color: STATE_COLOR.idle, roughness: 0.45, metalness: 0.05,
+      const g = new THREE.Group();
+      // Two legs.
+      for (const dx of [-0.12, 0.12]) {
+        const leg = new THREE.Mesh(legG, legMat);
+        leg.position.set(dx, 0.35, 0);
+        g.add(leg);
+      }
+      // Hi-vis vest torso — per-worker material (state colour + glow emissive).
+      const vestMat = new THREE.MeshStandardMaterial({
+        color: STATE_COLOR.idle, roughness: 0.5, metalness: 0.05,
         emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
       });
-      const mesh = new THREE.Mesh(geom, mat);
-      mesh.position.set(0, 0.7, 0);
-      mesh.castShadow = true;
-      this.scene.add(mesh);
-      this._materials.push(mat);
-      this._workers.push({ mesh, keyframes: wk.keyframes || [], glow: 0 });
+      this._materials.push(vestMat);
+      const torso = new THREE.Mesh(torsoG, vestMat);
+      torso.position.set(0, 1.0, 0);
+      g.add(torso);
+      // Head + helmet.
+      const head = new THREE.Mesh(headG, skinMat);
+      head.position.set(0, 1.45, 0);
+      g.add(head);
+      const helmet = new THREE.Mesh(helmetG, helmetMat);
+      helmet.position.set(0, 1.5, 0);
+      g.add(helmet);
+      // Near arm pivoting from the shoulder — reaches forward (+Z) on pick. We
+      // parent it to a pivot at the shoulder so a rotation swings the hand up.
+      const armPivot = new THREE.Group();
+      armPivot.position.set(0.27, 1.22, 0);
+      const arm = new THREE.Mesh(armG, armMat);
+      arm.position.set(0, -0.22, 0); // hangs down from the pivot at rest
+      armPivot.add(arm);
+      g.add(armPivot);
+      // Tote held in front while carrying (hidden otherwise).
+      const tote = new THREE.Mesh(toteG, toteMat);
+      tote.position.set(0, 0.95, 0.32);
+      tote.visible = false;
+      g.add(tote);
+
+      _enableShadows(g);
+      this.scene.add(g);
+      // `mesh` proxy = the group (its .position is the floor anchor) so shadow /
+      // glow followers keep working. Extra refs drive the pick reach + carry tote.
+      this._workers.push({
+        mesh: g, vestMat, armPivot, tote, keyframes: wk.keyframes || [],
+        glow: 0, reach: 0, faceYaw: 0, idx: this._workers.length,
+      });
     }
   }
 
@@ -959,7 +1445,11 @@ export class Scene3D {
     // Shared little tote box that rides on an AGV while it hauls a load. Created
     // once per AGV (never per frame); toggled visible by carry state each frame.
     const toteGeom = new THREE.BoxGeometry(0.7, 0.5, 0.95);
-    this._geometries.push(toteGeom);
+    // Status dome: a small hemisphere beacon on top, emissive in the action
+    // colour (idle gray → travel blue → pickup green → dropoff amber → charge
+    // purple), so an AGV's job reads at a glance like a real warehouse robot.
+    const domeGeom = new THREE.SphereGeometry(0.16, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    this._geometries.push(toteGeom, domeGeom);
     for (const a of agvs) {
       // Cyan emissive baked in but starting dark; pulsed up while the AGV works.
       const mat = new THREE.MeshStandardMaterial({
@@ -983,7 +1473,17 @@ export class Scene3D {
       tote.castShadow = true;
       tote.visible = false;
       mesh.add(tote);
-      this._agvs.push({ mesh, keyframes: a.keyframes || [], mat, tote, glow: 0 });
+      // Status beacon dome (action-coloured, emissive). Sits at a back corner so
+      // it stays visible even when a tote rides the body.
+      const domeMat = new THREE.MeshStandardMaterial({
+        color: AGV_COLOR.idle, roughness: 0.4, metalness: 0.1,
+        emissive: new THREE.Color(AGV_COLOR.idle), emissiveIntensity: 0.6,
+      });
+      this._materials.push(domeMat);
+      const dome = new THREE.Mesh(domeGeom, domeMat);
+      dome.position.set(0, 0.2, -0.5);
+      mesh.add(dome);
+      this._agvs.push({ mesh, keyframes: a.keyframes || [], mat, tote, dome, domeMat, glow: 0 });
     }
   }
 
@@ -1010,6 +1510,13 @@ export class Scene3D {
       color: 0xb0b6bd, roughness: 0.35, metalness: 0.7,
     });
     this._materials.push(bodyMat, cabMat, forkMat);
+    // A pallet load that rides the forks while carrying. Shared geometry/material.
+    const loadGeom = new THREE.BoxGeometry(0.9, 0.7, 1.0);
+    this._geometries.push(loadGeom);
+    const loadMat = new THREE.MeshStandardMaterial({
+      color: 0xc9a36b, roughness: 0.85, metalness: 0.04,
+    });
+    this._materials.push(loadMat);
     for (const f of forklifts) {
       const g = new THREE.Group();
       const body = new THREE.Mesh(bodyGeom, bodyMat);
@@ -1021,14 +1528,25 @@ export class Scene3D {
       const mastMesh = new THREE.Mesh(mastGeom, forkMat);
       mastMesh.position.set(0, 1.0, 0.9);
       g.add(mastMesh);
+      // Forks + load ride a small carriage group so they RAISE together when the
+      // forklift is carrying (driven in _updateForklifts off the carry state).
+      const carriage = new THREE.Group();
       for (const dx of [-0.25, 0.25]) {
         const p = new THREE.Mesh(prongGeom, forkMat);
-        p.position.set(dx, 0.1, 1.4);
-        g.add(p);
+        p.position.set(dx, 0, 1.4);
+        carriage.add(p);
       }
+      const load = new THREE.Mesh(loadGeom, loadMat);
+      load.position.set(0, 0.4, 1.35);
+      load.visible = false;
+      carriage.add(load);
+      carriage.position.y = 0.1; // resting fork height
+      g.add(carriage);
       _enableShadows(g);
       this.scene.add(g);
-      this._forklifts.push({ group: g, keyframes: f.keyframes || [], yaw: 0 });
+      this._forklifts.push({
+        group: g, keyframes: f.keyframes || [], yaw: 0, carriage, load, lift: 0,
+      });
     }
   }
 
@@ -1303,6 +1821,117 @@ export class Scene3D {
     }
   }
 
+  // -- Pick-event visualization ---------------------------------------------
+  // When a worker's keyframe carries a `hit` ({run_id, along, sku, qty}) — the
+  // best-effort nearest authored shelf cell it is reaching into (set in
+  // render/replay.py) — we (a) PULSE-GLOW a small marker on the target cell and
+  // (b) draw a thin connector from the picker's hand to that cell. This is the
+  // "ピッカーが実 SKU ヒット箇所に歩いて取る" money shot. Markers/lines are POOLED
+  // (one per worker, reused every frame — no per-frame allocation), reduced-motion
+  // aware (no pulse, steady marker), and dropped entirely under fps pressure
+  // (tier-3 degrade also disables this via `_glowEnabled`, sharing the halo gate).
+  _buildPickFx() {
+    this._pickFx = [];
+    const n = (this.replay.workers || []).length;
+    if (n === 0) return;
+    // Shared additive glow texture (reuse the halo's if built, else make one).
+    const tex = this._glowTex || this._makeGlowTexture();
+    // Pre-resolve which runs are pickable (have rect/along geometry). Without any
+    // shelf runs (legacy point racks) we cannot place a target → skip the pool.
+    if (!this._shelfRuns || this._shelfRuns.length === 0) return;
+    const markerG = new THREE.PlaneGeometry(1, 1);
+    this._geometries.push(markerG);
+    for (let i = 0; i < n; i++) {
+      // Pulse marker: an additive amber billboard quad laid on the cell face.
+      const markerMat = new THREE.SpriteMaterial({
+        map: tex, color: PICK_GLOW, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      this._materials.push(markerMat);
+      const marker = new THREE.Sprite(markerMat);
+      marker.scale.set(0.7, 0.7, 1);
+      marker.visible = false;
+      this.scene.add(marker);
+      // Connector line: a 2-point line from hand to cell. BufferGeometry positions
+      // are rewritten each active frame (6 floats); cheap and pooled.
+      const lineGeom = new THREE.BufferGeometry();
+      lineGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      this._geometries.push(lineGeom);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: PICK_LINE, transparent: true, opacity: 0, depthWrite: false,
+      });
+      this._materials.push(lineMat);
+      const line = new THREE.Line(lineGeom, lineMat);
+      line.visible = false;
+      line.frustumCulled = false;
+      this.scene.add(line);
+      this._pickFx.push({ marker, markerMat, line, lineGeom, lineMat, phase: i });
+    }
+  }
+
+  // Resolve a hit ({run_id, along}) to a world position on the shelf's pick face.
+  // Returns a cached scratch Vector3 or null when the run id is unknown. `out` is
+  // reused (no allocation). The point sits at a representative reach height and is
+  // pushed out to the open (pick) face along the bay's facing normal.
+  _hitWorld(hit, out) {
+    const runs = this._shelfRuns;
+    if (!runs || !hit) return null;
+    const r = runs[hit.run_id];
+    if (!r) return null;
+    const along = Math.max(0, Math.min(1, hit.along || 0)) * r.length;
+    const cx = r.x0 + r.ux * along;
+    const cz = r.z0 + r.uz * along;
+    // Push to the pick face: bay yaw's +Z normal, half the depth out.
+    const nx = Math.sin(r.yaw), nz = Math.cos(r.yaw);
+    const off = (r.dims.depth || 0.6) * 0.5 + 0.1;
+    const y = Math.min(1.3, (r.dims.h || 2.0) * 0.45); // mid-reach height
+    out.set(cx + nx * off, y, cz + nz * off);
+    return out;
+  }
+
+  // Per-frame per-worker: drive the pick-event marker + connector for a worker's
+  // current sample. Hidden unless the worker is picking AND carries a resolvable
+  // hit. Pulses the marker opacity/scale (steady under reduced-motion) and points
+  // the connector from the worker's hand to the target cell. Pooled + gated.
+  _updatePickEvent(w, s, t) {
+    const fx = this._pickFx && this._pickFx[w.idx];
+    if (!fx) return;
+    const showable = this._glowEnabled && s.state === 'pick' && s.hit;
+    if (!showable) {
+      if (fx.marker.visible) { fx.marker.visible = false; fx.line.visible = false; }
+      return;
+    }
+    if (!fx._p) fx._p = new THREE.Vector3();
+    const p = this._hitWorld(s.hit, fx._p);
+    if (!p) {
+      if (fx.marker.visible) { fx.marker.visible = false; fx.line.visible = false; }
+      return;
+    }
+    // Pulse (reduced-motion → steady mid glow). Sine on a per-worker phase so a
+    // bank of pickers doesn't blink in unison.
+    let pulse = 0.7;
+    if (this._beltSpeed !== 0) {
+      pulse = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(this._clock.elapsedTime * 5 + fx.phase));
+    }
+    fx.marker.visible = true;
+    fx.marker.position.copy(p);
+    fx.markerMat.opacity = pulse * 0.9;
+    const ms = 0.55 + 0.25 * pulse;
+    fx.marker.scale.set(ms, ms, 1);
+    // Connector: worker hand (approx shoulder + forward) → target cell.
+    fx.line.visible = true;
+    const wp = w.mesh.position;
+    const hy = 1.2; // hand height
+    // Hand a touch in front of the body along its facing.
+    const hx = wp.x + Math.sin(w.faceYaw) * 0.3;
+    const hz = wp.z + Math.cos(w.faceYaw) * 0.3;
+    const arr = fx.lineGeom.attributes.position.array;
+    arr[0] = hx; arr[1] = hy; arr[2] = hz;
+    arr[3] = p.x; arr[4] = p.y; arr[5] = p.z;
+    fx.lineGeom.attributes.position.needsUpdate = true;
+    fx.lineMat.opacity = pulse * 0.55;
+  }
+
   // -- Live productivity HUD (DOM overlay) ----------------------------------
   // Only built when replay.series exists & is non-empty. A small absolutely-
   // positioned panel inside the container with a sparkline (canvas 2D) and live
@@ -1505,22 +2134,46 @@ export class Scene3D {
     }
   }
 
-  // Per-frame: interpolate each worker's position + state color, and ramp a
-  // subtle cyan working-glow up while active / decay it to dark when idle.
+  // Per-frame: interpolate each worker (a human figure) — floor position, vest
+  // state colour, working-glow ramp, the arm REACH on pick, the carried tote, a
+  // facing yaw toward travel, and (if the frame carries a `hit`) the pick-event
+  // viz on the reached shelf cell.
   _updateWorkers(t, dt) {
     const glowOn = this._beltSpeed !== 0; // reduced-motion → hold glow steady-off
     for (const w of this._workers) {
       const s = sampleKeyframes(w.keyframes, t);
-      w.mesh.position.set(s.x, 0.7, s.y);
+      w.mesh.position.set(s.x, 0, s.y); // group anchored at floor (legs reach down)
       const color = STATE_COLOR[s.state] !== undefined ? STATE_COLOR[s.state] : STATE_COLOR.idle;
       // Ease state→state color over ~100ms (frame-rate-independent) so idle→travel
       // transitions don't pop. Target color cached on the entry (no per-frame new).
       if (!w._target) w._target = new THREE.Color();
       w._target.set(color);
-      w.mesh.material.color.lerp(w._target, 1 - Math.exp(-dt * 12));
+      w.vestMat.color.lerp(w._target, 1 - Math.exp(-dt * 12));
       const active = (glowOn && ACTIVE_WORKER[s.state]) ? 1 : 0;
       w.glow = approach(w.glow, active, dt, 4);
-      w.mesh.material.emissiveIntensity = w.glow * 0.35;
+      w.vestMat.emissiveIntensity = w.glow * 0.30;
+
+      // Face the direction of travel (look-ahead sample), so the body + reaching
+      // arm orient naturally. Hold the last yaw when essentially stationary.
+      const ahead = sampleKeyframes(w.keyframes, t + 0.3);
+      let vx = ahead.x - s.x, vz = ahead.y - s.y;
+      if (vx * vx + vz * vz > 1e-5) w.faceYaw = Math.atan2(vx, vz);
+      if (!w._qT) { w._qT = new THREE.Quaternion(); w._eT = new THREE.Euler(); }
+      w._eT.set(0, w.faceYaw, 0);
+      w._qT.setFromEuler(w._eT);
+      w.mesh.quaternion.slerp(w._qT, 1 - Math.exp(-dt * 10));
+
+      // Arm reach: ramp toward 1 while picking (swing the forearm up/forward),
+      // back to rest otherwise. The pivot rotates about local X so the hand lifts.
+      const reaching = (s.state === 'pick') ? 1 : 0;
+      w.reach = approach(w.reach, reaching, dt, 6);
+      if (w.armPivot) w.armPivot.rotation.x = -w.reach * 1.15; // up to ~66° forward
+
+      // Carried tote: visible while carrying (種まき/搬送) — picks the held box.
+      if (w.tote) w.tote.visible = (s.state === 'carry' || s.state === 'pack');
+
+      // Pick-event viz: pulse the reached cell + draw a connector from the hand.
+      this._updatePickEvent(w, s, t);
     }
   }
 
@@ -1539,6 +2192,14 @@ export class Scene3D {
       const active = ACTIVE_AGV[s.state] ? 1 : 0;
       a.glow = approach(a.glow, active, dt, 4);
       a.mat.emissiveIntensity = a.glow * 0.55;
+      // Status dome tracks the action colour (always lit, so idle reads gray).
+      if (a.domeMat) {
+        if (!a._dT) a._dT = new THREE.Color();
+        a._dT.set(color);
+        a.domeMat.color.lerp(a._dT, 1 - Math.exp(-dt * 12));
+        a.domeMat.emissive.copy(a.domeMat.color);
+        a.domeMat.emissiveIntensity = 0.5 + a.glow * 0.4;
+      }
       if (a.tote) {
         a.tote.visible = !!CARRY_AGV[s.state];
         a.tote.material.emissiveIntensity = a.glow * 0.35;
@@ -1577,7 +2238,29 @@ export class Scene3D {
       // Drive the activity halo (forklifts have no emissive ramp of their own).
       const active = (glowOn && moving) ? 1 : 0;
       f.glow = approach(f.glow || 0, active, dt, 4);
+
+      // Carry: raise the fork carriage + reveal its pallet load while hauling
+      // (pickup/dropoff/travel/carry states). The lift ramps so forks glide up.
+      const carrying = (CARRY_AGV[s.state] || s.state === 'carry') ? 1 : 0;
+      f.lift = approach(f.lift || 0, carrying, dt, 5);
+      if (f.carriage) f.carriage.position.y = 0.1 + f.lift * 1.0; // up to ~1.1m
+      if (f.load) f.load.visible = f.lift > 0.15;
     }
+  }
+
+  // AS/RS stacker crane: glide the mast back and forth along the AS/RS run and
+  // raise/lower its shuttle, so the automated aisle reads as alive. Purely a
+  // cosmetic patrol (no DES data drives it); frozen under reduced-motion.
+  _updateAsrs(t) {
+    const c = this._asrsCrane;
+    if (!c) return;
+    if (this._beltSpeed === 0) return; // reduced-motion / degrade → hold position
+    const f = 0.5 + 0.5 * Math.sin(this._clock.elapsedTime * 0.4);
+    c.group.position.x = c.ax + (c.bx - c.ax) * f;
+    c.group.position.z = c.az + (c.bz - c.az) * f;
+    // Shuttle bobs up/down the mast on a slower cycle.
+    const lift = 0.5 + 0.5 * Math.sin(this._clock.elapsedTime * 0.7 + 1.0);
+    c.shuttle.position.y = c.H * (0.15 + 0.7 * lift);
   }
 
   // 仮置き(staging) buffer: a box whose height + colour track its WIP over time
@@ -1607,6 +2290,7 @@ export class Scene3D {
     this._updateWorkers(t, dt);
     this._updateAgvs(t, dt);
     this._updateForklifts(t, dt);
+    this._updateAsrs(t);          // patrol the AS/RS stacker crane (if any)
     this._updateStaging(t);
     this._updateBelts(dt);        // scroll conveyor tread textures (delta-based)
     this._updateContactShadows(); // keep blob shadows under moving agents
@@ -1703,6 +2387,17 @@ export class Scene3D {
     }
     this._glowSprites = [];
     this._glowTex = null;
+    // Remove pooled pick-event markers/lines (their materials/geometries are
+    // tracked in _materials/_geometries — freed below; just drop scene refs).
+    for (const fx of (this._pickFx || [])) {
+      if (fx.marker) this.scene.remove(fx.marker);
+      if (fx.line) this.scene.remove(fx.line);
+    }
+    this._pickFx = [];
+    if (this._asrsCrane && this._asrsCrane.group) this.scene.remove(this._asrsCrane.group);
+    this._asrsCrane = null;
+    this._shelfRuns = [];
+    this._sc = null;
     this._heat = null;
     if (this.controls) this.controls.dispose();
     for (const g of this._geometries) { if (g && g.dispose) g.dispose(); }

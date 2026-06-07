@@ -156,6 +156,89 @@ def _congestion_grid(model: WarehouseModel, res: RunResult) -> dict:
     return {"grid_m": round(grid_m, 3), "nx": nx, "ny": ny, "cells": cells}
 
 
+def _pick_targets(shelves: list[dict]) -> list[tuple]:
+    """Flatten authored shelf runs into pickable targets for `hit` derivation.
+
+    Each target is (cx, cy, run_id, along, sku, qty): the cell's floor position,
+    its run index, the cell's fractional position ALONG the run (0..1, so the 3D
+    can find the bay without re-deriving geometry), and its SKU/qty. Only runs
+    that actually carry per-cell SKU detail (the authored / detailed path) yield
+    targets; a bare reconstructed run with no SKUs yields none, so `hit` is simply
+    absent rather than wrong.
+    """
+    targets: list[tuple] = []
+    for ri, run in enumerate(shelves):
+        cells = run.get("cells") or []
+        y0 = run.get("y0", 0.0)
+        y1 = run.get("y1", 0.0)
+        span = (y1 - y0) or 1.0
+        x = run.get("x", 0.0)
+        for c in cells:
+            sku = c.get("sku")
+            if not sku:
+                continue
+            cy = c.get("y", y0)
+            along = min(1.0, max(0.0, (cy - y0) / span))
+            targets.append((x, cy, ri, round(along, 4), sku, int(c.get("qty", 0) or 0)))
+    return targets
+
+
+def _attach_pick_hits(model: WarehouseModel, workers: list[dict],
+                      shelves: list[dict]) -> None:
+    """Best-effort: tag each `pick`-state worker keyframe with the cell it hit.
+
+    The engine's keyframes are `[t, x, y, state]` and do NOT carry which Location
+    was picked, so we derive a hit geometrically: for a `pick` keyframe, snap to
+    the NEAREST authored shelf cell (the picker stands at the aisle face of the
+    slot it is reaching into). Appends a 5th element
+
+        hit = {run_id, along, sku, qty}
+
+    only when a target is found within a sane reach radius; otherwise the keyframe
+    is left as the original 4-tuple. Fully backward-compatible: `sampleKeyframes`
+    and the 2D canvas both index [0..3] and ignore any extra element. Mutates the
+    `workers` keyframe lists in place (they are fresh copies surfaced by caller).
+
+    Gated to models that carry **authored** `ShelfArea`s (the MapMaker / M1
+    target). Legacy reconstructed-rack replays keep pure 4-tuple keyframes — so
+    the established replay contract (and its tests) is unchanged — while
+    free-placed MapMaker shelves, whose rectangles 3D draws individually, gain the
+    pick-event geometry the new 3D viz needs.
+    """
+    authored = any(
+        z.type == "storage" and getattr(z, "shelves", None)
+        for z in model.layout.zones
+    )
+    if not authored:
+        return
+    targets = _pick_targets(shelves)
+    if not targets:
+        return
+    # Reach radius: a picker reaching a slot is within ~one aisle-width of it.
+    # Beyond this we leave the keyframe untagged rather than point at a far shelf.
+    max_r2 = 4.0 ** 2
+    for w in workers:
+        kfs = w.get("keyframes") or []
+        new_kfs = []
+        for kf in kfs:
+            # Only augment 4-tuple pick frames; pass everything else through as-is.
+            if len(kf) >= 4 and kf[3] == "pick":
+                px, py = kf[1], kf[2]
+                best = None
+                best_d2 = max_r2
+                for (cx, cy, ri, along, sku, qty) in targets:
+                    d2 = (cx - px) ** 2 + (cy - py) ** 2
+                    if d2 < best_d2:
+                        best_d2 = d2
+                        best = (ri, along, sku, qty)
+                if best is not None:
+                    ri, along, sku, qty = best
+                    kf = [kf[0], kf[1], kf[2], kf[3],
+                          {"run_id": ri, "along": along, "sku": sku, "qty": qty}]
+            new_kfs.append(kf)
+        w["keyframes"] = new_kfs
+
+
 def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     by_sku = model.item_by_sku()
     _nav = NavNetwork.from_model(model)  # MapMaker-style waypoint/Delaunay net
@@ -224,6 +307,12 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     doors = [{"id": d.id, "type": d.type, "x": d.x, "y": d.y, "w": d.w}
              for d in model.layout.doors]
 
+    # Shelf runs (one truth for 2D/PNG/3D). Compute once, then best-effort tag
+    # `pick`-state worker keyframes with the cell they reach (the 3D pick-event
+    # viz). Backward-compatible: 4-tuple keyframes stay valid when no hit derives.
+    shelves = shelf_runs(model)
+    _attach_pick_hits(model, workers, shelves)
+
     # 仮置き(staging): a finite buffer whose WIP (滞留数) rises and falls. Surface
     # its footprint + an exact (t, wip) timeline so the 2D/3D viewers can colour it
     # by occupancy at the current playback time. Only present in staged mode.
@@ -258,7 +347,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         },
         "zones": zones,
         "racks": racks,
-        "shelves": shelf_runs(model),
+        "shelves": shelves,
         "navnet": _nav.to_dict() if _nav.obstacles else None,
         "stations": stations,
         "workers": workers,
