@@ -18,7 +18,7 @@ const PHASES = [
 
 // Cross-cutting views: available in every phase, pinned separately (own lane).
 const CROSS = [
-  { id: 'chat', label: 'Cody', icon: '💬' },
+  { id: 'chat', label: 'OCTA', icon: '🐙' },
   { id: 'notes', label: '知見', icon: '📌' },
 ];
 
@@ -27,7 +27,7 @@ const VIEW_LABEL = {
   overview: '概要', dataanalysis: 'データ分析', bianalytics: '分析BI', bi: '物量BI', design: 'レイアウト',
   materialflow: 'マテリアルフロー', timetable: '人員タイムチャート', analysis: 'KPI・判定',
   view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', compare: 'シナリオ比較',
-  export: 'エクスポート', chat: 'Cody', notes: '知見',
+  export: 'エクスポート', chat: 'OCTA', notes: '知見',
 };
 
 // Phases that require a completed run (hasRun) before their KPIs/output are real.
@@ -286,7 +286,7 @@ export function mountJourney(el, opts = {}) {
         if (locked) hint = '🔒 実行するとここで結果を確認できます';
         else if (DATA_HINTED.has(p.id) && !state.hasData) hint = 'データ取込後がおすすめ';
       } else {
-        hint = activeView === 'chat' ? 'Cody（横断アシスタント）' : '知見ボード（横断メモ）';
+        hint = activeView === 'chat' ? 'OCTA（横断アシスタント）' : '知見ボード（横断メモ）';
       }
       hintEl.textContent = hint;
       hintEl.hidden = !hint;

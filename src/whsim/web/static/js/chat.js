@@ -66,7 +66,7 @@ const DEFAULT_SUGGESTS = [
 ];
 
 const GREETING_TITLE = '倉庫のこと、なんでも聞いて。';
-const GREETING_SUB = 'やりたいことを話すだけ。Codyが倉庫を作って、動かして、結果を見せるよ。';
+const GREETING_SUB = 'やりたいことを話すだけ。OCTAが倉庫を作って、動かして、結果を見せるよ。';
 
 // History turns sent to the endpoint (sliding window).
 const HISTORY_TURNS = 8;
@@ -189,7 +189,7 @@ export function mountChat(targetEl, opts = {}) {
   const input = document.createElement('textarea');
   input.className = 'chat-input';
   input.rows = 1;
-  input.setAttribute('placeholder', 'Codyに話しかけてみよう…');
+  input.setAttribute('placeholder', 'OCTAに話しかけてみよう…');
   input.setAttribute('aria-label', 'メッセージを入力');
 
   const send = document.createElement('button');

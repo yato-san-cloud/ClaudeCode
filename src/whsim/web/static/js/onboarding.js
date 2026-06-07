@@ -128,7 +128,7 @@ export function mountOnboarding(opts = {}) {
     { sel: '.jn-pill[data-phase="design"]', title: '③ 設計', text: 'レイアウト・棚・動線を組み、物量を工程ごとの人時へ、必要人員まで試算します。' },
     { sel: '.jn-pill[data-phase="validate"]', title: '④ 検証', text: 'シミュレーションを実行し、処理能力・コスト・混雑をKPIと動きで確かめます。' },
     { sel: '.jn-pill[data-phase="propose"]', title: '⑤ 提案', text: '提案PNG・シナリオ比較・提案書（PPTX/PDF）を出力。「実データN%」も併記されます。' },
-    { sel: '.jn-pin[data-view="chat"]', title: '横断: Cody と 知見', text: 'どのフェーズでもCodyに相談でき、気づきは「知見」に残せます。フェーズ動線とは別レーンでいつでも使えます。' },
+    { sel: '.jn-pin[data-view="chat"]', title: '横断: OCTA と 知見', text: 'どのフェーズでもOCTAに相談でき、気づきは「知見」に残せます。フェーズ動線とは別レーンでいつでも使えます。' },
   ];
 
   let overlay = null;

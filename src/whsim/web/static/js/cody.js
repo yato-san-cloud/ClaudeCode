@@ -1,217 +1,238 @@
 /* ============================================================
-   Cody — terminal-bot mascot, framework-free ES module.
+   OCTA — メンダコ (deep-sea octopus) pixel-art mascot.
+   Framework-free ES module. The legacy internal name is "cody"
+   (module/CSS/identifiers) but the rendered character + every
+   user-facing label is OCTA, the 物流シミュレータ supporter.
 
-   Geometry is copied verbatim from the design reference
-   (design_handoff_cody_mascot / cody.html): viewBox 0 0 300 392,
-   terracotta body #D97757, rust lines #9C4226, neon face #86E29B,
-   amber accents #F0B860, a blinking head cursor and per-mood SMIL
-   animations. The invariant body is built once; only the <g> that
-   holds the face is swapped per mood.
+   The mascot is generated as run-length-merged 1×1 SVG pixels from
+   a parametric silhouette (mantle + ears + scalloped tentacle
+   fringe), shaded with a fixed coral palette so OCTA keeps one
+   identity across light/dark. Only the <g class="cody-face"> (eyes
+   /mouth/props) swaps per mood; the body is built once. Cyan props
+   (data dots, ?, Zzz, sparkles) tie OCTA to the WHSiM world.
 
-   Public API (the web shell calls this):
+   Public API (unchanged — the web shell calls this):
      mountCody(targetEl, opts) -> controller
        controller.setMood(mood, { say, autoIdleMs })
        controller.say(text, { mood, ms })
        controller.hide() / controller.show()
        controller.destroy()
+     codyAvatarSVG(mood) -> static <svg> string (chat avatars)
    The most-recently-mounted controller is also exposed as
    window.whsimCody for non-module callers.
    ============================================================ */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// Palette — identical to the reference prototype.
+// Pixel grid (viewBox units). Wider-than-tall, like a resting mendako.
+const GW = 22, GH = 20;
+
+// OCTA palette — warm coral, theme-independent (a mascot keeps one
+// identity). Cyan/alert/zzz are the "tech" props that tie to WHSiM.
 const C = {
-  body: "#D97757",
-  bodyHi: "#E59072",
-  line: "#9C4226",
-  screen: "#211C17",
-  bezel: "#160F08",
-  neon: "#86E29B",
-  neonHi: "#C5F5D2",
-  amber: "#F0B860",
-  rust: "#BE5A38",
+  out: "#5b1f2b",     // dark warm outline ring
+  base: "#f4647a",    // coral body
+  hi: "#ff98a7",      // lit highlight (upper-left)
+  sh: "#d2455d",      // shadow (lower edge / lower-right)
+  ear: "#ff8493",     // ears, a touch pinker
+  eye: "#2a121a",     // near-black warm
+  glint: "#ffffff",
+  mouth: "#7a2233",
+  tech: "#34e3ff",    // cyan props (brand)
+  techHi: "#bdf8ff",
+  alert: "#ff6b7d",
+  zzz: "#9ab7ff",
+  shadow: "rgba(91,31,43,.30)",
 };
 
 export const MOODS = [
-  "idle",
-  "thinking",
-  "typing",
-  "success",
-  "error",
-  "curious",
-  "excited",
-  "sleeping",
+  "idle", "thinking", "typing", "success",
+  "error", "curious", "excited", "sleeping",
 ];
 
-// Default Japanese lines per mood (callers can override via say()).
-// Tone: calm, dependable, "直せるよ" energy — never blames the user.
+// Default Japanese lines per mood — OCTA's voice: calm, dependable,
+// "いっしょに、いい流れをつくろう". Never blames the user.
 const DEFAULT_LINES = {
-  idle: "いっしょに作ろう。まずは小さく動かそう。",
+  idle: "いっしょに、いい流れをつくろう。まずは小さく動かそう。",
   thinking: "ちょっと考えてるよ…",
   typing: "書いてるところ。もう少し待ってね。",
-  success: "できた。ついでにここも整えておいた。",
+  success: "できた。ついでにここも整えておいたよ。",
   error: "エラーは敵じゃないよ。直せる。",
-  curious: "何を作る？手伝うよ。",
+  curious: "なにを作る？物流のこと、なんでも聞いてね。",
   excited: "いいね、それ動かしてみよう！",
   sleeping: "zzz… 呼んだら起きるよ。",
 };
 
-/* ---------- face geometry (copied from reference `faces`) ---------- */
-const FACES = {
-  idle: () => `
-    <circle cx="128" cy="162" r="9" fill="${C.neon}"/>
-    <circle cx="172" cy="162" r="9" fill="${C.neon}"/>
-    <circle cx="131" cy="159" r="2.6" fill="${C.bezel}"/>
-    <circle cx="175" cy="159" r="2.6" fill="${C.bezel}"/>
-    <path d="M133 188 Q150 201 167 188" fill="none" stroke="${C.neon}" stroke-width="5" stroke-linecap="round"/>`,
+/* ---------- parametric silhouette → pixel grid ---------- */
+const inEll = (x, y, ex, ey, rx, ry) =>
+  ((x - ex) / rx) ** 2 + ((y - ey) / ry) ** 2 <= 1;
+const CXP = 10.5, MY = 8.6, MRX = 8.8, MRY = 5.4;
+const botY = (x) => MY + MRY * Math.sqrt(Math.max(0, 1 - ((x - CXP) / MRX) ** 2));
 
-  thinking: () => `
-    <circle cx="130" cy="160" r="8" fill="${C.neon}"/>
-    <circle cx="174" cy="160" r="8" fill="${C.neon}"/>
-    <circle cx="133" cy="156" r="2.4" fill="${C.bezel}"/>
-    <circle cx="177" cy="156" r="2.4" fill="${C.bezel}"/>
-    <line x1="140" y1="193" x2="160" y2="193" stroke="${C.neon}" stroke-width="4" stroke-linecap="round"/>
-    <g fill="${C.neon}">
-      <circle cx="184" cy="146" r="3.2"><animate attributeName="opacity" values="1;.2;1" dur="1.2s" begin="0s" repeatCount="indefinite"/></circle>
-      <circle cx="194" cy="140" r="2.4"><animate attributeName="opacity" values="1;.2;1" dur="1.2s" begin=".4s" repeatCount="indefinite"/></circle>
-      <circle cx="201" cy="135" r="1.8"><animate attributeName="opacity" values="1;.2;1" dur="1.2s" begin=".8s" repeatCount="indefinite"/></circle>
-    </g>`,
-
-  success: () => `
-    <path d="M120 164 Q128 153 136 164" fill="none" stroke="${C.neon}" stroke-width="5" stroke-linecap="round"/>
-    <path d="M164 164 Q172 153 180 164" fill="none" stroke="${C.neon}" stroke-width="5" stroke-linecap="round"/>
-    <path d="M127 184 Q150 209 173 184 Z" fill="${C.neon}"/>
-    <path d="M183 138 l5 6 l11 -13" fill="none" stroke="${C.neonHi}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`,
-
-  typing: () => `
-    <circle cx="128" cy="161" r="7" fill="${C.neon}"/>
-    <circle cx="172" cy="161" r="7" fill="${C.neon}"/>
-    <circle cx="150" cy="190" r="5.5" fill="none" stroke="${C.neon}" stroke-width="4"/>
-    <g fill="${C.neon}">
-      <rect x="118" y="206" width="9" height="6" rx="2"><animate attributeName="opacity" values=".25;1;.25" dur=".9s" begin="0s" repeatCount="indefinite"/></rect>
-      <rect x="132" y="206" width="9" height="6" rx="2"><animate attributeName="opacity" values=".25;1;.25" dur=".9s" begin=".15s" repeatCount="indefinite"/></rect>
-      <rect x="146" y="206" width="9" height="6" rx="2"><animate attributeName="opacity" values=".25;1;.25" dur=".9s" begin=".3s" repeatCount="indefinite"/></rect>
-      <rect x="160" y="206" width="9" height="6" rx="2"><animate attributeName="opacity" values=".25;1;.25" dur=".9s" begin=".45s" repeatCount="indefinite"/></rect>
-      <rect x="174" y="206" width="9" height="6" rx="2"><animate attributeName="opacity" values=".25;1;.25" dur=".9s" begin=".6s" repeatCount="indefinite"/></rect>
-    </g>`,
-
-  error: () => `
-    <line x1="116" y1="149" x2="134" y2="154" stroke="${C.neon}" stroke-width="3.5" stroke-linecap="round"/>
-    <line x1="184" y1="149" x2="166" y2="154" stroke="${C.neon}" stroke-width="3.5" stroke-linecap="round"/>
-    <circle cx="128" cy="164" r="8" fill="${C.neon}"/>
-    <circle cx="172" cy="164" r="8" fill="${C.neon}"/>
-    <circle cx="128" cy="162" r="2.4" fill="${C.bezel}"/>
-    <circle cx="172" cy="162" r="2.4" fill="${C.bezel}"/>
-    <path d="M132 193 q9 -7 18 0 q9 7 18 0" fill="none" stroke="${C.neon}" stroke-width="4" stroke-linecap="round"/>
-    <g stroke="${C.amber}" stroke-width="3.5" stroke-linecap="round">
-      <line x1="192" y1="134" x2="192" y2="143"/>
-    </g>
-    <circle cx="192" cy="149" r="2.2" fill="${C.amber}"/>`,
-
-  sleeping: () => `
-    <path d="M120 161 Q128 169 136 161" fill="none" stroke="${C.neon}" stroke-width="5" stroke-linecap="round"/>
-    <path d="M164 161 Q172 169 180 161" fill="none" stroke="${C.neon}" stroke-width="5" stroke-linecap="round"/>
-    <line x1="144" y1="192" x2="156" y2="192" stroke="${C.neon}" stroke-width="4" stroke-linecap="round"/>
-    <g fill="${C.neon}" font-family="'JetBrains Mono','Noto Sans JP',monospace" font-weight="700">
-      <text x="176" y="152" font-size="11">z</text>
-      <text x="187" y="143" font-size="14">z</text>
-      <text x="199" y="132" font-size="18">z</text>
-    </g>`,
-
-  excited: () => `
-    <circle cx="128" cy="160" r="10.5" fill="${C.neon}"/>
-    <circle cx="172" cy="160" r="10.5" fill="${C.neon}"/>
-    <circle cx="124" cy="156" r="3.4" fill="${C.neonHi}"/>
-    <circle cx="168" cy="156" r="3.4" fill="${C.neonHi}"/>
-    <path d="M124 182 Q150 213 176 182 Z" fill="${C.neon}"/>
-    <g stroke="${C.amber}" stroke-width="2.8" stroke-linecap="round">
-      <line x1="108" y1="142" x2="108" y2="150"/><line x1="104" y1="146" x2="112" y2="146"/>
-      <line x1="196" y1="148" x2="196" y2="156"/><line x1="192" y1="152" x2="200" y2="152"/>
-    </g>`,
-
-  curious: () => `
-    <circle cx="128" cy="162" r="9" fill="${C.neon}"/>
-    <circle cx="172" cy="162" r="9" fill="${C.neon}"/>
-    <circle cx="125" cy="159" r="2.6" fill="${C.bezel}"/>
-    <circle cx="169" cy="159" r="2.6" fill="${C.bezel}"/>
-    <circle cx="150" cy="191" r="5" fill="none" stroke="${C.neon}" stroke-width="4"/>
-    <g fill="${C.amber}" font-family="'JetBrains Mono','Noto Sans JP',monospace" font-weight="700">
-      <text x="184" y="146" font-size="22">?</text>
-    </g>`,
-};
-
-// Per-mood cursor blink duration (the "heartbeat"): fast while
-// processing, slow while waiting/sleeping.
-const CURSOR_DUR = {
-  idle: "1.1s",
-  thinking: "0.45s",
-  typing: "0.55s",
-  success: "0.9s",
-  error: "0.7s",
-  curious: "0.9s",
-  excited: "0.4s",
-  sleeping: "2.2s",
-};
-
-/* ---------- invariant body (built once) ---------- */
-// Everything except the face <g> and the cursor's <animate> dur,
-// which we tweak per mood without rebuilding the whole tree.
-function bodyMarkup() {
-  return `
-  <rect x="96"  y="244" width="44" height="26" rx="13" fill="${C.body}" stroke="${C.line}" stroke-width="3"/>
-  <rect x="160" y="244" width="44" height="26" rx="13" fill="${C.body}" stroke="${C.line}" stroke-width="3"/>
-  <rect x="38"  y="150" width="24" height="58" rx="12" fill="${C.body}" stroke="${C.line}" stroke-width="3" transform="rotate(8 50 179)"/>
-  <rect x="238" y="150" width="24" height="58" rx="12" fill="${C.body}" stroke="${C.line}" stroke-width="3" transform="rotate(-8 250 179)"/>
-  <circle cx="48"  cy="210" r="9" fill="${C.body}" stroke="${C.line}" stroke-width="3"/>
-  <circle cx="252" cy="210" r="9" fill="${C.body}" stroke="${C.line}" stroke-width="3"/>
-  <rect x="58" y="70" width="184" height="184" rx="42" fill="${C.body}" stroke="${C.line}" stroke-width="3"/>
-  <line x1="150" y1="70" x2="150" y2="46" stroke="${C.line}" stroke-width="4" stroke-linecap="round"/>
-  <rect class="cody-cursor" x="143" y="22" width="14" height="22" rx="3" fill="${C.neon}">
-    <animate attributeName="opacity" values="1;1;0;0" dur="1.1s" keyTimes="0;.5;.5;1" repeatCount="indefinite"/>
-  </rect>
-  <rect x="80" y="100" width="140" height="124" rx="18" fill="${C.bezel}"/>
-  <rect x="84" y="104" width="132" height="116" rx="15" fill="${C.screen}"/>
-  <circle cx="100" cy="120" r="3.6" fill="${C.rust}"/>
-  <circle cx="113" cy="120" r="3.6" fill="${C.amber}"/>
-  <circle cx="126" cy="120" r="3.6" fill="${C.neon}"/>
-  <line x1="138" y1="120" x2="206" y2="120" stroke="#352b20" stroke-width="2"/>
-  <g class="cody-face"></g>`;
+// codes: 0 empty · 1 base · 2 highlight · 3 shadow · 4 ear
+function buildGrid() {
+  const g = Array.from({ length: GH }, () => Array(GW).fill(0));
+  const bumps = [-6.8, -3.4, 0, 3.4, 6.8].map((dx) => [CXP + dx, botY(CXP + dx)]);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const xc = x + 0.5, yc = y + 0.5; let f = 0;
+    if (inEll(xc, yc, CXP, MY, MRX, MRY)) f = 1;                       // mantle
+    if (inEll(xc, yc, CXP - 5.0, 3.7, 2.5, 2.7) ||
+        inEll(xc, yc, CXP + 5.0, 3.7, 2.5, 2.7)) f = 4;               // ears
+    for (const [bx, by] of bumps)                                     // tentacle nubs
+      if (inEll(xc, yc, bx, by, 0.95, 1.85) && yc >= by - 0.2) f = f || 3;
+    g[y][x] = f;
+  }
+  // shading on the mantle
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) if (g[y][x] === 1) {
+    const xc = x + 0.5, yc = y + 0.5;
+    if (inEll(xc, yc, CXP - 2.2, 6.4, 3.2, 2.6)) g[y][x] = 2;
+    else if (yc > 11.4 || inEll(xc, yc, CXP + 3.6, 11.0, 3.4, 2.6)) g[y][x] = 3;
+  }
+  // clean base "sockets" behind the eyes (uniform colour for crisp eyes + blink)
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) if (g[y][x] > 0 && g[y][x] !== 4) {
+    const xc = x + 0.5, yc = y + 0.5;
+    if (inEll(xc, yc, 7, 9.4, 1.9, 2.4) || inEll(xc, yc, 14, 9.4, 1.9, 2.4)) g[y][x] = 1;
+  }
+  return g;
 }
 
-const INACTIVITY_MS = 60000; // idle -> sleeping after ~60s of silence
-const SUCCESS_IDLE_MS = 2500; // success -> idle after ~2.5s
-// Bubble fade-out duration; must track the .cody-bubble CSS transition so the
-// element is hidden only after it has visually faded (a11y). Named, not magic.
-const BUBBLE_FADE_MS = 220;
+const GRID = buildGrid();
+const FILL_OF = { 1: C.base, 2: C.hi, 3: C.sh, 4: C.ear };
 
-// Strip every SMIL <animate> element from an SVG-markup string. CSS
-// @media (prefers-reduced-motion) cannot disable SMIL, so we remove it
-// at the source when the user has asked for reduced motion.
-const stripAnimate = (markup) => markup.replace(/<animate\b[^>]*\/>/g, "");
+function filled(x, y) { return x >= 0 && x < GW && y >= 0 && y < GH && GRID[y][x] > 0; }
+function isEdge(x, y) {
+  if (GRID[y][x] !== 0) return false;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+    if (filled(x + dx, y + dy)) return true;
+  return false;
+}
+// Merge horizontal runs of the same colour into one <rect> (fewer nodes, no seams).
+function runRects(test, colorOf) {
+  let s = "";
+  for (let y = 0; y < GH; y++) {
+    let x = 0;
+    while (x < GW) {
+      if (test(x, y)) {
+        const col = colorOf(x, y); let w = 1;
+        while (x + w < GW && test(x + w, y) && colorOf(x + w, y) === col) w++;
+        s += `<rect x="${x}" y="${y}" width="${w}" height="1" fill="${col}"/>`;
+        x += w;
+      } else x++;
+    }
+  }
+  return s;
+}
+
+// Invariant body (built once): contact shadow + outline ring + shaded fills.
+const BODY_INNER =
+  `<ellipse cx="11" cy="18.7" rx="7" ry="1.1" fill="${C.shadow}"/>` +
+  runRects((x, y) => isEdge(x, y), () => C.out) +
+  runRects((x, y) => GRID[y][x] > 0, (x, y) => FILL_OF[GRID[y][x]]);
+
+/* ---------- face pieces (grid coordinates) ---------- */
+function eyesOpen(lookUp, twin) {
+  const y = 8 + (lookUp ? -1 : 0);
+  const g2 = twin
+    ? `<rect x="7" y="${y + 2}" width="1" height="1" fill="${C.glint}"/><rect x="14" y="${y + 2}" width="1" height="1" fill="${C.glint}"/>`
+    : "";
+  return `<rect x="6" y="${y}" width="2" height="3" fill="${C.eye}"/>` +
+    `<rect x="13" y="${y}" width="2" height="3" fill="${C.eye}"/>` +
+    `<rect x="6" y="${y}" width="1" height="1" fill="${C.glint}"/>` +
+    `<rect x="13" y="${y}" width="1" height="1" fill="${C.glint}"/>` + g2;
+}
+function blink(dur) {
+  const a = `<animate attributeName="height" values="0;0;3;0" keyTimes="0;.92;.96;1" dur="${dur}" repeatCount="indefinite"/>`;
+  return `<rect x="6" y="8" width="2" height="0" fill="${C.base}">${a}</rect>` +
+    `<rect x="13" y="8" width="2" height="0" fill="${C.base}">${a}</rect>`;
+}
+// chevron "^ ^" happy eyes
+const eyesHappy =
+  `<rect x="6" y="9" width="1" height="1" fill="${C.eye}"/><rect x="7" y="8" width="1" height="1" fill="${C.eye}"/><rect x="8" y="9" width="1" height="1" fill="${C.eye}"/>` +
+  `<rect x="13" y="9" width="1" height="1" fill="${C.eye}"/><rect x="14" y="8" width="1" height="1" fill="${C.eye}"/><rect x="15" y="9" width="1" height="1" fill="${C.eye}"/>`;
+// gentle "‿ ‿" closed (sleeping)
+const eyesClosed =
+  `<rect x="6" y="9" width="1" height="1" fill="${C.eye}"/><rect x="7" y="10" width="1" height="1" fill="${C.eye}"/><rect x="8" y="9" width="1" height="1" fill="${C.eye}"/>` +
+  `<rect x="13" y="9" width="1" height="1" fill="${C.eye}"/><rect x="14" y="10" width="1" height="1" fill="${C.eye}"/><rect x="15" y="9" width="1" height="1" fill="${C.eye}"/>`;
+const eyesDot =
+  `<rect x="7" y="9" width="1" height="2" fill="${C.eye}"/><rect x="14" y="9" width="1" height="2" fill="${C.eye}"/>`;
+const browsWorried =
+  `<rect x="6" y="7" width="1" height="1" fill="${C.eye}"/><rect x="7" y="6" width="1" height="1" fill="${C.eye}"/>` +
+  `<rect x="15" y="7" width="1" height="1" fill="${C.eye}"/><rect x="14" y="6" width="1" height="1" fill="${C.eye}"/>`;
+// mouths
+const smile =
+  `<rect x="10" y="13" width="2" height="1" fill="${C.mouth}"/><rect x="9" y="12" width="1" height="1" fill="${C.mouth}"/><rect x="12" y="12" width="1" height="1" fill="${C.mouth}"/>`;
+const mouthFlat = `<rect x="10" y="12" width="2" height="1" fill="${C.mouth}"/>`;
+const mouthOpen =
+  `<rect x="9" y="12" width="4" height="1" fill="${C.mouth}"/><rect x="10" y="13" width="2" height="1" fill="${C.mouth}"/>`;
+const mouthWavy =
+  `<rect x="9" y="13" width="1" height="1" fill="${C.mouth}"/><rect x="10" y="12" width="1" height="1" fill="${C.mouth}"/><rect x="11" y="13" width="1" height="1" fill="${C.mouth}"/><rect x="12" y="12" width="1" height="1" fill="${C.mouth}"/>`;
+
+// animated cyan props
+function dataDots() {
+  const d = (cx, cy, r, b) =>
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${C.tech}"><animate attributeName="opacity" values="1;.2;1" dur="1.2s" begin="${b}" repeatCount="indefinite"/></circle>`;
+  return d(17.5, 5.5, 0.7, "0s") + d(19, 4.3, 0.55, ".4s") + d(20.2, 3.3, 0.45, ".8s");
+}
+function typingDots() {
+  const r = (x, b) =>
+    `<rect x="${x}" y="14.5" width="1.1" height="1.1" rx=".3" fill="${C.tech}"><animate attributeName="opacity" values=".25;1;.25" dur=".9s" begin="${b}" repeatCount="indefinite"/></rect>`;
+  return r(8.4, "0s") + r(10.4, ".15s") + r(12.4, ".3s");
+}
+function sparkle(cx, cy, b) {
+  return `<g fill="${C.techHi}"><animate attributeName="opacity" values=".2;1;.2" dur="1.4s" begin="${b}" repeatCount="indefinite"/>` +
+    `<rect x="${cx - 0.4}" y="${cy - 1.4}" width="0.8" height="2.8"/><rect x="${cx - 1.4}" y="${cy - 0.4}" width="2.8" height="0.8"/></g>`;
+}
+const qMark =
+  `<text x="17.3" y="6.6" font-family="'Space Mono',monospace" font-weight="700" font-size="6" fill="${C.tech}">?` +
+  `<animateTransform attributeName="transform" type="translate" values="0 0;0 -.6;0 0" dur="1.6s" repeatCount="indefinite"/></text>`;
+const bang =
+  `<text x="17.6" y="6.6" font-family="'Space Mono',monospace" font-weight="700" font-size="6" fill="${C.alert}">!` +
+  `<animateTransform attributeName="transform" type="translate" values="0 0;.5 0;-.5 0;0 0" dur=".5s" repeatCount="indefinite"/></text>`;
+const zzz =
+  `<g font-family="'Space Mono',monospace" font-weight="700" fill="${C.zzz}">` +
+  `<text x="16.2" y="6.5" font-size="3.4">z</text>` +
+  `<text x="17.6" y="4.6" font-size="4.4">z</text>` +
+  `<text x="19.2" y="2.6" font-size="5.4">z<animate attributeName="opacity" values=".3;1;.3" dur="2.6s" repeatCount="indefinite"/></text></g>`;
+
+const FACES = {
+  idle: () => eyesOpen(0) + smile + blink("4.6s"),
+  thinking: () => eyesOpen(1) + mouthFlat + blink("5.2s") + dataDots(),
+  typing: () => eyesOpen(0) + blink("4.0s") + typingDots(),
+  success: () => eyesHappy + mouthOpen + sparkle(18, 5, "0s"),
+  error: () => eyesDot + browsWorried + mouthWavy + bang,
+  curious: () => eyesOpen(0, false) + smile + blink("3.4s") + qMark,
+  excited: () => eyesOpen(0, true) + mouthOpen + sparkle(4.5, 6, "0s") + sparkle(18, 5.5, ".5s"),
+  sleeping: () => eyesClosed + mouthFlat + zzz,
+};
+
+const INACTIVITY_MS = 60000;  // idle -> sleeping after ~60s of silence
+const SUCCESS_IDLE_MS = 2500; // success -> idle after ~2.5s
+const BUBBLE_FADE_MS = 220;   // must track the .cody-bubble CSS transition
+
+// Strip SMIL <animate>/<animateTransform> — CSS reduced-motion can't disable SMIL.
+const stripAnimate = (m) => m.replace(/<animate(Transform)?\b[^>]*\/?>(?:[^<]*<\/animate(Transform)?>)?/g, "");
 
 let counter = 0;
 
-// Inject (once) a token-driven :focus-visible outline for the bubble close
-// button. cody.css styles the button but omits a keyboard focus ring; this
-// uses the app's accent/focus tokens so it stays theme-aware.
 const STYLE_ID = "cody-injected-style";
 function ensureInjectedStyle() {
   if (typeof document === "undefined") return;
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
+  // Mood-change squash "pop" on the svg (independent of the figure's float),
+  // plus a token-driven focus ring for the bubble close button.
   style.textContent =
-    ".cody-bubble-close:focus-visible{" +
-    "outline:2px solid var(--line-focus, var(--accent));" +
-    "outline-offset:2px;" +
-    "opacity:1;" +
-    "}";
+    ".cody-figure svg{transform-origin:50% 96%}" +
+    ".cody-figure svg.octa-pop{animation:octaPop .34s var(--ease-out,cubic-bezier(.16,1,.3,1))}" +
+    "@keyframes octaPop{0%{transform:scale(1,1)}28%{transform:scale(1.09,.93)}58%{transform:scale(.97,1.04)}100%{transform:scale(1,1)}}" +
+    "@media (prefers-reduced-motion:reduce){.cody-figure svg.octa-pop{animation:none}}" +
+    ".cody-bubble-close:focus-visible{outline:2px solid var(--line-focus, var(--accent));outline-offset:2px;opacity:1}";
   (document.head || document.documentElement).appendChild(style);
 }
 
 /**
- * Mount Cody into a target element.
+ * Mount OCTA into a target element.
  * @param {HTMLElement|string} targetEl  element or selector
  * @param {Object} [opts]
  * @param {string} [opts.mood="idle"]    initial mood
@@ -222,17 +243,11 @@ function ensureInjectedStyle() {
 export function mountCody(targetEl, opts = {}) {
   const target =
     typeof targetEl === "string" ? document.querySelector(targetEl) : targetEl;
-  if (!target) {
-    throw new Error("mountCody: target element not found");
-  }
+  if (!target) throw new Error("mountCody: target element not found");
 
   const companion = opts.companion !== false;
-
   ensureInjectedStyle();
 
-  // Reduced-motion: read once at mount. When set, we remove every SMIL
-  // <animate> from the injected SVG (CSS media queries can't disable SMIL)
-  // and skip the cursor blink entirely.
   let reduceMotion = false;
   try {
     reduceMotion = !!(window.matchMedia &&
@@ -257,8 +272,9 @@ export function mountCody(targetEl, opts = {}) {
   closeBtn.className = "cody-bubble-close";
   closeBtn.type = "button";
   closeBtn.setAttribute("aria-label", "閉じる");
-  closeBtn.textContent = "▾"; // ▾
-  closeBtn.addEventListener("click", () => hideBubble());
+  closeBtn.textContent = "▾";
+  const onClose = () => hideBubble();
+  closeBtn.addEventListener("click", onClose);
 
   bubble.appendChild(bubbleText);
   bubble.appendChild(closeBtn);
@@ -266,14 +282,14 @@ export function mountCody(targetEl, opts = {}) {
   const figure = document.createElement("div");
   figure.className = "cody-figure";
   figure.setAttribute("role", "img");
-  figure.setAttribute("aria-label", "Cody マスコット");
-  figure.title = "Cody";
+  figure.setAttribute("aria-label", "OCTA マスコット");
+  figure.title = "OCTA";
 
-  // The SVG is created once; the face <g> and cursor dur are mutated.
   const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 300 392");
+  svg.setAttribute("viewBox", `0 0 ${GW} ${GH}`);
   svg.setAttribute("xmlns", SVG_NS);
-  svg.innerHTML = reduceMotion ? stripAnimate(bodyMarkup()) : bodyMarkup();
+  svg.setAttribute("shape-rendering", "crispEdges");
+  svg.innerHTML = BODY_INNER + `<g class="cody-face"></g>`;
   figure.appendChild(svg);
 
   root.appendChild(bubble);
@@ -281,7 +297,6 @@ export function mountCody(targetEl, opts = {}) {
   target.appendChild(root);
 
   const faceGroup = svg.querySelector(".cody-face");
-  const cursorAnim = svg.querySelector(".cody-cursor animate");
 
   // ---- state ----
   let currentMood = "idle";
@@ -290,56 +305,46 @@ export function mountCody(targetEl, opts = {}) {
   let bubbleTimer = null;
   let destroyed = false;
 
-  function clearTimer(t) {
-    if (t) clearTimeout(t);
-    return null;
-  }
+  function clearTimer(t) { if (t) clearTimeout(t); return null; }
 
   function armInactivity() {
     inactivityTimer = clearTimer(inactivityTimer);
     inactivityTimer = setTimeout(() => {
-      if (!destroyed && currentMood !== "sleeping") {
-        applyMood("sleeping");
-      }
+      if (!destroyed && currentMood !== "sleeping") applyMood("sleeping");
     }, INACTIVITY_MS);
   }
 
-  // applyMood swaps only the face + cursor speed (body stays put).
+  // applyMood swaps only the face <g>; the body stays put. A brief squash
+  // "pop" gives the change some life (companion only, motion allowed).
   function applyMood(mood) {
     if (!FACES[mood]) mood = "idle";
+    const changed = mood !== currentMood;
     currentMood = mood;
     const face = FACES[mood]();
     faceGroup.innerHTML = reduceMotion ? stripAnimate(face) : face;
-    // When reduced, the cursor <animate> was stripped from the body so
-    // cursorAnim is null and the blink is skipped automatically.
-    if (cursorAnim) {
-      cursorAnim.setAttribute("dur", CURSOR_DUR[mood] || "1.1s");
-    }
     root.setAttribute("data-mood", mood);
+    if (companion && !reduceMotion && changed) {
+      svg.classList.remove("octa-pop");
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!destroyed) svg.classList.add("octa-pop");
+      }));
+    }
   }
 
   function showBubble(text, ms) {
     bubbleTimer = clearTimer(bubbleTimer);
     bubbleText.textContent = text;
     bubble.hidden = false;
-    // Replay the entrance transition without a synchronous layout flush:
-    // drop the open class, then re-add it after two animation frames so the
-    // browser registers the "closed" state before transitioning to open.
     bubble.classList.remove("is-open");
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!destroyed) bubble.classList.add("is-open");
-      });
-    });
-    if (typeof ms === "number" && ms > 0) {
-      bubbleTimer = setTimeout(hideBubble, ms);
-    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!destroyed) bubble.classList.add("is-open");
+    }));
+    if (typeof ms === "number" && ms > 0) bubbleTimer = setTimeout(hideBubble, ms);
   }
 
   function hideBubble() {
     bubbleTimer = clearTimer(bubbleTimer);
     bubble.classList.remove("is-open");
-    // keep it in the DOM during the fade, then hide for a11y
     setTimeout(() => {
       if (!bubble.classList.contains("is-open")) bubble.hidden = true;
     }, BUBBLE_FADE_MS);
@@ -350,101 +355,84 @@ export function mountCody(targetEl, opts = {}) {
     if (destroyed) return controller;
     autoIdleTimer = clearTimer(autoIdleTimer);
     applyMood(mood);
-
-    if (typeof sayText === "string" && sayText.length) {
-      showBubble(sayText);
-    }
-
-    // success auto-returns to idle after ~2.5s unless overridden.
+    if (typeof sayText === "string" && sayText.length) showBubble(sayText);
     if (mood === "success" && autoIdleMs !== 0) {
-      autoIdleTimer = setTimeout(() => {
-        if (!destroyed) applyMood("idle");
-      }, autoIdleMs || SUCCESS_IDLE_MS);
+      autoIdleTimer = setTimeout(() => { if (!destroyed) applyMood("idle"); }, autoIdleMs || SUCCESS_IDLE_MS);
     } else if (typeof autoIdleMs === "number" && autoIdleMs > 0) {
-      autoIdleTimer = setTimeout(() => {
-        if (!destroyed) applyMood("idle");
-      }, autoIdleMs);
+      autoIdleTimer = setTimeout(() => { if (!destroyed) applyMood("idle"); }, autoIdleMs);
     }
-
-    // any explicit interaction resets the inactivity countdown.
     if (mood !== "sleeping") armInactivity();
     return controller;
   }
 
   function say(text, { mood, ms } = {}) {
     if (destroyed) return controller;
-    const line = typeof text === "string" && text.length ? text : DEFAULT_LINES[mood || currentMood] || DEFAULT_LINES.idle;
+    const line = typeof text === "string" && text.length
+      ? text : DEFAULT_LINES[mood || currentMood] || DEFAULT_LINES.idle;
     if (mood) applyMood(mood);
     showBubble(line, ms);
     armInactivity();
     return controller;
   }
 
-  function hide() {
-    root.classList.add("cody-hidden");
-    return controller;
-  }
-
-  function show() {
-    root.classList.remove("cody-hidden");
-    return controller;
-  }
+  function hide() { root.classList.add("cody-hidden"); return controller; }
+  function show() { root.classList.remove("cody-hidden"); return controller; }
 
   function destroy() {
     destroyed = true;
     inactivityTimer = clearTimer(inactivityTimer);
     autoIdleTimer = clearTimer(autoIdleTimer);
     bubbleTimer = clearTimer(bubbleTimer);
-    closeBtn.removeEventListener("click", hideBubble);
+    closeBtn.removeEventListener("click", onClose);
     if (root.parentNode) root.parentNode.removeChild(root);
     if (window.whsimCody === controller) {
-      try {
-        delete window.whsimCody;
-      } catch (_e) {
-        window.whsimCody = undefined;
-      }
+      try { delete window.whsimCody; } catch (_e) { window.whsimCody = undefined; }
     }
   }
 
   const controller = {
     el: root,
-    get mood() {
-      return currentMood;
-    },
-    setMood,
-    say,
-    hide,
-    show,
-    destroy,
+    get mood() { return currentMood; },
+    setMood, say, hide, show, destroy,
   };
 
   // ---- init ----
   applyMood(opts.mood && FACES[opts.mood] ? opts.mood : "idle");
   armInactivity();
-  if (opts.greet) {
-    showBubble(DEFAULT_LINES.curious);
-  }
+  if (opts.greet) showBubble(DEFAULT_LINES.curious);
 
-  // expose for non-module callers (most-recent wins).
   window.whsimCody = controller;
-
   return controller;
 }
 
 export default mountCody;
 
 /**
- * Static (non-animated) Cody SVG markup for inline avatars — e.g. the chat
- * thread, where one small Cody sits beside each of its messages. Reuses the
- * exact body + per-mood face geometry, but strips every <animate> so many
- * avatars on screen stay cheap and calm.
+ * Static (non-animated) OCTA SVG markup for inline avatars — e.g. the chat
+ * thread, where one small OCTA sits beside each of its messages. Reuses the
+ * exact body + per-mood face, but strips every animation so many avatars on
+ * screen stay cheap and calm.
  * @param {string} [mood="idle"] one of MOODS
  * @returns {string} an <svg>…</svg> string
  */
 export function codyAvatarSVG(mood = "idle") {
-  const face = (FACES[mood] || FACES.idle)();
-  const body = bodyMarkup()
-    .replace('<g class="cody-face"></g>', `<g class="cody-face">${face}</g>`)
-    .replace(/<animate\b[^>]*\/>/g, ""); // static: no blink/dots
-  return `<svg viewBox="0 0 300 392" xmlns="${SVG_NS}" class="cody-avatar-svg" aria-hidden="true">${body}</svg>`;
+  return octaSVG(mood, { animated: false, cls: "cody-avatar-svg" });
+}
+
+/**
+ * Standalone OCTA <svg> for any context (avatars, boot/loading, previews).
+ * @param {string} [mood="idle"] one of MOODS
+ * @param {Object} [o]
+ * @param {boolean} [o.animated=true] keep SMIL blink/props (false = calm/static)
+ * @param {string}  [o.cls=""]        extra class on the <svg>
+ * @returns {string} an <svg>…</svg> string
+ */
+export function octaSVG(mood = "idle", o = {}) {
+  const animated = o.animated !== false;
+  let face = (FACES[mood] || FACES.idle)();
+  if (!animated) face = stripAnimate(face);
+  const inner = BODY_INNER + `<g class="cody-face">${face}</g>`;
+  const cls = o.cls ? ` class="${o.cls}"` : "";
+  return `<svg viewBox="0 0 ${GW} ${GH}" xmlns="${SVG_NS}"${cls} ` +
+    `shape-rendering="crispEdges" aria-hidden="true">${inner}</svg>`;
 }

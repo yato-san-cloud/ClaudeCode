@@ -1,10 +1,10 @@
 /* ============================================================
-   Cody mascot — companion + speech bubble styles.
+   OCTA mascot — companion + speech bubble styles. (Legacy class
+   prefix `.cody-*`; the character is OCTA, the メンダコ supporter.)
 
    Self-contained. Consumes the app's CSS variables where present
    (--bg-app, --ink-primary, --line-hair, --accent, --bad, --warn,
-   --ok) and falls back to Cody's own palette otherwise. Fonts are
-   inherited from the app (Inter + Noto Sans JP); none are imported.
+   --ok) and falls back to OCTA's own coral palette otherwise.
    Dark mode is handled via html[data-theme="dark"] overrides.
    ============================================================ */
 
@@ -13,7 +13,8 @@
   --cody-bubble-bg: var(--bg-app, #fbf7ef);
   --cody-bubble-ink: var(--ink-primary, #211c17);
   --cody-bubble-line: var(--line-hair, rgba(55, 53, 47, 0.16));
-  --cody-accent: var(--accent, #d97757);
+  --cody-accent: var(--accent, #f4647a);
+  --cody-coral: #f4647a;
   --cody-bad: var(--bad, #c4453f);
   --cody-warn: var(--warn, #b7791f);
   --cody-ok: var(--ok, #2e7d55);
@@ -170,13 +171,14 @@
   }
 }
 
+/* Underwater drift: OCTA bobs and gently tilts like floating in the deep. */
 @keyframes cody-float {
   0%,
   100% {
-    transform: translateY(0);
+    transform: translateY(0) rotate(-2deg);
   }
   50% {
-    transform: translateY(-5px);
+    transform: translateY(-5px) rotate(2deg);
   }
 }
 
@@ -218,5 +220,7 @@ html[data-theme="dark"] .cody-bubble {
 }
 
 html[data-theme="dark"] .cody-figure {
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.5));
+  /* depth shadow + a soft coral bioluminescent glow against the Void */
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.5))
+    drop-shadow(0 0 12px rgba(244, 100, 122, 0.38));
 }

@@ -506,7 +506,7 @@ export function mountBIAnalytics(el, opts = {}) {
     clearDim();
     if (askCody) {
       // Show an inline handoff note first so the jump to Cody is not jarring.
-      setAnswer(`<span class="sug">Cody に聞いています…「<b>${esc(q)}</b>」</span>`);
+      setAnswer(`<span class="sug">OCTA に聞いています…「<b>${esc(q)}</b>」</span>`);
       askCody(q);
       return;
     }

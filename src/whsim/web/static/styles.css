@@ -1833,8 +1833,13 @@ h1,h2,h3,h4,.brand{ font-family:var(--font-display); }
 .wm-stem{ width:.17em; height:.56em; border-radius:.07em;
   background:linear-gradient(180deg,#0EA5E9,#0A5E96); }
 .wm-tittle{ position:absolute; left:50%; top:-.40em; transform:translateX(-50%);
-  width:.64em; height:.64em; }
-.wm-tittle svg{ width:100%; height:100%; display:block; }
+  width:.64em; height:.64em; animation:wmFloat 5s ease-in-out infinite; will-change:transform; }
+.wm-tittle svg{ width:100%; height:100%; display:block;
+  filter:drop-shadow(0 .06em .14em rgba(52,227,255,.28)); }
+/* the inventory unit (i-titre) drifts like it's floating on the line — subtle. */
+@keyframes wmFloat{ 0%,100%{ transform:translateX(-50%) translateY(0); }
+  50%{ transform:translateX(-50%) translateY(-.07em); } }
+@media (prefers-reduced-motion:reduce){ .wm-tittle{ animation:none; } }
 .wm-cube-dark{ display:none; }
 .brand-tag{ font-family:var(--font-mono); font-weight:400; font-size:9px; letter-spacing:.32em;
   color:#6B7C8E; text-transform:uppercase; align-self:center; white-space:nowrap; }
