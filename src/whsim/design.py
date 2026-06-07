@@ -77,17 +77,22 @@ def materialize_racks(model: WarehouseModel) -> WarehouseModel:
 
     # Slots carry their storage-equipment type + per-cell capacity so the type
     # flows through to routing, capacity and the rendered shelf colour.
-    slots: list[tuple[float, float, str, int]] = []
+    slots: list[tuple[float, float, str, int, str]] = []
     for z in storage_zones:
         if z.shelves:
             for sh in z.shelves:
                 rtid = getattr(sh, "rack_type", None) or racktypes.DEFAULT
                 cap = racktypes.get(rtid)["capacity"]
-                for (x, y) in _shelf_slots(sh):
-                    slots.append((x, y, rtid, cap))
+                cells = _shelf_slots(sh)
+                base_name = getattr(sh, "name", "") or ""
+                multi = len(cells) > 1
+                for j, (x, y) in enumerate(cells):
+                    nm = ("" if not base_name
+                          else f"{base_name}-{j + 1:02d}" if multi else base_name)
+                    slots.append((x, y, rtid, cap, nm))
         elif z.rack is not None:
             for (x, y) in _zone_slots(z):
-                slots.append((x, y, racktypes.DEFAULT, 100))
+                slots.append((x, y, racktypes.DEFAULT, 100, ""))
 
     # Degenerate rack params (e.g. margin larger than the zone) can yield zero
     # slots. Regenerating would delete every existing location and orphan all
@@ -103,8 +108,8 @@ def materialize_racks(model: WarehouseModel) -> WarehouseModel:
     new_locs: list[Location] = list(kept)
     diag = (model.layout.bounds.width + model.layout.bounds.depth) or 1.0
     base = len(kept)
-    for i, (x, y, rtid, cap) in enumerate(slots):
-        new_locs.append(Location(id=f"L{i:04d}", zone="storage", x=x, y=y,
+    for i, (x, y, rtid, cap, nm) in enumerate(slots):
+        new_locs.append(Location(id=f"L{i:04d}", name=nm, zone="storage", x=x, y=y,
                                  type="shelf", rack_type=rtid, capacity=cap))
 
     # Re-peg SKUs round-robin onto the regenerated slots so the engine can route.

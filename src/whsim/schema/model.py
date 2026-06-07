@@ -94,11 +94,13 @@ class ShelfArea(BaseModel):
     not from thin air."""
 
     id: str = "s"
+    name: str = ""            # human shelf/run name (MapMaker "100-01-09"); seeds location names
     x: float = 0.0
     y: float = 0.0
     w: float = 2.0
     h: float = 10.0
     rack_type: str = "medium"  # storage-equipment preset (whsim.racktypes)
+    facing: Literal["up", "down", "left", "right"] = "down"  # 間口 (pick face) direction
     cell_w: float | None = None  # override bay pitch (m); None => from rack_type
     cell_d: float | None = None  # override depth pitch (m); None => from rack_type
 
@@ -142,6 +144,7 @@ class Layout(BaseModel):
 
 class Location(BaseModel):
     id: str = "loc"
+    name: str = ""            # addressable location name (from the shelf/run it sits in)
     zone: str = "storage"
     x: float = 0.0
     y: float = 0.0

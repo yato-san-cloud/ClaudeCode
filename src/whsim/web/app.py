@@ -760,6 +760,44 @@ async def api_import_mapcsv(name: str, file: UploadFile):
             "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
 
 
+@app.post("/api/projects/{name}/import-rmpm")
+async def api_import_rmpm(name: str, file: UploadFile):
+    """Import a MapMaker native ``.rmpm.json`` export -> named shelves/walls/stations.
+
+    FreeShelfObjects keep their MapMaker name, which seeds the materialised
+    location names so loaded stock data can later slot by shelf name."""
+    from whsim import design, rmpm
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    data = await _read_upload(file)
+    try:
+        res = rmpm.import_rmpm_bytes(data)
+    except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad export
+        raise HTTPException(400, f"rmpm を解析できませんでした: {e}")
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    if res.get("bounds"):
+        md["layout"]["bounds"] = res["bounds"]
+    if res.get("walls"):
+        md["layout"]["walls"] = res["walls"]
+    if res.get("zones"):
+        md["layout"]["zones"] = res["zones"]
+    if res.get("stations"):
+        md.setdefault("resources", {})["stations"] = res["stations"]
+    model = WarehouseModel.model_validate(md)
+    design.materialize_racks(model)   # named shelves -> named location cells
+    design.synthesize_items(model)    # ensure demand so the sim stays runnable
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("layout", Source.IMPORTED)
+    proj.save_provenance(prov)
+    return {"bounds": res.get("bounds"),
+            "shelves": res.get("stats", {}).get("shelves", 0),
+            "walls": len(res.get("walls", [])), "zones": len(res.get("zones", [])),
+            "stations": len(res.get("stations", [])),
+            "locations": len(model.locations),
+            "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
+
+
 _TABLE_FIELDS = {"shipments": "SHIPMENT_FIELDS", "inbound": "INBOUND_FIELDS",
                  "master": "INVENTORY_FIELDS"}
 

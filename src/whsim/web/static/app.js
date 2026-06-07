@@ -966,6 +966,23 @@ async function uploadMapcsv(file) {
   } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('地図取込に失敗しました: ' + e.message, 'error'); }
 }
 
+// MapMaker native .rmpm.json layout (richer than the CSV: carries shelf names).
+async function uploadRmpm(file) {
+  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
+  const fd = new FormData(); fd.append('file', file);
+  $('importLog').textContent = 'MapMakerレイアウトを解析中…';
+  try {
+    const r = await api(`/api/projects/${S.project}/import-rmpm`, { method: 'POST', body: fd });
+    const lines = [`<span class="ok">レイアウト取込: 棚${r.shelves}・壁${r.walls}・ステーション${r.stations}` +
+      ` → ロケーション${r.locations}件生成（${r.stats && r.stats.units || 'm'}）</span>`];
+    for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
+    $('importLog').innerHTML = lines.join('\n');
+    await openProject(S.project); // refresh headline/provenance/readiness
+    if (S.view === 'design') mountDesigner();
+    toast('MapMakerレイアウトを取り込みました。', 'ok');
+  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取込に失敗しました: ' + e.message, 'error'); }
+}
+
 // ---- unified 入荷/出荷/商品マスタ import with editable column mapping ---------
 let _tableFile = null, _tableKind = 'shipments';
 async function uploadTable(file) {
@@ -1560,6 +1577,8 @@ function initUI() {
   $('distInput').onchange = () => $('distInput').files[0] && uploadDistances($('distInput').files[0]);
   $('mapcsvBtn').onclick = () => $('mapcsvInput').click();
   $('mapcsvInput').onchange = () => $('mapcsvInput').files[0] && uploadMapcsv($('mapcsvInput').files[0]);
+  $('rmpmBtn').onclick = () => $('rmpmInput').click();
+  $('rmpmInput').onchange = () => $('rmpmInput').files[0] && uploadRmpm($('rmpmInput').files[0]);
   $('genMissingBtn').onclick = generateMissing;
   $('tableBtn').onclick = () => $('tableInput').click();
   $('tableInput').onchange = () => $('tableInput').files[0] && uploadTable($('tableInput').files[0]);
