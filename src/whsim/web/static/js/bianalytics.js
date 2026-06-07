@@ -111,15 +111,41 @@ function injectStyle() {
   .bia-chip:hover{border-color:var(--accent);color:var(--ink-primary)}
   @media (prefers-reduced-motion:reduce){.bia-chip{transition:none}}
 
-  /* ── cross-filter clear chip ── */
-  .bia-filterbar{display:flex;align-items:center;gap:var(--sp-2);min-height:24px;padding-left:var(--sp-1)}
-  .bia-fchip{appearance:none;display:inline-flex;align-items:center;gap:var(--sp-2);font-family:var(--font-mono);
+  /* ── cross-filter active-filter pills ── */
+  .bia-filterbar{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2);min-height:24px;padding-left:var(--sp-1)}
+  .bia-filterbar .lbl{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--ink-tertiary);
+    letter-spacing:.08em}
+  /* one pill per active facet — the ✕ removes just that facet */
+  .bia-pill{appearance:none;display:inline-flex;align-items:center;gap:var(--sp-2);font-family:var(--font-mono);
     font-size:var(--fs-micro);color:var(--accent);background:var(--accent-tint-2);
     border:1px solid var(--accent);border-radius:var(--r-pill);padding:var(--sp-1) var(--sp-3);cursor:pointer;
     transition:opacity var(--dur-1) var(--ease-out)}
-  .bia-fchip:hover{opacity:.75}
-  .bia-fchip .x{font-weight:700}
-  @media (prefers-reduced-motion:reduce){.bia-fchip{transition:none}}
+  .bia-pill:hover{opacity:.75}
+  .bia-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .bia-pill .x{font-weight:700}
+  /* "すべて解除" reset — quieter, no accent fill */
+  .bia-fclear{appearance:none;font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--ink-secondary);
+    background:transparent;border:1px solid var(--line-hair);border-radius:var(--r-pill);
+    padding:var(--sp-1) var(--sp-3);cursor:pointer;transition:color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out)}
+  .bia-fclear:hover{color:var(--ink-primary);border-color:var(--line-strong)}
+  .bia-fclear:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){.bia-pill,.bia-fclear{transition:none}}
+
+  /* ── error / retry state (mirror of bi.js / dataanalysis.js) ── */
+  .bia-err{display:flex;flex-direction:column;align-items:center;gap:var(--sp-3);text-align:center;
+    padding:32px 20px;color:var(--ink-secondary)}
+  .bia-err .msg{font-size:var(--fs-sm);color:var(--ink-secondary)}
+  .bia-err .det{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--ink-tertiary)}
+  .bia-retry{appearance:none;padding:var(--sp-2) var(--sp-5);border:1px solid var(--accent);border-radius:var(--r-md);
+    background:var(--accent);color:var(--ink-onAccent);font:inherit;font-weight:700;cursor:pointer;
+    transition:opacity var(--dur-1) var(--ease-out)}
+  .bia-retry:hover{opacity:.88}
+  .bia-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){.bia-retry{transition:none}}
+
+  /* Data/filter re-aggregation tween is driven by a small rAF lerp in JS
+     (snapshotMarks/tweenMarks), gated on prefers-reduced-motion there; the
+     heatmap cell keeps only its hover transform transition (above). */
 
   /* ── ② auto-insight cards ── */
   .bia-ins{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -165,6 +191,7 @@ function injectStyle() {
   .bia-bar{cursor:pointer;transition:opacity var(--dur-2) var(--ease-out)}
   .bia-bar.off{opacity:.22}
   .bia-cell.off{opacity:.3}
+  .bia-pt[data-hr]{cursor:pointer}
   @media (prefers-reduced-motion:reduce){.bia-bar{transition:none}}
 
   /* ── weekday heatmap ── */
@@ -230,19 +257,87 @@ export function mountBIAnalytics(el, opts = {}) {
   }
   document.addEventListener('themechange', onThemeChange);
 
-  // ── intra-view cross-filter state ──────────────────────────────────────
-  // A single click on a bar / weekday cell / legend rank toggles a facet; every
-  // chart then re-renders from the already-fetched data with non-matching marks
-  // dimmed (no refetch). null on every field = no filter active.
-  let filterState = { abc: null, weekday: null, rank: null };
-  const filterActive = () => !!(filterState.abc || filterState.weekday || filterState.rank);
+  // ── intra-view cross-filter state (TRUE propagation via xtab) ───────────
+  // A click on a bar / weekday cell / legend rank / hour toggles a facet; the
+  // weekday-heatmap, hourly chart and insight cards then RE-AGGREGATE from the
+  // `xtab` cell array filtered to ALL active facets (no refetch). The `abc`
+  // facet pins a clicked SKU (display-only on the Pareto); `rank` is the facet
+  // that actually propagates from an ABC click/legend. null = facet inactive.
+  let filterState = { abc: null, rank: null, weekday: null, hour: null };
+  // weekday is stored as the numeric xtab index (0=月..6=日) for clean joins;
+  // labels are derived via xtabWeekdays() / WD for display.
+  const PROPAGATING = ['rank', 'weekday', 'hour'];   // facets that re-aggregate via xtab
+  const filterActive = () => PROPAGATING.some((k) => filterState[k] != null) || filterState.abc != null;
+  const propagatingActive = () => PROPAGATING.some((k) => filterState[k] != null);
   function clearFilter() {
-    filterState = { abc: null, weekday: null, rank: null };
+    filterState = { abc: null, rank: null, weekday: null, hour: null };
+    render();
+  }
+  function clearFacet(key) {
+    filterState[key] = null;
     render();
   }
   function toggleFilter(key, val) {
     filterState[key] = filterState[key] === val ? null : val;
     render();
+  }
+
+  // ── xtab helpers: derive filtered cell sets + re-aggregations ───────────
+  const xtabCells = () => (data && Array.isArray(data.xtab) ? data.xtab : []);
+  const xtabWeekdays = () => (data && Array.isArray(data.xtab_weekdays) && data.xtab_weekdays.length
+    ? data.xtab_weekdays : WD);
+  // Cells matching ALL currently-active propagating facets (rank/weekday/hour).
+  // `except` lets a chart exclude its own facet so it shows the full distribution
+  // along its own axis (e.g. the weekday heatmap ignores the weekday facet so
+  // every weekday stays visible, with the selected one highlighted instead).
+  function filteredCells(except) {
+    return xtabCells().filter((c) => {
+      if (except !== 'rank' && filterState.rank != null && c.rank !== filterState.rank) return false;
+      if (except !== 'weekday' && filterState.weekday != null && c.weekday !== filterState.weekday) return false;
+      if (except !== 'hour' && filterState.hour != null && c.hour !== filterState.hour) return false;
+      return true;
+    });
+  }
+  // Per-weekday totals (qty) from cells, indexed 0..6; ignores the weekday facet.
+  function weekdayProfile() {
+    const wd = xtabWeekdays();
+    const totals = wd.map(() => 0);
+    filteredCells('weekday').forEach((c) => {
+      if (c.weekday >= 0 && c.weekday < totals.length) totals[c.weekday] += (c.qty || 0);
+    });
+    return wd.map((label, i) => ({ label, weekday: i, qty: totals[i] }));
+  }
+  // Per-hour totals (qty) from cells, indexed 0..23; ignores the hour facet.
+  function hourProfile() {
+    const totals = new Array(24).fill(0);
+    filteredCells('hour').forEach((c) => {
+      if (c.hour >= 0 && c.hour < 24) totals[c.hour] += (c.qty || 0);
+    });
+    // mirror the default `hourly` label shape ("HH時") so tooltips read naturally
+    return totals.map((qty, h) => ({ label: `${h}時`, hour: h, qty }));
+  }
+  // weekday index → display label (月..日) using the payload's order when present.
+  const weekdayLabel = (i) => (i == null ? '' : (xtabWeekdays()[i] || WD[i] || String(i)));
+  // Human-readable summary of the active facets, for card/insight copy.
+  function filterDescription() {
+    const parts = [];
+    if (filterState.rank != null) parts.push(`ランク${filterState.rank}`);
+    if (filterState.weekday != null) parts.push(`${weekdayLabel(filterState.weekday)}曜`);
+    if (filterState.hour != null) parts.push(`${filterState.hour}時`);
+    return parts.join(' · ') || '選択';
+  }
+  // Rank-level A/B/C distribution (lines + qty) for the *fully* filtered cells —
+  // used by the ABC chart when a weekday/hour facet makes per-SKU bars invalid.
+  function rankDistribution() {
+    const ranks = (data && Array.isArray(data.xtab_ranks) && data.xtab_ranks.length)
+      ? data.xtab_ranks : ['A', 'B', 'C'];
+    const byRank = {}; ranks.forEach((r) => { byRank[r] = { rank: r, lines: 0, qty: 0 }; });
+    filteredCells().forEach((c) => {
+      if (!byRank[c.rank]) byRank[c.rank] = { rank: c.rank, lines: 0, qty: 0 };
+      byRank[c.rank].lines += (c.lines || 0);
+      byRank[c.rank].qty += (c.qty || 0);
+    });
+    return ranks.map((r) => byRank[r]);
   }
 
   const root = document.createElement('div');
@@ -267,6 +362,7 @@ export function mountBIAnalytics(el, opts = {}) {
   const hideTip = () => tip.classList.remove('on');
 
   let data = null;          // analysis payload
+  let loadErr = null;       // last load() failure (null = none); drives the retry state
   let exIdx = 0, exTimer = 0;
   let animatedOnce = false; // stagger fade-in only on first data arrival, not on
                             // every filter/theme re-render
@@ -356,36 +452,54 @@ export function mountBIAnalytics(el, opts = {}) {
   function clearDim() { root.querySelectorAll('[data-sec]').forEach((n) => n.classList.remove('bia-dim')); }
 
   // ── auto-insights (max 3): fact line + implication line ───────────────
+  // When a propagating facet (rank/weekday/hour) is active the weekday & hour
+  // figures are recomputed from the filtered xtab cells so the numbers reflect
+  // the current selection; otherwise the default unfiltered aggregates are used.
   function insights() {
     const out = [];
+    const filtered = propagatingActive();
+    const selLabel = filterDescription();   // e.g. "ランクA · 火曜" for card copy
     const abc = data.abc || [];
     if (abc.length) {
-      const topN = Math.max(1, Math.round(abc.length * 0.2));
-      const share = abc.slice(0, topN).reduce((s, r) => s + (r.share || 0), 0);
-      const skew = share >= 0.8;
-      out.push({
-        sec: 'abc', kic: 'ABC 偏り',
-        fact: `上位20%の SKU（<span class="n">${fmt(topN)}品目</span>）が物量の <span class="n">${pct(share)}</span> を占有。`,
-        imp: skew ? '主力に偏在。A品を出荷口近くへ寄せれば歩行を大きく削減できます。'
-          : '比較的フラット。ゾーニング効果は限定的、動線最適化を優先。',
-      });
+      if (filtered) {
+        // per-SKU re-ranking is impossible from rank-level xtab; report the
+        // rank-level mix of the selection instead of pretending to re-rank.
+        const dist = rankDistribution();
+        const tot = dist.reduce((s, r) => s + (r.qty || 0), 0) || 1;
+        const aShare = (dist.find((r) => r.rank === 'A') || { qty: 0 }).qty / tot;
+        out.push({
+          sec: 'abc', kic: 'ABC 構成（絞込中）',
+          fact: `${esc(selLabel)} の物量はランクA が <span class="n">${pct(aShare)}</span> を占有。`,
+          imp: 'この絞込では個別SKUの再ランク付けはできません（ランク粒度の集計）。',
+        });
+      } else {
+        const topN = Math.max(1, Math.round(abc.length * 0.2));
+        const share = abc.slice(0, topN).reduce((s, r) => s + (r.share || 0), 0);
+        const skew = share >= 0.8;
+        out.push({
+          sec: 'abc', kic: 'ABC 偏り',
+          fact: `上位20%の SKU（<span class="n">${fmt(topN)}品目</span>）が物量の <span class="n">${pct(share)}</span> を占有。`,
+          imp: skew ? '主力に偏在。A品を出荷口近くへ寄せれば歩行を大きく削減できます。'
+            : '比較的フラット。ゾーニング効果は限定的、動線最適化を優先。',
+        });
+      }
     }
-    const wk = data.by_weekday || [];
+    const wk = filtered ? weekdayProfile().filter((r) => r.qty > 0) : (data.by_weekday || []);
     if (wk.length) {
       const mx = wk.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), wk[0]);
       const avg = wk.reduce((s, r) => s + (r.qty || 0), 0) / wk.length;
       const ratio = avg > 0 ? mx.qty / avg : 1;
       out.push({
-        sec: 'weekday', kic: 'ピーク曜日',
+        sec: 'weekday', kic: filtered ? 'ピーク曜日（絞込中）' : 'ピーク曜日',
         fact: `<span class="n">${esc(mx.label)}曜</span>が最大（<span class="n">${fmt(mx.qty)}</span>、平均比 <span class="n">×${fmt(ratio, 1)}</span>）。`,
         imp: ratio >= 1.4 ? 'この曜日に人員を寄せるか、前倒し出荷で平準化を。' : '曜日の山は緩やか。日次の平準化余地は小さめ。',
       });
     }
-    const hr = data.hourly || [];
+    const hr = filtered ? hourProfile().filter((r) => r.qty > 0) : (data.hourly || []);
     if (hr.length && out.length < 3) {
       const mx = hr.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), hr[0]);
       out.push({
-        sec: 'time', kic: 'ピーク時間帯',
+        sec: 'time', kic: filtered ? 'ピーク時間帯（絞込中）' : 'ピーク時間帯',
         fact: `ピークは <span class="n">${esc(mx.label)}</span>（<span class="n">${fmt(mx.qty)}</span>）。`,
         imp: 'この時間帯にピッカーを厚く。シフトの山谷を合わせると待ちが減ります。',
       });
@@ -412,6 +526,11 @@ export function mountBIAnalytics(el, opts = {}) {
   function svgPareto() {
     const a = (data.abc || []).slice();
     if (!a.length) return scaffold('abc', 'ABCパレート', '物量降順の棒＋累積%線');
+    // When a weekday/hour facet is active, the per-SKU ordering on this chart no
+    // longer reflects the selection (xtab is rank-level, not per-SKU — we cannot
+    // honestly re-rank individual SKUs by weekday). Rather than fake it, we dim
+    // the bars and overlay the rank-level A/B/C split of the selection.
+    const dimSku = filterState.weekday != null || filterState.hour != null;
     const W = 760, H = 260, ml = 8, mr = 38, mt = 14, mb = 28;
     const iw = W - ml - mr, ih = H - mt - mb;
     const n = a.length;
@@ -429,7 +548,9 @@ export function mountBIAnalytics(el, opts = {}) {
     let bars = '', vlabs = '';
     a.forEach((r, i) => {
       const h = mt + ih - yBar(r.qty || 0);
-      const off = filterActive() && !isMatch(r);
+      // dim when a weekday/hour facet invalidates per-SKU ranking, or when a
+      // sku/rank facet is active and this bar doesn't match it.
+      const off = dimSku || (filterActive() && !isMatch(r));
       bars += `<rect class="bia-bar${off ? ' off' : ''}" data-i="${i}" data-sku="${esc(r.sku || r.name || '')}" `
         + `x="${(x(i) + 1).toFixed(1)}" y="${yBar(r.qty || 0).toFixed(1)}" `
         + `width="${Math.max(1, bw - 2).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" `
@@ -457,63 +578,112 @@ export function mountBIAnalytics(el, opts = {}) {
       axis += `<text x="${ml + iw + 4}" y="${(yCum(f) + 3).toFixed(1)}" font-size="9">${pct(f)}</text>`;
     });
     const top = a[0];
-    const aria = `ABCパレート図。${fmt(n)}品目を物量降順で表示。最上位は ${esc(top.name || top.sku || '')}、物量 ${fmt(top.qty)}。`;
+    // overlay shown when per-SKU bars are dimmed: the honest rank-level A/B/C
+    // split of the current selection (we do NOT re-rank individual SKUs).
+    let overlay = '';
+    if (dimSku) {
+      const dist = rankDistribution();
+      const totQ = dist.reduce((s, r) => s + (r.qty || 0), 0) || 1;
+      const parts = dist.map((r) => `${esc(r.rank)} ${pct((r.qty || 0) / totQ)}`).join('　');
+      const note = `${weekdayLabel(filterState.weekday) ? weekdayLabel(filterState.weekday) + '曜' : ''}${filterState.hour != null ? (filterState.weekday != null ? '・' : '') + filterState.hour + '時' : ''}で絞込中`;
+      overlay = `<text x="${(ml + iw / 2).toFixed(1)}" y="${(mt + ih / 2 - 8).toFixed(1)}" `
+        + `font-size="12" text-anchor="middle" class="axt">${esc(note)}</text>`
+        + `<text x="${(ml + iw / 2).toFixed(1)}" y="${(mt + ih / 2 + 10).toFixed(1)}" `
+        + `font-size="11" text-anchor="middle" class="vlab" font-family="var(--font-mono)">${esc('選択物量のランク構成 ' + parts)}</text>`;
+    }
+    const aria = dimSku
+      ? `ABCパレート図。${esc(filterDescription())}で絞込中のため個別SKUの再ランクは表示できません。選択物量のランク構成を表示。`
+      : `ABCパレート図。${fmt(n)}品目を物量降順で表示。最上位は ${esc(top.name || top.sku || '')}、物量 ${fmt(top.qty)}。`;
     const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
       ${guide(0.7, '70%', WARN)}${guide(0.9, '90%', BAD)}
       ${bars}
-      ${vlabs}
-      <polyline points="${pts}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round"></polyline>
-      ${a.map((r, i) => { let c2 = r.cum != null ? r.cum : 0; return `<circle cx="${(x(i) + bw / 2).toFixed(1)}" cy="${yCum(Math.min(1, c2)).toFixed(1)}" r="2" fill="${accent}"></circle>`; }).join('')}
+      ${dimSku ? '' : vlabs}
+      <polyline points="${pts}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round"${dimSku ? ' opacity=".22"' : ''}></polyline>
+      ${a.map((r, i) => { let c2 = r.cum != null ? r.cum : 0; return `<circle cx="${(x(i) + bw / 2).toFixed(1)}" cy="${yCum(Math.min(1, c2)).toFixed(1)}" r="2" fill="${accent}"${dimSku ? ' opacity=".22"' : ''}></circle>`; }).join('')}
       ${axis}
+      ${overlay}
     </svg>`;
+    const sub = dimSku ? `${weekdayLabel(filterState.weekday) ? weekdayLabel(filterState.weekday) + '曜' : ''}${filterState.hour != null ? filterState.hour + '時' : ''}で絞込中・再ランク不可`
+      : `${fmt(n)}品目を物量降順で`;
     // legend ranks are clickable filters (data-rank)
-    return chartShell('abc', 'ABCパレート', `${fmt(n)}品目を物量降順で`, svg, [
+    return chartShell('abc', 'ABCパレート', sub, svg, [
       [accent, 'A (〜70%)', 'A'], [accent40, 'B (〜90%)', 'B'], ['var(--line-strong)', 'C', 'C'],
     ]);
   }
 
   // ── ④ weekday mini-heatmap: 7 accent-shade cells, ring on max ─────────
+  // Re-aggregates from filtered xtab cells whenever a propagating facet
+  // (rank/hour) is active, so e.g. selecting rank A shows A's weekday profile.
+  // The weekday facet itself is excluded from the filter (every weekday stays
+  // visible) and instead surfaces as a highlighted .sel cell.
   function heatWeekday() {
-    const raw = data.by_weekday || [];
-    if (!raw.length) return scaffold('weekday', '曜日別ヒートマップ', '7セルの濃淡');
-    // normalise to Mon..Sun order if labels are weekday names
-    const byLabel = {}; raw.forEach((r) => { byLabel[r.label] = r.qty || 0; });
-    const series = WD.every((d) => d in byLabel) ? WD.map((d) => ({ label: d, qty: byLabel[d] })) : raw;
+    const haveXtab = xtabCells().length > 0;
+    let series;   // [{label, qty, weekday}] indexed for cells (weekday may be null)
+    if (haveXtab) {
+      series = weekdayProfile();   // re-aggregated, intersects active facets
+    } else {
+      const raw = data.by_weekday || [];
+      if (!raw.length) return scaffold('weekday', '曜日別ヒートマップ', '7セルの濃淡');
+      const byLabel = {}; raw.forEach((r) => { byLabel[r.label] = r.qty || 0; });
+      series = WD.every((d) => d in byLabel)
+        ? WD.map((d, i) => ({ label: d, qty: byLabel[d], weekday: i }))
+        : raw.map((r) => ({ label: r.label, qty: r.qty || 0, weekday: WD.indexOf(r.label) }));
+    }
+    if (!series.length) return scaffold('weekday', '曜日別ヒートマップ', '7セルの濃淡');
     const max = Math.max(...series.map((r) => r.qty || 0), 1);
     const mxRow = series.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), series[0]);
-    const fWd = filterState.weekday;
+    const fWd = filterState.weekday;     // numeric index or null
     const cells = series.map((r) => {
       const t = (r.qty || 0) / max;                 // 0..1
       const a = 0.10 + t * 0.78;                     // alpha ramp on accent
-      const isMax = (r.qty || 0) === max;
-      const sel = fWd === r.label;
-      const off = filterActive() && fWd != null && !sel;
+      const isMax = (r.qty || 0) === max && max > 0;
+      const sel = fWd != null && fWd === r.weekday;
       // high-contrast ink on dark cells; tertiary-ink-ish on faint cells
       const ink = t > 0.55 ? 'var(--bg-app)' : 'var(--ink-secondary)';
-      return `<div class="bia-cell${isMax ? ' max' : ''}${sel ? ' sel' : ''}${off ? ' off' : ''}"
-        data-hd="${esc(r.label)}|${r.qty || 0}" data-wd="${esc(r.label)}" role="button" tabindex="0"
-        aria-label="${esc(r.label)}曜 物量 ${fmt(r.qty)}"
+      // tween cell intensity via CSS transition on background (data-driven recolour)
+      return `<div class="bia-cell bia-tcell${isMax ? ' max' : ''}${sel ? ' sel' : ''}"
+        data-hd="${esc(r.label)}|${r.qty || 0}" data-wd="${r.weekday == null ? '' : r.weekday}" role="button" tabindex="0"
+        aria-label="${esc(r.label)}曜 物量 ${fmt(r.qty)}${sel ? '（選択中）' : ''}"
         style="background:${accentAlpha(accent, +a.toFixed(3))}">
         <span class="wd" style="color:${ink}">${esc(r.label)}</span>
         <span class="vv" style="color:${ink}">${fmt(r.qty)}</span></div>`;
     }).join('');
+    const subtitle = propagatingActive() ? `${esc(filterDescription())}で絞込中` : '濃いほど物量大';
     const aria = `曜日別ヒートマップ。物量が最も多いのは ${esc(mxRow.label)}曜（${fmt(mxRow.qty)}）。`;
     const heat = `<div class="bia-heat" role="img" aria-label="${esc(aria)}">${cells}</div>`;
-    return chartShell('weekday', '曜日別ヒートマップ', '濃いほど物量大', heat, null);
+    return chartShell('weekday', '曜日別ヒートマップ', subtitle, heat, null);
   }
 
   // ── ⑤ time series: daily area (faint cyan fill + line) + hourly sparkline
+  // The hourly curve is RE-AGGREGATED from filtered xtab cells (so selecting
+  // 火曜 reshapes it to Tuesday). The daily series is filtered to matching
+  // weekdays ONLY when a weekday facet is the sole active facet (day index
+  // carries weekday via day%7, matching the server's floor(arrival_s/86400)%7);
+  // otherwise the full series is shown so the trend stays readable.
   function timeSeries() {
-    const daily = data.daily || [];
-    const hourly = data.hourly || [];
+    const allDaily = data.daily || [];
+    const haveXtab = xtabCells().length > 0;
+    // hourly: re-aggregate from xtab when available, else fall back to default
+    const hourly = haveXtab
+      ? hourProfile().map((r) => ({ ...r, label: `${r.hour}時` }))
+      : (data.hourly || []).map((r) => ({ ...r, label: r.label || (r.hour != null ? `${r.hour}時` : '') }));
+    // daily: filter to the selected weekday only when it is the lone active facet
+    const onlyWeekday = filterState.weekday != null
+      && filterState.rank == null && filterState.hour == null;
+    const daily = (onlyWeekday && allDaily.length && allDaily.every((r) => r.day != null))
+      ? allDaily.filter((r) => (r.day % 7) === filterState.weekday)
+      : allDaily;
     if (!daily.length && !hourly.length) return scaffold('time', '時系列', '日次エリア＋時間スパークライン');
     let body = '';
     if (daily.length) body += areaSVG(daily, 'daily');
     if (hourly.length) {
+      const hsub = propagatingActive() ? `${esc(filterDescription())}で絞込中` : 'スパークライン';
       body += `<div style="margin-top:14px"><div class="bia-ch-h" style="margin-bottom:6px">
-        <h3 style="font-size:12px">時間帯</h3><span class="sub">スパークライン</span></div>${sparkSVG(hourly)}</div>`;
+        <h3 style="font-size:12px">時間帯</h3><span class="sub">${hsub}</span></div>${sparkSVG(hourly)}</div>`;
     }
-    return chartShell('time', '時系列', daily.length ? `日次 ${fmt(daily.length)}日` : '時間帯別', body, null);
+    let sub = daily.length ? `日次 ${fmt(daily.length)}日` : '時間帯別';
+    if (onlyWeekday && daily.length) sub += `（${weekdayLabel(filterState.weekday)}曜のみ）`;
+    return chartShell('time', '時系列', sub, body, null);
   }
 
   function areaSVG(d, kind) {
@@ -551,7 +721,11 @@ export function mountBIAnalytics(el, opts = {}) {
     const y = (q) => mt + ih - (q / max) * ih;
     const line = h.map((r, i) => `${x(i).toFixed(1)},${y(r.qty || 0).toFixed(1)}`).join(' ');
     const mxi = h.reduce((bi, r, i) => ((r.qty || 0) > (h[bi].qty || 0) ? i : bi), 0);
-    const bars = h.map((r, i) => `<rect class="bia-pt" data-pt="${esc(r.label || '')}|${r.qty || 0}" x="${(x(i) - Math.max(3, iw / n / 2)).toFixed(1)}" y="${mt}" width="${Math.max(5, iw / n).toFixed(1)}" height="${ih}" fill="transparent"></rect>`).join('');
+    // hourly hotspots are also clickable cross-filters on the hour facet (data-hr)
+    const bars = h.map((r, i) => `<rect class="bia-pt" data-pt="${esc(r.label || '')}|${r.qty || 0}"`
+      + `${r.hour != null ? ` data-hr="${r.hour}"` : ''} role="button" tabindex="0"`
+      + ` aria-label="${esc(r.label || '')} 物量 ${fmt(r.qty)}${filterState.hour === r.hour ? '（選択中）' : ''}"`
+      + ` x="${(x(i) - Math.max(3, iw / n / 2)).toFixed(1)}" y="${mt}" width="${Math.max(5, iw / n).toFixed(1)}" height="${ih}" fill="transparent"></rect>`).join('');
     const aria = `時間帯スパークライン。ピークは ${esc(h[mxi].label || '')}（${fmt(h[mxi].qty)}）。`;
     return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
       <polyline points="${line}" fill="none" stroke="${accent40}" stroke-width="1.5"></polyline>
@@ -589,6 +763,17 @@ export function mountBIAnalytics(el, opts = {}) {
       root.innerHTML = '<div class="bia-empty">プロジェクトを選択してください。</div>';
       return;
     }
+    if (loadErr) {
+      // recoverable error: never leave a stuck spinner/blank — offer 再試行.
+      root.innerHTML = `<div class="bia-err">
+        <div class="msg">読み込めませんでした</div>
+        <div class="det">${esc(loadErr)}</div>
+        <button type="button" class="bia-retry" data-bia="retry">再試行</button>
+      </div>`;
+      const btn = root.querySelector('[data-bia="retry"]');
+      if (btn) btn.onclick = () => { loadErr = null; data = null; render(); load(); };
+      return;
+    }
     if (!data) {
       // animated spinner replaces the old plain "読み込み中…" text
       root.innerHTML = `<div class="bia-load"><span class="bia-spin" aria-hidden="true"></span>
@@ -616,6 +801,8 @@ export function mountBIAnalytics(el, opts = {}) {
       return;
     }
 
+    // snapshot current chart geometry so we can tween old→new on re-aggregation
+    const snap = animatedOnce ? snapshotMarks() : null;
     const ins = insights();
     root.innerHTML = `
       ${askBox()}
@@ -630,6 +817,7 @@ export function mountBIAnalytics(el, opts = {}) {
     wireCharts();
     wireFilterBar();
     enterAnimate();
+    if (snap) tweenMarks(snap);   // lightweight rAF lerp from previous geometry
   }
 
   function askBox() {
@@ -650,18 +838,99 @@ export function mountBIAnalytics(el, opts = {}) {
     </div>`;
   }
 
-  // cross-filter clear chip — only present while a facet is active
+  // cross-filter active-filter pills — one removable pill per active facet plus a
+  // "すべて解除" reset. Each pill's ✕ clears only its own facet (never sticks);
+  // the reset clears everything. Bar is empty (but present) when no facet active.
   function filterBar() {
     if (!filterActive()) return '<div class="bia-filterbar"></div>';
-    const parts = [];
-    if (filterState.abc) parts.push(`SKU: ${filterState.abc}`);
-    if (filterState.rank) parts.push(`ランク: ${filterState.rank}`);
-    if (filterState.weekday) parts.push(`曜日: ${filterState.weekday}`);
-    const label = parts.join(' · ');
-    return `<div class="bia-filterbar">
-      <button type="button" class="bia-fchip" data-bia="clearf" aria-label="フィルタを解除">
-        ${esc(label)} <span class="x" aria-hidden="true">×</span> フィルタ解除</button>
+    // [facetKey, displayLabel] for every currently-active facet
+    const pills = [];
+    if (filterState.abc != null) pills.push(['abc', `SKU:${filterState.abc}`]);
+    if (filterState.rank != null) pills.push(['rank', `ランク:${filterState.rank}`]);
+    if (filterState.weekday != null) pills.push(['weekday', `曜日:${weekdayLabel(filterState.weekday)}`]);
+    if (filterState.hour != null) pills.push(['hour', `時間:${filterState.hour}時`]);
+    const pillHtml = pills.map(([key, label]) =>
+      `<button type="button" class="bia-pill" data-facet="${esc(key)}" aria-label="${esc(label)} を解除">`
+      + `${esc(label)} <span class="x" aria-hidden="true">✕</span></button>`).join('');
+    return `<div class="bia-filterbar" role="group" aria-label="適用中のフィルタ">
+      <span class="lbl">絞込:</span>
+      ${pillHtml}
+      <button type="button" class="bia-fclear" data-bia="clearf">すべて解除</button>
     </div>`;
+  }
+
+  // ── data/filter re-aggregation tween (lightweight rAF lerp) ─────────────
+  // On a filter-driven re-render we snapshot the OLD geometry (bar y/height,
+  // heatmap cell alpha) keyed by stable data-attrs, then lerp the freshly-built
+  // marks from old→new over ~var(--dur-3). Gated on reduced-motion. Polylines
+  // whose point counts changed (e.g. weekday-filtered daily) just snap (no lerp).
+  let tweenRAF = 0;
+  function dur3ms() {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--dur-3').trim();
+    if (v.endsWith('ms')) return parseFloat(v) || 200;
+    if (v.endsWith('s')) return (parseFloat(v) || 0.2) * 1000;
+    return 200;
+  }
+  // Read current ABC bar + heatmap cell geometry into a lookup keyed by data-attr.
+  function snapshotMarks() {
+    const bars = {};
+    root.querySelectorAll('rect.bia-bar[data-sku]').forEach((b) => {
+      bars[b.dataset.sku] = { y: parseFloat(b.getAttribute('y')), h: parseFloat(b.getAttribute('height')) };
+    });
+    const cells = {};
+    root.querySelectorAll('.bia-tcell[data-wd]').forEach((c) => {
+      cells[c.dataset.wd] = c.style.background || '';
+    });
+    return { bars, cells };
+  }
+  // Parse the trailing alpha out of an "rgba(r,g,b,a)" string (cell intensity).
+  function rgbaAlpha(s) {
+    const m = /rgba?\([^)]*,\s*([0-9.]+)\s*\)/.exec(s || '');
+    return m ? parseFloat(m[1]) : null;
+  }
+  function setRgbaAlpha(s, a) {
+    return (s || '').replace(/(rgba?\([^)]*,\s*)[0-9.]+(\s*\))/, `$1${a.toFixed(3)}$2`);
+  }
+  function tweenMarks(snap) {
+    if (matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    // build animation plan from new marks that also existed in the snapshot
+    const plan = [];
+    root.querySelectorAll('rect.bia-bar[data-sku]').forEach((b) => {
+      const from = snap.bars[b.dataset.sku]; if (!from) return;
+      const toY = parseFloat(b.getAttribute('y')), toH = parseFloat(b.getAttribute('height'));
+      if (from.y === toY && from.h === toH) return;
+      plan.push({ kind: 'bar', el: b, fromY: from.y, fromH: from.h, toY, toH });
+    });
+    root.querySelectorAll('.bia-tcell[data-wd]').forEach((c) => {
+      const fromBg = snap.cells[c.dataset.wd]; if (fromBg == null) return;
+      const fa = rgbaAlpha(fromBg), ta = rgbaAlpha(c.style.background);
+      if (fa == null || ta == null || fa === ta) return;
+      plan.push({ kind: 'cell', el: c, fromA: fa, toA: ta, tmpl: c.style.background });
+    });
+    if (!plan.length) return;
+    // seed marks at their FROM state, then rAF-lerp to the TRUE (final) state.
+    plan.forEach((p) => {
+      if (p.kind === 'bar') { p.el.setAttribute('y', p.fromY); p.el.setAttribute('height', p.fromH); }
+      else { p.el.style.background = setRgbaAlpha(p.tmpl, p.fromA); }
+    });
+    const dur = dur3ms();
+    const t0 = performance.now();
+    if (tweenRAF) cancelAnimationFrame(tweenRAF);
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3);   // easeOutCubic
+      plan.forEach((p) => {
+        if (p.kind === 'bar') {
+          p.el.setAttribute('y', (p.fromY + (p.toY - p.fromY) * e).toFixed(1));
+          p.el.setAttribute('height', (p.fromH + (p.toH - p.fromH) * e).toFixed(1));
+        } else {
+          p.el.style.background = setRgbaAlpha(p.tmpl, p.fromA + (p.toA - p.fromA) * e);
+        }
+      });
+      if (k < 1) tweenRAF = requestAnimationFrame(step);
+      else tweenRAF = 0;
+    };
+    tweenRAF = requestAnimationFrame(step);
   }
 
   // stagger fade-in: mirror of analysis.js .an-in/.an-settled idiom (no import).
@@ -741,7 +1010,23 @@ export function mountBIAnalytics(el, opts = {}) {
         showTip(`<b>${esc(r.name || r.sku)}</b><br>物量 <span class="n">${fmt(r.qty)}</span> · 累積 <span class="n">${pct(r.cum || 0)}</span>`, e);
       });
       b.addEventListener('mouseleave', hideTip);
-      b.addEventListener('click', () => { hideTip(); toggleFilter('abc', b.dataset.sku); });
+      // Clicking a bar pins that SKU (in-chart highlight) AND maps it to its rank
+      // so the selection PROPAGATES (xtab is rank-level). Re-clicking the same
+      // SKU clears both; clicking another SKU re-pins. Never gets stuck.
+      b.addEventListener('click', () => {
+        hideTip();
+        const r = (data.abc || [])[+b.dataset.i]; if (!r) return;
+        const sku = b.dataset.sku;
+        const rk = rankOf(r);
+        if (filterState.abc === sku) {        // toggle off
+          filterState.abc = null;
+          if (filterState.rank === rk) filterState.rank = null;
+        } else {                              // pin sku + propagate its rank
+          filterState.abc = sku;
+          filterState.rank = rk;
+        }
+        render();
+      });
     });
     // ABC legend ranks: click → cross-filter on rank A/B/C
     root.querySelectorAll('.bia-leg').forEach((l) => {
@@ -756,21 +1041,40 @@ export function mountBIAnalytics(el, opts = {}) {
         showTip(`<b>${esc(lab)}曜</b> · <span class="n">${fmt(+q)}</span>`, e);
       });
       c.addEventListener('mouseleave', hideTip);
-      const go = () => { hideTip(); toggleFilter('weekday', c.dataset.wd); };
+      // data-wd is the numeric xtab weekday index (0..6) as a string; coerce to a
+      // Number so it joins cleanly against c.weekday in filteredCells(). Empty =>
+      // unknown weekday (no xtab match) -> skip toggling.
+      const go = () => {
+        hideTip();
+        const wd = c.dataset.wd;
+        if (wd === '' || wd == null) return;
+        toggleFilter('weekday', Number(wd));
+      };
       c.addEventListener('click', go);
       c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
     });
-    // time-series hover hotspots (daily area + hourly spark) → cross-highlight time section
+    // time-series hover hotspots (daily area + hourly spark). Hourly hotspots
+    // (data-hr) additionally toggle the hour facet → re-aggregates weekday +
+    // insights + ABC overlay via xtab; daily hotspots stay hover-only.
     root.querySelectorAll('.bia-pt').forEach((p) => {
       p.addEventListener('mousemove', (e) => {
         const [lab, q] = (p.dataset.pt || '|').split('|');
         showTip(`<b>${esc(lab)}</b> · <span class="n">${fmt(+q)}</span>`, e);
       });
       p.addEventListener('mouseleave', hideTip);
+      if (p.dataset.hr != null && p.dataset.hr !== '') {
+        const go = () => { hideTip(); toggleFilter('hour', Number(p.dataset.hr)); };
+        p.addEventListener('click', go);
+        p.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+      }
     });
   }
 
   function wireFilterBar() {
+    // each pill's ✕ removes only its own facet
+    root.querySelectorAll('.bia-pill[data-facet]').forEach((p) => {
+      p.onclick = () => clearFacet(p.dataset.facet);
+    });
     const clr = root.querySelector('[data-bia="clearf"]');
     if (clr) clr.onclick = () => clearFilter();
   }
@@ -805,14 +1109,16 @@ export function mountBIAnalytics(el, opts = {}) {
   async function load() {
     const name = getProject();
     if (!name) { render(); return; }
+    loadErr = null;
     try {
       const r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/analysis`);
-      if (!r.ok) throw new Error(r.statusText);
+      if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
       data = await r.json();
       render();
       startExampleRotation();
     } catch (e) {
-      root.innerHTML = `<div class="bia-empty">分析データの取得に失敗: ${esc(e.message)}</div>`;
+      loadErr = (e && e.message) ? e.message : String(e);
+      render();   // render() shows the 再試行 error state (never a stuck spinner)
       toast('分析BIの読み込みに失敗', 'error');
     }
   }
@@ -821,13 +1127,15 @@ export function mountBIAnalytics(el, opts = {}) {
   return {
     refresh() {
       data = null;
-      animatedOnce = false;                                    // re-animate next load
-      filterState = { abc: null, weekday: null, rank: null };  // drop stale facet
+      loadErr = null;
+      animatedOnce = false;                                              // re-animate next load
+      filterState = { abc: null, rank: null, weekday: null, hour: null }; // drop ALL stale facets
       render();
       load();
     },
     dispose() {
       stopRotation();
+      if (tweenRAF) { cancelAnimationFrame(tweenRAF); tweenRAF = 0; }
       document.removeEventListener('keydown', onSlash);
       document.removeEventListener('themechange', onThemeChange);
       if (tip.parentNode) tip.parentNode.removeChild(tip);
