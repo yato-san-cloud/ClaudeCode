@@ -112,7 +112,7 @@ const S = {
   export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
   dataanalysis: null, materialflow: null, notes: null, journey: null, overview: null, bi: null, bianalytics: null, phaseHint: null,
   hasData: false, hasRun: false, preset: 'brand',
-  t: 0, window: 1, playing: true, speed: 60, view: 'chat',
+  t: 0, window: 1, playing: true, speed: 60, view: 'overview',
 };
 const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
                     dropoff: '#f57f17', charge: '#8e24aa' };
@@ -631,6 +631,7 @@ async function openProject(name) {
   if (S.settings && S.settings.loadFor) S.settings.loadFor(name);
   if (S.view === 'design') mountDesigner();
   if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
+  if (S.view === 'overview') mountOverviewView();  // refresh ①取込 dashboard live
 }
 
 async function mountDesigner() {
@@ -890,24 +891,34 @@ function mountNotesView() {
 // the result tier is *soft*-gated: tabs stay visible but carry a 「要実行」 badge
 // and clicking one before a run nudges toward 実行 instead of showing emptiness.
 function refreshReadiness() {
-  const hasP = !!S.project, run = !!S.hasRun, data = !!S.hasData;
-  const pill = $('statusPill');
-  if (pill) {
-    const set = (step, on) => {
-      const c = pill.querySelector(`.sp-chip[data-step="${step}"]`);
-      if (c) c.classList.toggle('on', on);
-    };
-    set('project', hasP);
-    set('data', data);
-    set('run', run);
-    const runChip = pill.querySelector('.sp-chip[data-step="run"]');
-    if (runChip) runChip.lastChild.textContent = run ? '実行済' : '未実行';
-    const dataEl = $('spData');
-    if (dataEl) dataEl.textContent = data ? '取込済' : 'テンプレ仮値';
-  }
-  // The 5-phase stepper re-evaluates its ✓/🔒 flags + sub-tab hints from S.
+  // Single source of truth for progress / current location: the 5-phase stepper
+  // (✓ done / 🔒 locked) + the per-phase hint banner. The old header status pill
+  // duplicated this (project/data/run chips) and was removed.
   if (S.journey) S.journey.refresh();
   if (S.view) updatePhaseHint(S.view);
+  // The ①取込 setup cards (import / key figures) only make sense once a project
+  // exists; keep their visibility in lockstep with the readiness state.
+  syncOverviewSetup();
+}
+// Show the ①取込 in-panel setup block (import + key figures) only when a project
+// exists. These controls used to live in the left sidebar; they now sit in the
+// ①取込 body so guidance and action are in the same place.
+function syncOverviewSetup() {
+  const setup = $('overviewSetup');
+  if (setup) setup.hidden = !S.project;
+}
+// Move the data-import and key-figure cards out of the sidebar and into the ①取込
+// panel body. appendChild relocates the LIVE nodes, so the ID-based event wiring
+// set up in initUI() travels with them (handlers bind to the node, not its
+// position in the tree). Idempotent: skips cards already in place.
+function relocateSetupCards() {
+  const setup = $('overviewSetup');
+  if (!setup) return;
+  ['importCard', 'keyfigCard'].forEach((id) => {
+    const card = $(id);
+    if (card && card.parentNode !== setup) setup.appendChild(card);
+  });
+  syncOverviewSetup();
 }
 
 // ---- import ----------------------------------------------------------------
@@ -1069,12 +1080,6 @@ function setBtnBusy(btn, on, busyLabel) {
 function switchView(view) {
   if (!view || !$(view)) return;
   S.view = view;
-  document.querySelectorAll('.tab').forEach(x => {
-    const on = x.dataset.tab === view;
-    x.classList.toggle('active', on);
-    x.setAttribute('aria-selected', on ? 'true' : 'false');
-    x.tabIndex = on ? 0 : -1;
-  });
   document.querySelectorAll('.panel').forEach(x => {
     const on = x.id === view;
     x.classList.toggle('active', on);
@@ -1091,12 +1096,19 @@ function switchView(view) {
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
       || view === 'bi' || view === 'bianalytics')
       ? 'none' : '';
-  // Soft guidance: opening a run-gated result view before any run nudges toward 実行.
-  const tabBtn = document.querySelector(`.tab[data-tab="${view}"]`);
-  if (tabBtn && tabBtn.dataset.need === 'run' && !S.hasRun) {
+  // The 3D表現 preset control only belongs to the 3D view (kept out of the
+  // journey row otherwise, so it isn't persistent noise for the salesperson).
+  const presetCtl = $('presetCtl');
+  if (presetCtl) presetCtl.style.display = (view === 'view3d') ? 'inline-flex' : 'none';
+  // Soft guidance: opening a run-gated result view (④検証 / ⑤提案) before any run
+  // nudges toward 実行. Previously this keyed off a flat `.tab[data-need]` element
+  // that no longer exists in the DOM (journey.js renders .jn-pill/.jn-sub), so the
+  // nudge never fired — it is now driven by the view→phase map (VIEW_PHASE).
+  const gatedPhase = VIEW_PHASE[view];
+  if ((gatedPhase === 'validate' || gatedPhase === 'propose') && !S.hasRun) {
     cody('curious', S.project
-      ? 'この結果はシミュレーション実行後に表示されるよ。左の「▶ シミュレーション実行」を押してね。'
-      : 'まずプロジェクトを作って、左で「実行」しよう。結果はそのあとここに出るよ。');
+      ? 'この結果はシミュレーション実行後に表示されるよ。③設計の「シミュレーション実行」か、左の「▶ シミュレーション実行」を押してね。'
+      : 'まずプロジェクトを作って実行しよう。結果はそのあとここに出るよ。');
   }
   // The chat view embeds Cody in the thread; hide the floating companion there
   // so it doesn't overlap the composer (it returns on every other view).
@@ -1168,15 +1180,41 @@ function mountBIView() {
 // Mount the ①取込 overview home once; refresh it on every revisit.
 function mountOverviewView() {
   if (!S.overview) {
-    S.overview = mountOverview($('overview'), {
+    S.overview = mountOverview($('overviewDash'), {
       getState: () => S,
       getProject: () => api(`/api/projects/${S.project}/model`),
       switchTo: switchView,
+      // "✨ サンプルでためす" on the empty ①取込: build a demo project so a
+      // salesperson reaches a runnable model (and the 60-second proposal path)
+      // without any data at hand.
+      createSample: () => createSampleProject(),
       toast: (m, k) => toast(m, k),
     });
   } else {
     S.overview.refresh();
   }
+  syncOverviewSetup();
+}
+
+// Build + open the bundled sample project (POST /api/projects/sample). Shared by
+// the ①取込 empty-state CTA and the first-run onboarding card. Throws on failure
+// so callers can surface it.
+async function createSampleProject() {
+  const res = await fetch('/api/projects/sample', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    let detail = `サンプルを用意できませんでした (${res.status})`;
+    try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (_e) { /* ignore */ }
+    throw new Error(detail);
+  }
+  const data = await res.json().catch(() => ({}));
+  const name = (data && typeof data.name === 'string' && data.name.trim()) ? data.name.trim() : null;
+  if (!name) throw new Error('サンプル名を取得できませんでした');
+  await refreshProjects(name);
+  await openProject(name);
+  return name;
 }
 
 // ---- timetable (作業タイムチャート) — mounted once; holds editable state ------
@@ -1390,6 +1428,7 @@ function clearProjectState() {
   updateProjMenuState();
   if (S.chat && S.chat.loadFor) S.chat.loadFor(null);
   if (S.view === 'analysis') mountAnalysis($('analysis'), null);
+  if (S.view === 'overview') mountOverviewView();  // back to the empty ①取込 state
 }
 
 // ---- actions the Cody chat invokes to drive whsim --------------------------
@@ -1553,7 +1592,10 @@ function initUI() {
     });
   });
   $('playBtn').disabled = true; $('scrub').disabled = true; // until a run exists
-  // Default view is the Cody chat home: no replay transport, no KPI footer.
+  // ①取込 landing: relocate the import + key-figure cards from the sidebar into
+  // the ①取込 body (one screen for guidance + action). Default view is the
+  // overview, which uses neither the replay transport nor the KPI footer.
+  relocateSetupCards();
   document.querySelector('.transport').style.display = 'none';
   $('kpiBar').style.display = 'none';
   refreshReadiness();
@@ -1601,7 +1643,10 @@ function initUI() {
     // Subtle first-visit guide (shown once; localStorage 'whsim-onboarded').
     setTimeout(() => { try { S.onboarding.startGuide(false); } catch (_e) { /* ignore */ } }, 600);
   }
-  S.chat.focus();
+  // Land on ①取込 (overview): mounts the panel, lights the stepper's ① pill, and
+  // shows the phase-goal banner — so the entry point and current location are
+  // always explicit (the app no longer opens onto the cross-cutting OCTA chat).
+  switchView(S.view);
   requestAnimationFrame(loop);
   // Dismiss the boot splash once the shell is mounted and interactive.
   const boot = $('boot');

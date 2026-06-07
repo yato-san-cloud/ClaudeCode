@@ -99,6 +99,16 @@ const OV_CSS = `
   .ov-cta{width:100%;margin-top:8px}
   .ov-next-btn{width:100%}
 }
+/* ①取込 in-panel setup block: the import + key-figure cards relocated out of the
+   left sidebar so guidance (this dashboard) and action (import) share one screen. */
+.ov-setup{max-width:920px;margin:6px auto 28px;width:100%;
+  display:flex;flex-direction:column;gap:14px}
+.ov-setup[hidden]{display:none}
+.ov-setup-h{font-size:13px;font-weight:700;color:var(--ink-secondary);
+  letter-spacing:.02em;margin:2px 2px -2px}
+.ov-setup .card{margin-bottom:0}
+.ov-empty-sample{margin:16px auto 4px;font-size:15px;padding:11px 24px}
+.ov-empty-or{font-size:12px;color:var(--ink-tertiary);margin-top:12px}
 `;
 
 function injectStyle() {
@@ -114,6 +124,7 @@ export function mountOverview(el, opts = {}) {
   const getState = opts.getState || (() => ({}));
   const getProject = opts.getProject || (async () => null);
   const switchTo = opts.switchTo || (() => {});
+  const createSample = typeof opts.createSample === 'function' ? opts.createSample : null;
   const toast = opts.toast || (() => {});
 
   const root = document.createElement('div');
@@ -148,11 +159,11 @@ export function mountOverview(el, opts = {}) {
 
   function nextAction(d) {
     if (!d.hasProject) return { title: 'プロジェクトを作成', hint: '左サイドバーで名前とテンプレを選んで「作成」。', target: null, act: null };
-    if (!d.hasData) return { title: '顧客データを取り込む', hint: '左の「表データ(CSV/Excel)を取込」や ZIP ドロップへ。', target: 'dataanalysis', act: null };
+    if (!d.hasData) return { title: '顧客データを取り込む', hint: '下の「データ取込・基本条件」から ZIP/CSV/Excel/CAD/地図を取り込めます。', scroll: 'overviewSetup', target: null, act: null };
     if (!d.hasItems) return { title: '不足データを生成', hint: '実データから商品マスタ等を補完します。', target: null, act: 'generate' };
     if (!d.hasRun) return {
       title: '設計を始める', hint: 'レイアウト・工程・人員を組んで試算へ。先に物量を確認するなら「分析」へ。',
-      nav: 'bi', primaryLabel: '設計を始める →',
+      nav: 'design', primaryLabel: '設計を始める →',
       secondary: { nav: 'dataanalysis', label: '分析を見る →' },
       target: null, act: null,
     };
@@ -162,11 +173,11 @@ export function mountOverview(el, opts = {}) {
   function checklist(d) {
     return [
       { key: 'data', label: '顧客データ取込済み？', ok: d.hasData,
-        ctaLabel: 'データ分析へ', target: 'dataanalysis',
-        note: '左サイドバーの「表データ(CSV/Excel)を取込」「ZIPをドロップ」「CAD/地図/棚間距離」から取込。' },
+        ctaLabel: '取込へ', scroll: 'overviewSetup',
+        note: '下の「データ取込・基本条件」から ZIP/CSV/Excel/CAD/地図/棚間距離を取り込めます。' },
       { key: 'items', label: '商品マスタ有り／不足データ生成済み？', ok: d.hasItems,
         ctaLabel: '不足データを生成', act: 'generate',
-        note: '左サイドバーの「不足データを生成」でも実行できます。' },
+        note: '下の「データ取込・基本条件」内の「不足データを生成」からも実行できます。' },
       { key: 'run', label: 'シミュレーション実行済み？', ok: d.hasRun,
         ctaLabel: null, target: null,
         note: '左サイドバーの「▶ シミュレーション実行」を押してください。' },
@@ -193,10 +204,12 @@ export function mountOverview(el, opts = {}) {
     if (!st.project) {
       root.innerHTML =
         `<div class="ov-empty">
-           <div class="ov-empty-h">プロジェクトがまだありません</div>
-           <p>左サイドバーで名前とテンプレートを選び「作成」してください。<br>
-              取り込み（ZIP/CSV/CAD/MapMaker）はすべて左サイドバーにあります。</p>
+           <div class="ov-empty-h">はじめましょう</div>
+           <p>手元にデータが無くても大丈夫。サンプルの倉庫で、取込→分析→検証→提案までを今すぐ試せます。</p>
+           ${createSample ? '<button class="ov-cta primary ov-empty-sample" data-act="sample">✨ サンプルでためす</button>' : ''}
+           <p class="ov-empty-or">または左サイドバーの「プロジェクト」で、名前とテンプレートを選んで新規作成。</p>
          </div>`;
+      wire();
       return;
     }
     let prov = null;
@@ -219,9 +232,11 @@ export function mountOverview(el, opts = {}) {
       const cta = it.ok ? ''
         : it.act === 'generate'
           ? `<button class="ov-cta primary" data-act="generate">不足データを生成</button>`
-          : it.target
-            ? `<button class="ov-cta" data-go="${it.target}">${esc(it.ctaLabel)} →</button>`
-            : '';
+          : it.scroll
+            ? `<button class="ov-cta" data-scroll="${esc(it.scroll)}">${esc(it.ctaLabel)} ↓</button>`
+            : it.target
+              ? `<button class="ov-cta" data-go="${it.target}">${esc(it.ctaLabel)} →</button>`
+              : '';
       return `<li class="ov-ck ${it.ok ? 'done' : 'todo'}">
         <span class="ov-mark" aria-hidden="true">${it.ok ? '✓' : ''}</span>
         <div class="ov-ck-body">
@@ -257,9 +272,11 @@ export function mountOverview(el, opts = {}) {
                : '')
            : na.act === 'generate'
              ? `<button class="ov-next-btn" data-act="generate">不足データを生成</button>`
-             : na.target
-               ? `<button class="ov-next-btn" data-go="${na.target}">${esc(na.title)}へ進む →</button>`
-               : `<div class="ov-next-side">← 左サイドバーで操作してください</div>`}
+             : na.scroll
+               ? `<button class="ov-next-btn" data-scroll="${esc(na.scroll)}">${esc(na.title)} ↓</button>`
+               : na.target
+                 ? `<button class="ov-next-btn" data-go="${na.target}">${esc(na.title)}へ進む →</button>`
+                 : ''}
        </section>
 
        <section class="ov-card">
@@ -267,8 +284,8 @@ export function mountOverview(el, opts = {}) {
          <ul class="ov-list">${listHtml}</ul>
        </section>
 
-       <p class="ov-foot">取り込み操作（ZIP / 表データ / CAD / MapMaker地図 / 棚間距離 / 不足生成）は
-         <b>左サイドバー</b>にまとまっています。このホームは状況の確認と次の一手の案内です。</p>`;
+       <p class="ov-foot">取り込みと基本条件は<b>このページ下部</b>にまとまっています。
+         「次にやること」を上から進めれば、提案書まで迷わず到達できます。</p>`;
 
     wire();
   }
@@ -284,6 +301,38 @@ export function mountOverview(el, opts = {}) {
     root.querySelectorAll('[data-act="generate"]').forEach((b) => {
       b.onclick = () => runGenerate(b);
     });
+    root.querySelectorAll('[data-act="sample"]').forEach((b) => {
+      b.onclick = () => runSample(b);
+    });
+    root.querySelectorAll('[data-scroll]').forEach((b) => {
+      b.onclick = () => scrollToSetup(b.dataset.scroll);
+    });
+  }
+
+  // Scroll the on-page ①取込 setup block (import + key figures) into view. That
+  // block is a sibling of this module's root (#overviewDash), so resolve it from
+  // the document and reveal it if a stale hidden flag remains.
+  function scrollToSetup(id) {
+    const t = document.getElementById(id || 'overviewSetup');
+    if (!t) return;
+    if (t.hidden) t.hidden = false;
+    try { t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    catch (_e) { t.scrollIntoView(); }
+  }
+
+  // First-run "✨ サンプルでためす": build + open the bundled demo project via the
+  // host-supplied createSample, then re-render to the populated dashboard.
+  async function runSample(btn) {
+    if (!createSample) return;
+    if (btn) { btn.disabled = true; btn.dataset.l = btn.textContent; btn.textContent = '用意中…'; }
+    try {
+      await createSample();
+      toast('サンプルを用意しました。', 'ok');
+      await render();
+    } catch (e) {
+      toast('サンプルの用意に失敗しました: ' + (e && e.message ? e.message : ''), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset.l || '✨ サンプルでためす'; }
+    }
   }
 
   render();

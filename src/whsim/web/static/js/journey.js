@@ -11,7 +11,7 @@
 const PHASES = [
   { id: 'intake', no: '①', title: '取込', goal: '案件を作り顧客データを取り込む', views: ['overview'] },
   { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics'] },
-  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['bi', 'design', 'materialflow', 'timetable'] },
+  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'bi', 'materialflow', 'timetable'] },
   { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d'] },
   { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'compare', 'export'] },
 ];

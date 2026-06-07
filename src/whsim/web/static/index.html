@@ -27,13 +27,6 @@
       <div class="brand" aria-label="WHSiM — WAREHOUSE SIMULATOR" title="WHSiM — WAREHOUSE SIMULATOR">
         <span class="wm" aria-hidden="true"><span class="wm-t">WHS</span><span class="wm-i"><span class="wm-tittle"><svg class="wm-cube wm-cube-light" viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#0e8fd1"/><polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0664a0"/><polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#5cc8f7"/><g fill="none" stroke="#0b4f78" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g><g fill="none" stroke="#0e7bb0" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g></svg><svg class="wm-cube wm-cube-dark" viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#1685b4"/><polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0c5a82"/><polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#3ae6ff"/><g fill="none" stroke="#7ef6ff" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g><g fill="none" stroke="#bdf8ff" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g></svg></span><span class="wm-stem"></span></span><span class="wm-t">M</span></span><span class="brand-tag">WAREHOUSE SIMULATOR</span></div>
     </div>
-    <div class="status-pill" id="statusPill" aria-live="polite" title="準備状況">
-      <span class="sp-chip" data-step="project"><i></i>プロジェクト</span>
-      <span class="sp-div"></span>
-      <span class="sp-chip" data-step="data"><i></i><b id="spData">テンプレ仮値</b></span>
-      <span class="sp-div"></span>
-      <span class="sp-chip" data-step="run"><i></i>未実行</span>
-    </div>
     <div class="header-tools">
       <div class="provenance" id="provenance">— your data</div>
       <button id="themeToggle" type="button" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
@@ -43,7 +36,7 @@
   <div class="layout">
     <aside class="sidebar">
       <section class="card">
-        <h2>1. プロジェクト</h2>
+        <h2>プロジェクト</h2>
         <div class="row proj-row">
           <select id="projectSelect" aria-label="プロジェクトを選択"><option value="">（新規作成）</option></select>
           <div class="proj-menu-wrap">
@@ -64,8 +57,8 @@
         </div>
       </section>
 
-      <section class="card">
-        <h2>2. 顧客データ取り込み <small>任意</small></h2>
+      <section class="card" id="importCard">
+        <h2>顧客データ取り込み <small>任意</small></h2>
         <div id="dropzone" class="dropzone">
           <strong>ZIP をドラッグ&ドロップ</strong>
           <span>商品マスタ / 出荷 / 入荷 …（足りない分は仮値で補完）</span>
@@ -98,8 +91,8 @@
         <div id="importLog" class="log"></div>
       </section>
 
-      <section class="card">
-        <h2>3. キー項目</h2>
+      <section class="card" id="keyfigCard">
+        <h2>キー項目</h2>
         <div id="headline" class="headline"></div>
         <button id="applyBtn">反映</button>
       </section>
@@ -161,7 +154,7 @@
     <main class="main">
       <div class="tabs" role="navigation" aria-label="フェーズ動線">
         <div id="journey" class="journey-nav" style="flex:1;min-width:0"></div>
-        <label class="preset-ctl" title="3D表現">3D表現
+        <label id="presetCtl" class="preset-ctl" title="3D表現" style="display:none">3D表現
           <select id="presetSelect">
             <option value="brand">ブランド</option>
             <option value="natural">ナチュラル</option>
@@ -174,10 +167,15 @@
 
       <div class="stage">
         <div id="phaseHint"></div>
-        <div id="overview" class="panel" role="tabpanel" tabindex="0" hidden></div>
+        <div id="overview" class="panel active" role="tabpanel" tabindex="0">
+          <div id="overviewDash"></div>
+          <div id="overviewSetup" class="ov-setup" hidden>
+            <div class="ov-setup-h">データ取込・基本条件</div>
+          </div>
+        </div>
         <div id="bi" class="panel" role="tabpanel" tabindex="0" hidden></div>
         <div id="bianalytics" class="panel" role="tabpanel" tabindex="0" hidden></div>
-        <div id="chat" class="panel active" role="tabpanel" aria-labelledby="tab-chat" tabindex="0"></div>
+        <div id="chat" class="panel" role="tabpanel" aria-labelledby="tab-chat" tabindex="0" hidden></div>
         <div id="design" class="panel" role="tabpanel" aria-labelledby="tab-design" tabindex="0" hidden></div>
         <div id="analysis" class="panel" role="tabpanel" aria-labelledby="tab-analysis" tabindex="0" hidden></div>
         <div id="dataanalysis" class="panel" role="tabpanel" aria-labelledby="tab-dataanalysis" tabindex="0" hidden></div>

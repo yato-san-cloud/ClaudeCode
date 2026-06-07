@@ -27,7 +27,7 @@ const PHASES = {
     subtitle: '捌けるかをKPIと動きで確認',
     ctaText: '提案をまとめる →',
     ctaTargetView: 'viewpng',
-    empty: 'まだ実行結果がありません。③設計で『シミュレーション実行』を押してください。',
+    empty: 'まだ実行結果がありません。下の『▶ シミュレーション実行』を押すと、ここで結果を確認できます。',
   },
   propose: {
     subtitle: '提案書とシナリオ比較を出す',
@@ -108,11 +108,13 @@ export function mountPhaseHint(el, opts = {}) {
   el.appendChild(root);
 
   let current = null;
+  let currentEmpty = false;
 
   cta.onclick = () => {
     const p = current && PHASES[current];
     if (!p) return;
-    if (current === 'design') onRun();
+    // 実行はフェーズ境界のアクション: ③設計のCTA、および④検証が未実行のときのCTA。
+    if (current === 'design' || (current === 'validate' && currentEmpty)) onRun();
     else if (p.ctaTargetView) onCta(p.ctaTargetView);
   };
 
@@ -120,15 +122,23 @@ export function mountPhaseHint(el, opts = {}) {
     const p = PHASES[phaseId];
     if (!p) { hide(); return; }
     current = phaseId;
+    currentEmpty = !!isEmpty;
 
     sub.textContent = p.subtitle;
-    cta.textContent = p.ctaText;
+    // ④検証が未実行のときは、CTA自体を実行アクションにする(結果が無いのに
+    // 「提案をまとめる」と促さない)。それ以外は各フェーズ既定のCTA文言。
+    const runCta = phaseId === 'validate' && isEmpty;
+    cta.textContent = runCta ? '▶ シミュレーション実行' : p.ctaText;
 
     root.classList.toggle('is-empty', !!isEmpty);
     empty.hidden = !isEmpty;
     empty.textContent = isEmpty ? p.empty : '';
 
-    const showCta = phaseId === 'design' ? !isEmpty : !!p.ctaTargetView;
+    // CTAの可視性: ③設計はレイアウトがある時のみ、④検証は常時(未実行=実行 /
+    // 実行済=次へ)、その他はターゲットビューがある時。
+    const showCta = phaseId === 'design' ? !isEmpty
+      : phaseId === 'validate' ? true
+      : !!p.ctaTargetView;
     cta.hidden = !showCta;
 
     root.hidden = false;
