@@ -42,6 +42,20 @@ function cssVar(name, fallback) {
     return v || fallback;
   } catch (_e) { return fallback; }
 }
+// Read a duration token (e.g. --dur-2: 160ms) as a number of ms; falls back to a
+// token-consistent default. Keeps JS timing in lockstep with the CSS scale instead
+// of hard-coded magic numbers.
+function durMs(name, fallback) {
+  const raw = cssVar(name, '');
+  if (raw) {
+    const m = /([\d.]+)\s*(ms|s)?/.exec(raw);
+    if (m) return parseFloat(m[1]) * (m[2] === 's' ? 1000 : 1);
+  }
+  return fallback;
+}
+const DEBOUNCE_MS = durMs('--dur-3', 240);   // live re-solve debounce (was 180)
+const SYNC_FADE_MS = durMs('--dur-4', 420);  // cursor-sync emphasis fade (was 600)
+const DUR_RESIZE_MS = durMs('--dur-3', 240); // resize debounce
 
 // Scoped styles for elements this module adds on top of the styles.css tt-*
 // contract (the cursor-sync indicator). Token-only: no raw hex / px durations /
@@ -58,7 +72,18 @@ function injectStyle() {
   .tt-cursor-sync i{width:var(--sp-1);height:var(--sp-1);border-radius:var(--r-pill);
     background:var(--accent);flex:0 0 auto;transition:transform var(--dur-2) var(--ease-out)}
   .tt-cursor-sync.moved i{transform:scale(1.6)}
-  @media (prefers-reduced-motion: reduce){ .tt-cursor-sync,.tt-cursor-sync i{transition:none} }
+  .tt-recalc-pill{display:inline-flex;align-items:center;gap:var(--sp-1);
+    font-size:var(--fs-micro);color:var(--ink-onAccent);
+    background:var(--accent);border-radius:var(--r-pill);
+    padding:var(--sp-1) var(--sp-2);white-space:nowrap;
+    opacity:0;pointer-events:none;transition:opacity var(--dur-2) var(--ease-out)}
+  .tt-recalc-pill.on{opacity:1}
+  .tt-empty{display:flex;flex-direction:column;align-items:flex-start;gap:var(--sp-2);
+    padding:var(--sp-4);border:1px dashed var(--line-strong,var(--line));
+    border-radius:var(--r-lg);background:var(--bg-panel)}
+  .tt-empty-title{font-weight:700;color:var(--ink-primary);font-size:var(--fs-section)}
+  .tt-empty-body{color:var(--ink-secondary);font-size:var(--fs-sm);max-width:48ch}
+  @media (prefers-reduced-motion: reduce){ .tt-cursor-sync,.tt-cursor-sync i,.tt-recalc-pill{transition:none} }
   `;
   document.head.appendChild(s);
 }
@@ -83,13 +108,25 @@ export function mountTimetable(targetEl, opts = {}) {
   let destroyed = false;
   let layout = null;               // { bounds:{width,depth}, zones:[…] } or null
 
+  // ---- canvas-churn caches ----
+  // Resizing canvas.width clears + reallocates the backing store and is costly,
+  // so we only do it when the CSS size or DPR actually changes. The gantt chart
+  // (stacked areas + grid + total line) is expensive but only depends on the
+  // solve result, so we cache it to an offscreen canvas and per-cursor just blit
+  // the cache + draw the 1px cursor line (scrubbing becomes O(1)).
+  let ganttCssW = 0, ganttDpr = 0;       // last applied gantt backing-store size
+  let ganttGeom = null;                  // { padL,padR,padT,padB,plotW,plotH,X }
+  let ganttCache = null;                 // offscreen canvas holding the chart
+  let mapCssW = 0, mapDpr = 0;           // last applied staff-map backing-store size
+  let resizeTimer = null;
+
   // ---- DOM scaffold ----
   const root = el('div', 'tt-view');
   root.innerHTML = '<div class="tt-loading">タイムチャートを読み込み中…</div>';
   target.appendChild(root);
 
   // Sub-containers (filled after seed loads).
-  let elScenario, elKpis, elWarn, elCursor, elGantt, elGanttCanvas, elMatrix, elParams;
+  let elScenario, elKpis, elWarn, elCursor, elGantt, elGanttCanvas, elMatrix, elParams, elRecalc;
   let elMap, elMapCanvas, elMapTitle;
   let elCursorSync;          // low-key "時刻連動中" indicator near the time cursor
   let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
@@ -117,6 +154,12 @@ export function mountTimetable(targetEl, opts = {}) {
     const tsv = el('button', 'tt-btn', '📋 TSVコピー');
     tsv.onclick = copyTSV;
     bar.appendChild(tsv);
+
+    // "再計算中…" pill — surfaced while a slider edit is debounced / solving.
+    elRecalc = el('span', 'tt-recalc-pill');
+    elRecalc.setAttribute('aria-live', 'polite');
+    elRecalc.textContent = '再計算中…';
+    bar.appendChild(elRecalc);
     root.appendChild(bar);
 
     // KPI cards
@@ -137,10 +180,14 @@ export function mountTimetable(targetEl, opts = {}) {
     elCursor.setAttribute('aria-label', '時刻');
     elCursor.oninput = () => { cursorSlot = parseInt(elCursor.value, 10) || 0; onCursor(); };
     const curRead = el('span', 'tt-cursor-read'); curRead.id = 'ttCursorRead';
+    // The REAL readout is the polite live region (時刻 + 総人数 + 内訳); the
+    // decorative sync cue below is silenced (aria-hidden) to avoid double-speak.
+    curRead.setAttribute('aria-live', 'polite');
+    curRead.setAttribute('role', 'status');
     // Low-key live cue: signals that the 2D/3D replay is following this time
     // cursor (時刻連動). Static / token-styled; no toasts. Fades in on movement.
     elCursorSync = el('div', 'tt-cursor-sync');
-    elCursorSync.setAttribute('aria-live', 'polite');
+    elCursorSync.setAttribute('aria-hidden', 'true');
     elCursorSync.appendChild(el('i'));
     elCursorSync.appendChild(el('span', null, '時刻連動中（2D/3Dが追従）'));
     cur.appendChild(el('span', 'tt-cursor-label', '時刻'));
@@ -183,11 +230,24 @@ export function mountTimetable(targetEl, opts = {}) {
     root.appendChild(det);
   }
 
+  // Zero-scenario state: don't throw or render a blank tab — explain + give a CTA.
+  function renderEmptyState() {
+    root.innerHTML = '';
+    const box = el('div', 'tt-empty');
+    box.appendChild(el('div', 'tt-empty-title', 'シナリオがまだありません'));
+    box.appendChild(el('div', 'tt-empty-body',
+      'マテリアルフローで荷役物量を作成し「タイムチャートで人員配置 →」を押すと、ここに配置計画が表示されます。'));
+    const cta = el('button', 'tt-btn', 'マテリアルフローへ');
+    cta.onclick = () => document.dispatchEvent(new CustomEvent('whsim:goto', { detail: { view: 'materialflow' } }));
+    box.appendChild(cta);
+    root.appendChild(box);
+  }
+
   function ganttLegend() {
     const leg = el('div', 'tt-legend');
     for (const s of SECTIONS) {
       const i = el('span', 'tt-legend-item');
-      const sw = el('i'); sw.style.background = SECTION_COLOR[s] || '#999';
+      const sw = el('i'); sw.style.background = SECTION_COLOR[s] || 'var(--ink-tertiary,#8195a8)';
       i.appendChild(sw); i.appendChild(document.createTextNode(s));
       leg.appendChild(i);
     }
@@ -211,7 +271,9 @@ export function mountTimetable(targetEl, opts = {}) {
   // ---- compute + render ----
   function recompute() {
     if (!seed) return;
+    setRecalcPill(false);
     result = solve(currentScenario(), processes, productivity);
+    ganttCache = null;    // result changed → rebuild the chart cache on next render
     renderKpis();
     renderWarnings();
     renderGantt();
@@ -219,9 +281,14 @@ export function mountTimetable(targetEl, opts = {}) {
     onCursor();           // refresh readout + notify listeners
   }
 
+  function setRecalcPill(on) {
+    if (elRecalc) elRecalc.classList.toggle('on', !!on);
+  }
+
   function scheduleRecompute() {
     if (recalcTimer) clearTimeout(recalcTimer);
-    recalcTimer = setTimeout(() => { if (!destroyed) recompute(); }, 180);
+    setRecalcPill(true);
+    recalcTimer = setTimeout(() => { if (!destroyed) recompute(); }, DEBOUNCE_MS);
   }
 
   function renderKpis() {
@@ -266,13 +333,27 @@ export function mountTimetable(targetEl, opts = {}) {
   }
 
   // ---- gantt (stacked area by section + total line + cursor) ----
-  function renderGantt() {
+  // The chart (grid + stacked areas + total + cap line) only depends on the solve
+  // result, so we draw it ONCE to an offscreen cache. Per cursor tick we just blit
+  // the cache and stroke the 1px cursor line — O(1) scrubbing, no full repaint and
+  // no backing-store reallocation (cv.width is only set when CSS size / DPR change).
+  function ensureGanttBacking() {
     const cv = elGanttCanvas;
     const cssW = cv.clientWidth || 720;
     const cssH = 240;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = cssW * dpr; cv.height = cssH * dpr;
-    const ctx = cv.getContext('2d');
+    if (cssW !== ganttCssW || dpr !== ganttDpr) {
+      cv.width = cssW * dpr; cv.height = cssH * dpr;
+      ganttCssW = cssW; ganttDpr = dpr;
+      ganttCache = null; // backing store reallocated → cache invalid
+    }
+    return { cssW, cssH, dpr };
+  }
+
+  function buildGanttCache(cssW, cssH, dpr) {
+    const cache = document.createElement('canvas');
+    cache.width = cssW * dpr; cache.height = cssH * dpr;
+    const ctx = cache.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
 
@@ -283,6 +364,7 @@ export function mountTimetable(targetEl, opts = {}) {
     const maxTotal = Math.max(1, ...result.headcount_by_slot);
     const X = (i) => padL + (i / (N - 1)) * plotW;
     const Y = (v) => padT + plotH - (v / maxTotal) * plotH;
+    ganttGeom = { padL, padR, padT, padB, plotW, plotH, X };
 
     // y grid + labels
     ctx.strokeStyle = cssVar('--canvas-shell', '#dde3ea');
@@ -310,7 +392,7 @@ export function mountTimetable(targetEl, opts = {}) {
       for (let i = 0; i < N; i++) ctx.lineTo(X(i), Y(tops[i]));
       for (let i = N - 1; i >= 0; i--) ctx.lineTo(X(i), Y(bottoms[i]));
       ctx.closePath();
-      ctx.fillStyle = hexA(SECTION_COLOR[sec] || '#999', 0.78);
+      ctx.fillStyle = hexA(SECTION_COLOR[sec] || cssVar('--ink-tertiary', '#8195a8'), 0.78);
       ctx.fill();
       for (let i = 0; i < N; i++) bottoms[i] = tops[i];
     }
@@ -324,10 +406,31 @@ export function mountTimetable(targetEl, opts = {}) {
       ctx.strokeStyle = cssVar('--bad', '#e31a1c'); ctx.setLineDash([5, 4]); ctx.beginPath();
       ctx.moveTo(padL, Y(cap)); ctx.lineTo(cssW - padR, Y(cap)); ctx.stroke(); ctx.setLineDash([]);
     }
-    // cursor
+    ganttCache = cache;
+  }
+
+  // Cheap per-cursor path: blit the cached chart, draw the 1px cursor line.
+  function drawGanttCursor() {
+    if (!ganttGeom) return;
+    const cv = elGanttCanvas;
+    const { cssW, cssH, dpr } = ensureGanttBacking();
+    if (!ganttCache) { buildGanttCache(cssW, cssH, dpr); } // size/DPR changed → rebuild
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(ganttCache, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const { padT, plotH, X } = ganttGeom;
     const cx = X(cursorSlot);
-    ctx.strokeStyle = cssVar('--accent', '#2f6df6'); ctx.lineWidth = 2;
+    ctx.strokeStyle = cssVar('--accent', '#16C0DE'); ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(cx, padT); ctx.lineTo(cx, padT + plotH); ctx.stroke(); ctx.lineWidth = 1;
+  }
+
+  function renderGantt() {
+    if (!result) return;
+    const { cssW, cssH, dpr } = ensureGanttBacking();
+    if (!ganttCache) buildGanttCache(cssW, cssH, dpr);
+    drawGanttCursor();
   }
 
   function hexA(hex, a) {
@@ -343,7 +446,10 @@ export function mountTimetable(targetEl, opts = {}) {
     const cssW = cv.clientWidth || 720;
     const cssH = 260;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = cssW * dpr; cv.height = cssH * dpr;
+    if (cssW !== mapCssW || dpr !== mapDpr) {
+      cv.width = cssW * dpr; cv.height = cssH * dpr; // only reallocate when size/DPR changes
+      mapCssW = cssW; mapDpr = dpr;
+    }
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
@@ -394,7 +500,7 @@ export function mountTimetable(targetEl, opts = {}) {
     const rows = Math.ceil(cap / cols);
     const cw = w / cols, ch = h / rows;
     const r = Math.max(1.6, Math.min(4.5, Math.min(cw, ch) * 0.28));
-    ctx.fillStyle = color || '#1f78b4';
+    ctx.fillStyle = color || cssVar('--ink-tertiary', '#16C0DE');
     ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 0.6;
     let k = 0;
     for (let ry = 0; ry < rows && k < cap; ry++) {
@@ -410,7 +516,7 @@ export function mountTimetable(targetEl, opts = {}) {
     let x = 14; const y = H - 14;
     ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
     for (const [sec, n] of list) {
-      ctx.fillStyle = SECTION_COLOR[sec] || '#999';
+      ctx.fillStyle = SECTION_COLOR[sec] || cssVar('--ink-tertiary', '#16C0DE');
       const dots = Math.min(n, 12);
       for (let i = 0; i < dots; i++) { ctx.beginPath(); ctx.arc(x + i * 7 + 2, y - 3, 2.6, 0, 7); ctx.fill(); }
       const tx = x + dots * 7 + 6;
@@ -451,7 +557,7 @@ export function mountTimetable(targetEl, opts = {}) {
     for (const p of result.processes) {
       const tr = el('tr');
       const name = el('th', 'tt-rowhead');
-      const dot = el('i', 'tt-dot'); dot.style.background = SECTION_COLOR[p.section] || '#999';
+      const dot = el('i', 'tt-dot'); dot.style.background = SECTION_COLOR[p.section] || 'var(--ink-tertiary,#8195a8)';
       name.appendChild(dot); name.appendChild(document.createTextNode(p.id));
       tr.appendChild(name);
       // render every other slot to keep the table readable (sum the pair)
@@ -504,13 +610,13 @@ export function mountTimetable(targetEl, opts = {}) {
     for (const p of processes) {
       const row = el('div', 'tt-param-row');
       const head = el('div', 'tt-param-head');
-      const dot = el('i', 'tt-dot'); dot.style.background = SECTION_COLOR[p.section] || '#999';
+      const dot = el('i', 'tt-dot'); dot.style.background = SECTION_COLOR[p.section] || 'var(--ink-tertiary,#8195a8)';
       head.appendChild(dot); head.appendChild(el('span', 'tt-param-name', p.id));
       row.appendChild(head);
 
       // mode
       const modeSel = el('select', 'tt-mini');
-      for (const [val, txt] of [['dynamic', '🔵 物量÷生産性'], ['fixed_n', '🟠 固定人数']]) {
+      for (const [val, txt] of [['dynamic', '🟣 物量÷生産性'], ['fixed_n', '🟠 固定人数']]) {
         const op = el('option', null, txt); op.value = val; modeSel.appendChild(op);
       }
       modeSel.value = p['配置方式'] || 'dynamic';
@@ -608,9 +714,9 @@ export function mountTimetable(targetEl, opts = {}) {
       elCursorSync.classList.toggle('on', !!result);
       if (syncFadeTimer) clearTimeout(syncFadeTimer);
       elCursorSync.classList.add('moved');
-      syncFadeTimer = setTimeout(() => { if (elCursorSync) elCursorSync.classList.remove('moved'); }, 600);
+      syncFadeTimer = setTimeout(() => { if (elCursorSync) elCursorSync.classList.remove('moved'); }, SYNC_FADE_MS);
     }
-    renderGantt();      // move the cursor line
+    if (ganttCache) drawGanttCursor(); else renderGantt(); // O(1) cursor move
     renderStaffMap();   // repaint workers for this time (the 時刻連動)
     if (typeof o.onChange === 'function') {
       o.onChange({
@@ -652,6 +758,15 @@ export function mountTimetable(targetEl, opts = {}) {
     }
     if (typeof o.fetchLayout === 'function') {
       try { layout = await o.fetchLayout(); } catch (_e) { layout = null; }
+    } else {
+      // No layout source wired → live map falls back to the schematic. Note it.
+      flash('レイアウト情報が取得できないため、配置マップは簡易表示です。');
+    }
+    // A pending data-derived scenario can stand in for an empty seed.
+    if (!seed.scenarios || !Object.keys(seed.scenarios).length) {
+      if (pendingExternal) { applyExternalScenario(pendingExternal); pendingExternal = null; return; }
+      renderEmptyState();
+      return;
     }
     scenarioName = Object.keys(seed.scenarios)[0];
     loadScenario(scenarioName);
@@ -674,8 +789,20 @@ export function mountTimetable(targetEl, opts = {}) {
     recompute();
   }
 
-  const onTheme = () => { if (result) { renderGantt(); renderStaffMap(); } };
+  const onTheme = () => { if (result) { ganttCache = null; renderGantt(); renderStaffMap(); } };
   document.addEventListener('themechange', onTheme);
+
+  // Debounced resize: CSS width may change → invalidate the gantt cache and
+  // re-render both canvases. Removed in destroy(). (controller.resize existed but
+  // nothing was driving it.)
+  const onResize = () => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (destroyed || !result) return;
+      ganttCache = null; renderGantt(); renderStaffMap();
+    }, DUR_RESIZE_MS);
+  };
+  window.addEventListener('resize', onResize);
 
   const controller = {
     el: root,
@@ -691,12 +818,14 @@ export function mountTimetable(targetEl, opts = {}) {
       if (!seed) { pendingExternal = payload; return; }
       applyExternalScenario(payload);
     },
-    resize() { if (result) { renderGantt(); renderStaffMap(); } },
+    resize() { if (result) { ganttCache = null; renderGantt(); renderStaffMap(); } },
     destroy() {
       destroyed = true;
       if (recalcTimer) clearTimeout(recalcTimer);
       if (syncFadeTimer) clearTimeout(syncFadeTimer);
+      if (resizeTimer) clearTimeout(resizeTimer);
       document.removeEventListener('themechange', onTheme);
+      window.removeEventListener('resize', onResize);
       if (root.parentNode) root.parentNode.removeChild(root);
     },
   };

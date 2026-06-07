@@ -14,7 +14,9 @@ export const DAY_END_MINUTES = 1800; // 30:00 — logistics days run past midnig
 
 export const SECTION_COLOR = {
   '入荷': '#fbbf24',
-  '出荷ケース': '#3b82f6',
+  // Non-accent indigo/violet so the cyan brand accent stays the sole accent
+  // across stacked-area / legend / matrix / dots (was brand-blue #3b82f6).
+  '出荷ケース': '#7C6CF0',
   '出荷バラ': '#10b981',
   'ステージング': '#f97316',
   '間接': '#6b7280',

@@ -21,6 +21,8 @@ import { mountNotes } from './js/notes.js';
 const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
                    robot_arm: 'ロボットアーム', crane: 'クレーン' };
 const DOOR_COLOR = { dock: '#1f78b4', personnel: '#33a02c', shutter: '#8d99ae' };
+// Full circle in radians — replaces the `arc(...,0,7)` magic number in 2D draws.
+const TAU = Math.PI * 2;
 
 const $ = (id) => document.getElementById(id);
 const api = async (url, opts) => {
@@ -84,11 +86,26 @@ function refreshPalette() {
     markerStroke: cssVar('--canvas-marker-stroke', '#fff'),
     agentStroke:  cssVar('--canvas-agent-stroke', '#000'),
     conveyor:     cssVar('--canvas-conveyor-rep', '#8d99ae'),
+    // Brand cyan accent (theme-aware) for HUD/legend/playhead/routes.
+    accent:       cssVar('--accent', '#34e3ff'),
+    // Floating-card panel (HUD/legend) fill + secondary ink, theme-aware. The
+    // fallback is a touch lighter than the old flat 0b1320 so it lifts off the
+    // Void bg as a card; the accent border (added at draw time) completes it.
+    panelBg:      cssVar('--canvas-panel-bg', 'rgba(20,30,46,0.78)'),
+    panelInk:     cssVar('--canvas-panel-ink', '#9fb4c8'),
+    // Pick-station marker fill.
+    station:      cssVar('--canvas-station', '#08519c'),
   };
   return PALETTE;
 }
 const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキング',
                   packing: '梱包', shipping: '出荷', staging: '一時保管' };
+// Bottleneck-stage label → zone type. Inverts ZONE_JP (so any zone type can
+// match) plus synonyms not in ZONE_JP. Hoisted to module scope so drawBottleneck
+// allocates nothing on the per-frame hot path.
+const JP_TO_TYPE = Object.assign(
+  Object.fromEntries(Object.entries(ZONE_JP).map(([type, jp]) => [jp, type])),
+  { '検品': 'inspection', '格納': 'storage' });
 
 const S = {
   project: null, replay: null, scene3d: null, designer: null, compare: null,
@@ -121,15 +138,19 @@ function fitCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = r.width * dpr; canvas.height = r.height * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // Cache the CSS pixel size so draw2d/drawLiveHUD don't trigger a layout read
+  // (clientWidth/clientHeight) on the per-frame hot path.
+  canvas._cssW = r.width; canvas._cssH = r.height;
+  S._needs2d = true;  // size changed → one repaint even while paused
 }
 function draw2d() {
   const rep = S.replay;
   const P = PALETTE || refreshPalette();
-  const w = canvas.clientWidth, h = canvas.clientHeight;
+  // Use the cached CSS size (set by fitCanvas) to avoid a layout read each frame.
+  const w = canvas._cssW || canvas.clientWidth, h = canvas._cssH || canvas.clientHeight;
   ctx.clearRect(0, 0, w, h);
   if (!rep) {
-    ctx.fillStyle = P.inkFaint; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('プロジェクトを作成して「実行」すると、ここに動きが表示されます', w / 2, h / 2);
+    drawEmptyState(w, h, P);
     return;
   }
   const b = rep.meta.bounds, pad = 16;
@@ -153,7 +174,7 @@ function draw2d() {
   // faint edges + nodes, drawn under the racks/agents as a routing underlay.
   if (rep.navnet && rep.navnet.waypoints && rep.navnet.waypoints.length) {
     const wp = rep.navnet.waypoints;
-    ctx.strokeStyle = 'rgba(52,227,255,0.20)'; ctx.lineWidth = 0.8;
+    ctx.strokeStyle = hexA(P.accent, 0.20); ctx.lineWidth = 0.8;
     ctx.beginPath();
     for (const [i, j] of (rep.navnet.edges || [])) {
       const a = wp[i], b = wp[j];
@@ -161,8 +182,8 @@ function draw2d() {
       ctx.moveTo(X(a[0]), Y(a[1])); ctx.lineTo(X(b[0]), Y(b[1]));
     }
     ctx.stroke();
-    ctx.fillStyle = 'rgba(52,227,255,0.45)';
-    for (const p of wp) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 1.8, 0, 7); ctx.fill(); }
+    ctx.fillStyle = hexA(P.accent, 0.45);
+    for (const p of wp) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 1.8, 0, TAU); ctx.fill(); }
   }
   // Storage as MapMaker-style shelf runs (rack blocks + ABC bays); older replays
   // without `shelves` fall back to the legacy per-location dots.
@@ -189,8 +210,8 @@ function draw2d() {
     }
   }
   for (const s of rep.stations) {
-    ctx.fillStyle = '#08519c'; ctx.beginPath();
-    ctx.arc(X(s.x), Y(s.y), 7, 0, 7); ctx.fill();
+    ctx.fillStyle = P.station; ctx.beginPath();
+    ctx.arc(X(s.x), Y(s.y), 7, 0, TAU); ctx.fill();
   }
   // building shell: walls + doors (躯体)
   for (const wl of (rep.walls || [])) {
@@ -223,7 +244,7 @@ function draw2d() {
   // manual flow-line routes (動線)
   for (const rt of (rep.routes || [])) {
     if (!rt.points || rt.points.length < 2) continue;
-    ctx.strokeStyle = rt.mover === 'forklift' ? '#f57f17' : '#00b8d4';
+    ctx.strokeStyle = rt.mover === 'forklift' ? '#f57f17' : P.accent;
     ctx.lineWidth = 3; ctx.setLineDash([6, 4]); ctx.beginPath();
     rt.points.forEach((p, i) => i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])));
     ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
@@ -249,13 +270,16 @@ function draw2d() {
     let wip = 0;
     for (let i = 0; i < tl.length; i++) { if (tl[i][0] <= S.t) wip = tl[i][1]; else break; }
     const util = Math.min(1, wip / Math.max(sg.capacity, 1));
-    const hue = Math.round((1 - util) * 120); // 120=green (empty) → 0=red (full/jam)
-    ctx.fillStyle = `hsla(${hue},85%,50%,${0.22 + util * 0.5})`;
+    // Match the staging RING ramp (cyan→amber→red by threshold) so the rectangle
+    // and the fill-ring read as one branded object, not two heat scales.
+    const heat = stagingColor(util);
+    ctx.fillStyle = hexA(heat, 0.22 + util * 0.5);
     ctx.fillRect(X(sg.x), Y(sg.y + sg.h), sg.w * sc, sg.h * sc);
-    ctx.strokeStyle = `hsl(${hue},85%,38%)`; ctx.lineWidth = 1.2;
+    ctx.strokeStyle = heat; ctx.lineWidth = 1.2;
     ctx.strokeRect(X(sg.x), Y(sg.y + sg.h), sg.w * sc, sg.h * sc);
-    ctx.fillStyle = util > 0.55 ? '#fff' : '#243244';
-    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = util > 0.55 ? P.markerStroke : P.panelInk;
+    // Mono face for the numeric readout (matches the HUD/legend numerics).
+    ctx.font = '600 11px "Space Mono", ui-monospace, monospace'; ctx.textAlign = 'center';
     ctx.fillText(`仮置 ${wip}/${sg.capacity}`, X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2));
   }
   // workers — role decides the glyph (●picker ▲forklift ■packer/inspector),
@@ -270,6 +294,9 @@ function draw2d() {
   // V3 viewport extras (additive; each guarded so absent data = legacy render):
   // staging fill-ring + bottleneck ⚠ marker + bottom-left legend.
   if (sg) drawStagingRing(X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2), sg);
+  // TODO(P0-3): congestion heatmap overlay on the canvas. Deferred — needs a
+  // backend render/replay.py change to emit per-cell occupancy + visual
+  // verification not available in this environment.
   drawBottleneck(rep, X, Y);
   drawLegend(rep, w, h, P);
   drawLiveHUD(ctx, rep, S.t);
@@ -284,19 +311,21 @@ function draw2d() {
 function drawLiveHUD(ctx, rep, t) {
   const series = rep && rep.series;
   if (!Array.isArray(series) || series.length < 2) return;
+  const P = PALETTE || refreshPalette();
 
-  // Geometry: small panel pinned top-right of the canvas.
-  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  // Geometry: small panel pinned top-right of the canvas. Use the cached CSS
+  // size (set by fitCanvas) to avoid a layout read on the per-frame hot path.
+  const cw = canvas._cssW || canvas.clientWidth;
   const pad = 10, W = Math.min(220, cw - 2 * pad), H = 84;
   const x0 = cw - W - pad, y0 = pad;
   // Plot rect inside the panel (room for header text on top).
   const plX = x0 + 10, plY = y0 + 28, plW = W - 20, plH = H - 38;
 
-  // Domains. Use the playback window for x (matches the loop's S.window wrap)
-  // so the playhead position is consistent with the scrubber; fall back to the
-  // series' own time span if the window is missing.
-  const tMax = (typeof S.window === 'number' && S.window > 0)
-    ? S.window : (series[series.length - 1].t || 1);
+  // Domains. Prefer the replay SERIES' own time span for x so the playhead and
+  // the productivity line can never desync; fall back to the playback window.
+  const tMax = (series[series.length - 1].t > 0)
+    ? series[series.length - 1].t
+    : ((typeof S.window === 'number' && S.window > 0) ? S.window : 1);
   let rMax = 0;
   for (const p of series) { const r = +p.rate || 0; if (r > rMax) rMax = r; }
   if (rMax <= 0) rMax = 1;
@@ -313,14 +342,15 @@ function drawLiveHUD(ctx, rep, t) {
 
   const reduce = window.matchMedia
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const cyan = '#34e3ff';
+  const cyan = P.accent;
   const a0 = ctx.globalAlpha;
   ctx.save();
 
-  // Translucent panel.
+  // Translucent panel — reads as a floating card on the Void bg: a slightly
+  // lighter fill + a faint accent low-alpha border for dark-mode contrast.
   ctx.globalAlpha = 1;
-  ctx.fillStyle = 'rgba(11,19,32,0.72)';
-  ctx.strokeStyle = 'rgba(126,160,200,0.18)'; ctx.lineWidth = 1;
+  ctx.fillStyle = P.panelBg;
+  ctx.strokeStyle = hexA(P.accent, 0.22); ctx.lineWidth = 1;
   if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x0, y0, W, H, 6); ctx.fill(); ctx.stroke(); }
   else { ctx.fillRect(x0, y0, W, H); ctx.strokeRect(x0, y0, W, H); }
 
@@ -332,14 +362,14 @@ function drawLiveHUD(ctx, rep, t) {
   // Cumulative done + staging WIP, smaller, with semantic colours.
   ctx.font = '10px "Space Mono", ui-monospace, monospace';
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#9fb4c8';
-  const wipCol = curWip > 0 ? '#f5b05a' : '#9fb4c8';
+  ctx.fillStyle = P.panelInk;
+  const wipCol = curWip > 0 ? '#f5b05a' : P.panelInk;
   ctx.fillText(`完了 ${curDone}`, x0 + W - 56, y0 + 18);
   ctx.fillStyle = wipCol;
   ctx.fillText(`仮置 ${curWip}`, x0 + W - 10, y0 + 18);
 
   // Baseline of the plot.
-  ctx.strokeStyle = 'rgba(126,160,200,0.20)'; ctx.lineWidth = 1;
+  ctx.strokeStyle = hexA(P.panelInk, 0.20); ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(plX, plY + plH); ctx.lineTo(plX + plW, plY + plH); ctx.stroke();
 
   // Future portion (t >= playhead): faint line.
@@ -362,11 +392,11 @@ function drawLiveHUD(ctx, rep, t) {
   ctx.restore();
 
   // Playhead vertical line + current-value dot.
-  ctx.globalAlpha = 1; ctx.strokeStyle = reduce ? 'rgba(52,227,255,0.6)' : cyan;
+  ctx.globalAlpha = 1; ctx.strokeStyle = reduce ? hexA(P.accent, 0.6) : cyan;
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(phX, plY); ctx.lineTo(phX, plY + plH); ctx.stroke();
   ctx.fillStyle = cyan;
-  ctx.beginPath(); ctx.arc(phX, PY(cur.rate), 2.6, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(phX, PY(cur.rate), 2.6, 0, TAU); ctx.fill();
 
   ctx.restore();
   ctx.globalAlpha = a0; ctx.lineWidth = 1; ctx.lineCap = 'butt';
@@ -387,7 +417,7 @@ function agentGlyph(cx, cy, role, r) {
   } else if (role === 'packer' || role === 'inspector') { // ■
     ctx.rect(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7);
   } else {                                          // ● picker / fallback
-    ctx.arc(cx, cy, r, 0, 7);
+    ctx.arc(cx, cy, r, 0, TAU);
   }
   ctx.fill(); ctx.stroke();
 }
@@ -400,7 +430,7 @@ function drawStagingRing(cx, cy, sg) {
   let wip = 0;
   for (let i = 0; i < tl.length; i++) { if (tl[i][0] <= S.t) wip = tl[i][1]; else break; }
   const frac = Math.min(1, wip / Math.max(sg.capacity, 1));
-  const col = frac < 0.60 ? '#34e3ff' : frac < 0.85 ? '#f5b05a' : '#ff5a78';
+  const col = stagingColor(frac);  // shared ramp → ring & rectangle read as one
   const R = 13;
   // Gentle pulse when nearly full (≥85%) and actively playing — a Mini-Metro
   // "overcrowding" cue. Restores globalAlpha so nothing downstream is affected.
@@ -408,12 +438,13 @@ function drawStagingRing(cx, cy, sg) {
     ? 0.65 + 0.35 * (0.5 + 0.5 * Math.sin(performance.now() / 280))
     : 1;
   const a0 = ctx.globalAlpha;
+  const P = PALETTE || refreshPalette();
   ctx.lineWidth = 3; ctx.lineCap = 'round';
-  ctx.strokeStyle = 'rgba(126,160,200,0.20)';
-  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 7); ctx.stroke();
+  ctx.strokeStyle = hexA(P.panelInk, 0.20);
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
   ctx.globalAlpha = a0 * pulse;
   ctx.strokeStyle = col;
-  ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + frac * 2 * Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + frac * TAU); ctx.stroke();
   ctx.globalAlpha = a0;
   ctx.lineWidth = 1; ctx.lineCap = 'butt';
 }
@@ -425,18 +456,16 @@ function drawBottleneck(rep, X, Y) {
   const k = rep.kpis;
   if (!k || !k.bottleneck_jp) return;
   // Map the bottleneck label back to a zone type across ALL stages
-  // (入荷/検品/格納/ピッキング/梱包/出荷…), not just picking/packing. Built by
-  // inverting ZONE_JP so any zone type can match; unmatched => nothing drawn.
-  const JP_TO_TYPE = Object.fromEntries(
-    Object.entries(ZONE_JP).map(([type, jp]) => [jp, type]));
-  const extra = { '検品': 'inspection', '格納': 'storage' }; // synonyms not in ZONE_JP
-  const stage = JP_TO_TYPE[k.bottleneck_jp] || extra[k.bottleneck_jp] || null;
+  // (入荷/検品/格納/ピッキング/梱包/出荷…), not just picking/packing. Uses the
+  // module-scope JP_TO_TYPE (hoisted so the hot path allocates nothing); it
+  // already folds in the 検品/格納 synonyms. Unmatched => nothing drawn.
+  const stage = JP_TO_TYPE[k.bottleneck_jp] || null;
   const z = stage ? (rep.zones || []).find(zz => zz.type === stage) : null;
   if (!z) return;
   const cx = X(z.x + z.w / 2), cy = Y(z.y + z.h / 2);
   ctx.fillStyle = 'rgba(245,176,90,0.12)';
   ctx.strokeStyle = '#f5b05a'; ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.arc(cx, cy - 16, 11, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy - 16, 11, 0, TAU); ctx.fill(); ctx.stroke();
   ctx.fillStyle = '#f5b05a'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('⚠', cx, cy - 15);
@@ -454,7 +483,9 @@ function drawLegend(rep, w, h, P) {
   if (!items.length) return;
   const pad = 10, lh = 16, bw = 96, bh = items.length * lh + 10;
   const x0 = pad, y0 = h - bh - pad;
-  ctx.fillStyle = 'rgba(11,19,32,0.72)'; ctx.strokeStyle = 'rgba(126,160,200,0.18)';
+  // Floating card on the Void bg: panel fill + faint accent low-alpha border
+  // (matches the HUD card so the two overlays read as one brand surface).
+  ctx.fillStyle = P.panelBg; ctx.strokeStyle = hexA(P.accent, 0.22);
   ctx.lineWidth = 1;
   if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x0, y0, bw, bh, 6); ctx.fill(); ctx.stroke(); }
   else { ctx.fillRect(x0, y0, bw, bh); ctx.strokeRect(x0, y0, bw, bh); }
@@ -462,7 +493,7 @@ function drawLegend(rep, w, h, P) {
   ctx.font = '10px sans-serif';
   items.forEach(([role, label], i) => {
     const gy = y0 + 9 + i * lh;
-    ctx.fillStyle = '#34e3ff'; ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.6;
+    ctx.fillStyle = P.accent; ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.6;
     agentGlyph(x0 + 12, gy, role, 4);
     ctx.fillStyle = P.zoneInk || '#8a93a0';
     ctx.fillText(label, x0 + 24, gy);
@@ -472,6 +503,34 @@ function drawLegend(rep, w, h, P) {
 function hexA(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+// Shared staging heat ramp (cyan→amber→red by threshold). Used by BOTH the
+// staging RECTANGLE and the fill-RING so they read as one branded object. The
+// cyan end is the theme-aware brand accent; amber/red are semantic ramp stops.
+function stagingColor(frac) {
+  const P = PALETTE || refreshPalette();
+  return frac < 0.60 ? P.accent : frac < 0.85 ? '#f5b05a' : '#ff5a78';
+}
+// Empty / no-replay placeholder: a cheap, designed state instead of a single
+// gray line — a faint dashed building outline + an accent-muted message,
+// centred. Drawn once (works with the dirty-flag; no animation here).
+function drawEmptyState(w, h, P) {
+  const pad = Math.min(w, h) * 0.16;
+  const bx = pad, by = pad, bw = w - 2 * pad, bh = h - 2 * pad;
+  ctx.save();
+  // Faint dashed building outline (the "shell" we're waiting to fill).
+  ctx.strokeStyle = hexA(P.accent, 0.22); ctx.lineWidth = 1.5;
+  ctx.setLineDash([8, 6]);
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.stroke(); }
+  else { ctx.strokeRect(bx, by, bw, bh); }
+  ctx.setLineDash([]);
+  // Accent-muted message.
+  ctx.fillStyle = hexA(P.accent, 0.55);
+  ctx.font = '600 14px "Space Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('実行するとここに2Dリプレイが表示されます', w / 2, h / 2);
+  ctx.restore();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 1;
 }
 
 // ---- shared clock / render loop -------------------------------------------
@@ -483,7 +542,9 @@ function hexA(hex, a) {
 let lastTs = performance.now();
 let _lastScrub = -1, _lastClock = '';
 function loop(ts) {
-  const dt = (ts - lastTs) / 1000; lastTs = ts;
+  // Clamp dt so a GC pause / tab-throttle hitch can't snap all agents forward
+  // (anti-teleport): a single hitched frame advances at most 0.1s of wall-time.
+  const dt = Math.min((ts - lastTs) / 1000, 0.1); lastTs = ts;
   if (S.playing && S.replay) {
     S.t += dt * S.speed;
     if (S.t > S.window) S.t = 0;
@@ -492,7 +553,13 @@ function loop(ts) {
     const cv = (S.t / 60).toFixed(1) + ' 分';
     if (cv !== _lastClock) { $('clock').textContent = cv; _lastClock = cv; }
   }
-  if (S.view === 'view2d') draw2d();
+  // Dirty-flag redraw: while playing the frame genuinely changes every tick, but
+  // when paused an identical frame is wasteful — only redraw on an explicit
+  // one-shot request (S._needs2d), set wherever a static repaint is needed.
+  if (S.view === 'view2d' && (S.playing || S._needs2d)) {
+    draw2d();
+    S._needs2d = false;
+  }
   requestAnimationFrame(loop);
 }
 
@@ -688,6 +755,7 @@ async function loadReplay() {
   S.window = rep.meta.replay_window_s || rep.meta.duration_s || 1;
   S.t = 0;
   S.playing = true;
+  S._needs2d = true;  // fresh replay → repaint even if it loads while paused
   $('playBtn').disabled = false; $('scrub').disabled = false;
   $('playBtn').textContent = '⏸';
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
@@ -1026,7 +1094,7 @@ function switchView(view) {
   if (view === 'design') mountDesigner();
   if (view === 'analysis') { mountAnalysis($('analysis'), S.project); if (S.project) cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
   if (view === 'view3d') mount3d();
-  if (view === 'view2d') fitCanvas();
+  if (view === 'view2d') { fitCanvas(); S._needs2d = true; } // repaint on entry (paused or empty)
   if (view === 'export') mountExport();
   if (view === 'dataanalysis') mountDataAnalysisView();
   if (view === 'materialflow') mountMaterialFlowView();
@@ -1128,6 +1196,7 @@ function mountTimetableView() {
     fetchLayout: () => fetchLayoutFor(S.project),
     onChange: (payload) => {
       S.timetableStaffing = payload;
+      S._needs2d = true;  // staffing/cursor changed → one repaint even while paused
       if (S.view === 'view2d') draw2d();
       if (S.view === 'view3d' && S.scene3d) applyStaffing3d();
     },
@@ -1202,6 +1271,7 @@ document.addEventListener('whsim:load-timetable', (e) => {
 // for the static (paused / no-replay) case so the canvas repaints immediately.
 document.addEventListener('themechange', () => {
   refreshPalette();
+  S._needs2d = true;  // re-read PALETTE on the next frame even while paused
   if (S.view === 'view2d') draw2d();
 });
 
@@ -1426,6 +1496,7 @@ function initUI() {
     S.playing = false; $('playBtn').textContent = '▶';  // don't fight the user
     S.t = (parseFloat(e.target.value) / 1000) * S.window;
     $('clock').textContent = (S.t / 60).toFixed(1) + ' 分';
+    S._needs2d = true;  // scrubbed while paused → one repaint at the new playhead
   };
   $('speed').onchange = (e) => { S.speed = parseFloat(e.target.value); };
 

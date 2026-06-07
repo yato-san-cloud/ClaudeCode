@@ -8,6 +8,7 @@
 // Public API:
 //   new CompareView(container, data)  — build the UI into `container`
 //   view.setData(data)                — re-render with new data
+//   view.setLoading()                 — show a skeleton placeholder mid-fetch
 //   view.dispose()                    — tear down and detach listeners
 //
 // Defensive throughout: missing kpis, null cost fields, or a single-scenario
@@ -230,18 +231,50 @@ export class CompareView {
     this.root = root;
   }
 
+  // Mid-fetch skeleton — visually distinct from the empty "no scenarios" state
+  // so an in-flight comparison never reads as a false dead-end. Uses theme
+  // tokens only (no hardcoded colour); stepped opacity reads as "loading".
+  setLoading() {
+    if (this.root && this.root.parentNode === this.container) {
+      this.container.removeChild(this.root);
+    }
+
+    const root = document.createElement('div');
+    root.className = 'compare-view compare-loading';
+    root.style.fontFamily = 'inherit';
+    root.style.color = 'var(--ink-primary)';
+    root.setAttribute('aria-busy', 'true');
+    root.setAttribute('aria-label', '比較データを読み込み中');
+
+    for (let i = 0; i < 5; i += 1) {
+      const bar = document.createElement('div');
+      bar.className = 'compare-skel-row';
+      bar.style.height = 'var(--sp-5)';
+      bar.style.marginBottom = 'var(--sp-2)';
+      bar.style.borderRadius = 'var(--r-sm)';
+      bar.style.background = 'var(--bg-sunken)';
+      bar.style.opacity = i === 0 ? '0.9' : String(0.75 - i * 0.1);
+      root.appendChild(bar);
+    }
+
+    const note = document.createElement('p');
+    note.className = 'compare-note';
+    note.style.fontSize = 'var(--fs-xs)';
+    note.style.color = 'var(--ink-tertiary)';
+    note.style.margin = 'var(--sp-3) 2px 0';
+    note.textContent = '比較を読み込んでいます…';
+    root.appendChild(note);
+
+    this.container.appendChild(root);
+    this.root = root;
+  }
+
   _buildTable(scenarios) {
     const baseKpis = scenarios[0].kpis;
 
     const table = document.createElement('table');
     table.className = 'compare-table';
-    table.style.borderCollapse = 'collapse';
-    table.style.width = '100%';
-    table.style.background = 'var(--panel, #fff)';
-    table.style.border = '1px solid var(--line, #e3e8ee)';
-    table.style.borderRadius = '10px';
-    table.style.overflow = 'hidden';
-    table.style.fontSize = '13px';
+    table.setAttribute('aria-label', '現行と提案のKPI比較');
 
     // Header row: metric column + one column per scenario.
     const thead = document.createElement('thead');
@@ -281,69 +314,45 @@ export class CompareView {
       const labelCell = document.createElement('th');
       labelCell.scope = 'row';
       labelCell.textContent = metric.unit ? `${metric.label} (${metric.unit})` : metric.label;
-      labelCell.style.textAlign = 'left';
-      labelCell.style.padding = '9px 12px';
-      labelCell.style.fontWeight = '600';
-      labelCell.style.color = 'var(--ink, #1f2733)';
-      labelCell.style.borderTop = '1px solid var(--line, #e3e8ee)';
-      labelCell.style.whiteSpace = 'nowrap';
-      if (metric.headline) {
-        labelCell.style.fontWeight = '700';
-        labelCell.style.background = 'rgba(8,81,156,.06)';
-      }
       tr.appendChild(labelCell);
 
       const baseVal = metric.get(baseKpis);
 
       scenarios.forEach((s, i) => {
         const td = document.createElement('td');
-        td.style.padding = '9px 12px';
-        td.style.borderTop = '1px solid var(--line, #e3e8ee)';
-        td.style.textAlign = 'right';
-        td.style.whiteSpace = 'nowrap';
-        if (metric.headline) {
-          td.style.fontWeight = '700';
-          td.style.fontSize = '15px';
-          td.style.background = 'rgba(8,81,156,.06)';
-        }
 
         const valSpan = document.createElement('span');
         valSpan.className = 'compare-value';
         valSpan.textContent = metric.fmt(s.kpis);
         td.appendChild(valSpan);
 
-        // Verdict cell coloring by can_handle_demand.
+        // Verdict cell coloring by can_handle_demand (color + weight from CSS classes).
         if (metric.verdict) {
           td.style.textAlign = 'left';
           const ok = s.kpis.can_handle_demand;
           if (ok === true) {
             td.classList.add('compare-better');
-            td.style.color = 'var(--ok, #1a7a3c)';
-            td.style.fontWeight = '700';
           } else if (ok === false) {
             td.classList.add('compare-worse');
-            td.style.color = 'var(--bad, #b30000)';
-            td.style.fontWeight = '700';
           }
         }
 
-        // Delta coloring/annotation for alternatives vs baseline.
+        // Delta coloring/annotation for alternatives vs baseline. Color, pill,
+        // and weight all come from the .compare-better/.compare-worse[.compare-delta]
+        // CSS classes; a direction glyph (↑/↓) keeps better/worse from being
+        // color-only.
         if (i > 0 && !metric.verdict && metric.polarity !== 0) {
           const altVal = metric.get(s.kpis);
           const delta = computeDelta(metric, baseVal, altVal);
           if (delta.dir) {
             const cls = delta.dir === 'better' ? 'compare-better' : 'compare-worse';
-            const color = delta.dir === 'better' ? 'var(--ok, #1a7a3c)' : 'var(--bad, #b30000)';
+            const glyph = delta.dir === 'better' ? '↑' : '↓';
             td.classList.add(cls);
-            valSpan.style.color = color;
-            valSpan.style.fontWeight = metric.headline ? '700' : '600';
+            valSpan.classList.add(cls);
             const dspan = document.createElement('span');
-            dspan.className = 'compare-delta';
-            dspan.textContent = ' ' + delta.text;
-            dspan.style.color = color;
-            dspan.style.fontSize = '11px';
-            dspan.style.opacity = '.85';
-            dspan.style.marginLeft = '4px';
+            dspan.className = 'compare-delta ' + cls;
+            dspan.textContent = glyph + ' ' + delta.text;
+            td.appendChild(document.createTextNode(' '));
             td.appendChild(dspan);
           }
         }
@@ -356,14 +365,11 @@ export class CompareView {
     return table;
   }
 
-  _styleHeadCell(el, isCorner) {
-    el.style.padding = '10px 12px';
-    el.style.textAlign = isCorner ? 'left' : 'right';
-    el.style.background = 'var(--brand, #08519c)';
-    el.style.color = '#fff';
-    el.style.fontSize = '13px';
+  // Head-cell layout only. Color/background/typography come from the
+  // `.compare-table thead th` rules in styles.css (theme-aware cyan look);
+  // we intentionally set no hardcoded colors here.
+  _styleHeadCell(el, _isCorner) {
     el.style.verticalAlign = 'bottom';
-    el.style.whiteSpace = 'nowrap';
   }
 
   _buildThumbnails(scenarios) {
@@ -379,32 +385,24 @@ export class CompareView {
 
     scenarios.forEach((s) => {
       if (!s.png_url) return;
+      // Visual chrome (border / radius / background / caption) comes from the
+      // `.compare-thumb` rules in styles.css; only flex sizing + a reflow-guard
+      // aspect ratio stay inline (layout the stylesheet doesn't own).
       const fig = document.createElement('figure');
       fig.className = 'compare-thumb';
-      fig.style.margin = '0';
       fig.style.flex = '1 1 240px';
       fig.style.minWidth = '180px';
-      fig.style.background = 'var(--panel, #fff)';
-      fig.style.border = '1px solid var(--line, #e3e8ee)';
-      fig.style.borderRadius = '10px';
-      fig.style.padding = '8px';
+      // Reserve space before the PNG decodes so image loads don't reflow the row.
+      fig.style.aspectRatio = '4 / 3';
 
       const cap = document.createElement('figcaption');
       cap.textContent = `${s.role}：${s.name}`;
-      cap.style.fontSize = '12px';
-      cap.style.fontWeight = '700';
-      cap.style.color = 'var(--muted, #6b7785)';
-      cap.style.marginBottom = '6px';
       fig.appendChild(cap);
 
       const img = document.createElement('img');
       img.src = s.png_url;
       img.alt = `${s.name} の提案図`;
       img.loading = 'lazy';
-      img.style.maxHeight = '220px';
-      img.style.maxWidth = '100%';
-      img.style.display = 'block';
-      img.style.borderRadius = '6px';
       img.addEventListener('error', () => { fig.style.display = 'none'; });
       fig.appendChild(img);
 

@@ -38,24 +38,29 @@ function injectStyle() {
 // here affects the dark app shell. Motion uses transform/opacity only.
 const EXPORT_CSS = `
 #export {
-  --x-ease-out: cubic-bezier(.16,1,.3,1);
+  /* Chrome tracks the app theme: alias the private vars to the shell tokens
+     so the export panel is theme-aware (dark/light) rather than fixed. */
+  --x-ease-out: var(--ease-out);
   --x-ease-in: cubic-bezier(.4,0,1,1);
-  --x-dur-1: 120ms;
-  --x-dur-2: 180ms;
-  --x-dur-3: 240ms;
+  --x-dur-1: var(--dur-1);
+  --x-dur-2: var(--dur-2);
+  --x-dur-3: var(--dur-3);
 
-  --x-panel: #0E1726;
-  --x-panel-2: #111E33;
-  --x-ink-0: #EAF2FA;
-  --x-ink-1: #9FB2C8;
-  --x-ink-2: #607389;
-  --x-line: rgba(255,255,255,0.07);
-  --x-line-strong: rgba(255,255,255,0.12);
-  --x-cyan: #34E3FF;
+  --x-panel: var(--bg-app);
+  --x-panel-2: var(--bg-sunken);
+  --x-ink-0: var(--ink-primary);
+  --x-ink-1: var(--ink-secondary);
+  --x-ink-2: var(--ink-tertiary);
+  --x-line: var(--line-hair);
+  --x-line-strong: var(--line-strong);
+  --x-cyan: var(--accent);
+  /* One reusable cyan channel: rgb(var(--x-cyan-rgb)/.NN) for tints/glows. */
+  --x-cyan-rgb: 52 227 255;
   --x-cyan-hi: #7EF6FF;
   --x-tech: #2F7BFF;
   --x-deep: #0C5F86;
 
+  /* Print-white proposal sheet palette stays local (intentionally not theme-aware). */
   --x-paper: #FFFFFF;
   --x-paper-ink-0: #0B1220;
   --x-paper-ink-1: #3D4A60;
@@ -110,22 +115,22 @@ const EXPORT_CSS = `
 #export .export-doc-btn::before {
   content: ""; width: 8px; height: 8px; flex-shrink: 0; border-radius: 2px;
   background: var(--x-panel-2); border: 1px solid var(--x-line-strong);
-  box-shadow: 0 0 0 0 rgba(52,227,255,0);
+  box-shadow: 0 0 0 0 rgb(var(--x-cyan-rgb)/0);
   transition: box-shadow var(--x-dur-1) var(--x-ease-out), border-color var(--x-dur-1) var(--x-ease-out);
 }
 @media (hover: hover) {
   #export .export-doc-btn:hover {
-    border-color: rgba(52,227,255,0.35);
-    background: rgba(52,227,255,0.035);
+    border-color: rgb(var(--x-cyan-rgb)/0.35);
+    background: rgb(var(--x-cyan-rgb)/0.035);
     transform: translateY(-1px);
   }
   #export .export-doc-btn:hover::before {
-    border-color: rgba(52,227,255,0.45);
-    box-shadow: 0 0 10px rgba(52,227,255,0.55);
+    border-color: rgb(var(--x-cyan-rgb)/0.45);
+    box-shadow: 0 0 10px rgb(var(--x-cyan-rgb)/0.55);
   }
 }
 #export .export-doc-btn:active { transform: scale(.98); transition-timing-function: var(--x-ease-in); }
-#export .export-doc-btn:focus-visible { outline: 2px solid var(--x-cyan-hi); outline-offset: 2px; }
+#export .export-doc-btn:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
 #export .export-doc-btn[disabled] { cursor: default; opacity: 0.85; transform: none; }
 
 /* primary download: the one restrained cyan accent in the dark card grid */
@@ -133,7 +138,7 @@ const EXPORT_CSS = `
   color: #04121A; font-weight: 600;
   background: linear-gradient(180deg, var(--x-cyan-hi), var(--x-cyan));
   border-color: transparent;
-  box-shadow: 0 0 0 1px rgba(52,227,255,0.35), 0 6px 16px rgba(52,227,255,0.16);
+  box-shadow: 0 0 0 1px rgb(var(--x-cyan-rgb)/0.35), 0 6px 16px rgb(var(--x-cyan-rgb)/0.16);
 }
 #export .export-doc-btn.primary::before {
   background: rgba(4,18,26,0.18); border-color: rgba(4,18,26,0.25);
@@ -155,15 +160,15 @@ const EXPORT_CSS = `
 }
 @media (hover: hover) {
   #export .export-link-btn:hover {
-    border-color: rgba(52,227,255,0.32); color: var(--x-cyan-hi);
-    background: rgba(52,227,255,0.04);
+    border-color: rgb(var(--x-cyan-rgb)/0.32); color: var(--x-cyan-hi);
+    background: rgb(var(--x-cyan-rgb)/0.04);
   }
 }
 #export .export-link-btn:active { transform: scale(.98); transition-timing-function: var(--x-ease-in); }
-#export .export-link-btn:focus-visible { outline: 2px solid var(--x-cyan-hi); outline-offset: 2px; }
+#export .export-link-btn:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
 
 /* optimistic press feedback on doc buttons (visual only) */
-#export .export-doc-btn[data-busy="1"]::before { box-shadow: 0 0 10px rgba(52,227,255,0.55); }
+#export .export-doc-btn[data-busy="1"]::before { box-shadow: 0 0 10px rgb(var(--x-cyan-rgb)/0.55); }
 
 #export .spinner {
   width: 14px; height: 14px; border-radius: 50%;
@@ -200,9 +205,6 @@ const EXPORT_CSS = `
   background: currentColor; opacity: 0.55;
   transform: scaleX(1); transform-origin: left center;
 }
-
-/* summary KPI table: tabular, right-aligned values */
-#export table.proposal-kpis td { font-variant-numeric: tabular-nums; }
 
 /* ============================================================
    Proposal sheet typography + document structure (mock-aligned)
@@ -336,7 +338,6 @@ const EXPORT_CSS = `
   transform: scaleX(0);
   animation: x-rule-grow var(--x-dur-3) var(--x-ease-out) 260ms both;
 }
-#export .export-view.is-anim table.proposal-kpis tbody tr,
 #export .export-view.is-anim .kpi-card,
 #export .export-view.is-anim table.proposal-scn tbody tr {
   opacity: 0; will-change: opacity, transform;
@@ -350,7 +351,6 @@ const EXPORT_CSS = `
   }
   #export .export-view.is-anim .export-panel,
   #export .export-view.is-anim .proposal-sheet,
-  #export .export-view.is-anim table.proposal-kpis tbody tr,
   #export .export-view.is-anim .kpi-card,
   #export .export-view.is-anim table.proposal-scn tbody tr { opacity: 1 !important; transform: none !important; }
   #export .export-view.is-anim .proposal-verdict::before { transform: scaleX(1) !important; }
@@ -373,13 +373,6 @@ function yen(v, decimals = 0) {
   const digits = sign ? intPart.slice(1) : intPart;
   const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return '¥' + sign + grouped + (frac ? '.' + frac : '');
-}
-
-function pct(v, decimals = 0) {
-  if (!isNum(v)) return '—';
-  // completion_rate / utilization may arrive as fraction (0–1) or already %.
-  const scaled = Math.abs(v) <= 1.0 ? v * 100 : v;
-  return scaled.toFixed(decimals) + '%';
 }
 
 function num(v, decimals = 0) {
@@ -486,7 +479,7 @@ export class ExportView {
     const cards = root.querySelectorAll('.kpi-card');
     cards.forEach((el, i) => { el.style.setProperty('--x-stagger', (300 + i * 36) + 'ms'); });
     const base = 300 + cards.length * 36;
-    const rows = root.querySelectorAll('table.proposal-kpis tbody tr, table.proposal-scn tbody tr');
+    const rows = root.querySelectorAll('table.proposal-scn tbody tr');
     rows.forEach((tr, i) => { tr.style.setProperty('--x-stagger', (base + i * 36) + 'ms'); });
 
     root.classList.add('is-anim');
@@ -494,7 +487,7 @@ export class ExportView {
     // Settle: clear will-change once the entrance is done.
     const settle = base + rows.length * 36 + 320;
     this._motionTimers.push(window.setTimeout(() => {
-      root.querySelectorAll('.export-panel, .proposal-sheet, .kpi-card, table.proposal-kpis tbody tr, table.proposal-scn tbody tr')
+      root.querySelectorAll('.export-panel, .proposal-sheet, .kpi-card, table.proposal-scn tbody tr')
         .forEach((el) => { el.style.willChange = 'auto'; });
     }, settle));
 
@@ -532,7 +525,6 @@ export class ExportView {
     };
     const dur = 600;
     let start = null;
-    el.style.willChange = 'contents';
     const frame = (ts) => {
       if (!this.root) return; // disposed mid-flight
       if (start === null) start = ts;
@@ -542,7 +534,6 @@ export class ExportView {
         requestAnimationFrame(frame);
       } else {
         el.textContent = final; // restore exact rendered string
-        el.style.willChange = 'auto';
       }
     };
     requestAnimationFrame(frame);
@@ -566,7 +557,7 @@ export class ExportView {
     const root = document.createElement('div');
     root.className = 'export-view';
     root.style.fontFamily = 'inherit';
-    root.style.color = 'var(--ink, #1f2733)';
+    root.style.color = 'var(--ink-primary)';
     this.container.appendChild(root);
     this.root = root;
 
@@ -621,7 +612,7 @@ export class ExportView {
   _renderPlaceholder(message) {
     const p = document.createElement('p');
     p.className = 'export-empty';
-    p.style.color = 'var(--muted, #6b7785)';
+    p.style.color = 'var(--ink-tertiary)';
     p.style.padding = '16px';
     p.textContent = message;
     this.root.appendChild(p);
@@ -630,7 +621,7 @@ export class ExportView {
   _renderLoading() {
     const p = document.createElement('p');
     p.className = 'export-loading';
-    p.style.color = 'var(--muted, #6b7785)';
+    p.style.color = 'var(--ink-secondary)';
     p.style.padding = '16px';
     p.textContent = '読み込み中…';
     this.root.appendChild(p);
@@ -1235,84 +1226,6 @@ export class ExportView {
       }
     }
     return null;
-  }
-
-  _buildSummaryTable(k) {
-    const compFrac = completionFraction(k);
-    const bnName = (typeof k.bottleneck_jp === 'string' && k.bottleneck_jp) ? k.bottleneck_jp : null;
-    const bnUtil = isNum(k.bottleneck_utilization) ? pct(k.bottleneck_utilization, 0) : null;
-    const hc = headcountOf(k);
-
-    // Each item: [label, renderedText, countMeta|null]. countMeta drives the
-    // optional once-on-enter count-up; the rendered text is the source of truth
-    // and stays identical (count-up only animates 0 -> value, then restores it).
-    const compPctScaled = compFrac != null ? (Math.abs(compFrac) <= 1 ? compFrac * 100 : compFrac) : null;
-    const items = [
-      ['スループット',
-        isNum(k.throughput_per_hr) ? num(k.throughput_per_hr, 1) + ' 件/時' : '—',
-        isNum(k.throughput_per_hr) ? { value: k.throughput_per_hr, dec: 1, suffix: ' 件/時' } : null],
-      ['出荷完了率',
-        compFrac != null ? pct(compFrac, 1) : '—',
-        compPctScaled != null ? { value: compPctScaled, dec: 1, suffix: '%' } : null],
-      ['ボトルネック',
-        bnName ? (bnName + (bnUtil ? ' ' + bnUtil : '')) : '—', null],
-      ['必要人員',
-        isNum(hc) ? num(hc, 0) + ' 名' : '—',
-        isNum(hc) ? { value: hc, dec: 0, suffix: ' 名' } : null],
-      ['1件あたりコスト',
-        yen(k.total_cost_per_order, 1),
-        isNum(k.total_cost_per_order) ? { value: k.total_cost_per_order, dec: 1, group: true, prefix: '¥' } : null],
-      ['月間コスト',
-        yen(k.monthly_cost, 0),
-        isNum(k.monthly_cost) ? { value: k.monthly_cost, dec: 0, group: true, prefix: '¥' } : null],
-    ];
-    if (isNum(k.payback_months) && k.payback_months > 0) {
-      items.push(['投資回収',
-        num(k.payback_months, 1) + ' ヶ月',
-        { value: k.payback_months, dec: 1, suffix: ' ヶ月' }]);
-    }
-
-    const table = document.createElement('table');
-    table.className = 'proposal-kpis';
-    table.style.borderCollapse = 'collapse';
-    table.style.width = '100%';
-    table.style.fontSize = '13px';
-
-    const tbody = document.createElement('tbody');
-    items.forEach(([label, value, count]) => {
-      const tr = document.createElement('tr');
-      const th = document.createElement('th');
-      th.scope = 'row';
-      th.textContent = label;
-      th.style.textAlign = 'left';
-      th.style.fontWeight = '600';
-      th.style.padding = '8px 12px';
-      th.style.width = '40%';
-      th.style.background = 'var(--surface, #f5f7fa)';
-      th.style.border = '1px solid var(--line, #e3e8ee)';
-      const td = document.createElement('td');
-      td.className = 'tnum';
-      td.textContent = value;
-      td.style.textAlign = 'right';
-      td.style.padding = '8px 12px';
-      td.style.fontWeight = '700';
-      td.style.border = '1px solid var(--line, #e3e8ee)';
-      // Tag numeric value cells so the once-on-enter count-up can animate them.
-      // The rendered text above is authoritative; these attributes only drive
-      // the optional 0 -> value animation and are ignored under reduced-motion.
-      if (count && isNum(count.value)) {
-        td.setAttribute('data-x-count', String(count.value));
-        td.setAttribute('data-x-dec', String(count.dec || 0));
-        if (count.group) td.setAttribute('data-x-group', '1');
-        if (count.prefix) td.setAttribute('data-x-prefix', count.prefix);
-        if (count.suffix) td.setAttribute('data-x-suffix', count.suffix);
-      }
-      tr.appendChild(th);
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-    });
-    table.appendChild(tbody);
-    return table;
   }
 
   dispose() {

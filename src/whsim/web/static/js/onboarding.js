@@ -104,7 +104,9 @@ export function mountOnboarding(opts = {}) {
   // repeatedly (e.g. after a project is created/deleted) — refreshCTA.
   async function refreshCTA() {
     let none = false;
-    try { none = !(await hasProjects()); } catch (_e) { none = false; }
+    // Treat an unknown result as possibly-empty so the first-run next-step is
+    // never silently dropped on a transient hasProjects() failure.
+    try { none = !(await hasProjects()); } catch (_e) { none = true; }
     const hero = document.querySelector('.chat-empty');
     if (!none || !hero) { removeCTA(); return; }
     if (ctaEl && ctaEl.parentNode === hero) return; // already shown
@@ -131,11 +133,14 @@ export function mountOnboarding(opts = {}) {
 
   let overlay = null;
   let stepIdx = 0;
+  let onResize = null;        // module-scoped so clearGuide can detach it
+  let lastFocused = null;     // element focused before the guide opened
 
   function clearGuide() {
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
     overlay = null;
     document.removeEventListener('keydown', onKey, true);
+    if (onResize) { window.removeEventListener('resize', onResize); onResize = null; }
   }
 
   function onKey(e) {
@@ -147,6 +152,11 @@ export function mountOnboarding(opts = {}) {
   function finishGuide() {
     markOnboarded();
     clearGuide();
+    // Restore focus to whatever was focused before the guide opened.
+    if (lastFocused && typeof lastFocused.focus === 'function') {
+      try { lastFocused.focus(); } catch (_e) { /* ignore */ }
+    }
+    lastFocused = null;
   }
 
   function renderStep() {
@@ -222,6 +232,8 @@ export function mountOnboarding(opts = {}) {
 
     const card = document.createElement('div');
     card.className = 'coach-card';
+    // Announce title/text swaps as the user steps through the guide.
+    card.setAttribute('aria-live', 'polite');
 
     const count = document.createElement('div');
     count.className = 'coach-count';
@@ -271,16 +283,25 @@ export function mountOnboarding(opts = {}) {
   function startGuide(force) {
     if (!force && alreadyOnboarded()) return;
     clearGuide();
+    // Remember where focus was so finishGuide can restore it.
+    lastFocused = document.activeElement;
     stepIdx = 0;
     overlay = buildGuide();
     document.body.appendChild(overlay);
     document.addEventListener('keydown', onKey, true);
-    // Defer so layout has settled before measuring targets.
-    requestAnimationFrame(renderStep);
-    // Keep the spotlight aligned if the window resizes mid-guide.
-    const onResize = () => { if (overlay) renderStep(); };
+    // Defer so layout has settled before measuring targets, then move focus
+    // into the dialog (Next button) so keyboard/SR users land inside it.
+    requestAnimationFrame(() => {
+      renderStep();
+      const nextBtn = overlay && overlay.querySelector('.coach-next');
+      if (nextBtn && typeof nextBtn.focus === 'function') {
+        try { nextBtn.focus(); } catch (_e) { /* ignore */ }
+      }
+    });
+    // Keep the spotlight aligned if the window resizes mid-guide. Stored in a
+    // closure-scoped var so clearGuide() can detach it (no listener leak).
+    onResize = () => { if (overlay) renderStep(); };
     window.addEventListener('resize', onResize);
-    overlay.addEventListener('remove-listeners', () => window.removeEventListener('resize', onResize));
   }
 
   // ---- help "?" button in the header tools ----------------------------------

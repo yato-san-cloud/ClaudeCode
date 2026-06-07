@@ -181,8 +181,34 @@ function bodyMarkup() {
 
 const INACTIVITY_MS = 60000; // idle -> sleeping after ~60s of silence
 const SUCCESS_IDLE_MS = 2500; // success -> idle after ~2.5s
+// Bubble fade-out duration; must track the .cody-bubble CSS transition so the
+// element is hidden only after it has visually faded (a11y). Named, not magic.
+const BUBBLE_FADE_MS = 220;
+
+// Strip every SMIL <animate> element from an SVG-markup string. CSS
+// @media (prefers-reduced-motion) cannot disable SMIL, so we remove it
+// at the source when the user has asked for reduced motion.
+const stripAnimate = (markup) => markup.replace(/<animate\b[^>]*\/>/g, "");
 
 let counter = 0;
+
+// Inject (once) a token-driven :focus-visible outline for the bubble close
+// button. cody.css styles the button but omits a keyboard focus ring; this
+// uses the app's accent/focus tokens so it stays theme-aware.
+const STYLE_ID = "cody-injected-style";
+function ensureInjectedStyle() {
+  if (typeof document === "undefined") return;
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent =
+    ".cody-bubble-close:focus-visible{" +
+    "outline:2px solid var(--line-focus, var(--accent));" +
+    "outline-offset:2px;" +
+    "opacity:1;" +
+    "}";
+  (document.head || document.documentElement).appendChild(style);
+}
 
 /**
  * Mount Cody into a target element.
@@ -201,6 +227,17 @@ export function mountCody(targetEl, opts = {}) {
   }
 
   const companion = opts.companion !== false;
+
+  ensureInjectedStyle();
+
+  // Reduced-motion: read once at mount. When set, we remove every SMIL
+  // <animate> from the injected SVG (CSS media queries can't disable SMIL)
+  // and skip the cursor blink entirely.
+  let reduceMotion = false;
+  try {
+    reduceMotion = !!(window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch (_e) { reduceMotion = false; }
 
   // ---- DOM scaffold ----
   const root = document.createElement("div");
@@ -236,7 +273,7 @@ export function mountCody(targetEl, opts = {}) {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 300 392");
   svg.setAttribute("xmlns", SVG_NS);
-  svg.innerHTML = bodyMarkup();
+  svg.innerHTML = reduceMotion ? stripAnimate(bodyMarkup()) : bodyMarkup();
   figure.appendChild(svg);
 
   root.appendChild(bubble);
@@ -271,7 +308,10 @@ export function mountCody(targetEl, opts = {}) {
   function applyMood(mood) {
     if (!FACES[mood]) mood = "idle";
     currentMood = mood;
-    faceGroup.innerHTML = FACES[mood]();
+    const face = FACES[mood]();
+    faceGroup.innerHTML = reduceMotion ? stripAnimate(face) : face;
+    // When reduced, the cursor <animate> was stripped from the body so
+    // cursorAnim is null and the blink is skipped automatically.
     if (cursorAnim) {
       cursorAnim.setAttribute("dur", CURSOR_DUR[mood] || "1.1s");
     }
@@ -282,9 +322,15 @@ export function mountCody(targetEl, opts = {}) {
     bubbleTimer = clearTimer(bubbleTimer);
     bubbleText.textContent = text;
     bubble.hidden = false;
-    // force reflow so the entrance transition replays
-    void bubble.offsetWidth;
-    bubble.classList.add("is-open");
+    // Replay the entrance transition without a synchronous layout flush:
+    // drop the open class, then re-add it after two animation frames so the
+    // browser registers the "closed" state before transitioning to open.
+    bubble.classList.remove("is-open");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!destroyed) bubble.classList.add("is-open");
+      });
+    });
     if (typeof ms === "number" && ms > 0) {
       bubbleTimer = setTimeout(hideBubble, ms);
     }
@@ -296,7 +342,7 @@ export function mountCody(targetEl, opts = {}) {
     // keep it in the DOM during the fade, then hide for a11y
     setTimeout(() => {
       if (!bubble.classList.contains("is-open")) bubble.hidden = true;
-    }, 220);
+    }, BUBBLE_FADE_MS);
   }
 
   // ---- controller API ----
