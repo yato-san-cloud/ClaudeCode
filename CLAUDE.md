@@ -15,11 +15,17 @@ Everything hangs off **one contract: the canonical schema
 `whsim.schema.WarehouseModel`** (`src/whsim/schema/model.py`). Every field has a
 default, so any model is always valid and always runnable ("never blocks on
 missing data"). Components are pure functions over that schema plus run
-artifacts, so each is independently testable/replaceable:
+artifacts, so each is independently testable/replaceable. **See
+`docs/ARCHITECTURE.md`** for the full module map, the 12 invariants, the
+replay/MapMaker data contracts, and extension points — read it before a large change.
 
 - `templates.py` — a template is a fully filled-in (provisional) `model.json`.
 - `importer.py` — tolerant ZIP→subtree merge; broken/non-JSON files are skipped,
   never fatal; partial import is fine.
+- `mapcsv.py` / `rmpm.py` — tolerant MapMaker importers (Hitachi WorldMap Map CSV /
+  native `.rmpm.json`); shelves keep their MapMaker name (→ slottable location names),
+  walls/stations mapped, mm→m. `racktypes.py` — 6 storage-equipment presets served at
+  `/api/racktypes` and mirrored into the JS editor/3D (keep in parity).
 - `provenance.py` — tracks each subtree's source (imported/interview/provisional);
   surfaced in output as "N% your data". First-class, not bookkeeping.
 - `project.py` — persists workspace under `projects/<name>/` (gitignored runtime
@@ -35,15 +41,19 @@ artifacts, so each is independently testable/replaceable:
 - `analytic.py` — closed-form M/M/c estimate; also the engine's sanity oracle in tests.
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict.
 - `design.py` — design-side helpers: `materialize_racks` expands a storage zone's
-  parametric rack params into the concrete `locations` grid (re-pegs item SKUs).
+  parametric rack params (or authored MapMaker-style shelves) into the concrete
+  `locations` grid, propagating shelf names to location names and re-pegging SKUs.
 - `cad.py` — tolerant DXF import (ezdxf) → bounds/walls/zones in meters (unit auto-detect).
 - `export_doc.py` — editable PPTX + PDF proposal (python-pptx / reportlab, CJK fonts).
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
 - `render/png2d.py` — proposal PNG (layout + congestion heatmap + verdict + provenance footer).
 - `render/anim2d.py` — server-side animated 2D replay GIF (no browser needed).
 - `web/` — FastAPI backend + single-page frontend (`static/`). `js/view3d.js` (three.js
-  replay) and `js/designer.js` (interactive layout/equipment/flow editor) are self-contained
-  ES modules mounted by `app.js`. three.js is vendored under `static/vendor/`.
+  replay — realistic per-`rack_type` geometry, human pickers, pick-event glow) and
+  `js/designer.js` (MapMaker-style free shelf editor: placement/edge-snap/control-points/
+  pan-zoom/undo + 棚一括生成 + 面積オート生成 + a storage-equipment palette) are mounted by
+  `app.js`. Shared frontend helpers live in `js/util.js` (`$`/`api`/`esc`) and
+  `js/constants.js` (label/colour maps). three.js is vendored under `static/vendor/`.
   The UI is a phase-driven journey (取込→分析→設計→検証→提案) rather than flat tabs:
   `js/journey.js` renders the 5-phase stepper + sub-tabs and drives view selection
   (`switchView` keeps it in sync), `js/overview.js` is the ①取込 landing dashboard
@@ -53,7 +63,8 @@ artifacts, so each is independently testable/replaceable:
 
 ### Commands
 
-- Install: `pip install -e ".[dev]"` (add `,web` for the web app: `pip install -e ".[dev,web]"`)
+- Install: `pip install -e ".[dev]"`; web app adds `,web`; CAD/PPTX/PDF add `,docs` —
+  everything: `pip install -e ".[dev,web,docs]"`
 - Flow: `whsim new <name> -t ecommerce_small` → `whsim import <name> <zip>` →
   `whsim run <name>` → `whsim render <name>` (or `whsim simulate <name>` for run+render);
   `whsim estimate <name>` for the instant analytic estimate; `whsim animate <name>` for a
