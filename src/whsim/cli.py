@@ -156,10 +156,20 @@ def animate(name: str, run: str = typer.Option("latest", "--run")):
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 8000):
-    """Launch the web app (template -> import -> run -> animated 2D/3D replay)."""
+def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
+    """Launch the web app (template -> import -> run -> animated 2D/3D replay).
+
+    Pass --reload for development: the server auto-restarts on code edits and
+    sends no-cache headers, so a plain browser refresh (F5) always shows the
+    latest -- no manual restart or hard-reload. See dev.bat / dev.sh for a
+    one-command setup that also auto-pulls the branch.
+    """
+    import os
+
     import uvicorn
-    uvicorn.run("whsim.web.app:app", host=host, port=port)
+    if reload:
+        os.environ["WHSIM_DEV"] = "1"  # app then adds no-cache headers
+    uvicorn.run("whsim.web.app:app", host=host, port=port, reload=reload)
 
 
 @app.command()

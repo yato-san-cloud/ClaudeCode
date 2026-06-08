@@ -18,6 +18,7 @@ execute against in one shared namespace.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -62,6 +63,16 @@ from whsim.web.routes import (
 STATIC = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="whsim", version="0.1.0")
+
+# Dev convenience (enabled by `whsim serve --reload`): tell the browser never to
+# serve a cached copy, so a plain refresh always shows the freshly-pulled
+# frontend -- no hard-reload needed. Off by default; production caching unchanged.
+if os.environ.get("WHSIM_DEV") == "1":
+    @app.middleware("http")
+    async def _dev_no_cache(request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
 
 # Bound concurrent heavy runs so a burst of /run(-scenarios) can't saturate the
 # worker thread pool and starve the rest of the API. The event loop is single-
