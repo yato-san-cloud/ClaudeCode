@@ -1,0 +1,172 @@
+"""Cross-cutting / stateless endpoints: templates, rack presets, Cody chat,
+material-flow & timetable seeds, work-method naming, notes and the favicon."""
+
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, HTTPException, Response
+
+from whsim import cody, templates
+from whsim.project import Project
+
+from ._common import _open
+
+router = APIRouter()
+
+
+@router.get("/favicon.ico")
+def favicon():
+    # No icon asset shipped; answer 204 so the browser stops logging a 404.
+    return Response(status_code=204)
+
+
+@router.get("/api/templates")
+def api_templates():
+    return templates.list_templates()
+
+
+@router.get("/api/materialflow/seed")
+def api_materialflow_seed():
+    """Material-flow skeleton (process flow + units/productivity) for the
+    荷役物量 authoring screen."""
+    from whsim.analysis import staffing
+    return {"flow": staffing.flow_seed()}
+
+
+@router.post("/api/materialflow/generate")
+def api_materialflow_generate(payload: dict | None = None):
+    """不足データ作成: estimate every process's 荷役物量 from a partial base."""
+    from whsim.analysis import staffing
+    base = (payload or {}).get("base") or {}
+    return {"volumes": staffing.generate_flow_volumes(base)}
+
+
+@router.post("/api/materialflow/scenario")
+def api_materialflow_scenario(payload: dict | None = None):
+    """Turn authored per-process 荷役物量 into a timetable scenario (→ 人員配置)."""
+    from whsim.analysis import staffing
+    volumes = (payload or {}).get("volumes") or {}
+    return staffing.scenario_from_volumes(volumes)
+
+
+@router.get("/api/racktypes")
+def api_racktypes():
+    """Storage-equipment presets (軽量棚/中量棚/パレットラック/ネステナー/…) for the
+    designer's 棚種別 picker — each with cell footprint, capacity and colour."""
+    from whsim import racktypes
+    return racktypes.catalog()
+
+
+@router.post("/api/cody/chat")
+def api_cody_chat(payload: dict):
+    """Cody mascot chat: turn a Japanese message into a reply + intent.
+
+    Assembles a context (available templates, and — if a project is named and
+    cheap to read — whether it has a finished run plus its latest KPIs) and
+    delegates ALL dialogue/intent decisions to ``cody.respond`` (the LLM seam).
+    This endpoint never executes whsim actions: the frontend runs the returned
+    intent against the existing endpoints. Honours "never blocks": any read that
+    fails leaves ``has_run``/``kpis`` as their safe defaults (False / None).
+    """
+    # Coerce defensively: the frontend always sends strings, but a stray number
+    # / object must not 500 the chat seam (cody.respond expects a str message).
+    raw_msg = payload.get("message")
+    message = raw_msg if isinstance(raw_msg, str) else ("" if raw_msg is None else str(raw_msg))
+    raw_proj = payload.get("project")
+    project = raw_proj if isinstance(raw_proj, str) else None
+
+    has_run = False
+    kpis = None
+    if project:
+        try:
+            proj = Project.open(project)
+            rd = proj.latest_run_dir()
+            if rd is not None and (rd / "kpis.json").is_file():
+                has_run = True
+                kpis = json.loads((rd / "kpis.json").read_text("utf-8"))
+        except Exception:  # noqa: BLE001 — context is best-effort, never fatal
+            has_run = False
+            kpis = None
+
+    context = {
+        "project": project,
+        "templates": templates.list_templates(),
+        "has_run": has_run,
+        "kpis": kpis,
+    }
+    result = cody.respond(message, context)
+    result["project"] = project
+    return result
+
+
+@router.post("/api/workmethod/name")
+def api_workmethod_name(payload: dict | None = None):
+    """Reverse-name a 5-axis WorkMethod: return {name, explain}.
+
+    Stateless: the floor-plan editor POSTs the axes a salesperson is turning and
+    immediately shows "＝<name>" plus a plain-language explanation, so a novice
+    sees what the combination is called and an expert recognises it."""
+    from whsim import workmethod
+    from whsim.schema.model import WorkMethod
+    work = WorkMethod.model_validate(payload or {})
+    return {"name": workmethod.method_name(work),
+            "explain": workmethod.explain(work)}
+
+
+@router.get("/api/timetable/seed")
+def api_timetable_seed():
+    """Bundled work-timetable dataset (process master + productivity + scenarios).
+
+    The タイムチャート tab fetches this once and then re-solves entirely client-side
+    as the user drags sliders, so live recalc has zero round-trip latency."""
+    from whsim import timetable
+    seed = timetable.load_seed()
+    seed["section_color"] = timetable.SECTION_COLOR
+    seed["section_zone_type"] = timetable.SECTION_ZONE_TYPE
+    return seed
+
+
+@router.post("/api/timetable/solve")
+def api_timetable_solve(payload: dict | None = None):
+    """Solve a staffing timetable. Stateless server-side mirror of the JS solver.
+
+    Body: {scenario: name|object, processes?, productivity?}. Missing process /
+    productivity masters fall back to the bundled seed; a string `scenario`
+    selects a seed scenario by name. Used for tests, headless runs and export."""
+    from whsim import timetable
+    seed = timetable.load_seed()
+    p = payload or {}
+    processes = p.get("processes") or seed["processes"]
+    productivity = p.get("productivity") or seed["productivity"]
+    scenario = p.get("scenario")
+    if isinstance(scenario, str):
+        scenario = seed["scenarios"].get(scenario)
+    if not isinstance(scenario, dict):
+        scenario = next(iter(seed["scenarios"].values()))
+    return timetable.solve(scenario, processes, productivity)
+
+
+@router.get("/api/projects/{name}/notes")
+def api_notes_list(name: str, anchor: str | None = None):
+    """知見ボード: anchored notes for a project (newest first)."""
+    from whsim import notes
+    return {"notes": notes.list_notes(_open(name), anchor)}
+
+
+@router.post("/api/projects/{name}/notes")
+def api_notes_add(name: str, payload: dict):
+    """Post a note pinned to an anchor (生産性/工程/シナリオ/設計/結果/general…)."""
+    from whsim import notes
+    p = payload or {}
+    try:
+        return notes.add_note(_open(name), p.get("anchor", "general"),
+                              p.get("author", ""), p.get("text", ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/api/projects/{name}/notes/{note_id}")
+def api_notes_delete(name: str, note_id: str):
+    from whsim import notes
+    return {"ok": notes.delete_note(_open(name), note_id)}
