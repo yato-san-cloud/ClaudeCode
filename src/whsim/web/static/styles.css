@@ -535,43 +535,6 @@ button.primary:disabled { background: var(--bg-active); border-color: transparen
   background: var(--bg-app);
   flex: none;
 }
-.tab {
-  position: relative;
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
-  border: none;
-  background: transparent;
-  color: var(--ink-secondary);
-  padding: 8px 12px 12px;
-  height: auto;
-  border-radius: var(--r-sm) var(--r-sm) 0 0;
-  box-shadow: none;
-  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
-}
-.tab:hover {
-  background: var(--bg-hover);
-  color: var(--ink-primary);
-}
-.tab.active {
-  background: transparent;
-  color: var(--ink-primary);
-  font-weight: var(--fw-semibold);
-  border: none;
-  box-shadow: none;
-}
-.tab.active::after {
-  content: "";
-  position: absolute;
-  left: 8px; right: 8px; bottom: -1px;
-  height: 2px;
-  background: var(--ink-primary);
-  border-radius: 2px;
-}
-.tab.active:hover { background: var(--bg-hover); }
-.tab:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--accent-tint);
-}
 
 /* 3D preset control — sits at the right end of the tab row */
 .preset-ctl {
@@ -1305,7 +1268,6 @@ html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
     -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
   .tabs::-webkit-scrollbar { display: none; }
-  .tab { flex: 0 0 auto; white-space: nowrap; }
   .preset-ctl { flex: 0 0 auto; margin-left: var(--sp-2); }
 }
 @media (max-width: 460px) {
@@ -1891,26 +1853,10 @@ a:focus-visible, button:focus-visible, [role="tab"]:focus-visible,
 input:focus-visible, select:focus-visible, textarea:focus-visible{
   outline:2px solid var(--line-focus); outline-offset:2px; border-radius:5px;
 }
-.tab.active, button[role="tab"][aria-selected="true"]{ font-weight:700; }
-html[data-theme="dark"] .tab.active, html[data-theme="dark"] button[role="tab"][aria-selected="true"]{
+button[role="tab"][aria-selected="true"]{ font-weight:700; }
+html[data-theme="dark"] button[role="tab"][aria-selected="true"]{
   text-shadow:0 0 14px rgba(52,227,255,.35);
 }
-
-/* ===== 動線 / IA: tab groups, soft-gated result tabs ===== */
-.tabs .tab-group{
-  align-self:center; margin:0 2px 0 8px; padding:0 2px;
-  font-size:9.5px; letter-spacing:.14em; text-transform:uppercase;
-  color:var(--ink-tertiary,#8195a8); font-weight:700; user-select:none; white-space:nowrap;
-}
-.tab.gated{ position:relative; opacity:.72; }
-.tab.gated:hover{ opacity:1; }
-.tab.gated::before{
-  content:"要実行"; position:absolute; top:-3px; right:2px;
-  font-size:8px; letter-spacing:.04em; font-weight:700; line-height:1;
-  padding:2px 4px; border-radius:5px; color:#b3741a;
-  background:color-mix(in srgb,#f5b05a 24%,transparent);
-}
-.tab.active.gated::before{ display:none; }
 
 /* ===== Stage 1 polish: handoff signature treatments ===== */
 /* Primary run CTA — cyan→blue gradient + glow (handoff .btn-run). */

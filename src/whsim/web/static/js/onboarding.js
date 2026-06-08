@@ -19,12 +19,11 @@
 //   controller: { maybeShowFirstRunCTA(), refreshCTA(), startGuide() }
 //
 // Vanilla ES module. No raw-HTML for any server/user string (textContent only).
+import { $ } from './util.js';
 
 // Versioned: bumping re-introduces the guide once to existing users. v3 refreshes
 // the ③設計/④検証 copy to cover the new MapMaker shelf editor + realistic 3D.
 const STORAGE_KEY = 'whsim-onboarded-v3';
-
-const $ = (id) => document.getElementById(id);
 
 function alreadyOnboarded() {
   try { return localStorage.getItem(STORAGE_KEY) === '1'; } catch (_e) { return false; }

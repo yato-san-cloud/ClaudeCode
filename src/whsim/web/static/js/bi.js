@@ -3,6 +3,7 @@
 // material-flow (物量→人時) that updates live as the 仮値 sliders move. The pallet
 // derivation is client-side so it feels instant; derived values are badged 推計.
 // Comments EN; UI JA. Brand tokens only; no idle loops; reduced-motion safe.
+import { esc } from './util.js';
 
 // Productivity standards mirror analysis/staffing GENERIC_PROCESSES (editable
 // JP-warehouse defaults). 格納 is driven by *pallets* here — the live link.
@@ -15,7 +16,6 @@ const PROCS = [
   { id: '出荷', sec: '出荷', driver: 'out_orders', prod: 120, unit: '件/h' },
 ];
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
 

@@ -18,9 +18,8 @@
 //     opts.onRerun():           void|Promise (re-run the simulation)
 //   controller: { loadFor(name), clear(), enabled(on) }
 //
-// Vanilla ES module, no imports. User-controlled values never reach innerHTML.
-
-const $ = (id) => document.getElementById(id);
+// Vanilla ES module. User-controlled values never reach innerHTML.
+import { $ } from './util.js';
 
 // field id -> backend key. Numeric fields are coerced; currency is a string.
 const NUMERIC = {

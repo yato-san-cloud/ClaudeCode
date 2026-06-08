@@ -2,13 +2,12 @@
 // 状態の可視化 + 準備チェックリスト + 「次の一手」。取込操作自体は左サイドバーに既存。
 // opts: { getState(): {project,hasData,hasRun,running}, getProject(): Promise<modelJSON|null>,
 //         switchTo(view), toast(msg,kind) }  ※すべて app.js 側が供給する実在物。
+import { api, esc } from './util.js';
 
 const SUBTREE_JP = {
   locations: 'ロケーション', items: '商品マスタ', process: 'オペレーション',
   resources: '人員・設備', orders: '出荷・入荷データ', simulation: '実行条件',
 };
-const esc = (s) => String(s == null ? '' : s)
-  .replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 const OV_CSS = `
 /* Make the overview a normal scrollable document block: the default
@@ -131,12 +130,6 @@ export function mountOverview(el, opts = {}) {
   root.className = 'ov';
   el.innerHTML = '';
   el.appendChild(root);
-
-  async function api(url, o) {
-    const r = await fetch(url, o);
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-    return r.json();
-  }
 
   function derive(st, prov) {
     const sub = (prov && prov.provenance && prov.provenance.subtrees) || {};

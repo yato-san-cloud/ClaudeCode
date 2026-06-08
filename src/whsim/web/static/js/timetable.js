@@ -20,12 +20,11 @@
 import {
   solve, generateSlots, minToTime, timeToMin, SECTION_COLOR, SECTION_ZONE_TYPE,
 } from './timetable_solver.js';
+import { ZONE_JP } from './constants.js';
 
 const SLOTS = generateSlots();           // 60 half-hour marks, 0..1770 min
 const N = SLOTS.length;
 const SECTIONS = ['入荷', '出荷ケース', '出荷バラ', 'ステージング', '間接'];
-const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキング',
-  packing: '梱包', shipping: '出荷', staging: '一時保管', office: '事務' };
 
 function isNum(v) { return typeof v === 'number' && Number.isFinite(v); }
 function r1(v) { return isNum(v) ? Math.round(v * 10) / 10 : 0; }

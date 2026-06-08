@@ -3,6 +3,7 @@
 // showing the phase's objective (left) and the "next move" CTA button (right).
 // When the phase has no data yet, an empty-state message is surfaced instead.
 // Code/comments in English; user-facing strings in Japanese.
+import { esc } from './util.js';
 
 const PHASES = {
   intake: {
@@ -37,8 +38,6 @@ const PHASES = {
   },
 };
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 function injectStyle() {
   if (document.getElementById('ph-style')) return;

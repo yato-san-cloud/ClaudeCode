@@ -7,6 +7,9 @@
 // getTime() and interpolates worker positions/states via keyframes.
 import * as THREE from '../vendor/three/three.module.js';
 import { OrbitControls } from '../vendor/three/controls/OrbitControls.js';
+// Shared 2D/3D rack swatch palette (CSS strings) — single source of truth so the
+// 3D legend can't drift from the 2D editor/replay or whsim.racktypes.
+import { RACK_COLOR } from './constants.js';
 
 // Worker state -> color.
 const STATE_COLOR = {
@@ -53,12 +56,12 @@ function rackDims(rt) { return RACK_DIMS[rt] || RACK_DIMS[RACK_DEFAULT]; }
 // matching the 2D editor/replay (RACK_COLOR in app.js) so the same rack reads as
 // the same colour across 2D and 3D. Display-only; never feeds geometry.
 const RACK_LEGEND = {
-  light:     { label: '軽量棚', sw: '#7fb0f2' },
-  medium:    { label: '中量棚', sw: '#2ee6a0' },
-  pallet:    { label: 'パレットラック', sw: '#f5b05a' },
-  nestainer: { label: 'ネステナー', sw: '#9b6bff' },
-  flow:      { label: 'フローラック', sw: '#34e3ff' },
-  asrs:      { label: '自動倉庫(AS/RS)', sw: '#5cebff' },
+  light:     { label: '軽量棚', sw: RACK_COLOR.light },
+  medium:    { label: '中量棚', sw: RACK_COLOR.medium },
+  pallet:    { label: 'パレットラック', sw: RACK_COLOR.pallet },
+  nestainer: { label: 'ネステナー', sw: RACK_COLOR.nestainer },
+  flow:      { label: 'フローラック', sw: RACK_COLOR.flow },
+  asrs:      { label: '自動倉庫(AS/RS)', sw: RACK_COLOR.asrs },
 };
 
 // Steel / accent colours shared by the realistic rack builders.

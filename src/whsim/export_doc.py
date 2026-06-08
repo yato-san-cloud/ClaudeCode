@@ -86,19 +86,6 @@ def _fmt_pct(val) -> str:
     return f"{f:,.1f}%"
 
 
-def _kpi_rows(kpis: dict) -> list[tuple[str, str]]:
-    """Build the ordered (Japanese label, formatted value) KPI table rows."""
-    return [
-        ("スループット (件/時)", _fmt_num(kpis.get("throughput_per_hr"), 1)),
-        ("出荷完了率 (%)", _fmt_pct(kpis.get("completion_rate"))),
-        ("ボトルネック", str(kpis.get("bottleneck_jp") or DASH)),
-        ("必要人員 (名)", _fmt_num(kpis.get("headcount"))),
-        ("1件あたりコスト", _fmt_money(kpis.get("total_cost_per_order"), kpis, 1)),
-        ("月間コスト", _fmt_money(kpis.get("monthly_cost"), kpis)),
-        ("投資回収 (月)", _fmt_num(kpis.get("payback_months"), 1)),
-    ]
-
-
 def _headline_tiles(kpis: dict) -> list[tuple[str, str, str]]:
     """The four hero KPIs for the executive summary, as (label, value, unit)."""
     comp = kpis.get("completion_rate")

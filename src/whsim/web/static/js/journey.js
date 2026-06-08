@@ -3,6 +3,7 @@
 // the underlying view panels. PM wires real panels via opts.onSelectView(viewId);
 // this component only renders the stepper + sub-tabs + cross-cutting pins and
 // reflects state (✓ done / 🔒 locked) from opts.getState().
+import { esc } from './util.js';
 
 // --- Shared contract: phases, their member views, and labels ------------------
 
@@ -121,8 +122,6 @@ function injectStyle() {
   `;
   document.head.appendChild(s);
 }
-
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 // --- Component ----------------------------------------------------------------
 

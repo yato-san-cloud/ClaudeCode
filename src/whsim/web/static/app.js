@@ -17,19 +17,14 @@ import { mountTimetable } from './js/timetable.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
 import { mountNotes } from './js/notes.js';
+import { $, api } from './js/util.js';
+import {
+  ZONE_JP, EQUIP_JP, ABC_COLOR, STATE_COLOR, RACK_COLOR, AGV_COLOR,
+} from './js/constants.js';
 
-const EQUIP_JP = { agv: 'AGV', forklift: 'フォークリフト', asrs: '自動倉庫',
-                   robot_arm: 'ロボットアーム', crane: 'クレーン' };
 const DOOR_COLOR = { dock: '#1f78b4', personnel: '#33a02c', shutter: '#8d99ae' };
 // Full circle in radians — replaces the `arc(...,0,7)` magic number in 2D draws.
 const TAU = Math.PI * 2;
-
-const $ = (id) => document.getElementById(id);
-const api = async (url, opts) => {
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
-};
 
 // ---- toast notifications (small, accessible, Japanese) ---------------------
 function toast(message, kind = 'info', ms = 4200) {
@@ -92,13 +87,6 @@ function nudgeToDesign(summary) {
     () => switchView('design'), 'ok');
 }
 
-const STATE_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
-                      pick: '#33a02c', pack: '#e31a1c', inspect: '#ffb300' };
-const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
-// Storage-equipment colors (mirror whsim.racktypes) — tints the 2D shelf bodies.
-const RACK_COLOR = { light: '#7fb0f2', medium: '#2ee6a0', pallet: '#f5b05a',
-                     nestainer: '#9b6bff', flow: '#34e3ff', asrs: '#5cebff' };
-
 // ---- theme-aware canvas palette --------------------------------------------
 // Resolved from CSS custom properties at draw time (cached, refreshed on the
 // `themechange` event). Fallbacks equal the previous hardcoded values so LIGHT
@@ -131,8 +119,6 @@ function refreshPalette() {
   };
   return PALETTE;
 }
-const ZONE_JP = { receiving: '入荷', storage: '保管', picking: 'ピッキング',
-                  packing: '梱包', shipping: '出荷', staging: '一時保管' };
 // Bottleneck-stage label → zone type. Inverts ZONE_JP (so any zone type can
 // match) plus synonyms not in ZONE_JP. Hoisted to module scope so drawBottleneck
 // allocates nothing on the per-frame hot path.
@@ -147,8 +133,6 @@ const S = {
   hasData: false, hasRun: false, preset: 'brand',
   t: 0, window: 1, playing: true, speed: 60, view: 'overview',
 };
-const AGV_COLOR = { idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
-                    dropoff: '#f57f17', charge: '#8e24aa' };
 
 // ---- keyframe interpolation (must match the 3D view) -----------------------
 function interp(keyframes, t) {

@@ -1,6 +1,7 @@
 // dataanalysis.js — WMS 実データ分析タブ (3PL エンジン統合のフロント).
 // サンプル or アップロード → /api/analysis/* → KPI・インサイト・チャートを描画.
 // 自己完結 (テーマは CSS 変数を参照、無ければフォールバック値).
+import { esc } from './util.js';
 
 // Insight-card border colours, keyed by severity. Resolved from the theme
 // status tokens (critical→--bad, warning→--warn, info→--accent/--info) to
@@ -95,9 +96,6 @@ function injectStyle() {
 
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const pct = (n) => (n == null ? '—' : (n * 100).toFixed(0) + '%');
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
 function svg(w, h, body, label) {
   const a11y = label ? ` role="img" aria-label="${esc(label)}"` : '';
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block"${a11y}>${body}</svg>`;

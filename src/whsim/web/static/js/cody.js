@@ -45,7 +45,7 @@ const C = {
   shadow: "rgba(91,31,43,.30)",
 };
 
-export const MOODS = [
+const MOODS = [
   "idle", "thinking", "typing", "success",
   "error", "curious", "excited", "sleeping",
 ];
@@ -427,7 +427,7 @@ export function codyAvatarSVG(mood = "idle") {
  * @param {string}  [o.cls=""]        extra class on the <svg>
  * @returns {string} an <svg>…</svg> string
  */
-export function octaSVG(mood = "idle", o = {}) {
+function octaSVG(mood = "idle", o = {}) {
   const animated = o.animated !== false;
   let face = (FACES[mood] || FACES.idle)();
   if (!animated) face = stripAnimate(face);

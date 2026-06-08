@@ -8,14 +8,12 @@
 //   (3) フロー      — DOM workflow strip of stages with per-stage method
 //                     dropdowns + a pick-strategy selector.
 //
-// Pure DOM / Canvas2D — no imports. Mutates an internal deep copy of `model`
-// and only writes back to the host via handlers.save({layout, resources, process}).
+// Pure DOM / Canvas2D. Mutates an internal deep copy of `model` and only writes
+// back to the host via handlers.save({layout, resources, process}). Shared
+// label maps are imported from constants.js.
+import { ZONE_JP } from './constants.js';
 
 // ---- constants -------------------------------------------------------------
-const ZONE_JP = {
-  receiving: '入荷', storage: '保管', picking: 'ピッキング',
-  packing: '梱包', shipping: '出荷', staging: '一時保管',
-};
 const ZONE_TYPES = ['receiving', 'storage', 'picking', 'packing', 'shipping', 'staging'];
 const ZONE_DEFAULT_COLOR = {
   receiving: '#74add1', storage: '#fdae61', picking: '#a6d96a',

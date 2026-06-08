@@ -12,6 +12,7 @@
 // Accent: injected CSS uses var(--accent) directly so it follows the theme.
 // Where SVG needs a literal colour string (stroke/fill attrs) we read --accent
 // once via getComputedStyle and refresh it on the `themechange` document event.
+import { esc } from './util.js';
 
 const ACCENT_FALLBACK = '#34E3FF';   // cyan fallback when --accent is unreadable
 const WARN = 'var(--warn)';
@@ -48,7 +49,6 @@ const EXAMPLES = [
   'データ範囲は？',
 ];
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const pct = (n, d = 0) => (n == null || isNaN(n) ? '—' : `${fmt(n * 100, d)}%`);

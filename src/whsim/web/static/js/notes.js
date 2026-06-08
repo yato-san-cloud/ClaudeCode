@@ -1,6 +1,7 @@
 // notes.js — 知見ボード（掲示板）. Pin tacit knowledge to numbers/processes so
 // "なぜこの生産性/物量なのか" lives in the system and compounds. Per-project,
 // display-name identity (localStorage), no auth yet.
+import { api, esc } from './util.js';
 
 const ANCHORS = [
   { v: 'general', t: '全般' }, { v: '生産性', t: '生産性' }, { v: '工程', t: '工程' },
@@ -46,8 +47,6 @@ function injectStyle() {
   document.head.appendChild(s);
 }
 
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-
 export function mountNotes(el, opts = {}) {
   injectStyle();
   const toast = opts.toast || (() => {});
@@ -56,12 +55,6 @@ export function mountNotes(el, opts = {}) {
   root.className = 'nb';
   el.innerHTML = '';
   el.appendChild(root);
-
-  async function api(url, o) {
-    const r = await fetch(url, o);
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-    return r.json();
-  }
 
   function shell() {
     const proj = getProject();

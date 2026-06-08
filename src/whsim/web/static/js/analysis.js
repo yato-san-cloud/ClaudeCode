@@ -1060,7 +1060,7 @@ export async function mountAnalysis(targetEl, projectName) {
 
 // Teardown: remove the themechange listener for a previously-mounted element
 // and drop its cached payload. Idempotent; safe to call on an unmounted element.
-export function disposeAnalysis(targetEl) {
+function disposeAnalysis(targetEl) {
   if (!targetEl) return;
   if (targetEl._anThemeHandler) {
     document.removeEventListener('themechange', targetEl._anThemeHandler);
