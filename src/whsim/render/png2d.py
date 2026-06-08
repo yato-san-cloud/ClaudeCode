@@ -26,11 +26,8 @@ from whsim import racktypes  # noqa: E402
 from whsim.render.fonts import setup_jp_font  # noqa: E402
 from whsim.render.heatmap import blur  # noqa: E402
 from whsim.render.shelves import shelf_runs  # noqa: E402
+from whsim.labels import ABC_COLOR, ZONE_JP  # noqa: E402
 from whsim.schema.model import WarehouseModel  # noqa: E402
-
-ABC_COLOR = {"A": "#d7301f", "B": "#fc8d59", "C": "#fdcc8a"}
-ZONE_JP = {"receiving": "入荷", "storage": "保管", "picking": "ピッキング",
-           "packing": "梱包", "shipping": "出荷", "staging": "一時保管"}
 
 # Proposal-sheet palette (light "paper"; deeper blue accent for ink legibility).
 INK = "#16202e"
