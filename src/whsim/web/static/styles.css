@@ -219,13 +219,8 @@ header {
   letter-spacing: var(--ls-section);
   color: var(--ink-primary);
 }
-.brand-mark { flex: none; display: block; border-radius: var(--r-sm); }
-.brand span {
-  font-weight: var(--fw-regular);
-  font-size: var(--fs-micro);
-  letter-spacing: 0;
-  color: var(--ink-tertiary);
-}
+/* (the old .brand-mark / .brand span rules are gone — they outranked the
+   wordmark colours by specificity and washed the light-mode logo out) */
 
 /* provenance pill (実データ N% / your data) */
 .provenance {
@@ -1919,10 +1914,11 @@ button.is-busy { cursor: progress; opacity: .85; }
 body{ font-family:var(--font-sans); }
 h1,h2,h3,h4,.brand{ font-family:var(--font-display); }
 
-/* WHSiM ワードマーク (WHS + 立方体チットルの i + M) */
-.brand{ display:flex; align-items:center; gap:10px; }
+/* WHSiM ワードマーク (WHS + 立方体チットルの i + M) — ブランドの顔として
+   一段目立たせる: 大きめの字面 + シアンの存在感 + アクセント区切りのタグ。 */
+.brand{ display:flex; align-items:center; gap:12px; }
 .wm{ display:inline-flex; align-items:flex-end; font-family:var(--font-display);
-  font-weight:700; letter-spacing:.05em; font-size:23px; line-height:1; }
+  font-weight:800; letter-spacing:.06em; font-size:27px; line-height:1; }
 .wm-t{ color:#0A1626; }
 .wm-i{ position:relative; display:inline-flex; flex-direction:column; justify-content:flex-end;
   align-items:center; width:.54em; height:.80em; margin:0 .04em; }
@@ -1931,24 +1927,28 @@ h1,h2,h3,h4,.brand{ font-family:var(--font-display); }
 .wm-tittle{ position:absolute; left:50%; top:-.40em; transform:translateX(-50%);
   width:.64em; height:.64em; animation:wmFloat 5s ease-in-out infinite; will-change:transform; }
 .wm-tittle svg{ width:100%; height:100%; display:block;
-  filter:drop-shadow(0 .06em .14em rgba(52,227,255,.28)); }
+  filter:drop-shadow(0 .06em .20em rgba(52,227,255,.55)); }
 /* the inventory unit (i-titre) drifts like it's floating on the line — subtle. */
 @keyframes wmFloat{ 0%,100%{ transform:translateX(-50%) translateY(0); }
   50%{ transform:translateX(-50%) translateY(-.07em); } }
 @media (prefers-reduced-motion:reduce){ .wm-tittle{ animation:none; } }
 .wm-cube-dark{ display:none; }
-.brand-tag{ font-family:var(--font-mono); font-weight:400; font-size:9px; letter-spacing:.32em;
-  color:#6B7C8E; text-transform:uppercase; align-self:center; white-space:nowrap; }
+/* Tag sits behind a thin accent divider — reads as a lockup, not stray text. */
+.brand-tag{ font-family:var(--font-mono); font-weight:500; font-size:10px; letter-spacing:.30em;
+  color:#5B7185; text-transform:uppercase; align-self:center; white-space:nowrap;
+  padding-left:12px; border-left:2px solid var(--accent,#16C0DE); line-height:1.5; }
 
 html[data-theme="dark"] .wm-t{
-  background:linear-gradient(180deg,#FBFEFF,#A9EBFB 60%,#34E3FF);
-  -webkit-background-clip:text; background-clip:text; color:transparent; }
-html[data-theme="dark"] .wm-stem{ background:linear-gradient(180deg,#34E3FF,#0E8FA8); }
+  background:linear-gradient(180deg,#FFFFFF,#BFF0FC 55%,#34E3FF);
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  filter:drop-shadow(0 0 12px rgba(52,227,255,.30)); }
+html[data-theme="dark"] .wm-stem{ background:linear-gradient(180deg,#34E3FF,#0E8FA8);
+  box-shadow:0 0 8px rgba(52,227,255,.55); }
 html[data-theme="dark"] .wm-cube-light{ display:none; }
 html[data-theme="dark"] .wm-cube-dark{ display:block; }
-html[data-theme="dark"] .brand-tag{ color:#8FA6BD; }
+html[data-theme="dark"] .brand-tag{ color:#9FB7CE; }
 
-@media (max-width:720px){ .brand-tag{ display:none; } .wm{ font-size:20px; } }
+@media (max-width:720px){ .brand-tag{ display:none; } .wm{ font-size:22px; } }
 
 /* ===========================================================================
    WHSiM ブランド — アクセント調整 + 数値タイポ + 仕上げ磨き
