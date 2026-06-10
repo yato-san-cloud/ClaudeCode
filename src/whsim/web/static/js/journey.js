@@ -11,8 +11,10 @@ import { esc } from './util.js';
 // The first view in `views` is the phase's landing sub-view (clicked on the pill).
 const PHASES = [
   { id: 'intake', no: '①', title: '取込', goal: '案件を作り顧客データを取り込む', views: ['overview'] },
-  { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics'] },
-  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'bi', 'materialflow', 'timetable'] },
+  // ②分析 is the single "analysis home": 物量サマリ (facts) lands first, きいて分析
+  // (ask/drill) and 物量シミュ (仮値 what-if volume calculator) drill deeper.
+  { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics', 'bi'] },
+  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'timetable', 'materialflow'] },
   { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d'] },
   { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'compare', 'export'] },
 ];
@@ -25,7 +27,7 @@ const CROSS = [
 
 // Display labels for every view id (sub-tab buttons + landing targets).
 const VIEW_LABEL = {
-  overview: '概要', dataanalysis: 'データ分析', bianalytics: '分析BI', bi: '物量BI', design: 'レイアウト',
+  overview: '概要', dataanalysis: '物量サマリ', bianalytics: 'きいて分析', bi: '物量シミュ', design: 'レイアウト',
   materialflow: 'マテリアルフロー', timetable: '人員タイムチャート', analysis: 'KPI・判定',
   view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', compare: 'シナリオ比較',
   export: 'エクスポート', chat: 'OCTA', notes: '知見',

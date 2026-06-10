@@ -1065,9 +1065,10 @@ function switchView(view) {
 
 // viewId → phase id (mirrors journey.js PHASES). Cross-cutting views map to null.
 const VIEW_PHASE = {
-  overview: 'intake', dataanalysis: 'analyze',
-  bianalytics: 'analyze',
-  bi: 'design', design: 'design', materialflow: 'design', timetable: 'design',
+  overview: 'intake',
+  // ②分析 analysis home: 物量サマリ / きいて分析 / 物量シミュ (volume what-if).
+  dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze',
+  design: 'design', timetable: 'design', materialflow: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate',
   viewpng: 'propose', compare: 'propose', export: 'propose',
 };
@@ -1096,7 +1097,7 @@ function mountBIAnalyticsView() {
   } else { S.bianalytics.refresh(); }
 }
 
-// Mount the 物量BI split view (ETL→material-flow); refresh on revisit.
+// Mount the 物量シミュ split view (ETL→material-flow); refresh on revisit.
 function mountBIView() {
   if (!S.bi) {
     S.bi = mountBI($('bi'), {
@@ -1229,13 +1230,13 @@ document.addEventListener('whsim:apply-run', (e) => {
 });
 
 // Cross-view drill navigation: a module asks the shell to switch views
-// (e.g. 分析BI "物量BIで見る →" / "人員設計へ →").
+// (e.g. きいて分析 "物量シミュで見る →" / "人員設計へ →").
 document.addEventListener('whsim:nav', (e) => {
   const view = e && e.detail && e.detail.view;
   if (typeof view === 'string' && view) switchView(view);
 });
 
-// データ分析タブ → タイムチャート: place the day from the measured volumes.
+// 物量サマリタブ → タイムチャート: place the day from the measured volumes.
 document.addEventListener('whsim:load-timetable', (e) => {
   const scenario = e && e.detail && e.detail.scenario;
   if (!scenario) { toast('先に物量を分析してください。', 'info'); return; }

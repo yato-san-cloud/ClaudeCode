@@ -1,4 +1,5 @@
-// dataanalysis.js — WMS 実データ分析タブ (3PL エンジン統合のフロント).
+// dataanalysis.js — 物量サマリタブ: WMS 実データ分析 (3PL エンジン統合のフロント)。
+// ②分析の着地点（分析ホーム）: 事実チップ＋「きいて分析」「物量シミュ」へのドリルを先頭に表示.
 // サンプル or アップロード → /api/analysis/* → KPI・インサイト・チャートを描画.
 // チャートは ECharts (市販BI級): 物量推移(エリア+dataZoom)・ABCパレート(棒+累積%)・
 // 曜日別ピーク(棒)・時間帯ピーク(棒)・時間帯別必要人員(エリア). 自己完結 (テーマは
@@ -75,6 +76,22 @@ function injectStyle() {
   s.id = 'da-style';
   s.textContent = `
   .da{display:flex;flex-direction:column;gap:16px;width:100%;padding:4px 2px 24px}
+  /* ── 分析ホーム strip: fact chips + drill links to the other ② sub-views ── */
+  .da-home{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
+    border-left:4px solid var(--accent,#16C0DE);border-radius:12px;padding:9px 14px}
+  .da-home-t{font-size:var(--fs-sm,12.5px);font-weight:700;color:var(--ink-primary,#16202e)}
+  .da-home-chip{display:inline-flex;align-items:baseline;gap:6px;font-size:var(--fs-xs,12px);
+    color:var(--ink-secondary,#52677c);background:var(--bg-app,#fff);
+    border:1px solid var(--line,rgba(120,140,170,.18));border-radius:999px;padding:3px 10px}
+  .da-home-chip i{font-style:normal;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8)}
+  .da-home-chip b{font-weight:700;color:var(--ink-primary,#16202e);font-variant-numeric:tabular-nums}
+  .da-home-links{margin-left:auto;display:flex;gap:14px}
+  .da-home-link{border:none;background:none;padding:0;font:inherit;font-size:var(--fs-sm,12.5px);
+    font-weight:600;color:var(--accent,#16C0DE);cursor:pointer;white-space:nowrap}
+  .da-home-link:hover{text-decoration:underline}
+  .da-home-link:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:2px}
+  @media(max-width:640px){.da-home-links{margin-left:0;flex-basis:100%}}
   .da-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .da-bar .da-btn{padding:var(--sp-2) var(--sp-4);border-radius:10px;border:1px solid var(--accent);
     background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);
@@ -319,6 +336,34 @@ function staffingCard(s) {
   </div>`;
 }
 
+// ②分析 landing header (分析ホーム): a slim strip of fact chips derived from the
+// already-fetched bundle (「—」 when absent) + drill links to the sibling ② views
+// (きいて分析 / 物量シミュ) via the shell's `whsim:nav` CustomEvent. Pure render;
+// links are wired in wire().
+function homeHeader(b) {
+  const k = (b && b.kpis) || null;
+  // ABC構成: A-rank share of total qty, re-derived from the ABC rows.
+  let aShare = null;
+  const abc = (b && b.abc_sku) || [];
+  if (abc.length) {
+    const tot = abc.reduce((s, r) => s + (r.qty || 0), 0);
+    if (tot > 0) aShare = abc.reduce((s, r) => s + (r.rank === 'A' ? (r.qty || 0) : 0), 0) / tot;
+  }
+  const chips = [
+    ['総物量', k && k.total_pcs_out != null ? `${fmt(k.total_pcs_out)} pcs` : '—'],
+    ['ABC構成', aShare != null ? `A品 ${pct(aShare)}` : '—'],
+    ['ピーク曜日', k && k.peak_weekday ? esc(k.peak_weekday) : '—'],
+  ];
+  return `<div class="da-home" role="navigation" aria-label="分析ホーム">
+    <span class="da-home-t">分析ホーム</span>
+    ${chips.map(([l, v]) => `<span class="da-home-chip"><i>${l}</i><b>${v}</b></span>`).join('')}
+    <span class="da-home-links">
+      <button type="button" class="da-home-link" data-nav="bianalytics">きいて分析 →</button>
+      <button type="button" class="da-home-link" data-nav="bi">物量シミュ →</button>
+    </span>
+  </div>`;
+}
+
 // A chart card whose body is an ECharts mount node (id) or a friendly empty note.
 function chartCard(title, id, hasData, full) {
   const body = hasData
@@ -371,6 +416,7 @@ export function mountDataAnalysis(el, opts = {}) {
   function render(b) {
     disposeCharts();
     root.innerHTML =
+      homeHeader(b) +
       `<div class="da-bar">
          <button class="da-btn primary" data-act="sample">▶ サンプルで試す</button>
          <button class="da-btn" data-act="upload">出荷データを取り込む</button>
@@ -426,6 +472,11 @@ export function mountDataAnalysis(el, opts = {}) {
     return r.json();
   }
   function wire() {
+    // 分析ホーム drill links → sibling ② views (the shell listens for whsim:nav).
+    root.querySelectorAll('.da-home-link[data-nav]').forEach((btn) => {
+      btn.onclick = () => document.dispatchEvent(
+        new CustomEvent('whsim:nav', { detail: { view: btn.dataset.nav } }));
+    });
     const fileInput = root.querySelector('[data-da-file]');
     const sample = root.querySelector('[data-act="sample"]');
     if (sample) sample.onclick = () => load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
