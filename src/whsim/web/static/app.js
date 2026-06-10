@@ -17,7 +17,7 @@ import { mountTimetable } from './js/timetable.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
 import { mountNotes } from './js/notes.js';
-import { $, api } from './js/util.js';
+import { $, api, esc } from './js/util.js';
 import {
   ZONE_JP, EQUIP_JP, ABC_COLOR, STATE_COLOR, RACK_COLOR, AGV_COLOR,
 } from './js/constants.js';
@@ -811,8 +811,23 @@ function renderKpis(k) {
   if (k.n_agvs) cards.push(['AGV稼働率', `${k.n_agvs}台 ${(k.agv_utilization*100).toFixed(0)}%`]);
   if (k.total_cost_per_order) cards.push(['1件あたりコスト', `${cur}${k.total_cost_per_order.toFixed(1)}`]);
   if (k.monthly_cost) cards.push(['月間コスト', `${cur}${Math.round(k.monthly_cost).toLocaleString()}`]);
-  $('kpiBar').innerHTML = `<div class="verdict ${cls}">${k.verdict}</div>` +
-    cards.map(([kk, vv]) => `<div class="kpi"><div class="k">${kk}</div><div class="v">${vv}</div></div>`).join('');
+  // HERO treatment: a prominent verdict banner (大きく 捌ける/捌けない + 一文)
+  // followed by a responsive KPI grid (reuses the .kpi-hero cell styling).
+  const headword = k.can_handle_demand ? '捌ける' : '捌けない';
+  const verdictLine = esc(k.verdict || '');
+  $('kpiBar').innerHTML =
+    `<div class="kpi-verdict-hero ${cls}" role="status" aria-live="polite">` +
+      `<div class="kvh-mark" aria-hidden="true"></div>` +
+      `<div class="kvh-body">` +
+        `<div class="kvh-headword">${headword}</div>` +
+        (verdictLine ? `<div class="kvh-line">${verdictLine}</div>` : '') +
+      `</div>` +
+    `</div>` +
+    `<div class="kpi-hero kpi-hero--run">` +
+      cards.map(([kk, vv]) =>
+        `<div class="kpi-hero-cell"><div class="kpi-label">${esc(kk)}</div>` +
+        `<div class="kpi-value">${esc(vv)}</div></div>`).join('') +
+    `</div>`;
 }
 
 // Core scenario-compare flow, shared by the button and the Cody chat.
@@ -1001,11 +1016,16 @@ function switchView(view) {
   const replayView = (view === 'view2d' || view === 'view3d');
   document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
   // The chat home, analysis dashboards and timetable carry their own summaries.
-  $('kpiBar').style.display =
+  const kpiBar = $('kpiBar');
+  kpiBar.style.display =
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
       || view === 'bi' || view === 'bianalytics')
       ? 'none' : '';
+  // ④検証: in the 2D/3D replay views the verdict + KPIs read as the page HERO
+  // (lifted above the replay canvas), not a footer strip. Elsewhere (e.g. PNG /
+  // 提案) it stays an inline summary below the content.
+  kpiBar.classList.toggle('is-hero', replayView);
   // The 3D表現 preset control only belongs to the 3D view (kept out of the
   // journey row otherwise, so it isn't persistent noise for the salesperson).
   const presetCtl = $('presetCtl');

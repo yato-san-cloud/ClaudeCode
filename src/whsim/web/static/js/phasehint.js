@@ -46,7 +46,7 @@ function injectStyle() {
   s.textContent = `
   .ph{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;
     background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
-    border-left:4px solid var(--accent,#2f7bff);border-radius:var(--r-lg);
+    border-left:4px solid var(--accent,#16C0DE);border-radius:var(--r-lg);
     padding:var(--sp-3) var(--sp-4);margin:0 auto var(--sp-3);max-width:1100px;width:100%}
   .ph[hidden]{display:none}
   .ph-goal{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
@@ -55,11 +55,11 @@ function injectStyle() {
   .ph.is-empty{border-left-color:var(--ink-tertiary,#8195a8)}
   .ph.is-empty .ph-sub{color:var(--ink-secondary,#52677c);font-weight:600;font-size:13px}
   .ph-cta{flex:none;padding:9px 18px;border-radius:var(--r-md);border:none;cursor:pointer;
-    background:var(--accent,#2f7bff);color:#04222c;font:inherit;font-weight:700;font-size:13.5px;
+    background:var(--accent,#16C0DE);color:#04222c;font:inherit;font-weight:700;font-size:13.5px;
     white-space:nowrap;transition:background var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
   .ph-cta:hover{background:var(--accent-hover,#1A73CE);transform:translateY(-1px)}
   .ph-cta:active{transform:translateY(0)}
-  .ph-cta:focus-visible{outline:2px solid var(--accent,#2f7bff);outline-offset:2px}
+  .ph-cta:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:2px}
   @media (prefers-reduced-motion: reduce){
     .ph-cta{transition:none}
     .ph-cta:hover,.ph-cta:active{transform:none}

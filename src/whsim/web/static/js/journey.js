@@ -63,15 +63,15 @@ function injectStyle() {
     background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
     border-radius:12px;padding:7px 12px;font:inherit;color:var(--ink-primary,#16202e);
     transition:border-color var(--dur-1) var(--ease-out),background var(--dur-1) var(--ease-out)}
-  .jn-pill:hover{border-color:var(--accent,#2f7bff)}
+  .jn-pill:hover{border-color:var(--accent,#16C0DE)}
   .jn-pill-head{display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:700;line-height:1.2}
   .jn-pill-no{color:var(--ink-tertiary,#8195a8);font-weight:800}
   .jn-pill-flag{margin-left:auto;font-size:12px}
   .jn-pill-goal{font-size:10.5px;color:var(--ink-tertiary,#8195a8);line-height:1.3;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .jn-pill.is-active{background:var(--accent,#2f7bff);border-color:var(--accent,#2f7bff);color:var(--ink-onAccent,#04222c)}
+  .jn-pill.is-active{background:var(--accent,#16C0DE);border-color:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222c)}
   .jn-pill.is-active .jn-pill-no,.jn-pill.is-active .jn-pill-goal{color:var(--ink-onAccent,#04222c);opacity:.8}
-  .jn-pill.is-done{border-color:var(--accent,#2f7bff)}
+  .jn-pill.is-done{border-color:var(--accent,#16C0DE)}
   .jn-pill.is-locked{opacity:.85}
   .jn-pins{display:flex;align-items:center;gap:6px;flex:0 0 auto;
     padding-left:10px;margin-left:2px;border-left:1px solid var(--line,rgba(120,140,170,.18))}
@@ -80,8 +80,8 @@ function injectStyle() {
     border-radius:999px;padding:6px 11px;font:inherit;font-size:12px;font-weight:600;
     color:var(--ink-secondary,#52677c);
     transition:border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),background var(--dur-1) var(--ease-out)}
-  .jn-pin:hover{border-color:var(--accent,#2f7bff)}
-  .jn-pin.is-active{background:var(--accent,#2f7bff);border-color:var(--accent,#2f7bff);color:var(--ink-onAccent,#04222c)}
+  .jn-pin:hover{border-color:var(--accent,#16C0DE)}
+  .jn-pin.is-active{background:var(--accent,#16C0DE);border-color:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222c)}
   .jn-pin-icon{font-size:13px}
   .jn-subs{display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:thin;
     padding-bottom:2px;min-height:30px}
@@ -92,8 +92,8 @@ function injectStyle() {
     padding:5px 12px;font:inherit;font-size:12.5px;font-weight:600;
     color:var(--ink-secondary,#52677c);
     transition:border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),background var(--dur-1) var(--ease-out)}
-  .jn-sub:hover{border-color:var(--accent,#2f7bff)}
-  .jn-sub.is-active{background:var(--accent,#2f7bff);border-color:var(--accent,#2f7bff);color:var(--ink-onAccent,#04222c)}
+  .jn-sub:hover{border-color:var(--accent,#16C0DE)}
+  .jn-sub.is-active{background:var(--accent,#16C0DE);border-color:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222c)}
   .jn-sub-hint{font-size:11px;color:var(--ink-tertiary,#8195a8);margin-left:4px;white-space:nowrap}
   /* Arrow-key affordance for the sub-tab row (unobtrusive; hidden when narrow). */
   .jn-kbdhint{margin-left:auto;flex:0 0 auto;font-size:var(--fs-micro,11px);
@@ -101,7 +101,7 @@ function injectStyle() {
     letter-spacing:var(--ls-micro,0.04em)}
   /* Visible keyboard focus ring (does not affect mouse interaction visuals). */
   .jn-pill:focus-visible,.jn-pin:focus-visible,.jn-sub:focus-visible{
-    outline:2px solid var(--line-focus,var(--accent,#2f7bff));outline-offset:2px}
+    outline:2px solid var(--line-focus,var(--accent,#16C0DE));outline-offset:2px}
   /* Visually-hidden live region for screen-reader status announcements. */
   .jn-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
     clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}

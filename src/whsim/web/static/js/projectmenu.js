@@ -13,7 +13,7 @@
 // identical: same DOM ids, same prompt/confirm strings, same endpoints, same
 // follow-up calls (incl. the chat-bucket rename/clear) in the same order.
 import { S } from './state.js';
-import { $, api } from './util.js';
+import { $, api, modalPrompt, modalConfirm } from './util.js';
 
 // Shell helpers that remain in app.js, injected at boot.
 let toast = () => {};
@@ -61,7 +61,14 @@ function onProjMenuKey(e) {
 export async function projDuplicate() {
   const from = S.project;
   if (!from) return;
-  const to = (prompt(`「${from}」を複製します。新しい名前を入力してください。`, from + '-copy') || '').trim();
+  closeProjMenu();
+  const to = (await modalPrompt({
+    title: 'プロジェクトを複製',
+    message: `「${from}」を複製します。新しい名前を入力してください。`,
+    label: '新しいプロジェクト名',
+    value: from + '-copy',
+    okLabel: '複製',
+  }) || '').trim();
   if (!to) return;
   try {
     const r = await api(`/api/projects/${from}/duplicate`, {
@@ -76,7 +83,14 @@ export async function projDuplicate() {
 export async function projRename() {
   const from = S.project;
   if (!from) return;
-  const to = (prompt(`「${from}」の新しい名前を入力してください。`, from) || '').trim();
+  closeProjMenu();
+  const to = (await modalPrompt({
+    title: 'プロジェクト名を変更',
+    message: `「${from}」の新しい名前を入力してください。`,
+    label: '新しいプロジェクト名',
+    value: from,
+    okLabel: '変更',
+  }) || '').trim();
   if (!to || to === from) return;
   try {
     const r = await api(`/api/projects/${from}/rename`, {
@@ -92,7 +106,14 @@ export async function projRename() {
 export async function projDelete() {
   const name = S.project;
   if (!name) return;
-  if (!confirm(`プロジェクト「${name}」を削除します。元に戻せません。よろしいですか？`)) return;
+  closeProjMenu();
+  if (!(await modalConfirm({
+    title: 'プロジェクトを削除',
+    message: `プロジェクト「${name}」を削除します。元に戻せません。よろしいですか？`,
+    okLabel: '削除',
+    cancelLabel: 'キャンセル',
+    danger: true,
+  }))) return;
   try {
     await api(`/api/projects/${name}`, { method: 'DELETE' });
     if (S.chat && S.chat.clearBucket) S.chat.clearBucket(name);

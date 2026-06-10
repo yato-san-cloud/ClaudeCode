@@ -724,7 +724,7 @@ input[type="range"]::-moz-range-track {
    ============================================================================= */
 .kpibar {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: var(--sp-3);
   margin-top: var(--sp-3);
   flex: none;
@@ -803,6 +803,94 @@ input[type="range"]::-moz-range-track {
   color: var(--ink-primary);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+}
+
+/* =============================================================================
+   ④検証 HERO — the run result reads as the page hero (verdict banner + KPI
+   grid) rather than a footer strip. `renderKpis` (app.js) builds the inner
+   HTML; `switchView` toggles `.kpibar.is-hero` for the 2D/3D replay views.
+   ============================================================================= */
+/* Hero mode: lift the verdict + KPIs ABOVE the replay canvas (order) and give
+   them column flow + breathing room. Without .is-hero the same markup stays an
+   inline summary below the content (PNG / 提案 views). */
+.kpibar.is-hero {
+  order: -1;                 /* float above the .panel/.transport in .stage */
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: var(--sp-4);
+  margin-top: 0;
+  margin-bottom: var(--sp-4);
+}
+
+/* Verdict banner — big 捌ける/捌けない + one-line summary, status-tinted. */
+.kpi-verdict-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-hair);
+  background: var(--bg-sunken);
+  color: var(--ink-primary);
+  animation: rise var(--dur-4) var(--ease-out) both;
+}
+.kpi-verdict-hero .kvh-mark {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ink-faint);
+  color: #fff;
+  font-size: 28px;
+  line-height: 1;
+}
+.kpi-verdict-hero .kvh-mark::before { content: ""; }
+.kpi-verdict-hero .kvh-body { min-width: 0; }
+.kpi-verdict-hero .kvh-headword {
+  font-size: clamp(26px, 4.4vw, var(--fs-display));
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-display);
+  letter-spacing: var(--ls-display);
+}
+.kpi-verdict-hero .kvh-line {
+  margin-top: 4px;
+  font-size: var(--fs-section);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-section);
+  color: var(--ink-secondary);
+}
+.kpi-verdict-hero.ok {
+  background: var(--ok-tint);
+  color: var(--ok-ink);
+  border-color: var(--ok-line);
+}
+.kpi-verdict-hero.ok .kvh-mark { background: var(--ok); }
+.kpi-verdict-hero.ok .kvh-mark::before { content: "\2713"; }
+.kpi-verdict-hero.ok .kvh-line { color: var(--ok-ink); }
+.kpi-verdict-hero.bad {
+  background: var(--bad-tint);
+  color: var(--bad-ink);
+  border-color: var(--bad-line);
+}
+.kpi-verdict-hero.bad .kvh-mark { background: var(--bad); }
+.kpi-verdict-hero.bad .kvh-mark::before { content: "\0021"; }
+.kpi-verdict-hero.bad .kvh-line { color: var(--bad-ink); }
+
+/* KPI grid reusing the .kpi-hero cell styling (analysis.js / kpi-hero). The
+   --run modifier auto-fits as many ~150px cells as fit, so the variable card
+   count from renderKpis always lays out cleanly. */
+.kpi-hero.kpi-hero--run {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.kpi-hero--run .kpi-hero-cell .kpi-value {
+  font-family: var(--num);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kpi-verdict-hero { animation: none; }
 }
 
 /* =============================================================================
@@ -1859,9 +1947,9 @@ html[data-theme="dark"] button[role="tab"][aria-selected="true"]{
 }
 
 /* ===== Stage 1 polish: handoff signature treatments ===== */
-/* Primary run CTA — cyan→blue gradient + glow (handoff .btn-run). */
+/* Primary run CTA — brand-cyan gradient + glow (handoff .btn-run). */
 .sidebar .primary.big{
-  background:linear-gradient(135deg,var(--accent),#2f7bff);
+  background:linear-gradient(135deg,var(--accent-hover),var(--accent));
   color:#04222c; border:none; font-weight:700; letter-spacing:.03em;
   box-shadow:0 6px 18px color-mix(in srgb,var(--accent) 22%,transparent);
 }
