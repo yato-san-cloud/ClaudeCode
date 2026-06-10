@@ -1761,7 +1761,7 @@ export class Scene3D {
     const cx = (z.x || 0) + z.w / 2;
     const cz = (z.y || 0) + z.h / 2;
     // Ring just inside the zone footprint; beam height scales with floor span.
-    const r = Math.max(1.2, Math.min(z.w, z.h) * 0.5);
+    const r = Math.max(1.6, Math.min(z.w, z.h) * 0.5);
     const span = Math.max(this.bounds.width, this.bounds.depth);
     const beamH = Math.max(8, span * 0.85);
     const AMBER = 0xf5b05a;
@@ -1774,7 +1774,7 @@ export class Scene3D {
     //    floor narrowing toward a point above. Faint so it reads as a god-ray.
     const beamGeom = new THREE.ConeGeometry(r * 1.05, beamH, 40, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
-      color: AMBER, transparent: true, opacity: 0.10, side: THREE.DoubleSide,
+      color: AMBER, transparent: true, opacity: 0.12, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, depthWrite: false,
     });
     const beam = new THREE.Mesh(beamGeom, beamMat);
@@ -1782,10 +1782,11 @@ export class Scene3D {
     group.add(beam);
     geoms.push(beamGeom); mats.push(beamMat);
 
-    // 2) Pulsing floor ring (annulus) laid flat at the zone.
-    const ringGeom = new THREE.RingGeometry(r * 0.86, r, 56);
+    // 2) Bold pulsing floor ring (annulus) laid flat at the zone — the primary
+    //    top-down signal, thick + bright so it reads even amid amber ABC racks.
+    const ringGeom = new THREE.RingGeometry(r * 0.74, r * 1.12, 64);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: AMBER, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+      color: AMBER, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, depthWrite: false,
     });
     const ring = new THREE.Mesh(ringGeom, ringMat);
@@ -1794,9 +1795,23 @@ export class Scene3D {
     group.add(ring);
     geoms.push(ringGeom); mats.push(ringMat);
 
-    // 3) A real SpotLight so the zone floor genuinely brightens (cheap; shadows
+    // 3) Expanding "sonar" ring — a UNIT annulus (radius ~1) scaled + faded
+    //    outward every cycle in _updateBottleneck. Motion is what catches the eye
+    //    from the default near-top-down camera, where a static ring blends in.
+    const sonarGeom = new THREE.RingGeometry(0.92, 1.0, 64);
+    const sonarMat = new THREE.MeshBasicMaterial({
+      color: AMBER, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const sonar = new THREE.Mesh(sonarGeom, sonarMat);
+    sonar.rotation.x = -Math.PI / 2;
+    sonar.position.set(cx, 0.07, cz);
+    group.add(sonar);
+    geoms.push(sonarGeom); mats.push(sonarMat);
+
+    // 4) A real SpotLight so the zone floor genuinely brightens (cheap; shadows
     //    off — the key directional already owns the scene's contact shadows).
-    const light = new THREE.SpotLight(0xffd9a0, 3.2, beamH * 1.6,
+    const light = new THREE.SpotLight(0xffd9a0, 3.6, beamH * 1.6,
       Math.atan2(r * 1.2, beamH) + 0.05, 0.6, 1.0);
     light.position.set(cx, beamH, cz);
     light.target.position.set(cx, 0, cz);
@@ -1804,14 +1819,16 @@ export class Scene3D {
     group.add(light);
     group.add(light.target);
 
-    // 4) Floating ⚠ label, billboarded, bobbing above the zone.
+    // 5) Floating ⚠ label, billboarded (always faces camera, depthTest off so it
+    //    never hides behind racks), bobbing above rack height.
     const tex = this._makeWarnLabelTexture();
     const labelMat = new THREE.SpriteMaterial({
       map: tex, transparent: true, depthWrite: false, depthTest: false,
     });
     const label = new THREE.Sprite(labelMat);
-    const labY = Math.max(3.2, span * 0.16);
-    label.scale.set(r * 1.6 + 2.4, (r * 1.6 + 2.4) * 0.5, 1);
+    const labY = Math.max(5, span * 0.10);
+    const labW = Math.max(10, r * 2.4);
+    label.scale.set(labW, labW * 0.5, 1);
     label.position.set(cx, labY, cz);
     label.center.set(0.5, 0.0);
     group.add(label);
@@ -1819,48 +1836,68 @@ export class Scene3D {
 
     this.scene.add(group);
     this._bottleneck = {
-      group, beamMat, ringMat, light, label, labelMat,
-      cx, cz, labY, baseRing: r, geoms, mats, texs,
+      group, beam, beamMat, ring, ringMat, sonar, sonarMat,
+      light, label, labelMat, cx, cz, labY, baseRing: r, geoms, mats, texs,
     };
+    // Opt-in placement confirmation for the headless screenshot PDCA loop
+    // (invisible in production; enable with localStorage 'whsim-3ddebug').
+    try {
+      if (window.localStorage && localStorage.getItem('whsim-3ddebug')) {
+        // eslint-disable-next-line no-console
+        console.info(`[whsim] bottleneck spotlight: ${zoneType} @ `
+          + `(${cx.toFixed(1)}, ${cz.toFixed(1)}) r=${r.toFixed(1)}`);
+      }
+    } catch (e) { /* no localStorage (sandboxed) — ignore */ }
   }
 
   // ⚠ + "ボトルネック" drawn on a transparent canvas for the floating label.
+  // Dark pill + amber border so it stays legible over any floor tone / racks.
   _makeWarnLabelTexture() {
-    const W = 256, H = 128;
+    const W = 512, H = 256; // hi-res so it stays crisp when scaled up in world
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, W, H);
-    // Soft pill backdrop so the glyph stays legible over any floor tone.
-    ctx.fillStyle = 'rgba(20,16,8,0.55)';
-    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(8, 8, W - 16, H - 16, 18); ctx.fill(); }
-    else ctx.fillRect(8, 8, W - 16, H - 16);
+    // Pill backdrop with an amber outline (reads as a warning chip from afar).
+    const pad = 14, rad = 40;
+    ctx.fillStyle = 'rgba(18,14,8,0.82)';
+    ctx.strokeStyle = '#f5b05a';
+    ctx.lineWidth = 6;
+    if (ctx.roundRect) {
+      ctx.beginPath(); ctx.roundRect(pad, pad, W - 2 * pad, H - 2 * pad, rad);
+      ctx.fill(); ctx.stroke();
+    } else { ctx.fillRect(pad, pad, W - 2 * pad, H - 2 * pad); }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#f5b05a';
-    ctx.font = 'bold 52px sans-serif';
-    ctx.fillText('⚠', W / 2, 44);
-    ctx.font = 'bold 30px sans-serif';
-    ctx.fillText('ボトルネック', W / 2, 92);
+    ctx.fillStyle = '#ffcf7a';
+    ctx.font = 'bold 104px sans-serif';
+    ctx.fillText('⚠', W / 2, 92);
+    ctx.fillStyle = '#ffe6bf';
+    ctx.font = 'bold 58px sans-serif';
+    ctx.fillText('ボトルネック', W / 2, 188);
     const tex = new THREE.CanvasTexture(canvas);
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
     return tex; // owned by this._bottleneck.texs (disposed in _disposeBottleneck)
   }
 
-  // Per-frame pulse: ring breathes (scale + opacity), beam shimmers, label bobs.
+  // Per-frame: static ring breathes, sonar ring expands+fades, beam shimmers,
+  // label bobs. Uses direct mesh refs (no child-index coupling).
   _updateBottleneck() {
     const b = this._bottleneck;
     if (!b) return;
     const e = this._clock.elapsedTime; // continuous; getDelta() resets only delta
     const pulse = 0.5 + 0.5 * Math.sin(e * 2.2); // 0..1
-    if (b.ringMat) b.ringMat.opacity = 0.45 + 0.45 * pulse;
-    if (b.group) {
-      // breathe the ring via group child scale would scale the beam too, so scale
-      // only the ring mesh (child index 1). Keep it subtle.
-      const ring = b.group.children[1];
-      if (ring) { const s = 1 + 0.06 * pulse; ring.scale.set(s, s, 1); }
+    if (b.ringMat) b.ringMat.opacity = 0.55 + 0.4 * pulse;
+    if (b.ring) { const s = 1 + 0.05 * pulse; b.ring.scale.set(s, s, 1); }
+    // Sonar: a UNIT ring grown from ~0.9× to ~2.3× the base radius, fading out,
+    // restarting each cycle — the motion cue that reads from straight overhead.
+    if (b.sonar && b.sonarMat) {
+      const sp = (e % 1.8) / 1.8;            // 0..1 sweep
+      const sc = b.baseRing * (0.9 + sp * 1.4);
+      b.sonar.scale.set(sc, sc, 1);
+      b.sonarMat.opacity = 0.55 * (1 - sp);  // brightest at birth, gone at edge
     }
-    if (b.beamMat) b.beamMat.opacity = 0.07 + 0.06 * pulse;
+    if (b.beamMat) b.beamMat.opacity = 0.09 + 0.07 * pulse;
     if (b.label) b.label.position.y = b.labY + 0.35 * Math.sin(e * 1.6);
   }
 
