@@ -817,17 +817,20 @@ input[type="range"]::-moz-range-track {
   order: -1;                 /* float above the .panel/.transport in .stage */
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: var(--sp-4);
+  gap: var(--sp-2);
   margin-top: 0;
-  margin-bottom: var(--sp-4);
+  margin-bottom: var(--sp-3);
 }
 
-/* Verdict banner — big 捌ける/捌けない + one-line summary, status-tinted. */
+/* Verdict banner — bold 捌ける/捌けない + one-line summary, status-tinted.
+   COMPACT by design: a strip, not a block, so the replay canvas / proposal PNG
+   below keeps the bulk of the viewport (PDCA: the first hero cut pushed the
+   2D/3D/PNG below the fold). */
 .kpi-verdict-hero {
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
-  padding: var(--sp-4) var(--sp-5);
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
   border-radius: var(--r-lg);
   border: 1px solid var(--line-hair);
   background: var(--bg-sunken);
@@ -836,30 +839,37 @@ input[type="range"]::-moz-range-track {
 }
 .kpi-verdict-hero .kvh-mark {
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   background: var(--ink-faint);
   color: #fff;
-  font-size: 28px;
+  font-size: 18px;
   line-height: 1;
 }
 .kpi-verdict-hero .kvh-mark::before { content: ""; }
-.kpi-verdict-hero .kvh-body { min-width: 0; }
+.kpi-verdict-hero .kvh-body {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
 .kpi-verdict-hero .kvh-headword {
-  font-size: clamp(26px, 4.4vw, var(--fs-display));
+  font-size: 22px;
   font-weight: var(--fw-bold);
-  line-height: var(--lh-display);
+  line-height: 1.25;
   letter-spacing: var(--ls-display);
+  white-space: nowrap;
 }
 .kpi-verdict-hero .kvh-line {
-  margin-top: 4px;
-  font-size: var(--fs-section);
+  font-size: var(--fs-body);
   font-weight: var(--fw-medium);
-  line-height: var(--lh-section);
+  line-height: var(--lh-body);
   color: var(--ink-secondary);
+  min-width: 0;
 }
 .kpi-verdict-hero.ok {
   background: var(--ok-tint);
@@ -878,16 +888,27 @@ input[type="range"]::-moz-range-track {
 .kpi-verdict-hero.bad .kvh-mark::before { content: "\0021"; }
 .kpi-verdict-hero.bad .kvh-line { color: var(--bad-ink); }
 
-/* KPI grid reusing the .kpi-hero cell styling (analysis.js / kpi-hero). The
-   --run modifier auto-fits as many ~150px cells as fit, so the variable card
-   count from renderKpis always lays out cleanly. */
+/* KPI cells as ONE horizontally-scrolling chip row (not a multi-row grid), so
+   the variable card count from renderKpis never steals vertical space from the
+   replay canvas / proposal PNG. Reuses the .kpi-hero cell styling. */
 .kpi-hero.kpi-hero--run {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
+}
+.kpi-hero--run .kpi-hero-cell {
+  flex: 0 0 auto;
+  min-width: 128px;
+  padding: var(--sp-2) var(--sp-3);
 }
 .kpi-hero--run .kpi-hero-cell .kpi-value {
   font-family: var(--num);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.015em;
+  font-size: var(--fs-section);
 }
 @media (prefers-reduced-motion: reduce) {
   .kpi-verdict-hero { animation: none; }

@@ -1015,12 +1015,13 @@ function switchView(view) {
   // The replay transport only belongs to the 2D/3D animation views.
   const replayView = (view === 'view2d' || view === 'view3d');
   document.querySelector('.transport').style.display = replayView ? 'flex' : 'none';
-  // The chat home, analysis dashboards and timetable carry their own summaries.
+  // The chat home, analysis dashboards and timetable carry their own summaries;
+  // the designer needs the full canvas height, so the KPI bar hides there too.
   const kpiBar = $('kpiBar');
   kpiBar.style.display =
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
-      || view === 'bi' || view === 'bianalytics')
+      || view === 'bi' || view === 'bianalytics' || view === 'design')
       ? 'none' : '';
   // ④検証: in the 2D/3D replay views the verdict + KPIs read as the page HERO
   // (lifted above the replay canvas), not a footer strip. Elsewhere (e.g. PNG /
