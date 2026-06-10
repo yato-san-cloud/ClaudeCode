@@ -1756,12 +1756,9 @@ export class Scene3D {
   setBottleneck(zoneType) {
     this._disposeBottleneck();
     if (!zoneType) return;
-    const z = (this.replay.zones || []).find((zz) => zz.type === zoneType);
-    if (!z || !(z.w > 0) || !(z.h > 0)) return;
-    const cx = (z.x || 0) + z.w / 2;
-    const cz = (z.y || 0) + z.h / 2;
-    // Ring just inside the zone footprint; beam height scales with floor span.
-    const r = Math.max(1.6, Math.min(z.w, z.h) * 0.5);
+    const anchor = this._resolveBottleneckAnchor(zoneType);
+    if (!anchor) return; // no matching zone and no congestion to fall back on
+    const { cx, cz, r, src } = anchor;
     const span = Math.max(this.bounds.width, this.bounds.depth);
     const beamH = Math.max(8, span * 0.85);
     const AMBER = 0xf5b05a;
@@ -1844,10 +1841,46 @@ export class Scene3D {
     try {
       if (window.localStorage && localStorage.getItem('whsim-3ddebug')) {
         // eslint-disable-next-line no-console
-        console.info(`[whsim] bottleneck spotlight: ${zoneType} @ `
+        console.info(`[whsim] bottleneck spotlight: ${zoneType} via ${src} @ `
           + `(${cx.toFixed(1)}, ${cz.toFixed(1)}) r=${r.toFixed(1)}`);
       }
     } catch (e) { /* no localStorage (sandboxed) — ignore */ }
+  }
+
+  // Where does the bottleneck live on the floor? Prefer an explicit process zone
+  // of that type (receiving/picking/packing/…). Many real layouts have no such
+  // zone — picking happens across the storage racks — so fall back to the
+  // congestion hotspot (the value-weighted centre of the busiest cells), which
+  // for a process-bound run IS that process's floor. Returns {cx,cz,r,src} or
+  // null. Mirrors what the 2D ⚠ overlay *should* do, generalised.
+  _resolveBottleneckAnchor(zoneType) {
+    const z = (this.replay.zones || []).find((zz) => zz.type === zoneType);
+    if (z && z.w > 0 && z.h > 0) {
+      // A focused ring inside the zone (capped so a floor-sized zone like a
+      // single 'storage' area doesn't ring the whole building).
+      const r = Math.max(1.6, Math.min(Math.min(z.w, z.h) * 0.5, 10));
+      return { cx: (z.x || 0) + z.w / 2, cz: (z.y || 0) + z.h / 2, r, src: 'zone' };
+    }
+    const c = this.replay.congestion;
+    if (c && Array.isArray(c.cells) && c.cells.length && c.grid_m > 0) {
+      let max = 0;
+      for (const cell of c.cells) { if (cell[2] > max) max = cell[2]; }
+      if (max <= 0) return null;
+      // Value-weighted centroid over the hot cells (>= 60% of peak) so a single
+      // noisy peak doesn't yank the marker; weight by value to bias to the core.
+      const thr = max * 0.6;
+      let sx = 0, sz = 0, sw = 0;
+      for (const [ix, iy, v] of c.cells) {
+        if (v < thr) continue;
+        const wgt = v;
+        sx += (ix + 0.5) * c.grid_m * wgt;
+        sz += (iy + 0.5) * c.grid_m * wgt;
+        sw += wgt;
+      }
+      if (sw <= 0) return null;
+      return { cx: sx / sw, cz: sz / sw, r: Math.max(3.5, c.grid_m * 1.4), src: 'congestion' };
+    }
+    return null;
   }
 
   // ⚠ + "ボトルネック" drawn on a transparent canvas for the floating label.
