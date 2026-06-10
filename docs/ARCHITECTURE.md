@@ -24,7 +24,7 @@
 4. **provenance は第一級**。各 subtree の出所（imported/interview/provisional/generated）を追跡し「実データN%」として表示（`provenance.py`）。モデル書込み時に飛ばさない。
 5. **距離の解決順**：`World.dist` = 実測override(`distances.py`) > グラフDijkstra(`engine/graph.py`) > Manhattan。
 6. **replay/render は層状契約（V1/V2/V3）**。keyframe・`shelves`・`navnet` の形は **2Dキャンバス(`app.js` `interp`)と3D(`view3d.js`)の両方**が消費する。コメント「**must match the 3D view**」は厳守。新フィールドは additive＋guard（無ければ legacy 描画にフォールバック）、**古い replay を壊さない**。
-7. **ビルドレス / npm 無し / vendored**。フロントは素の ES modules（`<script type="module">` ＋ importmap）。three.js は `static/vendor/`。**バンドラや `package.json` を導入しない**。
+7. **ビルドレス / npm 無し / vendored**。フロントは素の ES modules（`<script type="module">` ＋ importmap）。three.js と ECharts は `static/vendor/`（importmap で `three`/`echarts`）。**バンドラや `package.json` を導入しない**。
 8. **日本語＝ユーザー向け文字列、英語＝コード/識別子/コメント**。
 9. **journey→view 規約**。パネルは `<div id="x" class="panel" role="tabpanel">`、ナビは `journey.js` が描く `.jn-sub[role="tab"]`、`switchView`(`app.js`) がステッパーとパネルを同期。**フラット `.tab` マークアップを復活させない**（CSSは削除済）。
 10. **新テンプレ＝データのみ**。`templates/<id>/{template.json,manifest.json}` を足すだけ、**コード変更不要**。
@@ -60,10 +60,10 @@
 - `export_doc.py`（PPTX+PDF）/ `web/app.py`（FastAPI ~50ルート、**最大ファイル**）/ `cli.py` / `project.py` / `notes.py` / `cody.py`。
 
 ### フロント（`app.js` から到達可能な ES modules）
-- シェル：`app.js`（bootstrap・2Dキャンバス・`switchView`・全配線）。共有：`util.js`（`$`/`api`/`esc`）・`constants.js`（ラベル/色マップ）。
+- シェル：`app.js`（bootstrap・`switchView`・2Dキャンバス・mount配線）。抽出済：`state.js`（共有`S`シングルトン）・`imports.js`（取込ハンドラ）・`projectmenu.js`。共有：`util.js`（`$`/`api`/`esc`）・`constants.js`（ラベル/色マップ）。
 - 動線：`journey.js`（5フェーズ stepper）・`phasehint.js`・`overview.js`（①取込ホーム＋取込/基本条件）・`onboarding.js`。
-- 編集/3D：`designer.js`（**最大**・MapMaker式棚編集＋設備パレット）・`view3d.js`（three.js・rack_type別リアル形状・人型ピッカー・pick発光）。
-- 分析/BI：`analysis.js` `bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**重複多いUI領域**）。
+- 編集/3D：`designer.js`（ファサード）→`designer/{core,constants,geometry}.js`（MapMaker式棚編集＋設備パレット）・`view3d.js`（three.js・rack_type別リアル形状・人型ピッカー・pick発光・ホバー/追従/選択）。
+- 分析/BI：`bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**ECharts**描画＝`vendor/echarts`、テーマ追従・toolbox・dispose）・`analysis.js`（KPI・判定）。
 - その他：`compare.js` `export.js` `timetable.js`(+`timetable_solver.js`) `settings.js` `notes.js` `cody.js`(+`chat.js`)。
 
 ---
