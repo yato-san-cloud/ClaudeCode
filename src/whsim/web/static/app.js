@@ -479,20 +479,41 @@ function drawStagingRing(cx, cy, sg) {
   ctx.lineWidth = 1; ctx.lineCap = 'butt';
 }
 
-// Bottleneck ⚠ overlay: read the bottleneck stage from the replay's KPIs and
-// drop a warning marker on the matching zone centre. No KPIs / no matching
-// zone => nothing drawn (full backward compatibility).
-function drawBottleneck(rep, X, Y) {
+// Resolve where the bottleneck lives in WORLD coords: prefer an explicit
+// process zone of the bottleneck type; else fall back to the congestion hotspot
+// (value-weighted centre of the busiest cells) — many layouts have no dedicated
+// 'picking' zone (it happens across the storage racks), so the zone lookup alone
+// silently drew nothing. Returns {wx, wy} or null. Shared spine with the 3D
+// Scene3D._resolveBottleneckAnchor so PNG / 2D / 3D point at the same spot.
+function resolveBottleneckXY(rep) {
   const k = rep.kpis;
-  if (!k || !k.bottleneck_jp) return;
-  // Map the bottleneck label back to a zone type across ALL stages
-  // (入荷/検品/格納/ピッキング/梱包/出荷…), not just picking/packing. Uses the
-  // module-scope JP_TO_TYPE (hoisted so the hot path allocates nothing); it
-  // already folds in the 検品/格納 synonyms. Unmatched => nothing drawn.
+  if (!k || !k.bottleneck_jp) return null;
   const stage = JP_TO_TYPE[k.bottleneck_jp] || null;
   const z = stage ? (rep.zones || []).find(zz => zz.type === stage) : null;
-  if (!z) return;
-  const cx = X(z.x + z.w / 2), cy = Y(z.y + z.h / 2);
+  if (z) return { wx: z.x + z.w / 2, wy: z.y + z.h / 2 };
+  const c = rep.congestion;
+  if (c && Array.isArray(c.cells) && c.cells.length && c.grid_m > 0) {
+    let max = 0;
+    for (const cell of c.cells) { if (cell[2] > max) max = cell[2]; }
+    if (max <= 0) return null;
+    const thr = max * 0.6;
+    let sx = 0, sy = 0, sw = 0;
+    for (const [ix, iy, v] of c.cells) {
+      if (v < thr) continue;
+      sx += (ix + 0.5) * c.grid_m * v; sy += (iy + 0.5) * c.grid_m * v; sw += v;
+    }
+    if (sw > 0) return { wx: sx / sw, wy: sy / sw };
+  }
+  return null;
+}
+
+// Bottleneck ⚠ overlay: drop a warning marker on the bottleneck's floor anchor
+// (matching zone, else the congestion hotspot). No KPIs / no anchor => nothing
+// drawn (full backward compatibility).
+function drawBottleneck(rep, X, Y) {
+  const a = resolveBottleneckXY(rep);
+  if (!a) return;
+  const cx = X(a.wx), cy = Y(a.wy);
   ctx.fillStyle = 'rgba(245,176,90,0.12)';
   ctx.strokeStyle = '#f5b05a'; ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.arc(cx, cy - 16, 11, 0, TAU); ctx.fill(); ctx.stroke();
