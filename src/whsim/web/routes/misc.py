@@ -4,6 +4,8 @@ material-flow & timetable seeds, work-method naming, notes and the favicon."""
 from __future__ import annotations
 
 import json
+import subprocess
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response
 
@@ -13,6 +15,55 @@ from whsim.project import Project
 from ._common import _open
 
 router = APIRouter()
+
+
+def _build_version() -> dict:
+    """Package version + git commit of the running checkout (best-effort).
+
+    Computed once at import: `whsim serve --reload` restarts the process on
+    every code change (incl. the dev auto-sync's reset --hard), so the cache
+    always reflects the running build. Git absent (e.g. wheel install) is fine —
+    the commit fields are simply null. Never raises ("never blocks").
+    """
+    repo = Path(__file__).resolve().parents[4]  # routes/web/whsim/src -> repo
+    ver = None
+    try:
+        # Prefer the checkout's pyproject so a `git pull` shows the new version
+        # immediately (editable installs pin importlib.metadata at install time).
+        import tomllib
+        with open(repo / "pyproject.toml", "rb") as f:
+            ver = tomllib.load(f)["project"]["version"]
+    except Exception:  # noqa: BLE001 — fall back to installed metadata
+        ver = None
+    if not ver:
+        try:
+            from importlib.metadata import version as _pkg_version
+            ver = _pkg_version("whsim")
+        except Exception:  # noqa: BLE001 — metadata may be missing in odd installs
+            ver = "dev"
+    commit = commit_time = None
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%h\t%ci"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0 and "\t" in out.stdout:
+            commit, commit_time = out.stdout.strip().split("\t", 1)
+    except Exception:  # noqa: BLE001 — git is optional context, never fatal
+        pass
+    return {"version": ver, "commit": commit, "commit_time": commit_time}
+
+
+_VERSION = _build_version()
+
+
+@router.get("/api/version")
+def api_version():
+    """Running build: package version + git commit hash/time (nulls without git).
+
+    Surfaced as the header badge so anyone can tell at a glance whether the
+    browser is looking at the latest push (the dev loop auto-syncs + reloads)."""
+    return _VERSION
 
 
 @router.get("/favicon.ico")

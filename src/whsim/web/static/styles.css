@@ -1352,6 +1352,20 @@ html[data-theme="dark"] .c-action { background: rgba(255,255,255,0.08); }
 
 /* ---- Header: dark-mode toggle --------------------------------------------- */
 .header-tools { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+/* Build badge — version · commit · time; quiet chrome, mono digits. */
+.version-badge {
+  font-family: var(--num);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-tertiary);
+  white-space: nowrap;
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-pill);
+  padding: 3px 10px;
+  background: var(--bg-sunken);
+  user-select: all;          /* tap-to-copy the build id when reporting issues */
+}
+@media (max-width: 1080px) { .version-badge { display: none; } }
 .header-tools #provenance { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 880px) { .header-tools #provenance { display: none; } }
 #themeToggle {
