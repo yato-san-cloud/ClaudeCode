@@ -21,6 +21,14 @@ import { $, api } from './js/util.js';
 import {
   ZONE_JP, EQUIP_JP, ABC_COLOR, STATE_COLOR, RACK_COLOR, AGV_COLOR,
 } from './js/constants.js';
+import { S } from './js/state.js';
+import {
+  initImports, uploadZip, uploadDistances, uploadMapcsv, uploadRmpm,
+  uploadTable, generateMissing, uploadCad,
+} from './js/imports.js';
+import {
+  initProjectMenu, closeProjMenu, openProjMenu, projDuplicate, projRename, projDelete,
+} from './js/projectmenu.js';
 
 const DOOR_COLOR = { dock: '#1f78b4', personnel: '#33a02c', shutter: '#8d99ae' };
 // Full circle in radians — replaces the `arc(...,0,7)` magic number in 2D draws.
@@ -126,13 +134,8 @@ const JP_TO_TYPE = Object.assign(
   Object.fromEntries(Object.entries(ZONE_JP).map(([type, jp]) => [jp, type])),
   { '検品': 'inspection', '格納': 'storage' });
 
-const S = {
-  project: null, replay: null, scene3d: null, designer: null, compare: null,
-  export: null, cody: null, chat: null, settings: null, onboarding: null, timetable: null,
-  dataanalysis: null, materialflow: null, notes: null, journey: null, overview: null, bi: null, bianalytics: null, phaseHint: null,
-  hasData: false, hasRun: false, preset: 'brand',
-  t: 0, window: 1, playing: true, speed: 60, view: 'overview',
-};
+// The shared SPA state `S` now lives in ./js/state.js (single singleton) so the
+// extracted shell modules (imports.js / projectmenu.js) mutate the SAME object.
 
 // ---- keyframe interpolation (must match the 3D view) -----------------------
 function interp(keyframes, t) {
@@ -939,139 +942,10 @@ function relocateSetupCards() {
 }
 
 // ---- import ----------------------------------------------------------------
-async function uploadZip(file) {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = '取り込み中…';
-  try {
-    const r = await api(`/api/projects/${S.project}/import`, { method: 'POST', body: fd });
-    const lines = [`<span class="ok">取り込み: ${r.updated.join(', ') || 'なし'}</span>`];
-    for (const w of r.warnings) lines.push(`<span class="warn">! ${w}</span>`);
-    $('importLog').innerHTML = lines.join('\n');
-    $('provenance').textContent = r.provenance_summary;
-    S.hasData = true;
-    await openProject(S.project); // refresh headline values (also refreshes readiness)
-    if (S.dataanalysis) S.dataanalysis.refresh();
-    toast('データを取り込みました。', 'ok');
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
-}
-
-async function uploadDistances(file) {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = '棚間距離を取込中…';
-  try {
-    const r = await api(`/api/projects/${S.project}/import-distances`, { method: 'POST', body: fd });
-    const lines = [`<span class="ok">棚間距離: ${r.count}件取込（実測距離で動線を補正）</span>`];
-    for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
-    $('importLog').innerHTML = lines.join('\n');
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
-}
-
-async function uploadMapcsv(file) {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = 'MapMaker地図を解析中…';
-  try {
-    const r = await api(`/api/projects/${S.project}/import-mapcsv`, { method: 'POST', body: fd });
-    const lines = [`<span class="ok">地図取込: 棚${r.shelves}・壁${r.walls}・ステーション${r.stations}` +
-      ` → ロケーション${r.locations}件生成（${r.stats && r.stats.units || 'm'}）</span>`];
-    for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
-    $('importLog').innerHTML = lines.join('\n');
-    await openProject(S.project); // refresh headline/provenance/readiness
-    if (S.view === 'design') mountDesigner();
-    nudgeToDesign(`地図を取り込みました（棚${r.shelves}）。`);
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('地図取込に失敗しました: ' + e.message, 'error'); }
-}
-
-// MapMaker native .rmpm.json layout (richer than the CSV: carries shelf names).
-async function uploadRmpm(file) {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = 'MapMakerレイアウトを解析中…';
-  try {
-    const r = await api(`/api/projects/${S.project}/import-rmpm`, { method: 'POST', body: fd });
-    const lines = [`<span class="ok">レイアウト取込: 棚${r.shelves}・壁${r.walls}・ステーション${r.stations}` +
-      ` → ロケーション${r.locations}件生成（${r.stats && r.stats.units || 'm'}）</span>`];
-    for (const w of (r.warnings || []).slice(0, 5)) lines.push(`<span class="warn">! ${w}</span>`);
-    $('importLog').innerHTML = lines.join('\n');
-    await openProject(S.project); // refresh headline/provenance/readiness
-    if (S.view === 'design') mountDesigner();
-    nudgeToDesign(`MapMakerレイアウトを取り込みました（棚${r.shelves}）。`);
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取込に失敗しました: ' + e.message, 'error'); }
-}
-
-// ---- unified 入荷/出荷/商品マスタ import with editable column mapping ---------
-let _tableFile = null, _tableKind = 'shipments';
-async function uploadTable(file) {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  _tableFile = file; _tableKind = $('tableKind').value;
-  await doTableImport(null);
-}
-async function doTableImport(mapping) {
-  const fd = new FormData(); fd.append('file', _tableFile);
-  let url = `/api/projects/${S.project}/import-table?kind=${_tableKind}`;
-  if (mapping) url += '&mapping=' + encodeURIComponent(JSON.stringify(mapping));
-  $('importLog').textContent = '取込中…';
-  try {
-    const r = await api(url, { method: 'POST', body: fd });
-    renderTableMapping(r);
-    if (r.provenance_summary) $('provenance').textContent = r.provenance_summary;
-    await openProject(S.project);
-    toast('取込しました。', 'ok');
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取込に失敗しました: ' + e.message, 'error'); }
-}
-function renderTableMapping(r) {
-  const opts = (sel) => ['<option value="">（なし）</option>']
-    .concat((r.columns || []).map(c => `<option${c === sel ? ' selected' : ''}>${c}</option>`)).join('');
-  const rows = Object.entries(r.mapping || {}).map(([k, m]) =>
-    `<div class="row" style="gap:6px;margin:3px 0;align-items:center">
-       <span style="flex:1;font-size:12px">${m.label}${m.required ? ' <b style="color:var(--bad)">*</b>' : ''}</span>
-       <select data-mapfield="${k}" style="flex:1">${opts(m.column)}</select>
-     </div>`).join('');
-  const cnt = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(' / ');
-  $('importLog').innerHTML =
-    `<span class="ok">取込（${cnt || '0'}）</span>
-     <div style="margin-top:6px;font-size:11px;color:var(--muted-2)">列マッピング（必要なら直して再取込）</div>${rows}
-     <button id="remapBtn" style="margin-top:6px;width:100%">この対応で再取込</button>`;
-  $('remapBtn').onclick = () => {
-    const mp = {};
-    $('importLog').querySelectorAll('[data-mapfield]').forEach(s => { mp[s.dataset.mapfield] = s.value || null; });
-    doTableImport(mp);
-  };
-}
-
-async function generateMissing() {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  setBtnBusy($('genMissingBtn'), true, '生成中…');
-  try {
-    const r = await api(`/api/projects/${S.project}/generate-missing`, { method: 'POST' });
-    const lines = (r.generated && r.generated.length)
-      ? r.generated.map(g => `<span class="ok">＋ ${g}</span>`)
-      : ['<span class="warn">生成できる不足データはありませんでした。</span>'];
-    $('importLog').innerHTML = lines.join('\n');
-    if (r.provenance_summary) $('provenance').textContent = r.provenance_summary;
-    await openProject(S.project);  // refresh headline/provenance/readiness
-    toast('不足データを生成しました。', 'ok');
-    cody('excited', '不足していたマスタを実データから補ったよ。これで実行できる。');
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('生成に失敗しました: ' + e.message, 'error'); }
-  finally { setBtnBusy($('genMissingBtn'), false); }
-}
-
-async function uploadCad(file) {
-  if (!S.project) { $('importLog').textContent = '先にプロジェクトを作成してください。'; return; }
-  const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = 'CAD図面を解析中…';
-  try {
-    const r = await api(`/api/projects/${S.project}/import-cad`, { method: 'POST', body: fd });
-    const lines = [`<span class="ok">図面取込: 壁${r.walls}本 / ゾーン${r.zones}個 / ` +
-      `外形 ${r.bounds ? r.bounds.width.toFixed(0) + '×' + r.bounds.depth.toFixed(0) + 'm' : '—'}</span>`];
-    for (const w of (r.warnings || [])) lines.push(`<span class="warn">! ${w}</span>`);
-    $('importLog').innerHTML = lines.join('\n');
-    if (S.view === 'design') mountDesigner();
-    nudgeToDesign(`図面を取り込みました（壁${r.walls}）。`);
-  } catch (e) { $('importLog').textContent = 'エラー: ' + e.message; toast('取り込みに失敗しました: ' + e.message, 'error'); }
-}
+// The ①取込 upload handlers (uploadZip/Cad/Distances/Mapcsv/Rmpm/Table +
+// generateMissing) moved verbatim to ./js/imports.js; they are imported above and
+// wired to their shell deps via initImports() in main(). The DOM-id event wiring
+// for them stays in initUI() (unchanged).
 
 // ---- theme (light/dark, manual toggle, persisted) -------------------------
 function applyTheme(theme) {
@@ -1368,81 +1242,12 @@ document.addEventListener('whsim:toast', (e) => {
 });
 
 // ---- project management menu (duplicate / rename / delete) -----------------
-function closeProjMenu() {
-  const menu = $('projMenu'), btn = $('projMenuBtn');
-  if (!menu || menu.hidden) return;
-  menu.hidden = true;
-  btn.setAttribute('aria-expanded', 'false');
-  document.removeEventListener('click', onDocClickProjMenu, true);
-  document.removeEventListener('keydown', onProjMenuKey, true);
-}
-function openProjMenu() {
-  const menu = $('projMenu'), btn = $('projMenuBtn');
-  if (!menu || !S.project) return;
-  menu.hidden = false;
-  btn.setAttribute('aria-expanded', 'true');
-  const first = menu.querySelector('[role="menuitem"]');
-  if (first) first.focus();
-  document.addEventListener('click', onDocClickProjMenu, true);
-  document.addEventListener('keydown', onProjMenuKey, true);
-}
-function onDocClickProjMenu(e) {
-  if (!$('projMenu').contains(e.target) && e.target !== $('projMenuBtn')) closeProjMenu();
-}
-function onProjMenuKey(e) {
-  const menu = $('projMenu');
-  const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
-  const idx = items.indexOf(document.activeElement);
-  if (e.key === 'Escape') { e.preventDefault(); closeProjMenu(); $('projMenuBtn').focus(); }
-  else if (e.key === 'ArrowDown') { e.preventDefault(); items[(idx + 1) % items.length].focus(); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); items[(idx - 1 + items.length) % items.length].focus(); }
-  else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
-  else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
-  else if (e.key === 'Tab') { closeProjMenu(); }
-}
-async function projDuplicate() {
-  const from = S.project;
-  if (!from) return;
-  const to = (prompt(`「${from}」を複製します。新しい名前を入力してください。`, from + '-copy') || '').trim();
-  if (!to) return;
-  try {
-    const r = await api(`/api/projects/${from}/duplicate`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to }),
-    });
-    await refreshProjects(r.name || to);
-    await openProject(r.name || to);
-    toast(`「${from}」を複製しました。`, 'ok');
-  } catch (e) { toast('複製に失敗しました: ' + e.message, 'error'); }
-}
-async function projRename() {
-  const from = S.project;
-  if (!from) return;
-  const to = (prompt(`「${from}」の新しい名前を入力してください。`, from) || '').trim();
-  if (!to || to === from) return;
-  try {
-    const r = await api(`/api/projects/${from}/rename`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to }),
-    });
-    if (S.chat && S.chat.renameBucket) S.chat.renameBucket(from, r.name || to);
-    await refreshProjects(r.name || to);
-    await openProject(r.name || to);
-    toast(`「${to}」に名前を変更しました。`, 'ok');
-  } catch (e) { toast('名前変更に失敗しました: ' + e.message, 'error'); }
-}
-async function projDelete() {
-  const name = S.project;
-  if (!name) return;
-  if (!confirm(`プロジェクト「${name}」を削除します。元に戻せません。よろしいですか？`)) return;
-  try {
-    await api(`/api/projects/${name}`, { method: 'DELETE' });
-    if (S.chat && S.chat.clearBucket) S.chat.clearBucket(name);
-    clearProjectState();
-    await refreshProjects('');
-    toast(`「${name}」を削除しました。`, 'ok');
-  } catch (e) { toast('削除に失敗しました: ' + e.message, 'error'); }
-}
+// The menu open/close/keyboard handling (closeProjMenu/openProjMenu/onDocClick/
+// onProjMenuKey) and the three project actions (projDuplicate/projRename/
+// projDelete) moved verbatim to ./js/projectmenu.js; they are imported above and
+// wired to their shell deps via initProjectMenu() in main(). The #projMenuBtn /
+// menuitem click wiring stays in initUI() (unchanged).
+
 // Reset everything tied to a now-gone project.
 function clearProjectState() {
   S.project = null;
@@ -1641,6 +1446,11 @@ function initUI() {
 }
 
 (async function main() {
+  // Inject the shell helpers the extracted modules call back into. These are
+  // hoisted function declarations, so wiring them up here (before any user
+  // interaction can fire the import / project-menu handlers) is safe.
+  initImports({ toast, openProject, mountDesigner, nudgeToDesign, setBtnBusy, cody });
+  initProjectMenu({ toast, refreshProjects, openProject, clearProjectState });
   initTheme();
   refreshPalette();
   initUI();
