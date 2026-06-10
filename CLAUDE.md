@@ -73,6 +73,18 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - Lint: `ruff check src`
 - Regenerate template / sample data: `python scripts/gen_template_ecommerce.py`,
   `python scripts/gen_sample_data.py`
+- **UI screenshot PDCA (headless)**: playwright is installed and an existing
+  chromium lives at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`
+  (`p.chromium.launch(executable_path=...)`, args `--no-sandbox
+  --disable-dev-shm-usage`; add `--use-gl=angle --use-angle=swiftshader
+  --enable-unsafe-swiftshader` for WebGL/3D). Pattern: start uvicorn on a spare
+  port → create the sample project (`POST /api/projects/sample`) → optionally
+  import `reference/mapmaker/exported/LW.rmpm.json` → drive the UI by clicking
+  `.jn-pill[data-phase=…]` / `.jn-sub[data-view=…]` and `#runBtn` (wait for
+  `#status` to contain 完了) → screenshot per view. Pre-set localStorage
+  `whsim-onboarded-v*='1'` so coachmarks don't cover shots. See the transcript
+  scripts in `/tmp/shoot_whsim.py` style; verify shots by Reading the PNGs
+  before shipping UI changes.
 
 ### Conventions
 
