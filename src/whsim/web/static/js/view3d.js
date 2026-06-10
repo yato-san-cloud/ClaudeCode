@@ -208,6 +208,7 @@ export class Scene3D {
     this._glowSprites = [];   // { sprite, mat, kind, ref, base } additive activity halos
     this._glowEnabled = true; // gated off by fps auto-degrade (tier 3)
     this._heat = null;        // { mesh, mat } instanced congestion patches
+    this._bottleneck = null;  // { group, beamMat, ringMat, label, ... } spotlight or null
     this._hud = null;         // DOM overlay { root, ... } or null
     this._info = null;        // controls-hint + legend DOM overlay or null
     this._intro = null;       // intro camera tween state or null
@@ -1742,6 +1743,138 @@ export class Scene3D {
     return tex;
   }
 
+  // -- Bottleneck spotlight --------------------------------------------------
+  // Dramatise the run's binding constraint in 3D: a warm translucent light
+  // SHAFT (additive cone — real SpotLights don't scatter in air without a
+  // volumetric pass, none vendored), a pulsing floor ring, and a floating ⚠
+  // label over the bottleneck zone, plus an actual SpotLight that genuinely
+  // brightens that floor. Driven externally (mount3d resolves the bottleneck
+  // label → zone type via JP_TO_TYPE and calls this); no-ops when the zone
+  // isn't found, so it's fully backward-compatible. Re-callable: it tears down
+  // any previous marker first. Mirrors the 2D ⚠ overlay so the proposal's
+  // ③検証 bottleneck reads the same across PNG / 2D / 3D.
+  setBottleneck(zoneType) {
+    this._disposeBottleneck();
+    if (!zoneType) return;
+    const z = (this.replay.zones || []).find((zz) => zz.type === zoneType);
+    if (!z || !(z.w > 0) || !(z.h > 0)) return;
+    const cx = (z.x || 0) + z.w / 2;
+    const cz = (z.y || 0) + z.h / 2;
+    // Ring just inside the zone footprint; beam height scales with floor span.
+    const r = Math.max(1.2, Math.min(z.w, z.h) * 0.5);
+    const span = Math.max(this.bounds.width, this.bounds.depth);
+    const beamH = Math.max(8, span * 0.85);
+    const AMBER = 0xf5b05a;
+    const group = new THREE.Group();
+    const geoms = [];
+    const mats = [];
+    const texs = [];
+
+    // 1) Volumetric-looking light shaft: hollow additive cone, wide base on the
+    //    floor narrowing toward a point above. Faint so it reads as a god-ray.
+    const beamGeom = new THREE.ConeGeometry(r * 1.05, beamH, 40, 1, true);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: AMBER, transparent: true, opacity: 0.10, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const beam = new THREE.Mesh(beamGeom, beamMat);
+    beam.position.set(cx, beamH / 2, cz); // base at floor, tip up
+    group.add(beam);
+    geoms.push(beamGeom); mats.push(beamMat);
+
+    // 2) Pulsing floor ring (annulus) laid flat at the zone.
+    const ringGeom = new THREE.RingGeometry(r * 0.86, r, 56);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: AMBER, transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeom, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(cx, 0.06, cz);
+    group.add(ring);
+    geoms.push(ringGeom); mats.push(ringMat);
+
+    // 3) A real SpotLight so the zone floor genuinely brightens (cheap; shadows
+    //    off — the key directional already owns the scene's contact shadows).
+    const light = new THREE.SpotLight(0xffd9a0, 3.2, beamH * 1.6,
+      Math.atan2(r * 1.2, beamH) + 0.05, 0.6, 1.0);
+    light.position.set(cx, beamH, cz);
+    light.target.position.set(cx, 0, cz);
+    light.castShadow = false;
+    group.add(light);
+    group.add(light.target);
+
+    // 4) Floating ⚠ label, billboarded, bobbing above the zone.
+    const tex = this._makeWarnLabelTexture();
+    const labelMat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthWrite: false, depthTest: false,
+    });
+    const label = new THREE.Sprite(labelMat);
+    const labY = Math.max(3.2, span * 0.16);
+    label.scale.set(r * 1.6 + 2.4, (r * 1.6 + 2.4) * 0.5, 1);
+    label.position.set(cx, labY, cz);
+    label.center.set(0.5, 0.0);
+    group.add(label);
+    mats.push(labelMat); texs.push(tex);
+
+    this.scene.add(group);
+    this._bottleneck = {
+      group, beamMat, ringMat, light, label, labelMat,
+      cx, cz, labY, baseRing: r, geoms, mats, texs,
+    };
+  }
+
+  // ⚠ + "ボトルネック" drawn on a transparent canvas for the floating label.
+  _makeWarnLabelTexture() {
+    const W = 256, H = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    // Soft pill backdrop so the glyph stays legible over any floor tone.
+    ctx.fillStyle = 'rgba(20,16,8,0.55)';
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(8, 8, W - 16, H - 16, 18); ctx.fill(); }
+    else ctx.fillRect(8, 8, W - 16, H - 16);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#f5b05a';
+    ctx.font = 'bold 52px sans-serif';
+    ctx.fillText('⚠', W / 2, 44);
+    ctx.font = 'bold 30px sans-serif';
+    ctx.fillText('ボトルネック', W / 2, 92);
+    const tex = new THREE.CanvasTexture(canvas);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    return tex; // owned by this._bottleneck.texs (disposed in _disposeBottleneck)
+  }
+
+  // Per-frame pulse: ring breathes (scale + opacity), beam shimmers, label bobs.
+  _updateBottleneck() {
+    const b = this._bottleneck;
+    if (!b) return;
+    const e = this._clock.elapsedTime; // continuous; getDelta() resets only delta
+    const pulse = 0.5 + 0.5 * Math.sin(e * 2.2); // 0..1
+    if (b.ringMat) b.ringMat.opacity = 0.45 + 0.45 * pulse;
+    if (b.group) {
+      // breathe the ring via group child scale would scale the beam too, so scale
+      // only the ring mesh (child index 1). Keep it subtle.
+      const ring = b.group.children[1];
+      if (ring) { const s = 1 + 0.06 * pulse; ring.scale.set(s, s, 1); }
+    }
+    if (b.beamMat) b.beamMat.opacity = 0.07 + 0.06 * pulse;
+    if (b.label) b.label.position.y = b.labY + 0.35 * Math.sin(e * 1.6);
+  }
+
+  _disposeBottleneck() {
+    const b = this._bottleneck;
+    if (!b) return;
+    if (b.light && b.light.target && b.group) b.group.remove(b.light.target);
+    if (b.group) this.scene.remove(b.group);
+    for (const g of (b.geoms || [])) { if (g && g.dispose) g.dispose(); }
+    for (const m of (b.mats || [])) { if (m && m.dispose) m.dispose(); }
+    for (const t of (b.texs || [])) { if (t && t.dispose) t.dispose(); }
+    this._bottleneck = null;
+  }
+
   // -- Additive activity glow halos (pseudo-bloom) --------------------------
   // A soft radial cyan billboard Sprite riding on top of each active agent
   // (worker / AGV+tote / forklift). This is a CHEAP approximation of bloom: one
@@ -2435,6 +2568,7 @@ export class Scene3D {
     this._updateBelts(dt);        // scroll conveyor tread textures (delta-based)
     this._updateContactShadows(); // keep blob shadows under moving agents
     this._updateGlowHalos();      // additive cyan activity halos (pseudo-bloom)
+    this._updateBottleneck();     // pulse the bottleneck spotlight (if any)
     this._updateHud(t);           // sync DOM productivity overlay (if present)
     this._monitorFps(dt);         // auto-degrade if frame time gets heavy
     this.controls.update();
@@ -2541,6 +2675,7 @@ export class Scene3D {
     this._pickFx = [];
     if (this._asrsCrane && this._asrsCrane.group) this.scene.remove(this._asrsCrane.group);
     this._asrsCrane = null;
+    this._disposeBottleneck();    // remove spotlight group + free its own GPU refs
     this._shelfRuns = [];
     this._sc = null;
     this._heat = null;

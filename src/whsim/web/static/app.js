@@ -928,6 +928,12 @@ function mount3d() {
   try {
     S.scene3d = new Scene3D(el, S.replay, () => S.t);
     if (S.preset && S.scene3d.setPreset) S.scene3d.setPreset(S.preset);
+    // Spotlight the run's bottleneck zone in 3D (same constraint the 2D ⚠ and the
+    // ⑤提案 ③検証 chip call out). Resolve the JP label → zone type via JP_TO_TYPE.
+    const bk = S.kpis;
+    if (bk && bk.bottleneck_jp && S.scene3d.setBottleneck) {
+      S.scene3d.setBottleneck(JP_TO_TYPE[bk.bottleneck_jp] || null);
+    }
     applyStaffing3d();   // overlay the timetable staffing if one has been computed
     S.scene3d.resize();
   } catch (e) {
