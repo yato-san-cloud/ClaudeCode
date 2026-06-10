@@ -1,9 +1,39 @@
 // bi.js — 物量BI: split-screen ETL→material-flow. Left: base volumes aggregated
 // in DuckDB (server) + a provisional 仮値 derivation (ケース→パレット). Right: the
-// material-flow (物量→人時) that updates live as the 仮値 sliders move. The pallet
-// derivation is client-side so it feels instant; derived values are badged 推計.
-// Comments EN; UI JA. Brand tokens only; no idle loops; reduced-motion safe.
+// material-flow (物量→人時) that updates live as the 仮値 sliders move, drawn with
+// ECharts (horizontal bar by 工程, coloured by 入荷/出荷 section, with the 平常/ピーク
+// toggle). The pallet derivation is client-side so it feels instant; derived values
+// are badged 推計. Comments EN; UI JA. Theme-aware (rebuilt on themechange);
+// responsive (resize); reduced-motion safe.
 import { esc } from './util.js';
+import * as echarts from 'echarts';
+
+const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+function hexAlpha(hex, a) {
+  let h = (hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) h = '16C0DE';
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+// Live tokens an ECharts option needs (rebuilt per render → theme-aware).
+function biPalette() {
+  const accent = cssVar('--accent', '#16C0DE');
+  return {
+    accent, inbound: cssVar('--rank-b', '#5B9BD5'),
+    ink: cssVar('--ink-primary', '#37352F'),
+    ink2: cssVar('--ink-secondary', 'rgba(55,53,47,0.65)'),
+    ink3: cssVar('--ink-tertiary', 'rgba(55,53,47,0.45)'),
+    line: cssVar('--line-hair', 'rgba(55,53,47,0.09)'),
+    lineStrong: cssVar('--line-strong', 'rgba(55,53,47,0.16)'),
+    panel: cssVar('--bg-app', '#FFFFFF'),
+    fontMono: cssVar('--font-mono', 'monospace'), fontSans: cssVar('--font-sans', 'sans-serif'),
+  };
+}
 
 // Productivity standards mirror analysis/staffing GENERIC_PROCESSES (editable
 // JP-warehouse defaults). 格納 is driven by *pallets* here — the live link.
@@ -105,6 +135,16 @@ export function mountBI(el, opts = {}) {
   el.innerHTML = '';
   el.appendChild(root);
 
+  // ── right-pane ECharts (material-flow man-hours bar) ──────────────────
+  let flowChart = null;
+  let ro = null;
+  function disposeChart() { if (flowChart) { try { flowChart.dispose(); } catch (_) { /* noop */ } flowChart = null; } }
+  const resizeChart = () => { if (flowChart) { try { flowChart.resize(); } catch (_) { /* noop */ } } };
+  window.addEventListener('resize', resizeChart);
+  if (typeof ResizeObserver !== 'undefined') ro = new ResizeObserver(() => resizeChart());
+  function onThemeChange() { if (vol && flowChart) drawFlowChart(); }
+  document.addEventListener('themechange', onThemeChange);
+
   let vol = null;       // base volumes from DuckDB
   let loadErr = null;   // last load() failure (null = none); drives the retry state
   let cpp = 40;         // 仮値: cases per pallet
@@ -179,6 +219,9 @@ export function mountBI(el, opts = {}) {
   }
 
   function render() {
+    // Any branch below rewrites root.innerHTML, orphaning the right-pane canvas;
+    // dispose it up-front so a re-render never leaks an ECharts instance.
+    disposeChart();
     if (!getProject()) { root.innerHTML = '<div class="bi-empty">プロジェクトを選択してください。</div>'; return; }
     if (loadErr) { renderError(); return; }
     if (!vol) { root.innerHTML = '<div class="bi-empty">物量を集計中…</div>'; return; }
@@ -313,6 +356,7 @@ export function mountBI(el, opts = {}) {
       </section>`;
 
     wire();
+    drawFlowChart();   // paint the right-pane man-hours bar
     applyFocus();
   }
 
@@ -344,25 +388,73 @@ export function mountBI(el, opts = {}) {
     return `<div class="bi-h"><h3>マテリアルフロー</h3><span class="sub">物量 → 人時（仮値とライブ連動・${mode}）</span></div>`;
   }
 
+  // The right pane now hosts an ECharts horizontal-bar of 人時 by 工程; this
+  // returns the chart mount node + the total row. drawFlowChart() fills the canvas.
   function renderFlow(procs, maxMh, totalMh) {
-    const mhOf = (p) => (showPeak ? p.man_hours_peak : p.man_hours);
-    const card = (p) => `
-      <div class="bi-proc${p.derived ? ' derived' : ''}">
-        <div class="pn"><b>${esc(p.id)}</b><div class="pv">${fmt(p.volume)} ${esc(driverUnit(p.driver))} ÷ ${fmt(p.prod)} ${esc(p.unit)}${showPeak ? ` ×${fmt(peak, 2)}` : ''}</div>
-          <div class="bi-bar" role="img" aria-label="${esc(p.id)} ${fmt(mhOf(p), 1)} 人時（合計比 ${fmt((mhOf(p) / maxMh) * 100)}%）"><i style="width:${Math.min(100, (mhOf(p) / maxMh) * 100)}%"></i></div></div>
-        <div class="mh" data-mh="${p.id}">${fmt(mhOf(p), 1)}<span class="u">人時</span></div>
-      </div>`;
-    const inb = procs.filter((p) => p.sec === '入荷');
-    const out = procs.filter((p) => p.sec === '出荷');
+    void procs; void maxMh;
     const totalLabel = showPeak ? `合計 必要人時/日（ピーク ×${fmt(peak, 2)}）` : '合計 必要人時/日';
     return `
-      <div class="bi-sec">入荷</div>${inb.map(card).join('')}
-      <div class="bi-sec">出荷</div>${out.map(card).join('')}
+      <div class="bi-flow-chart" data-bi-flow style="width:100%;height:300px"></div>
       <div class="bi-total"><span>${totalLabel}</span><span class="tv" id="bi-totalmh">${fmt(totalMh, 1)} 人時</span></div>`;
   }
 
   function driverUnit(dr) {
     return { in_cases: 'ケース', in_pallets: 'PL', out_lines: '行', out_orders: '件' }[dr] || '';
+  }
+
+  // Build/refresh the right-pane man-hours bar from the current procs. Inbound vs
+  // outbound 工程 are coloured distinctly; the peak-aware key drives the values so
+  // the ピーク toggle/slider reflect immediately. 格納 (derived) is marked.
+  function drawFlowChart() {
+    const node = root.querySelector('[data-bi-flow]');
+    if (!node) return;
+    const procs = processes();
+    const mhOf = (p) => (showPeak ? p.man_hours_peak : p.man_hours);
+    const p = biPalette();
+    // top→bottom flow order; ECharts category axis stacks bottom→top, so reverse.
+    const ordered = procs.slice().reverse();
+    const cats = ordered.map((q) => q.id);
+    const bars = ordered.map((q) => ({
+      value: +mhOf(q).toFixed(2),
+      itemStyle: { color: q.sec === '入荷' ? p.inbound : p.accent,
+        borderColor: q.derived ? p.accent : 'transparent', borderWidth: q.derived ? 1.5 : 0,
+        borderType: 'dashed', borderRadius: [0, 4, 4, 0] },
+    }));
+    if (!flowChart) {
+      flowChart = echarts.init(node, null, { renderer: 'canvas' });
+      if (ro) ro.observe(node);
+    }
+    flowChart.setOption({
+      animation: !reduceMotion(),
+      grid: { left: 8, right: 56, top: 28, bottom: 8, containLabel: true },
+      legend: {
+        top: 0, right: 4, icon: 'roundRect', itemWidth: 10, itemHeight: 10, selectedMode: false,
+        data: ['入荷', '出荷'], textStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono },
+      },
+      tooltip: {
+        trigger: 'item', backgroundColor: p.panel, borderColor: p.lineStrong, borderWidth: 1,
+        textStyle: { color: p.ink, fontSize: 12, fontFamily: p.fontSans },
+        extraCssText: 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.16);',
+        formatter: (d) => {
+          const q = ordered[d.dataIndex] || {};
+          return `<b>${q.id}</b>${q.derived ? ' <span style="opacity:.7">(推計)</span>' : ''}<br>`
+            + `${fmt(q.volume)} ${driverUnit(q.driver)} ÷ ${fmt(q.prod)} ${q.unit}`
+            + `${showPeak ? ` ×${fmt(peak, 2)}` : ''}<br>人時 ${fmt(mhOf(q), 1)}`;
+        },
+      },
+      xAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono },
+        splitLine: { lineStyle: { color: p.line } } },
+      yAxis: { type: 'category', data: cats, inverse: false,
+        axisLabel: { color: p.ink2, fontFamily: p.fontSans, fontSize: 12 },
+        axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+      series: [
+        { name: '入荷', type: 'bar', data: [], itemStyle: { color: p.inbound } },
+        { name: '出荷', type: 'bar', data: [], itemStyle: { color: p.accent } },
+        { name: '人時', type: 'bar', data: bars, barMaxWidth: 22,
+          label: { show: true, position: 'right', color: p.ink2, fontFamily: p.fontMono, fontSize: 10,
+            formatter: (d) => fmt(d.value, 1) } },
+      ],
+    }, true);
   }
 
   // Live update on slider input — recompute every 仮値 derivation + the right
@@ -372,13 +464,31 @@ export function mountBI(el, opts = {}) {
   const setText = (sel, txt) => { const n = root.querySelector(sel); if (n) n.textContent = txt; };
   const setHTML = (sel, html) => { const n = root.querySelector(sel); if (n) n.innerHTML = html; };
 
+  // Live slider repaint: update the right-pane header text + total + redraw the
+  // ECharts canvas IN PLACE (never rebuild #bi-right's innerHTML, which would
+  // destroy the canvas node). If the canvas is somehow missing (first paint),
+  // fall back to a full rebuild then draw.
   function repaintRight() {
     const procs = processes();
     const mhKey = (p) => (showPeak ? p.man_hours_peak : p.man_hours);
-    const maxMh = Math.max(1, ...procs.map(mhKey));
     const totalMh = procs.reduce((s, p) => s + mhKey(p), 0);
     const right = root.querySelector('#bi-right');
-    if (right) right.innerHTML = `${rightHeader()}${renderFlow(procs, maxMh, totalMh)}`;
+    if (!right) return;
+    const node = right.querySelector('[data-bi-flow]');
+    if (!node) {
+      const maxMh = Math.max(1, ...procs.map(mhKey));
+      right.innerHTML = `${rightHeader()}${renderFlow(procs, maxMh, totalMh)}`;
+    }
+    // header subtitle (平常/ピーク) + total label/value, updated in place
+    const sub = right.querySelector('.bi-h .sub');
+    if (sub) sub.textContent = `物量 → 人時（仮値とライブ連動・${showPeak ? `ピーク日 ×${fmt(peak, 2)}` : '平常日'}）`;
+    const totalRow = right.querySelector('.bi-total');
+    if (totalRow) {
+      const label = showPeak ? `合計 必要人時/日（ピーク ×${fmt(peak, 2)}）` : '合計 必要人時/日';
+      const lbl = totalRow.querySelector('span:first-child'); if (lbl) lbl.textContent = label;
+      const tv = root.querySelector('#bi-totalmh'); if (tv) tv.textContent = `${fmt(totalMh, 1)} 人時`;
+    }
+    drawFlowChart();
   }
 
   function wire() {
@@ -469,6 +579,12 @@ export function mountBI(el, opts = {}) {
     // refresh() works as before; pass a focus hint (e.g. {peak:true}) to honour
     // a 分析BI drill-down once the data finishes loading.
     refresh(focus) { if (focus) pendingFocus = focus; loadErr = null; vol = null; render(); load(); },
-    dispose() { el.innerHTML = ''; },
+    dispose() {
+      disposeChart();
+      if (ro) { ro.disconnect(); ro = null; }
+      window.removeEventListener('resize', resizeChart);
+      document.removeEventListener('themechange', onThemeChange);
+      el.innerHTML = '';
+    },
   };
 }

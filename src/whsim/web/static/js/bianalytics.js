@@ -1,34 +1,37 @@
 // bianalytics.js — 分析BIビュー. A ThoughtSpot-style "ask in words → chart"
 // surface over the already-aggregated analysis endpoint, plus auto-insight cards
-// and three hand-rolled SVG charts (ABC Pareto / weekday heatmap / time series).
+// and three commercial-grade ECharts visualisations:
+//   ・ABCパレート  : bar (rank-coloured) + cumulative line on a second axis, with
+//                    70/90% ABC band guides and toolbox (saveAsImage / restore).
+//   ・曜日別ヒート  : single-row heatmap with a visualMap colour ramp.
+//   ・時系列        : daily area line with brush + slider dataZoom (scrub by day) +
+//                    an hourly bar sparkline that doubles as the hour cross-filter.
 // Everything renders client-side from one GET — no server round-trip on interaction.
 //
-// World-view (strict): Void/panel surfaces from tokens, a single theme accent
-// (--accent, blue↔cyan per light/dark) + semantic green/amber/red only,
-// Chakra(display)/Grotesk(sans)/Space Mono(numerics). 120–180ms ease-out, no
-// idle loops, reduced-motion safe, data-ink maximised (hairline rules, no
-// frames/shadows). Comments EN; UI JA.
+// Cross-filter: clicking a Pareto bar (→ its rank), a heatmap cell (→ weekday),
+// a legend rank, or an hourly bar / dataZoom brush (→ hour range) toggles a facet;
+// the other charts + insight cards RE-AGGREGATE from the filtered `xtab` cells.
 //
-// Accent: injected CSS uses var(--accent) directly so it follows the theme.
-// Where SVG needs a literal colour string (stroke/fill attrs) we read --accent
-// once via getComputedStyle and refresh it on the `themechange` document event.
+// Theme: ECharts options are rebuilt from live CSS tokens (read via
+// getComputedStyle) and re-applied on the document `themechange` event, so charts
+// follow light/dark. Responsive via ResizeObserver + window resize. Reduced-motion
+// disables ECharts animation. Comments EN; UI JA.
 import { esc } from './util.js';
+import * as echarts from 'echarts';
+import { ABC_COLOR } from './constants.js';
 
-const ACCENT_FALLBACK = '#34E3FF';   // cyan fallback when --accent is unreadable
-const WARN = 'var(--warn)';
-const BAD = 'var(--bad)';
+const ACCENT_FALLBACK = '#16C0DE';
 const TIP_W = 220;                    // tooltip width (kept in sync with .bia-tip CSS)
 
-// Read the live --accent token (resolved hex) for use inside SVG attribute
-// strings. Refreshed on `themechange` so self-drawn charts follow the theme.
-function readAccent() {
-  const v = getComputedStyle(document.documentElement)
-    .getPropertyValue('--accent').trim();
-  return v || ACCENT_FALLBACK;
+// ── theme token reader ──────────────────────────────────────────────────
+// Resolve a CSS custom property to a concrete value (ECharts paints can't use
+// var()). Refreshed whenever we (re)build options, so charts track the theme.
+function tok(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
 }
-// Convert a hex (#rgb/#rrggbb) accent to an rgba() string at the given alpha;
-// non-hex values fall back to the resolved fallback so charts never break.
-function accentAlpha(hex, a) {
+// Convert a hex (#rgb/#rrggbb) to rgba() at the given alpha; non-hex falls back.
+function hexAlpha(hex, a) {
   let h = (hex || '').replace('#', '');
   if (h.length === 3) h = h.split('').map((c) => c + c).join('');
   if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) h = ACCENT_FALLBACK.slice(1);
@@ -36,6 +39,55 @@ function accentAlpha(hex, a) {
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
   return `rgba(${r},${g},${b},${a})`;
+}
+const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
+
+// Snapshot the live design tokens an ECharts option needs. Rebuilt per render so
+// a themechange (which mutates the CSS vars) is picked up by the next setOption.
+function palette() {
+  const accent = tok('--accent', ACCENT_FALLBACK);
+  return {
+    accent,
+    accentSoft: hexAlpha(accent, 0.4),
+    accentFill: hexAlpha(accent, 0.14),
+    ink: tok('--ink-primary', '#37352F'),
+    ink2: tok('--ink-secondary', 'rgba(55,53,47,0.65)'),
+    ink3: tok('--ink-tertiary', 'rgba(55,53,47,0.45)'),
+    line: tok('--line-hair', 'rgba(55,53,47,0.09)'),
+    lineStrong: tok('--line-strong', 'rgba(55,53,47,0.16)'),
+    panel: tok('--bg-app', '#FFFFFF'),
+    sunken: tok('--bg-sunken', '#FBFBFA'),
+    warn: tok('--warn', '#B7791F'),
+    bad: tok('--bad', '#C4453F'),
+    // ABC band fills track the shared constants palette (A/B/C).
+    rankA: tok('--rank-a', ABC_COLOR.A),
+    rankB: tok('--rank-b', ABC_COLOR.B),
+    rankC: tok('--rank-c', ABC_COLOR.C),
+    fontMono: tok('--font-mono', 'monospace'),
+    fontSans: tok('--font-sans', 'sans-serif'),
+  };
+}
+// Shared tooltip styling so every chart's floating tooltip matches the panel.
+function tipStyle(p) {
+  return {
+    backgroundColor: p.panel,
+    borderColor: p.lineStrong,
+    borderWidth: 1,
+    textStyle: { color: p.ink, fontSize: 12, fontFamily: p.fontSans },
+    extraCssText: 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.16);',
+  };
+}
+// Standard toolbox (image save + restore) — the saveAsImage label/icons are JA.
+function toolbox(p) {
+  return {
+    right: 8, top: 4,
+    iconStyle: { borderColor: p.ink3 },
+    emphasis: { iconStyle: { borderColor: p.accent } },
+    feature: {
+      saveAsImage: { title: '画像保存', backgroundColor: p.panel, pixelRatio: 2 },
+      restore: { title: '初期化' },
+    },
+  };
 }
 
 const WD = ['月', '火', '水', '木', '金', '土', '日'];
@@ -63,16 +115,6 @@ function injectStyle() {
     margin:0 auto;width:100%;padding:var(--sp-2) 2px var(--sp-8);color:var(--ink-primary);font-family:var(--font-sans)}
   .bia-dim{opacity:.34;transition:opacity var(--dur-2) var(--ease-out)}
   @media (prefers-reduced-motion:reduce){.bia-dim{transition:none}}
-
-  /* ── enter-only motion (mirror of analysis.js .an-in idiom) ── */
-  .bia-anim{opacity:0;transform:translateY(6px);will-change:transform,opacity}
-  .bia-anim.bia-in{opacity:1;transform:none;
-    transition:opacity var(--dur-3) var(--ease-out),transform var(--dur-3) var(--ease-out)}
-  .bia-anim.bia-settled{will-change:auto}
-  @media (prefers-reduced-motion:reduce){
-    .bia-anim{opacity:1;transform:none}
-    .bia-anim.bia-in{transition:none}
-  }
 
   /* ── loading spinner ── */
   .bia-load{display:flex;align-items:center;justify-content:center;gap:var(--sp-3);
@@ -115,7 +157,6 @@ function injectStyle() {
   .bia-filterbar{display:flex;align-items:center;flex-wrap:wrap;gap:var(--sp-2);min-height:24px;padding-left:var(--sp-1)}
   .bia-filterbar .lbl{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--ink-tertiary);
     letter-spacing:.08em}
-  /* one pill per active facet — the ✕ removes just that facet */
   .bia-pill{appearance:none;display:inline-flex;align-items:center;gap:var(--sp-2);font-family:var(--font-mono);
     font-size:var(--fs-micro);color:var(--accent);background:var(--accent-tint-2);
     border:1px solid var(--accent);border-radius:var(--r-pill);padding:var(--sp-1) var(--sp-3);cursor:pointer;
@@ -123,7 +164,6 @@ function injectStyle() {
   .bia-pill:hover{opacity:.75}
   .bia-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .bia-pill .x{font-weight:700}
-  /* "すべて解除" reset — quieter, no accent fill */
   .bia-fclear{appearance:none;font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--ink-secondary);
     background:transparent;border:1px solid var(--line-hair);border-radius:var(--r-pill);
     padding:var(--sp-1) var(--sp-3);cursor:pointer;transition:color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out)}
@@ -131,7 +171,7 @@ function injectStyle() {
   .bia-fclear:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){.bia-pill,.bia-fclear{transition:none}}
 
-  /* ── error / retry state (mirror of bi.js / dataanalysis.js) ── */
+  /* ── error / retry state ── */
   .bia-err{display:flex;flex-direction:column;align-items:center;gap:var(--sp-3);text-align:center;
     padding:32px 20px;color:var(--ink-secondary)}
   .bia-err .msg{font-size:var(--fs-sm);color:var(--ink-secondary)}
@@ -142,10 +182,6 @@ function injectStyle() {
   .bia-retry:hover{opacity:.88}
   .bia-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){.bia-retry{transition:none}}
-
-  /* Data/filter re-aggregation tween is driven by a small rAF lerp in JS
-     (snapshotMarks/tweenMarks), gated on prefers-reduced-motion there; the
-     heatmap cell keeps only its hover transform transition (above). */
 
   /* ── ② auto-insight cards ── */
   .bia-ins{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -165,58 +201,18 @@ function injectStyle() {
   /* ── ②b drill links (cross-view nav) ── */
   .bia-drill{display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
   .bia-drill a{font-family:var(--font-sans);font-size:var(--fs-xs);color:var(--accent);
-    cursor:pointer;text-decoration:none;
-    transition:opacity var(--dur-1) var(--ease-out)}
+    cursor:pointer;text-decoration:none;transition:opacity var(--dur-1) var(--ease-out)}
   .bia-drill a:hover{opacity:.7}
   @media (prefers-reduced-motion:reduce){.bia-drill a{transition:none}}
 
   /* ── shared chart shell ── */
   .bia-chart{background:var(--bg-panel);border:1px solid var(--line-hair);border-radius:var(--r-lg);padding:16px}
-  .bia-ch-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .bia-ch-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
   .bia-ch-h h3{margin:0;font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--ink-primary)}
   .bia-ch-h .sub{font-size:11px;color:var(--ink-tertiary)}
-  .bia-ch-h .leg{margin-left:auto;display:flex;gap:12px;font-size:10.5px;color:var(--ink-tertiary);
-    font-family:var(--font-mono)}
-  .bia-ch-h .leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
-  .bia-leg{cursor:pointer;border-radius:var(--r-xs);padding:0 var(--sp-1);
-    transition:color var(--dur-1) var(--ease-out)}
-  .bia-leg:hover{color:var(--ink-secondary)}
-  .bia-leg.sel{color:var(--accent)}
-  @media (prefers-reduced-motion:reduce){.bia-leg{transition:none}}
-  .bia svg{display:block;width:100%;height:auto}
-  .bia svg text{font-family:var(--font-mono);fill:var(--ink-tertiary)}
-  .bia svg .axt{fill:var(--ink-secondary)}
-  .bia svg .vlab{fill:var(--ink-secondary);font-variant-numeric:tabular-nums}
-  /* cross-filter: clickable marks + de-emphasised non-matching marks */
-  .bia-bar{cursor:pointer;transition:opacity var(--dur-2) var(--ease-out)}
-  .bia-bar.off{opacity:.22}
-  .bia-cell.off{opacity:.3}
-  .bia-pt[data-hr]{cursor:pointer}
-  /* brushing: live drag band + committed selection band on the hour sparkline */
-  .bia-brush{pointer-events:none}
-  .bia-brush-live{pointer-events:none}
-  @media (prefers-reduced-motion:reduce){.bia-bar{transition:none}}
-
-  /* ── weekday heatmap ── */
-  .bia-heat{display:flex;gap:6px}
-  .bia-cell{flex:1;border-radius:var(--r-sm);aspect-ratio:1/1.05;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:2px;border:1px solid var(--line-soft);
-    cursor:pointer;transition:transform var(--dur-1,90ms) var(--ease-out,ease)}
-  .bia-cell:hover{transform:translateY(-2px)}
-  @media (prefers-reduced-motion:reduce){.bia-cell{transition:none}.bia-cell:hover{transform:none}}
-  .bia-cell.max{outline:2px solid var(--accent);outline-offset:2px}
-  .bia-cell.sel{outline:2px solid var(--accent);outline-offset:2px}
-  .bia-cell .wd{font-family:var(--font-display);font-size:12px;font-weight:600}
-  .bia-cell .vv{font-family:var(--font-mono);font-size:10px;font-variant-numeric:tabular-nums}
-
-  /* ── tooltip (fixed width 220px — mirrored by TIP_W to avoid reflow reads) ── */
-  .bia-tip{position:fixed;z-index:50;pointer-events:none;opacity:0;transform:translateY(2px);
-    width:220px;box-sizing:border-box;
-    background:var(--bg-app);border:1px solid var(--line-strong);border-radius:var(--r-md);
-    padding:var(--sp-2) var(--sp-3);font-size:var(--fs-xs);color:var(--ink-primary);box-shadow:0 4px 16px rgba(0,0,0,.16);
-    transition:opacity var(--dur-1) var(--ease-out);white-space:normal}
-  .bia-tip.on{opacity:1}
-  .bia-tip .n{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--accent);font-weight:700}
+  .bia-ch-h .hint{margin-left:auto;font-size:10.5px;color:var(--ink-tertiary);font-family:var(--font-mono)}
+  /* the ECharts mount node — height is per-chart, width 100% (responsive) */
+  .bia-ec{width:100%}
 
   /* ── empty / scaffold ── */
   .bia-empty{background:var(--bg-panel);border:1px dashed var(--line-strong);border-radius:var(--r-lg);
@@ -227,11 +223,11 @@ function injectStyle() {
     color:var(--accent);border:1px solid var(--accent);border-radius:var(--r-pill);
     padding:var(--sp-2) var(--sp-5);cursor:pointer;transition:background var(--dur-2) var(--ease-out)}
   .bia-cta:hover{background:var(--accent-tint-2)}
-  /* primary (filled) variant — the data-import call to action */
   .bia-cta.primary{color:var(--bg-app);background:var(--accent);border-color:var(--accent);font-weight:700}
   .bia-cta.primary:hover{opacity:.88;background:var(--accent)}
   @media (prefers-reduced-motion:reduce){.bia-cta{transition:none}}
   .bia-scaffold{opacity:.5;filter:grayscale(.4)}
+  .bia-scaffold-note{padding:18px;text-align:center;color:var(--ink-tertiary);font-size:13px}
   `;
   document.head.appendChild(s);
 }
@@ -241,47 +237,44 @@ export function mountBIAnalytics(el, opts = {}) {
   const getProject = opts.getProject || (() => null);
   const toast = opts.toast || (() => {});
   // Optional Cody delegation: when a question matches no keyword rule and this
-  // is a function, the raw question is handed to Cody. Back-compatible: when
-  // unset, the legacy "近い質問" suggestion list is shown instead.
+  // is a function, the raw question is handed to Cody.
   const askCody = typeof opts.askCody === 'function' ? opts.askCody : null;
 
-  // Drill: ask PM-side to switch the active view. This file only fires the event;
-  // the host listens for `whsim:nav` and performs the actual view switch.
+  // Drill: ask PM-side to switch the active view (host listens for `whsim:nav`).
   const nav = (view) => document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view } }));
 
-  // Live accent (resolved hex) for SVG attribute strings. Read once, refreshed on
-  // the `themechange` document event so self-drawn charts follow light/dark.
-  let accent = readAccent();
-  let accent40 = accentAlpha(accent, 0.4);
+  // ── ECharts instance registry: id → instance. Disposed/cleared each render
+  // so a re-aggregation never leaks canvases. ResizeObserver keeps them sized.
+  const charts = new Map();
+  let ro = null;
+  function disposeCharts() {
+    charts.forEach((c) => { try { c.dispose(); } catch (_) { /* noop */ } });
+    charts.clear();
+  }
+  function ensureChart(node, id) {
+    const inst = echarts.init(node, null, { renderer: 'canvas' });
+    charts.set(id, inst);
+    if (ro) ro.observe(node);
+    return inst;
+  }
+  function onWinResize() { charts.forEach((c) => { try { c.resize(); } catch (_) { /* noop */ } }); }
+  window.addEventListener('resize', onWinResize);
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(() => { charts.forEach((c) => { try { c.resize(); } catch (_) { /* noop */ } }); });
+  }
+
   function onThemeChange() {
-    accent = readAccent();
-    accent40 = accentAlpha(accent, 0.4);
-    if (data && data.has_data) render();   // re-tint SVGs with the new accent
+    if (data && data.has_data) render();   // rebuild options from the new tokens
   }
   document.addEventListener('themechange', onThemeChange);
 
   // ── intra-view cross-filter state (TRUE propagation via xtab) ───────────
-  // A click on a bar / weekday cell / legend rank / hour toggles a facet; the
-  // weekday-heatmap, hourly chart and insight cards then RE-AGGREGATE from the
-  // `xtab` cell array filtered to ALL active facets (no refetch). The `abc`
-  // facet pins a clicked SKU (display-only on the Pareto); `rank` is the facet
-  // that actually propagates from an ABC click/legend.
-  //
-  // MULTI-SELECT: `rank`, `weekday` and `hour` are SETS of selected values
-  // (Set<string|number>). An EMPTY set means the facet is inactive (no
-  // constraint). `filteredCells()` matches a cell when its facet value is IN the
-  // set. Plain click toggles a single value (replace/clear); SHIFT or Ctrl/Cmd
-  // click adds/removes from the set. `abc` stays a single pinned SKU (or null).
+  // rank/weekday/hour are SETS (empty = inactive). abc is a single pinned SKU.
   let filterState = { abc: null, rank: new Set(), weekday: new Set(), hour: new Set() };
-  // weekday is stored as the numeric xtab index (0=月..6=日) for clean joins;
-  // labels are derived via xtabWeekdays() / WD for display.
-  const PROPAGATING = ['rank', 'weekday', 'hour'];   // facets that re-aggregate via xtab
+  const PROPAGATING = ['rank', 'weekday', 'hour'];
   const facetActive = (k) => filterState[k] instanceof Set && filterState[k].size > 0;
   const filterActive = () => PROPAGATING.some((k) => facetActive(k)) || filterState.abc != null;
   const propagatingActive = () => PROPAGATING.some((k) => facetActive(k));
-  // Count of propagating facets that have at least one selected value.
-  const activePropagatingFacets = () => PROPAGATING.filter((k) => facetActive(k));
-  // Sorted member array of a facet's set (numbers ascending, else lexical).
   function facetValues(key) {
     const s = filterState[key];
     if (!(s instanceof Set)) return [];
@@ -289,25 +282,17 @@ export function mountBIAnalytics(el, opts = {}) {
       ? a - b : String(a).localeCompare(String(b)));
   }
   const freshFilterState = () => ({ abc: null, rank: new Set(), weekday: new Set(), hour: new Set() });
-  function clearFilter() {
-    filterState = freshFilterState();
-    render();
-  }
-  // Remove an entire facet (the "abc" facet, or all members of a set facet).
+  function clearFilter() { filterState = freshFilterState(); render(); }
   function clearFacet(key) {
     if (key === 'abc') filterState.abc = null;
     else if (filterState[key] instanceof Set) filterState[key].clear();
     render();
   }
-  // Remove a single value from a set facet (used by per-value pills).
   function removeFacetValue(key, val) {
     if (filterState[key] instanceof Set) filterState[key].delete(val);
     render();
   }
-  // Toggle a value in a set facet.
-  //   additive=false (plain click): single-select — if the set is exactly {val}
-  //     clear it, otherwise replace the whole set with {val}.
-  //   additive=true (shift/ctrl/cmd click): add the value, or remove it if present.
+  // Toggle a value in a set facet (additive = shift/ctrl/cmd → multi-select).
   function toggleFilter(key, val, additive) {
     const s = filterState[key];
     if (!(s instanceof Set)) return;
@@ -320,17 +305,11 @@ export function mountBIAnalytics(el, opts = {}) {
     }
     render();
   }
-  // Detect the additive modifier from a keyboard/pointer event.
-  const isAdditive = (e) => !!(e && (e.shiftKey || e.ctrlKey || e.metaKey));
 
   // ── xtab helpers: derive filtered cell sets + re-aggregations ───────────
   const xtabCells = () => (data && Array.isArray(data.xtab) ? data.xtab : []);
   const xtabWeekdays = () => (data && Array.isArray(data.xtab_weekdays) && data.xtab_weekdays.length
     ? data.xtab_weekdays : WD);
-  // Cells matching ALL currently-active propagating facets (rank/weekday/hour).
-  // `except` lets a chart exclude its own facet so it shows the full distribution
-  // along its own axis (e.g. the weekday heatmap ignores the weekday facet so
-  // every weekday stays visible, with the selected one highlighted instead).
   function filteredCells(except) {
     return xtabCells().filter((c) => {
       if (except !== 'rank' && facetActive('rank') && !filterState.rank.has(c.rank)) return false;
@@ -339,7 +318,6 @@ export function mountBIAnalytics(el, opts = {}) {
       return true;
     });
   }
-  // Per-weekday totals (qty) from cells, indexed 0..6; ignores the weekday facet.
   function weekdayProfile() {
     const wd = xtabWeekdays();
     const totals = wd.map(() => 0);
@@ -348,19 +326,14 @@ export function mountBIAnalytics(el, opts = {}) {
     });
     return wd.map((label, i) => ({ label, weekday: i, qty: totals[i] }));
   }
-  // Per-hour totals (qty) from cells, indexed 0..23; ignores the hour facet.
   function hourProfile() {
     const totals = new Array(24).fill(0);
     filteredCells('hour').forEach((c) => {
       if (c.hour >= 0 && c.hour < 24) totals[c.hour] += (c.qty || 0);
     });
-    // mirror the default `hourly` label shape ("HH時") so tooltips read naturally
     return totals.map((qty, h) => ({ label: `${h}時`, hour: h, qty }));
   }
-  // weekday index → display label (月..日) using the payload's order when present.
   const weekdayLabel = (i) => (i == null ? '' : (xtabWeekdays()[i] || WD[i] || String(i)));
-  // Human-readable summary of the active facets, for card/insight copy.
-  // Multi-valued facets join their members with "・" (e.g. "火・水曜").
   function filterDescription() {
     const parts = [];
     if (facetActive('rank')) parts.push(`ランク${facetValues('rank').join('・')}`);
@@ -368,35 +341,25 @@ export function mountBIAnalytics(el, opts = {}) {
     if (facetActive('hour')) parts.push(`${facetValues('hour').join('・')}時`);
     return parts.join(' · ') || '選択';
   }
-  // xtab_sku: per-SKU × weekday breakdown ([{sku, weekday, qty, lines}]); empty
-  // when the server has no data. Used to RE-RANK the ABC Pareto under a
-  // weekday-only selection (a true re-aggregation, not a dim+annotate).
   const xtabSku = () => (data && Array.isArray(data.xtab_sku) ? data.xtab_sku : []);
   const hasSkuXtab = () => xtabSku().length > 0;
-  // True only when the weekday facet is the SOLE active facet (≥1 weekday, and
-  // no rank/hour facet) AND per-SKU weekday data exists — the one case where we
-  // can honestly re-rank individual SKUs by the selected weekday(s).
   function weekdayOnlySelection() {
     return facetActive('weekday') && !facetActive('rank') && !facetActive('hour') && hasSkuXtab();
   }
-  // Re-aggregate the abc[] SKUs by summing xtab_sku over the selected weekday(s),
-  // re-sort descending by the filtered qty, then recompute cumulative %/ranks for
-  // THAT selection. Returns the same row shape as data.abc (sku/name/qty/cum/rank)
-  // so the Pareto renderer is unchanged. Falls back to data.abc when not eligible.
+  // Re-aggregate the abc[] SKUs by summing xtab_sku over the selected weekday(s).
   function paretoRows() {
     const base = (data.abc || []).slice();
     if (!weekdayOnlySelection() || !base.length) return { rows: base, reranked: false };
-    const days = filterState.weekday;          // Set<number>
-    const byName = new Map();                   // display name → meta (carry name)
+    const days = filterState.weekday;
+    const byName = new Map();
     base.forEach((r) => { byName.set(r.sku || r.name, { sku: r.sku, name: r.name }); });
-    const qtyBy = new Map();                     // sku-key → summed qty for selection
+    const qtyBy = new Map();
     xtabSku().forEach((c) => {
       if (!days.has(c.weekday)) return;
       const key = c.sku;
-      if (!byName.has(key)) return;             // only re-rank known abc SKUs
+      if (!byName.has(key)) return;
       qtyBy.set(key, (qtyBy.get(key) || 0) + (c.qty || 0));
     });
-    // Build rows for every abc SKU (0 when it has no rows on the selected days).
     let rows = base.map((r) => {
       const key = r.sku || r.name;
       return { sku: r.sku, name: r.name, qty: qtyBy.get(key) || 0 };
@@ -413,9 +376,6 @@ export function mountBIAnalytics(el, opts = {}) {
     });
     return { rows, reranked: true };
   }
-
-  // Rank-level A/B/C distribution (lines + qty) for the *fully* filtered cells —
-  // used by the ABC chart when a weekday/hour facet makes per-SKU bars invalid.
   function rankDistribution() {
     const ranks = (data && Array.isArray(data.xtab_ranks) && data.xtab_ranks.length)
       ? data.xtab_ranks : ['A', 'B', 'C'];
@@ -433,38 +393,17 @@ export function mountBIAnalytics(el, opts = {}) {
   el.innerHTML = '';
   el.appendChild(root);
 
-  // one floating tooltip reused by every chart
-  const tip = document.createElement('div');
-  tip.className = 'bia-tip';
-  document.body.appendChild(tip);
-  const showTip = (html, ev) => {
-    tip.innerHTML = html;
-    tip.classList.add('on');
-    const px = (ev.clientX || 0) + 14;
-    const py = (ev.clientY || 0) + 14;
-    // Tooltip width is fixed in CSS (TIP_W); use the constant rather than
-    // reading offsetWidth, which would force a layout reflow on every hover.
-    tip.style.left = `${Math.min(px, window.innerWidth - TIP_W - 8)}px`;
-    tip.style.top = `${py}px`;
-  };
-  const hideTip = () => tip.classList.remove('on');
-
   let data = null;          // analysis payload
-  let lastParetoRows = [];  // rows actually drawn by svgPareto (default or re-ranked)
-  let loadErr = null;       // last load() failure (null = none); drives the retry state
+  let loadErr = null;       // last load() failure (null = none)
   let exIdx = 0, exTimer = 0;
-  let animatedOnce = false; // stagger fade-in only on first data arrival, not on
-                            // every filter/theme re-render
+  let dzTimer = 0;          // trailing-debounce timer for hourly dataZoom → facet
 
   // ── lightweight rule mapper: keyword → {section, answer} ──────────────
-  // Pure string rules over Japanese keywords; never calls the server. Unknown
-  // questions fall through to a "近い質問" suggestion list (the examples).
   function answerQuestion(qRaw) {
     const q = (qRaw || '').trim();
     if (!q) { setAnswer(''); clearDim(); return; }
     const has = (...ks) => ks.some((k) => q.includes(k));
 
-    // ABC / 上位 / 偏り
     if (has('ABC', 'abc', '上位', '主力', '偏', 'パレート', '20%')) {
       const a = data.abc || [];
       if (!a.length) return suggestNoData('abc');
@@ -475,7 +414,6 @@ export function mountBIAnalytics(el, opts = {}) {
       setAnswer(`上位 <b>${pct(topN / a.length)}</b> の SKU（<span class="hit">${fmt(topN)}品目</span>）が物量の <span class="hit">${pct(share)}</span> を占めます。最上位は <b>${esc(top[0].name || top[0].sku)}</b>。`);
       return;
     }
-    // 曜日（梱包/詰まる/混む/物量 を含む曜日質問）
     if (has('曜日') || has('梱包', '詰ま', '混む', '忙しい')) {
       const w = data.by_weekday || [];
       if (!w.length) return suggestNoData('weekday');
@@ -484,7 +422,6 @@ export function mountBIAnalytics(el, opts = {}) {
       setAnswer(`物量が最も多い曜日は <span class="hit">${esc(mx.label)}曜</span>（<b>${fmt(mx.qty)}</b>）。ここが詰まりやすい曜日です。`);
       return;
     }
-    // ピーク / 時間帯 / 時間
     if (has('ピーク', '時間帯', '時間', '何時', 'ピーク時')) {
       const h = data.hourly || [];
       if (!h.length) return suggestNoData('time');
@@ -493,7 +430,6 @@ export function mountBIAnalytics(el, opts = {}) {
       setAnswer(`ピークは <span class="hit">${esc(mx.label)}</span> 帯（<b>${fmt(mx.qty)}</b>）。人員はこの時間に厚く。`);
       return;
     }
-    // データ範囲 / 期間
     if (has('範囲', '期間', 'いつ', '何日', 'データ')) {
       const d = data.daily || [];
       if (!d.length) return suggestNoData('time');
@@ -502,16 +438,13 @@ export function mountBIAnalytics(el, opts = {}) {
       setAnswer(`データ範囲は <span class="hit">${fmt(d.length)}日分</span>（${esc(d[0].label || '')}〜${esc(d[d.length - 1].label || '')}）、合計 <b>${fmt(total)}</b>。`);
       return;
     }
-    // fall-through (no rule matched): delegate to Cody if available, else suggest.
     clearDim();
     if (askCody) {
-      // Show an inline handoff note first so the jump to Cody is not jarring.
       setAnswer(`<span class="sug">OCTA に聞いています…「<b>${esc(q)}</b>」</span>`);
       askCody(q);
       return;
     }
     setAnswer(`<span class="sug">うまく解釈できませんでした。近い質問: ${EXAMPLES.slice(0, 3).map((e) => `<u data-ex="${esc(e)}">${esc(e)}</u>`).join(' / ')}</span>`);
-    // [data-ex] clicks are handled by a single delegated listener on root (wireAsk).
   }
 
   function suggestNoData(section) {
@@ -534,25 +467,18 @@ export function mountBIAnalytics(el, opts = {}) {
       n.classList.toggle('bia-dim', n.dataset.sec !== section);
     });
     const tgt = root.querySelector(`[data-sec="${section}"]`);
-    if (tgt && !matchMedia('(prefers-reduced-motion:reduce)').matches) {
-      tgt.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
+    if (tgt && !reduceMotion()) tgt.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
   function clearDim() { root.querySelectorAll('[data-sec]').forEach((n) => n.classList.remove('bia-dim')); }
 
   // ── auto-insights (max 3): fact line + implication line ───────────────
-  // When a propagating facet (rank/weekday/hour) is active the weekday & hour
-  // figures are recomputed from the filtered xtab cells so the numbers reflect
-  // the current selection; otherwise the default unfiltered aggregates are used.
   function insights() {
     const out = [];
     const filtered = propagatingActive();
-    const selLabel = filterDescription();   // e.g. "ランクA · 火曜" for card copy
+    const selLabel = filterDescription();
     const abc = data.abc || [];
     if (abc.length) {
       if (weekdayOnlySelection()) {
-        // weekday-only + per-SKU data: a TRUE re-rank of the SKUs by the
-        // selected weekday(s) — report the re-aggregated top-20% concentration.
         const rows = paretoRows().rows.filter((r) => (r.qty || 0) > 0);
         if (rows.length) {
           const topN = Math.max(1, Math.round(rows.length * 0.2));
@@ -564,8 +490,6 @@ export function mountBIAnalytics(el, opts = {}) {
           });
         }
       } else if (filtered) {
-        // per-SKU re-ranking is impossible from rank-level xtab; report the
-        // rank-level mix of the selection instead of pretending to re-rank.
         const dist = rankDistribution();
         const tot = dist.reduce((s, r) => s + (r.qty || 0), 0) || 1;
         const aShare = (dist.find((r) => r.rank === 'A') || { qty: 0 }).qty / tot;
@@ -618,306 +542,354 @@ export function mountBIAnalytics(el, opts = {}) {
     return out.slice(0, 3);
   }
 
-  // ── ③ ABC Pareto (SVG): bars desc + cumulative line on right axis ─────
   // rankOf: A (cum≤70%) / B (≤90%) / C — used for both colour and rank filter.
   function rankOf(r) {
     if (r.rank === 'A' || r.rank === 'B' || r.rank === 'C') return r.rank;
     if (r.cum != null) return r.cum <= 0.7 ? 'A' : r.cum <= 0.9 ? 'B' : 'C';
     return 'C';
   }
-  function svgPareto() {
-    // paretoRows() returns the default abc[] OR, under a weekday-ONLY selection
-    // with per-SKU data (xtab_sku), a TRUE re-aggregation: SKUs re-summed over the
-    // selected weekday(s), re-sorted desc, with fresh cumulative %/ranks.
+
+  // ── chart shells: build an ECharts mount node inside a titled section ───
+  function chartShell(sec, title, sub, hint, height) {
+    const sect = document.createElement('section');
+    sect.className = 'bia-chart';
+    sect.dataset.sec = sec;
+    sect.innerHTML = `<div class="bia-ch-h"><h3>${esc(title)}</h3><span class="sub">${esc(sub)}</span>`
+      + `${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</div>`
+      + `<div class="bia-ec" data-ec="${esc(sec)}" style="height:${height}px"></div>`;
+    return sect;
+  }
+  function scaffoldShell(sec, title, sub) {
+    const sect = document.createElement('section');
+    sect.className = 'bia-chart bia-scaffold';
+    sect.dataset.sec = sec;
+    sect.innerHTML = `<div class="bia-ch-h"><h3>${esc(title)}</h3><span class="sub">${esc(sub)}</span></div>`
+      + `<div class="bia-scaffold-note">この図は実データが入ると描画されます。</div>`;
+    return sect;
+  }
+
+  // ── ③ ABC Pareto: rank-coloured bars + cumulative % line (2nd axis) ────
+  function buildPareto(node) {
+    const p = palette();
     const pr = paretoRows();
     const a = pr.rows.slice();
     const reranked = pr.reranked;
-    // expose the rendered rows (default OR re-ranked) so the bar tooltip/click
-    // wiring can look a bar up by its index against the SAME array that drew it.
-    lastParetoRows = a;
-    if (!a.length) return scaffold('abc', 'ABCパレート', '物量降順の棒＋累積%線');
-    // When a propagating facet is active that we CANNOT honestly re-rank (hour
-    // facet, or rank/weekday mixes, or weekday without per-SKU data), the per-SKU
-    // ordering no longer reflects the selection. Rather than fake it, we dim the
-    // bars and overlay the rank-level A/B/C split of the selection. The
-    // weekday-only-with-sku-data case is handled by `reranked` above instead.
+    // When a facet we cannot honestly re-rank is active, dim the bars and show the
+    // selection's rank-level A/B/C split instead of faking per-SKU order.
     const dimSku = propagatingActive() && !reranked;
-    const W = 760, H = 260, ml = 8, mr = 38, mt = 14, mb = 28;
-    const iw = W - ml - mr, ih = H - mt - mb;
-    const n = a.length;
-    const maxQ = Math.max(...a.map((r) => r.qty || 0), 1);
-    const bw = iw / n;
-    const x = (i) => ml + i * bw;
-    const yBar = (q) => mt + ih - (q / maxQ) * ih;
-    const yCum = (c) => mt + ih - (c) * ih; // c is 0..1
-    const colOf = (r) => { const k = rankOf(r); return k === 'A' ? accent : k === 'B' ? accent40 : 'var(--line-strong)'; };
-    // active cross-filter: a specific sku (bar) or one/more ranks (legend) may be
-    // selected. fRank is the multi-valued rank set (empty = no constraint).
+    const colorOf = (r) => { const k = rankOf(r); return k === 'A' ? p.rankA : k === 'B' ? p.rankB : p.rankC; };
     const fSku = filterState.abc;
     const isMatch = (r) => (fSku == null || (r.sku || r.name) === fSku)
       && (!facetActive('rank') || filterState.rank.has(rankOf(r)));
-    // bars (label the top few; hide labels on thin bars to avoid clutter)
-    const LABEL_TOP = Math.min(5, n);          // label at most the first 5 bars
-    let bars = '', vlabs = '';
-    a.forEach((r, i) => {
-      const h = mt + ih - yBar(r.qty || 0);
-      // dim when a weekday/hour facet invalidates per-SKU ranking, or when a
-      // sku/rank facet is active and this bar doesn't match it.
-      const off = dimSku || (filterActive() && !isMatch(r));
-      bars += `<rect class="bia-bar${off ? ' off' : ''}" data-i="${i}" data-sku="${esc(r.sku || r.name || '')}" `
-        + `x="${(x(i) + 1).toFixed(1)}" y="${yBar(r.qty || 0).toFixed(1)}" `
-        + `width="${Math.max(1, bw - 2).toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" `
-        + `fill="${colOf(r)}" rx="1"></rect>`;
-      // value labels: only top-N bars and only when the bar is wide enough to read
-      if (i < LABEL_TOP && bw >= 16 && (r.qty || 0) > 0) {
-        vlabs += `<text class="vlab" x="${(x(i) + bw / 2).toFixed(1)}" y="${(yBar(r.qty || 0) - 4).toFixed(1)}" `
-          + `font-size="9" text-anchor="middle">${fmt(r.qty)}</text>`;
-      }
-    });
-    // cumulative polyline (use provided cum, else derive)
-    let acc = 0; const tot = a.reduce((s, r) => s + (r.qty || 0), 0) || 1;
-    const pts = a.map((r, i) => {
-      const c = r.cum != null ? r.cum : (acc += (r.qty || 0) / tot, acc);
-      return `${(x(i) + bw / 2).toFixed(1)},${yCum(Math.min(1, c)).toFixed(1)}`;
-    }).join(' ');
-    // 70/90 guides + right axis ticks
-    const guide = (frac, label, col) => {
-      const yy = yCum(frac).toFixed(1);
-      return `<line x1="${ml}" x2="${ml + iw}" y1="${yy}" y2="${yy}" stroke="${col}" stroke-width="1" stroke-dasharray="3 3" opacity=".5"></line>`
-        + `<text x="${ml + iw + 4}" y="${(+yy + 3).toFixed(1)}" font-size="9">${label}</text>`;
-    };
-    let axis = '';
-    [0, 0.5, 1].forEach((f) => {
-      axis += `<text x="${ml + iw + 4}" y="${(yCum(f) + 3).toFixed(1)}" font-size="9">${pct(f)}</text>`;
-    });
-    const top = a[0];
-    // overlay shown when per-SKU bars are dimmed: the honest rank-level A/B/C
-    // split of the current selection (we do NOT re-rank individual SKUs).
-    let overlay = '';
+
     if (dimSku) {
+      // honest rank-level composition bars (A/B/C) for the current selection
       const dist = rankDistribution();
       const totQ = dist.reduce((s, r) => s + (r.qty || 0), 0) || 1;
-      const parts = dist.map((r) => `${esc(r.rank)} ${pct((r.qty || 0) / totQ)}`).join('　');
-      const note = `${filterDescription()}で絞込中`;
-      overlay = `<text x="${(ml + iw / 2).toFixed(1)}" y="${(mt + ih / 2 - 8).toFixed(1)}" `
-        + `font-size="12" text-anchor="middle" class="axt">${esc(note)}</text>`
-        + `<text x="${(ml + iw / 2).toFixed(1)}" y="${(mt + ih / 2 + 10).toFixed(1)}" `
-        + `font-size="11" text-anchor="middle" class="vlab" font-family="var(--font-mono)">${esc('選択物量のランク構成 ' + parts)}</text>`;
+      const cats = dist.map((r) => `ランク${r.rank}`);
+      const inst = ensureChart(node, 'abc');
+      inst.setOption({
+        animation: !reduceMotion(),
+        grid: { left: 48, right: 24, top: 28, bottom: 28 },
+        toolbox: toolbox(p),
+        tooltip: {
+          trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
+          formatter: (ps) => {
+            const r = dist[ps[0].dataIndex] || {};
+            return `<b>ランク${esc(r.rank)}</b><br>物量 ${fmt(r.qty)}（${pct((r.qty || 0) / totQ)}）<br>ライン ${fmt(r.lines)}`;
+          },
+        },
+        title: {
+          text: `${filterDescription()}で絞込中・選択物量のランク構成`,
+          left: 'center', top: 2,
+          textStyle: { color: p.ink2, fontSize: 11, fontFamily: p.fontMono, fontWeight: 'normal' },
+        },
+        xAxis: {
+          type: 'category', data: cats,
+          axisLabel: { color: p.ink2, fontFamily: p.fontMono },
+          axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false },
+        },
+        yAxis: {
+          type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono },
+          splitLine: { lineStyle: { color: p.line } },
+        },
+        series: [{
+          type: 'bar', barMaxWidth: 80,
+          data: dist.map((r) => ({ value: r.qty || 0, itemStyle: { color: colorOf({ rank: r.rank }) } })),
+          label: { show: true, position: 'top', color: p.ink2, fontFamily: p.fontMono,
+            formatter: (d) => pct((dist[d.dataIndex].qty || 0) / totQ) },
+        }],
+      }, true);
+      return;
     }
-    const aria = dimSku
-      ? `ABCパレート図。${esc(filterDescription())}で絞込中のため個別SKUの再ランクは表示できません。選択物量のランク構成を表示。`
-      : reranked
-        ? `ABCパレート図。${esc(filterDescription())}で再集計し、${fmt(n)}品目を選択物量の降順で再ランク表示。最上位は ${esc(top.name || top.sku || '')}、物量 ${fmt(top.qty)}。`
-        : `ABCパレート図。${fmt(n)}品目を物量降順で表示。最上位は ${esc(top.name || top.sku || '')}、物量 ${fmt(top.qty)}。`;
-    const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
-      ${guide(0.7, '70%', WARN)}${guide(0.9, '90%', BAD)}
-      ${bars}
-      ${dimSku ? '' : vlabs}
-      <polyline points="${pts}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round"${dimSku ? ' opacity=".22"' : ''}></polyline>
-      ${a.map((r, i) => { let c2 = r.cum != null ? r.cum : 0; return `<circle cx="${(x(i) + bw / 2).toFixed(1)}" cy="${yCum(Math.min(1, c2)).toFixed(1)}" r="2" fill="${accent}"${dimSku ? ' opacity=".22"' : ''}></circle>`; }).join('')}
-      ${axis}
-      ${overlay}
-    </svg>`;
-    // subtitle states the active selection: re-ranked / dim+annotate / default.
-    const sub = reranked ? `${filterDescription()}で再集計（再ランク済み）`
-      : dimSku ? `${filterDescription()}で絞込中・再ランク不可`
-        : `${fmt(n)}品目を物量降順で`;
-    // legend ranks are clickable filters (data-rank)
-    return chartShell('abc', 'ABCパレート', sub, svg, [
-      [accent, 'A (〜70%)', 'A'], [accent40, 'B (〜90%)', 'B'], ['var(--line-strong)', 'C', 'C'],
-    ]);
+
+    if (!a.length) { node.parentElement.replaceWith(scaffoldShell('abc', 'ABCパレート', '物量降順の棒＋累積%線')); return; }
+
+    const cats = a.map((r, i) => r.name || r.sku || `#${i + 1}`);
+    const tot = a.reduce((s, r) => s + (r.qty || 0), 0) || 1;
+    let acc = 0;
+    const cum = a.map((r) => { const c = r.cum != null ? r.cum : (acc += (r.qty || 0) / tot, acc); return Math.min(1, c) * 100; });
+    const barData = a.map((r) => {
+      const off = filterActive() && !isMatch(r);
+      return { value: r.qty || 0, itemStyle: { color: colorOf(r), opacity: off ? 0.25 : 1 } };
+    });
+    // reflect the active selection in the section subtitle (re-ranked vs default)
+    const sub = reranked ? `${filterDescription()}で再集計（再ランク済み）` : `${fmt(a.length)}品目を物量降順で`;
+    const subEl = node.parentElement && node.parentElement.querySelector('.bia-ch-h .sub');
+    if (subEl) subEl.textContent = sub;
+    const inst = ensureChart(node, 'abc');
+    inst.setOption({
+      animation: !reduceMotion(),
+      grid: { left: 52, right: 52, top: 16, bottom: a.length > 14 ? 56 : 30 },
+      toolbox: toolbox(p),
+      legend: {
+        // Clickable rank legend (cross-filter). The A/B/C entries map to empty
+        // proxy series, so ECharts "hiding" one on click is invisible; our
+        // legendselectchanged handler maps the click to the rank facet + re-renders
+        // (which rebuilds the legend fresh, so the swatches never stay greyed).
+        top: 0, right: 90, icon: 'roundRect', itemWidth: 10, itemHeight: 10,
+        textStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono },
+        data: ['A (〜70%)', 'B (〜90%)', 'C'],
+      },
+      tooltip: {
+        trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
+        formatter: (ps) => {
+          const i = ps[0].dataIndex; const r = a[i] || {};
+          return `<b>${esc(r.name || r.sku)}</b><br>物量 ${fmt(r.qty)} · 累積 ${pct((r.cum != null ? r.cum : cum[i] / 100))}<br>ランク ${esc(rankOf(r))}`;
+        },
+      },
+      xAxis: {
+        type: 'category', data: cats,
+        axisLabel: { show: a.length <= 20, color: p.ink3, fontFamily: p.fontMono, rotate: a.length > 8 ? 40 : 0,
+          interval: 0, hideOverlap: true, formatter: (v) => (v.length > 8 ? `${v.slice(0, 8)}…` : v) },
+        axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false },
+      },
+      yAxis: [
+        { type: 'value', name: '物量', nameTextStyle: { color: p.ink3, fontFamily: p.fontMono, fontSize: 10 },
+          axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
+        { type: 'value', name: '累積%', min: 0, max: 100,
+          nameTextStyle: { color: p.ink3, fontFamily: p.fontMono, fontSize: 10 },
+          axisLabel: { color: p.ink3, fontFamily: p.fontMono, formatter: '{value}%' }, splitLine: { show: false } },
+      ],
+      series: [
+        // ABC legend proxies (no data) so the rank colours show in the legend.
+        { name: 'A (〜70%)', type: 'bar', data: [], itemStyle: { color: p.rankA } },
+        { name: 'B (〜90%)', type: 'bar', data: [], itemStyle: { color: p.rankB } },
+        { name: 'C', type: 'bar', data: [], itemStyle: { color: p.rankC } },
+        {
+          name: '物量', type: 'bar', yAxisIndex: 0, data: barData, barMaxWidth: 34,
+        },
+        {
+          // cumulative % on the 2nd axis; the 70/90% ABC band guides ride this
+          // series so `yAxis: 70/90` maps to the percentage scale (not 物量).
+          name: '累積%', type: 'line', yAxisIndex: 1, data: cum, smooth: false,
+          symbol: 'circle', symbolSize: 5, lineStyle: { color: p.accent, width: 2 },
+          itemStyle: { color: p.accent }, z: 5,
+          markLine: {
+            silent: true, symbol: 'none',
+            label: { color: p.ink2, fontFamily: p.fontMono, fontSize: 9, formatter: '{b}' },
+            data: [
+              { yAxis: 70, name: '70%', lineStyle: { color: p.warn, type: 'dashed' } },
+              { yAxis: 90, name: '90%', lineStyle: { color: p.bad, type: 'dashed' } },
+            ],
+          },
+        },
+      ],
+    }, true);
+    // Click a bar → pin SKU + propagate its rank (plain = single, shift/ctrl = add).
+    inst.on('click', { seriesName: '物量' }, (params) => {
+      const r = a[params.dataIndex]; if (!r) return;
+      const sku = r.sku || r.name;
+      const rk = rankOf(r);
+      const additive = !!(params.event && (params.event.shiftKey || params.event.ctrlKey || params.event.metaKey));
+      if (filterState.abc === sku) { filterState.abc = null; filterState.rank.delete(rk); }
+      else { filterState.abc = sku; if (additive) filterState.rank.add(rk); else { filterState.rank.clear(); filterState.rank.add(rk); } }
+      render();
+    });
+    // Click a legend rank proxy → toggle that rank facet.
+    inst.on('legendselectchanged', (params) => {
+      const map = { 'A (〜70%)': 'A', 'B (〜90%)': 'B', 'C': 'C' };
+      const rk = map[params.name];
+      if (rk) toggleFilter('rank', rk, false);
+    });
   }
 
-  // ── ④ weekday mini-heatmap: 7 accent-shade cells, ring on max ─────────
-  // Re-aggregates from filtered xtab cells whenever a propagating facet
-  // (rank/hour) is active, so e.g. selecting rank A shows A's weekday profile.
-  // The weekday facet itself is excluded from the filter (every weekday stays
-  // visible) and instead surfaces as a highlighted .sel cell.
-  function heatWeekday() {
+  // ── ④ weekday heatmap (single-row) with visualMap colour ramp ──────────
+  function buildWeekday(node) {
+    const p = palette();
     const haveXtab = xtabCells().length > 0;
-    let series;   // [{label, qty, weekday}] indexed for cells (weekday may be null)
+    let series;
     if (haveXtab) {
-      series = weekdayProfile();   // re-aggregated, intersects active facets
+      series = weekdayProfile();
     } else {
       const raw = data.by_weekday || [];
-      if (!raw.length) return scaffold('weekday', '曜日別ヒートマップ', '7セルの濃淡');
+      if (!raw.length) { node.parentElement.replaceWith(scaffoldShell('weekday', '曜日別ヒートマップ', '7セルの濃淡')); return; }
       const byLabel = {}; raw.forEach((r) => { byLabel[r.label] = r.qty || 0; });
       series = WD.every((d) => d in byLabel)
         ? WD.map((d, i) => ({ label: d, qty: byLabel[d], weekday: i }))
         : raw.map((r) => ({ label: r.label, qty: r.qty || 0, weekday: WD.indexOf(r.label) }));
     }
-    if (!series.length) return scaffold('weekday', '曜日別ヒートマップ', '7セルの濃淡');
+    if (!series.length) { node.parentElement.replaceWith(scaffoldShell('weekday', '曜日別ヒートマップ', '7セルの濃淡')); return; }
     const max = Math.max(...series.map((r) => r.qty || 0), 1);
-    const mxRow = series.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), series[0]);
-    const fWd = filterState.weekday;     // Set<number> of selected weekday indices
-    const cells = series.map((r) => {
-      const t = (r.qty || 0) / max;                 // 0..1
-      const a = 0.10 + t * 0.78;                     // alpha ramp on accent
-      const isMax = (r.qty || 0) === max && max > 0;
-      const sel = r.weekday != null && fWd.has(r.weekday);
-      // high-contrast ink on dark cells; tertiary-ink-ish on faint cells
-      const ink = t > 0.55 ? 'var(--bg-app)' : 'var(--ink-secondary)';
-      // tween cell intensity via CSS transition on background (data-driven recolour)
-      return `<div class="bia-cell bia-tcell${isMax ? ' max' : ''}${sel ? ' sel' : ''}"
-        data-hd="${esc(r.label)}|${r.qty || 0}" data-wd="${r.weekday == null ? '' : r.weekday}" role="button" tabindex="0"
-        aria-label="${esc(r.label)}曜 物量 ${fmt(r.qty)}${sel ? '（選択中）' : ''}"
-        style="background:${accentAlpha(accent, +a.toFixed(3))}">
-        <span class="wd" style="color:${ink}">${esc(r.label)}</span>
-        <span class="vv" style="color:${ink}">${fmt(r.qty)}</span></div>`;
-    }).join('');
-    const subtitle = propagatingActive() ? `${esc(filterDescription())}で絞込中` : '濃いほど物量大';
-    const aria = `曜日別ヒートマップ。物量が最も多いのは ${esc(mxRow.label)}曜（${fmt(mxRow.qty)}）。`;
-    const heat = `<div class="bia-heat" role="img" aria-label="${esc(aria)}">${cells}</div>`;
-    return chartShell('weekday', '曜日別ヒートマップ', subtitle, heat, null);
+    const fWd = filterState.weekday;
+    const cats = series.map((r) => r.label);
+    // heatmap data: [x, y(0), value]; carry index for click→weekday facet.
+    const cells = series.map((r, i) => ({
+      value: [i, 0, r.qty || 0],
+      itemStyle: (r.weekday != null && fWd.has(r.weekday))
+        ? { borderColor: p.accent, borderWidth: 2 } : undefined,
+    }));
+    const inst = ensureChart(node, 'weekday');
+    inst.setOption({
+      animation: !reduceMotion(),
+      grid: { left: 12, right: 16, top: 10, bottom: 56, containLabel: true },
+      toolbox: toolbox(p),
+      tooltip: {
+        ...tipStyle(p),
+        formatter: (d) => `<b>${esc(series[d.value[0]].label)}曜</b> · ${fmt(d.value[2])}`,
+      },
+      xAxis: {
+        type: 'category', data: cats, splitArea: { show: true },
+        axisLabel: { color: p.ink2, fontFamily: p.fontMono, fontSize: 12 },
+        axisLine: { show: false }, axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'category', data: [''], splitArea: { show: false },
+        axisLabel: { show: false }, axisLine: { show: false }, axisTick: { show: false },
+      },
+      visualMap: {
+        min: 0, max, calculable: true, orient: 'horizontal', left: 'center', bottom: 4,
+        inRange: { color: [hexAlpha(p.accent, 0.12), p.accent] },
+        textStyle: { color: p.ink3, fontFamily: p.fontMono },
+      },
+      series: [{
+        type: 'heatmap', data: cells,
+        label: { show: true, color: p.ink, fontFamily: p.fontMono, fontSize: 11, formatter: (d) => fmt(d.value[2]) },
+        emphasis: { itemStyle: { shadowBlur: 8, shadowColor: hexAlpha(p.accent, 0.5) } },
+      }],
+    }, true);
+    inst.on('click', (params) => {
+      const r = series[params.value ? params.value[0] : params.dataIndex];
+      if (!r || r.weekday == null) return;
+      const additive = !!(params.event && (params.event.shiftKey || params.event.ctrlKey || params.event.metaKey));
+      toggleFilter('weekday', r.weekday, additive);
+    });
   }
 
-  // ── ⑤ time series: daily area (faint cyan fill + line) + hourly sparkline
-  // The hourly curve is RE-AGGREGATED from filtered xtab cells (so selecting
-  // 火曜 reshapes it to Tuesday). The daily series is filtered to matching
-  // weekdays ONLY when a weekday facet is the sole active facet (day index
-  // carries weekday via day%7, matching the server's floor(arrival_s/86400)%7);
-  // otherwise the full series is shown so the trend stays readable.
-  function timeSeries() {
+  // ── ⑤ time series: daily area (dataZoom slider+brush) + hourly bars ────
+  function buildDaily(node) {
+    const p = palette();
     const allDaily = data.daily || [];
-    const haveXtab = xtabCells().length > 0;
-    // hourly: re-aggregate from xtab when available, else fall back to default
-    const hourly = haveXtab
-      ? hourProfile().map((r) => ({ ...r, label: `${r.hour}時` }))
-      : (data.hourly || []).map((r) => ({ ...r, label: r.label || (r.hour != null ? `${r.hour}時` : '') }));
-    // daily: filter to the selected weekday(s) only when weekday is the lone active
-    // facet (multi-select supported — keep any day whose weekday is in the set).
-    const onlyWeekday = facetActive('weekday')
-      && !facetActive('rank') && !facetActive('hour');
+    const onlyWeekday = facetActive('weekday') && !facetActive('rank') && !facetActive('hour');
     const daily = (onlyWeekday && allDaily.length && allDaily.every((r) => r.day != null))
       ? allDaily.filter((r) => filterState.weekday.has(r.day % 7))
       : allDaily;
-    if (!daily.length && !hourly.length) return scaffold('time', '時系列', '日次エリア＋時間スパークライン');
-    let body = '';
-    if (daily.length) body += areaSVG(daily, 'daily');
-    if (hourly.length) {
-      const hsub = propagatingActive() ? `${esc(filterDescription())}で絞込中` : 'スパークライン';
-      body += `<div style="margin-top:14px"><div class="bia-ch-h" style="margin-bottom:6px">
-        <h3 style="font-size:12px">時間帯</h3><span class="sub">${hsub}</span></div>${sparkSVG(hourly)}</div>`;
-    }
-    let sub = daily.length ? `日次 ${fmt(daily.length)}日` : '時間帯別';
-    if (onlyWeekday && daily.length) {
-      sub += `（${facetValues('weekday').map(weekdayLabel).join('・')}曜のみ）`;
-    }
-    return chartShell('time', '時系列', sub, body, null);
+    if (!daily.length) { node.parentElement.replaceWith(scaffoldShell('time', '時系列', '日次エリア＋時間スパークライン')); return; }
+    const cats = daily.map((r) => r.label || '');
+    const vals = daily.map((r) => r.qty || 0);
+    const inst = ensureChart(node, 'daily');
+    inst.setOption({
+      animation: !reduceMotion(),
+      grid: { left: 52, right: 20, top: 18, bottom: 64 },
+      toolbox: toolbox(p),
+      tooltip: { trigger: 'axis', ...tipStyle(p),
+        formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data)}` },
+      dataZoom: [
+        { type: 'inside', filterMode: 'none' },
+        { type: 'slider', height: 22, bottom: 18, filterMode: 'none',
+          borderColor: p.line, fillerColor: hexAlpha(p.accent, 0.14),
+          handleStyle: { color: p.accent }, moveHandleStyle: { color: p.accentSoft },
+          dataBackground: { lineStyle: { color: p.accentSoft }, areaStyle: { color: hexAlpha(p.accent, 0.1) } },
+          textStyle: { color: p.ink3, fontFamily: p.fontMono } },
+      ],
+      xAxis: {
+        type: 'category', data: cats, boundaryGap: false,
+        axisLabel: { color: p.ink3, fontFamily: p.fontMono, hideOverlap: true },
+        axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false },
+      },
+      yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono },
+        splitLine: { lineStyle: { color: p.line } } },
+      series: [{
+        name: '日次物量', type: 'line', data: vals, smooth: false,
+        symbol: 'circle', symbolSize: 4, showSymbol: false,
+        lineStyle: { color: p.accent, width: 2 }, itemStyle: { color: p.accent },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: hexAlpha(p.accent, 0.22) }, { offset: 1, color: hexAlpha(p.accent, 0.02) }]) },
+        markPoint: { symbol: 'pin', symbolSize: 40, data: [{ type: 'max', name: 'ピーク' }],
+          itemStyle: { color: p.accent }, label: { color: p.panel, fontSize: 9, fontFamily: p.fontMono } },
+      }],
+    }, true);
   }
 
-  function areaSVG(d, kind) {
-    const W = 760, H = 170, ml = 8, mr = 8, mt = 12, mb = 22;
-    const iw = W - ml - mr, ih = H - mt - mb, n = d.length;
-    const max = Math.max(...d.map((r) => r.qty || 0), 1);
-    const x = (i) => ml + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
-    const y = (q) => mt + ih - (q / max) * ih;
-    const line = d.map((r, i) => `${x(i).toFixed(1)},${y(r.qty || 0).toFixed(1)}`).join(' ');
-    const area = `${ml},${(mt + ih).toFixed(1)} ${line} ${(ml + iw).toFixed(1)},${(mt + ih).toFixed(1)}`;
-    const labels = [0, Math.floor(n / 2), n - 1].filter((i, k, a) => a.indexOf(i) === k && i >= 0);
-    const dots = d.map((r, i) => `<rect class="bia-pt" data-pt="${esc(r.label || '')}|${r.qty || 0}" x="${(x(i) - Math.max(3, iw / n / 2)).toFixed(1)}" y="${mt}" width="${Math.max(6, iw / n).toFixed(1)}" height="${ih}" fill="transparent"></rect>`).join('');
-    // y-axis: a couple of tick labels (max + mid) so the magnitude is legible
-    const yticks = [max, max / 2].map((v) => `<text x="${ml}" y="${(y(v) - 3).toFixed(1)}" font-size="8" text-anchor="start">${fmt(v)}</text>`).join('');
-    // peak callout: dot + value label on the highest day
-    const pi = d.reduce((bi, r, i) => ((r.qty || 0) > (d[bi].qty || 0) ? i : bi), 0);
-    const peak = `<circle cx="${x(pi).toFixed(1)}" cy="${y(d[pi].qty || 0).toFixed(1)}" r="3" fill="${accent}"></circle>`
-      + `<text class="vlab" x="${x(pi).toFixed(1)}" y="${(y(d[pi].qty || 0) - 6).toFixed(1)}" font-size="9" text-anchor="middle">${fmt(d[pi].qty)}</text>`;
-    const aria = `日次物量の推移。${fmt(n)}日分、最大は ${esc(d[pi].label || '')} の ${fmt(d[pi].qty)}。`;
-    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">
-      <polygon points="${area}" fill="${accentAlpha(accent, 0.12)}"></polygon>
-      <polyline points="${line}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round"></polyline>
-      ${yticks}
-      ${peak}
-      ${labels.map((i) => `<text x="${x(i).toFixed(1)}" y="${H - 6}" font-size="9" text-anchor="${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}">${esc(d[i].label || '')}</text>`).join('')}
-      ${dots}
-    </svg>`;
-  }
-
-  function sparkSVG(h) {
-    const W = 760, H = 70, ml = 8, mr = 8, mt = 8, mb = 16;
-    const iw = W - ml - mr, ih = H - mt - mb, n = h.length;
-    const max = Math.max(...h.map((r) => r.qty || 0), 1);
-    const x = (i) => ml + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
-    const y = (q) => mt + ih - (q / max) * ih;
-    const line = h.map((r, i) => `${x(i).toFixed(1)},${y(r.qty || 0).toFixed(1)}`).join(' ');
-    const mxi = h.reduce((bi, r, i) => ((r.qty || 0) > (h[bi].qty || 0) ? i : bi), 0);
-    const hourSel = filterState.hour;   // Set<number> of selected hours
-    // hourly hotspots are also clickable cross-filters on the hour facet (data-hr);
-    // each carries data-i / data-x so the brush handler can map a pointer x back to
-    // an hour index without re-reading layout. Geometry constants are exposed on the
-    // SVG via data-* so brushHour() can build the visual band in viewBox units.
-    const bars = h.map((r, i) => {
-      const seld = r.hour != null && hourSel.has(r.hour);
-      return `<rect class="bia-pt${seld ? ' sel' : ''}" data-pt="${esc(r.label || '')}|${r.qty || 0}"`
-        + `${r.hour != null ? ` data-hr="${r.hour}"` : ''} data-i="${i}" role="button" tabindex="0"`
-        + ` aria-label="${esc(r.label || '')} 物量 ${fmt(r.qty)}${seld ? '（選択中）' : ''}"`
-        + ` x="${(x(i) - Math.max(3, iw / n / 2)).toFixed(1)}" y="${mt}" width="${Math.max(5, iw / n).toFixed(1)}" height="${ih}" fill="transparent"></rect>`;
-    }).join('');
-    // brushed band: shade the contiguous selected-hour range so a drag selection
-    // reads as a single region (mirror of a Tableau range brush). Only when the
-    // selected hours map to known indices in this series.
-    let band = '';
-    if (hourSel.size) {
-      const idxs = h.map((r, i) => (r.hour != null && hourSel.has(r.hour) ? i : -1)).filter((i) => i >= 0);
-      if (idxs.length) {
-        const i0 = Math.min(...idxs), i1 = Math.max(...idxs);
-        const half = Math.max(3, iw / n / 2);
-        const bx = (x(i0) - half).toFixed(1);
-        const bw = (x(i1) + half - (x(i0) - half)).toFixed(1);
-        band = `<rect class="bia-brush" x="${bx}" y="${mt}" width="${bw}" height="${ih}" `
-          + `fill="${accentAlpha(accent, 0.14)}" stroke="${accent40}" stroke-width="1" rx="2" pointer-events="none"></rect>`;
+  function buildHourly(node) {
+    const p = palette();
+    const haveXtab = xtabCells().length > 0;
+    const hourly = haveXtab
+      ? hourProfile().map((r) => ({ ...r, label: `${r.hour}時` }))
+      : (data.hourly || []).map((r) => ({ ...r, label: r.label || (r.hour != null ? `${r.hour}時` : '') }));
+    if (!hourly.length) { node.parentElement.replaceWith(scaffoldShell('hour', '時間帯', 'スパークライン')); return; }
+    const cats = hourly.map((r) => r.label);
+    const hourSel = filterState.hour;
+    const bars = hourly.map((r) => ({
+      value: r.qty || 0,
+      itemStyle: { color: (r.hour != null && hourSel.has(r.hour)) ? p.accent : hexAlpha(p.accent, 0.5) },
+    }));
+    const inst = ensureChart(node, 'hour');
+    inst.setOption({
+      animation: !reduceMotion(),
+      grid: { left: 44, right: 16, top: 12, bottom: 46 },
+      toolbox: toolbox(p),
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
+        formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data.value != null ? ps[0].data.value : ps[0].data)}` },
+      // brush via dataZoom: drag the slider to commit a contiguous hour range.
+      dataZoom: [
+        { type: 'inside', filterMode: 'none' },
+        { type: 'slider', height: 18, bottom: 14, filterMode: 'none',
+          borderColor: p.line, fillerColor: hexAlpha(p.accent, 0.14), handleStyle: { color: p.accent },
+          textStyle: { color: p.ink3, fontFamily: p.fontMono } },
+      ],
+      xAxis: { type: 'category', data: cats,
+        axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: 3 },
+        axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono },
+        splitLine: { lineStyle: { color: p.line } } },
+      series: [{ name: '時間帯物量', type: 'bar', data: bars, barMaxWidth: 22 }],
+    }, true);
+    // Single bar tap → toggle that hour facet (plain = single, shift = add).
+    inst.on('click', (params) => {
+      const r = hourly[params.dataIndex]; if (!r || r.hour == null) return;
+      const additive = !!(params.event && (params.event.shiftKey || params.event.ctrlKey || params.event.metaKey));
+      toggleFilter('hour', r.hour, additive);
+    });
+    // dataZoom drag → commit the visible hour range as the hour facet. Debounced
+    // and deferred: a drag fires many `datazoom` ticks, and render() disposes the
+    // very instance that's firing, so we read state synchronously then re-render on
+    // a trailing timer (settled), guarding against disposing mid-dispatch.
+    inst.on('datazoom', () => {
+      const opt = inst.getOption();
+      const dz = (opt.dataZoom || []).find((z) => z.type === 'slider') || (opt.dataZoom || [])[0];
+      if (!dz) return;
+      const n = hourly.length;
+      const i0 = Math.max(0, Math.round((dz.start / 100) * (n - 1)));
+      const i1 = Math.min(n - 1, Math.round((dz.end / 100) * (n - 1)));
+      const next = new Set();
+      if (!(i0 <= 0 && i1 >= n - 1)) {                 // full range = no selection
+        for (let k = i0; k <= i1; k += 1) { const hr = hourly[k] && hourly[k].hour; if (hr != null) next.add(hr); }
       }
-    }
-    const aria = `時間帯スパークライン。ピークは ${esc(h[mxi].label || '')}（${fmt(h[mxi].qty)}）。`
-      + (hourSel.size ? `現在 ${facetValues('hour').join('・')}時を選択中。ドラッグで時間帯の範囲を選択できます。` : 'ドラッグで時間帯の範囲を選択できます。');
-    // data-brush carries the layout the pointer handler needs (ml/iw/n) in viewBox
-    // units so it can convert client-x → hour index. A transparent full-width hit
-    // layer (.bia-brushlayer) under the bars captures pointerdown for the drag.
-    return `<svg class="bia-spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}"
-      data-brush="1" data-ml="${ml}" data-iw="${iw}" data-n="${n}" data-mt="${mt}" data-ih="${ih}">
-      ${band}
-      <polyline points="${line}" fill="none" stroke="${accent40}" stroke-width="1.5"></polyline>
-      <circle cx="${x(mxi).toFixed(1)}" cy="${y(h[mxi].qty || 0).toFixed(1)}" r="3" fill="${accent}"></circle>
-      <text x="${x(mxi).toFixed(1)}" y="${(y(h[mxi].qty || 0) - 6).toFixed(1)}" font-size="9" text-anchor="middle" class="axt">${esc(h[mxi].label || '')}</text>
-      <rect class="bia-brushlayer" x="${ml}" y="${mt}" width="${iw}" height="${ih}" fill="transparent" style="cursor:ew-resize"></rect>
-      ${bars}
-    </svg>`;
-  }
-
-  function chartShell(sec, title, sub, body, legend) {
-    // legend rows: [colour, label] or [colour, label, rank] — a rank makes the
-    // row a clickable cross-filter (data-rank), with .sel showing the active one.
-    const leg = legend ? `<div class="leg">${legend.map(([c, t, rank]) => {
-      const sel = rank && facetActive('rank') && filterState.rank.has(rank) ? ' sel' : '';
-      const attrs = rank ? ` class="bia-leg${sel}" data-rank="${esc(rank)}" role="button" tabindex="0"` : '';
-      return `<span${attrs}><i style="background:${c}"></i>${esc(t)}</span>`;
-    }).join('')}</div>` : '';
-    return `<section class="bia-chart" data-sec="${sec}">
-      <div class="bia-ch-h"><h3>${esc(title)}</h3><span class="sub">${esc(sub)}</span>${leg}</div>
-      ${body}</section>`;
-  }
-
-  // empty-state scaffold for a chart whose array is missing — frame kept, no fabrication
-  function scaffold(sec, title, sub) {
-    return `<section class="bia-chart bia-scaffold" data-sec="${sec}">
-      <div class="bia-ch-h"><h3>${esc(title)}</h3><span class="sub">${esc(sub)}</span></div>
-      <div class="bia-empty" style="border:none;padding:18px">この図は実データが入ると描画されます。</div>
-    </section>`;
+      const cur = Array.from(filterState.hour).sort().join(',');
+      const nxt = Array.from(next).sort().join(',');
+      if (cur === nxt) return;
+      if (dzTimer) clearTimeout(dzTimer);
+      dzTimer = setTimeout(() => { dzTimer = 0; filterState.hour = next; render(); }, 220);
+    });
   }
 
   // ── render ────────────────────────────────────────────────────────────
   function render() {
-    // Any path below rewrites root.innerHTML, orphaning the previous render's
-    // brush listeners; tear them down up-front so non-chart branches don't leak
-    // (the full-data branch re-attaches via rebindBrush() at the end).
-    teardownBrush();
+    disposeCharts();
     const name = getProject();
-    if (!name) {
-      root.innerHTML = '<div class="bia-empty">プロジェクトを選択してください。</div>';
-      return;
-    }
+    if (!name) { root.innerHTML = '<div class="bia-empty">プロジェクトを選択してください。</div>'; return; }
     if (loadErr) {
-      // recoverable error: never leave a stuck spinner/blank — offer 再試行.
       root.innerHTML = `<div class="bia-err">
         <div class="msg">読み込めませんでした</div>
         <div class="det">${esc(loadErr)}</div>
@@ -928,12 +900,10 @@ export function mountBIAnalytics(el, opts = {}) {
       return;
     }
     if (!data) {
-      // animated spinner replaces the old plain "読み込み中…" text
       root.innerHTML = `<div class="bia-load"><span class="bia-spin" aria-hidden="true"></span>
         <span>分析データを読み込み中…</span></div>`;
       return;
     }
-
     if (!data.has_data) {
       root.innerHTML = `
         ${askBox()}
@@ -954,24 +924,38 @@ export function mountBIAnalytics(el, opts = {}) {
       return;
     }
 
-    // snapshot current chart geometry so we can tween old→new on re-aggregation
-    const snap = animatedOnce ? snapshotMarks() : null;
+    // build the DOM scaffold (HTML for text bits; chart sections appended as nodes)
     const ins = insights();
     root.innerHTML = `
       ${askBox()}
       ${chipsRow()}
       ${filterBar()}
       ${ins.length ? `<div class="bia-ins">${ins.map(insCard).join('')}</div>` : ''}
-      ${svgPareto()}
-      ${heatWeekday()}
-      ${timeSeries()}`;
+      <div data-charts></div>`;
+    const slot = root.querySelector('[data-charts]');
+    // ABC pareto
+    const paretoSec = chartShell('abc', 'ABCパレート', '物量降順の棒＋累積%線', 'バー/凡例クリックで絞込', 280);
+    slot.appendChild(paretoSec);
+    buildPareto(paretoSec.querySelector('[data-ec]'));
+    // weekday heatmap
+    const wkSub = propagatingActive() ? `${filterDescription()}で絞込中` : '濃いほど物量大';
+    const wkSec = chartShell('weekday', '曜日別ヒートマップ', wkSub, 'セルクリックで曜日を絞込', 180);
+    slot.appendChild(wkSec);
+    buildWeekday(wkSec.querySelector('[data-ec]'));
+    // daily time series
+    const tSec = chartShell('time', '時系列（日次）', '日次エリア＋スクラブ', 'スライダーで日を絞込', 240);
+    slot.appendChild(tSec);
+    buildDaily(tSec.querySelector('[data-ec]'));
+    // hourly sparkline (own facet section: time)
+    const hSub = propagatingActive() ? `${filterDescription()}で絞込中` : 'スパークライン';
+    const hSec = chartShell('hour', '時間帯', hSub, 'バー/スライダーで時間帯を絞込', 170);
+    hSec.dataset.sec = 'time';   // share the 'time' focus target
+    slot.appendChild(hSec);
+    buildHourly(hSec.querySelector('[data-ec]'));
+
     wireAsk();
     wireInsights();
-    wireCharts();
     wireFilterBar();
-    rebindBrush();   // (re)attach hour-sparkline brush to the freshly-built SVG
-    enterAnimate();
-    if (snap) tweenMarks(snap);   // lightweight rAF lerp from previous geometry
   }
 
   function askBox() {
@@ -985,33 +969,19 @@ export function mountBIAnalytics(el, opts = {}) {
     </div>`;
   }
 
-  // example questions rendered as clickable quick-chips (click fills + submits)
   function chipsRow() {
     return `<div class="bia-chips" role="group" aria-label="質問の例">
       ${EXAMPLES.map((e) => `<button type="button" class="bia-chip" data-ex="${esc(e)}">${esc(e)}</button>`).join('')}
     </div>`;
   }
 
-  // cross-filter active-filter pills — MULTI-SELECT aware: one removable pill per
-  // *selected value* (so ランク:A and ランク:B are two pills, each with its own ✕),
-  // plus a "すべて解除" reset. A pill's ✕ removes only that single value via
-  // [data-facet,data-val]; the abc pill (single) clears the whole abc facet. The
-  // set can never get stuck — every member is independently removable and refresh()
-  // rebuilds fresh empty Sets. Bar is empty (but present) when no facet active.
   function filterBar() {
     if (!filterActive()) return '<div class="bia-filterbar"></div>';
-    // [facetKey, value-or-null, displayLabel] for every currently-active value
     const pills = [];
     if (filterState.abc != null) pills.push(['abc', null, `SKU:${filterState.abc}`]);
-    if (facetActive('rank')) {
-      facetValues('rank').forEach((v) => pills.push(['rank', v, `ランク:${v}`]));
-    }
-    if (facetActive('weekday')) {
-      facetValues('weekday').forEach((v) => pills.push(['weekday', v, `曜日:${weekdayLabel(v)}`]));
-    }
-    if (facetActive('hour')) {
-      facetValues('hour').forEach((v) => pills.push(['hour', v, `時間:${v}時`]));
-    }
+    if (facetActive('rank')) facetValues('rank').forEach((v) => pills.push(['rank', v, `ランク:${v}`]));
+    if (facetActive('weekday')) facetValues('weekday').forEach((v) => pills.push(['weekday', v, `曜日:${weekdayLabel(v)}`]));
+    if (facetActive('hour')) facetValues('hour').forEach((v) => pills.push(['hour', v, `時間:${v}時`]));
     const pillHtml = pills.map(([key, val, label]) =>
       `<button type="button" class="bia-pill" data-facet="${esc(key)}"`
       + `${val != null ? ` data-val="${esc(val)}"` : ''} aria-label="${esc(label)} を解除">`
@@ -1021,211 +991,6 @@ export function mountBIAnalytics(el, opts = {}) {
       ${pillHtml}
       <button type="button" class="bia-fclear" data-bia="clearf">すべて解除</button>
     </div>`;
-  }
-
-  // ── data/filter re-aggregation tween (lightweight rAF lerp) ─────────────
-  // On a filter-driven re-render we snapshot the OLD geometry (bar y/height,
-  // heatmap cell alpha) keyed by stable data-attrs, then lerp the freshly-built
-  // marks from old→new over ~var(--dur-3). Gated on reduced-motion. Polylines
-  // whose point counts changed (e.g. weekday-filtered daily) just snap (no lerp).
-  let tweenRAF = 0;
-
-  // ── brushing on the hour sparkline (pointer drag → contiguous hour range) ──
-  // Every render builds a fresh .bia-spark element, so brush listeners must be
-  // (a) rebound to the new node and (b) torn down for the old one. We keep a list
-  // of teardown fns; rebindBrush() runs them before wiring the new node, and
-  // dispose() runs them too. The document-level move/up listeners exist ONLY for
-  // the duration of an active drag (added on pointerdown, removed on pointerup),
-  // and that pointerup remover is also captured as a teardown so a re-render or
-  // dispose mid-drag cannot leak them.
-  let brushTeardowns = [];
-  function teardownBrush() {
-    brushTeardowns.forEach((fn) => { try { fn(); } catch (_) { /* noop */ } });
-    brushTeardowns = [];
-  }
-  function rebindBrush() {
-    teardownBrush();                       // detach the previous render's listeners
-    const svg = root.querySelector('svg.bia-spark[data-brush]');
-    if (!svg) return;
-    const layer = svg.querySelector('.bia-brushlayer');
-    if (!layer) return;
-    const ml = parseFloat(svg.dataset.ml) || 0;
-    const iw = parseFloat(svg.dataset.iw) || 1;
-    const n = parseInt(svg.dataset.n, 10) || 0;
-    const mt = parseFloat(svg.dataset.mt) || 0;
-    const ih = parseFloat(svg.dataset.ih) || 0;
-    if (n <= 0) return;
-    // Map a client-x to an hour index (0..n-1) using the SVG's own scale so it
-    // works regardless of the rendered (responsive) width.
-    const idxAt = (clientX) => {
-      const box = svg.getBoundingClientRect();
-      if (!box.width) return 0;
-      const vx = ((clientX - box.left) / box.width) * (iw + ml * 2); // → viewBox x
-      const t = n <= 1 ? 0 : (vx - ml) / iw;
-      return Math.max(0, Math.min(n - 1, Math.round(t * (n - 1))));
-    };
-    let dragging = false, startIdx = 0, liveBand = null, moved = false;
-    const reduce = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
-    const drawLive = (i0, i1) => {
-      const a = Math.min(i0, i1), b = Math.max(i0, i1);
-      const half = Math.max(3, iw / n / 2);
-      const xAt = (i) => ml + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
-      const bx = xAt(a) - half;
-      const bw = (xAt(b) + half) - bx;
-      if (!liveBand) {
-        liveBand = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        liveBand.setAttribute('class', 'bia-brush-live');
-        liveBand.setAttribute('fill', accentAlpha(accent, 0.18));
-        liveBand.setAttribute('stroke', accent);
-        liveBand.setAttribute('stroke-width', '1');
-        liveBand.setAttribute('rx', '2');
-        liveBand.setAttribute('pointer-events', 'none');
-        svg.appendChild(liveBand);
-      }
-      liveBand.setAttribute('x', bx.toFixed(1));
-      liveBand.setAttribute('y', mt.toFixed(1));
-      liveBand.setAttribute('width', Math.max(0, bw).toFixed(1));
-      liveBand.setAttribute('height', ih.toFixed(1));
-    };
-    const clearLive = () => { if (liveBand && liveBand.parentNode) liveBand.parentNode.removeChild(liveBand); liveBand = null; };
-    const onMove = (e) => {
-      if (!dragging) return;
-      const i = idxAt(e.clientX);
-      if (i !== startIdx) moved = true;
-      if (!reduce()) drawLive(startIdx, i);
-    };
-    const onUp = (e) => {
-      if (!dragging) return;
-      dragging = false;
-      const i = idxAt(e.clientX);
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      clearLive();
-      // A real drag (>1 cell) commits a contiguous RANGE to the hour facet,
-      // replacing any prior hour selection. A no-move "drag" (== click) is left to
-      // the per-bar click handler, so we don't double-handle a single tap.
-      if (!moved) return;
-      const a = Math.min(startIdx, i), b = Math.max(startIdx, i);
-      // index → hour via the bar that drew it (data-i carries the index).
-      const hourOf = (idx) => {
-        const bar = svg.querySelector(`.bia-pt[data-i="${idx}"][data-hr]`);
-        return bar ? Number(bar.dataset.hr) : null;
-      };
-      const next = new Set();
-      for (let k = a; k <= b; k += 1) { const hr = hourOf(k); if (hr != null) next.add(hr); }
-      filterState.hour = next;             // replace with the brushed range
-      render();
-    };
-    const onDown = (e) => {
-      // primary button / touch / pen only
-      if (e.button != null && e.button !== 0) return;
-      dragging = true; moved = false;
-      startIdx = idxAt(e.clientX);
-      document.addEventListener('pointermove', onMove);
-      document.addEventListener('pointerup', onUp);
-      // capture an interim teardown so a re-render or dispose mid-drag removes the
-      // document listeners and any live band (no leak, no stuck overlay).
-      brushTeardowns.push(() => {
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
-        clearLive();
-      });
-    };
-    // Attach to the SVG (not just the hit layer) so a pointerdown that lands on a
-    // bar still starts a brush; bars keep their own click for single-hour taps
-    // (a no-move drag commits nothing, so the tap's click is the sole handler).
-    svg.addEventListener('pointerdown', onDown);
-    brushTeardowns.push(() => svg.removeEventListener('pointerdown', onDown));
-  }
-
-  function dur3ms() {
-    const v = getComputedStyle(document.documentElement).getPropertyValue('--dur-3').trim();
-    if (v.endsWith('ms')) return parseFloat(v) || 200;
-    if (v.endsWith('s')) return (parseFloat(v) || 0.2) * 1000;
-    return 200;
-  }
-  // Read current ABC bar + heatmap cell geometry into a lookup keyed by data-attr.
-  function snapshotMarks() {
-    const bars = {};
-    root.querySelectorAll('rect.bia-bar[data-sku]').forEach((b) => {
-      bars[b.dataset.sku] = { y: parseFloat(b.getAttribute('y')), h: parseFloat(b.getAttribute('height')) };
-    });
-    const cells = {};
-    root.querySelectorAll('.bia-tcell[data-wd]').forEach((c) => {
-      cells[c.dataset.wd] = c.style.background || '';
-    });
-    return { bars, cells };
-  }
-  // Parse the trailing alpha out of an "rgba(r,g,b,a)" string (cell intensity).
-  function rgbaAlpha(s) {
-    const m = /rgba?\([^)]*,\s*([0-9.]+)\s*\)/.exec(s || '');
-    return m ? parseFloat(m[1]) : null;
-  }
-  function setRgbaAlpha(s, a) {
-    return (s || '').replace(/(rgba?\([^)]*,\s*)[0-9.]+(\s*\))/, `$1${a.toFixed(3)}$2`);
-  }
-  function tweenMarks(snap) {
-    if (matchMedia('(prefers-reduced-motion:reduce)').matches) return;
-    // build animation plan from new marks that also existed in the snapshot
-    const plan = [];
-    root.querySelectorAll('rect.bia-bar[data-sku]').forEach((b) => {
-      const from = snap.bars[b.dataset.sku]; if (!from) return;
-      const toY = parseFloat(b.getAttribute('y')), toH = parseFloat(b.getAttribute('height'));
-      if (from.y === toY && from.h === toH) return;
-      plan.push({ kind: 'bar', el: b, fromY: from.y, fromH: from.h, toY, toH });
-    });
-    root.querySelectorAll('.bia-tcell[data-wd]').forEach((c) => {
-      const fromBg = snap.cells[c.dataset.wd]; if (fromBg == null) return;
-      const fa = rgbaAlpha(fromBg), ta = rgbaAlpha(c.style.background);
-      if (fa == null || ta == null || fa === ta) return;
-      plan.push({ kind: 'cell', el: c, fromA: fa, toA: ta, tmpl: c.style.background });
-    });
-    if (!plan.length) return;
-    // seed marks at their FROM state, then rAF-lerp to the TRUE (final) state.
-    plan.forEach((p) => {
-      if (p.kind === 'bar') { p.el.setAttribute('y', p.fromY); p.el.setAttribute('height', p.fromH); }
-      else { p.el.style.background = setRgbaAlpha(p.tmpl, p.fromA); }
-    });
-    const dur = dur3ms();
-    const t0 = performance.now();
-    if (tweenRAF) cancelAnimationFrame(tweenRAF);
-    const step = (now) => {
-      const k = Math.min(1, (now - t0) / dur);
-      const e = 1 - Math.pow(1 - k, 3);   // easeOutCubic
-      plan.forEach((p) => {
-        if (p.kind === 'bar') {
-          p.el.setAttribute('y', (p.fromY + (p.toY - p.fromY) * e).toFixed(1));
-          p.el.setAttribute('height', (p.fromH + (p.toH - p.fromH) * e).toFixed(1));
-        } else {
-          p.el.style.background = setRgbaAlpha(p.tmpl, p.fromA + (p.toA - p.fromA) * e);
-        }
-      });
-      if (k < 1) tweenRAF = requestAnimationFrame(step);
-      else tweenRAF = 0;
-    };
-    tweenRAF = requestAnimationFrame(step);
-  }
-
-  // stagger fade-in: mirror of analysis.js .an-in/.an-settled idiom (no import).
-  // Runs once per data load; filter/theme re-renders skip it to avoid re-flashing.
-  function enterAnimate() {
-    if (animatedOnce) return;
-    animatedOnce = true;
-    const reduce = matchMedia('(prefers-reduced-motion:reduce)').matches;
-    const items = Array.from(root.querySelectorAll('.bia-ins, .bia-chart'));
-    items.forEach((n) => n.classList.add('bia-anim'));
-    if (reduce) { items.forEach((n) => n.classList.add('bia-in', 'bia-settled')); return; }
-    requestAnimationFrame(() => {
-      items.forEach((n, i) => {
-        window.setTimeout(() => {
-          n.classList.add('bia-in');
-          n.addEventListener('transitionend', function once() {
-            n.classList.add('bia-settled');
-            n.removeEventListener('transitionend', once);
-          });
-        }, i * 40);
-      });
-    });
   }
 
   function insCard(c) {
@@ -1253,8 +1018,6 @@ export function mountBIAnalytics(el, opts = {}) {
     bindExampleDelegation();
   }
 
-  // Single delegated click handler on root for every [data-ex] (chips +
-  // inline "近い質問" suggestions) — avoids re-binding per question/chip.
   let exDelegated = false;
   function bindExampleDelegation() {
     if (exDelegated) return;
@@ -1267,7 +1030,6 @@ export function mountBIAnalytics(el, opts = {}) {
 
   function wireInsights() {
     root.querySelectorAll('[data-go]').forEach((c) => { c.onclick = () => focus(c.dataset.go); });
-    // drill links fire `whsim:nav` and must not bubble into the card's focus()
     root.querySelectorAll('[data-nav]').forEach((a) => {
       const go = (e) => { e.stopPropagation(); e.preventDefault(); nav(a.dataset.nav); };
       a.onclick = go;
@@ -1275,87 +1037,7 @@ export function mountBIAnalytics(el, opts = {}) {
     });
   }
 
-  function wireCharts() {
-    // ABC bars: tooltip + click → cross-filter on that SKU
-    root.querySelectorAll('.bia-bar').forEach((b) => {
-      // look the row up against the SAME array that drew the bar (default abc OR
-      // the re-ranked rows) so data-i stays valid after a weekday re-rank.
-      const rowOf = () => lastParetoRows[+b.dataset.i];
-      b.addEventListener('mousemove', (e) => {
-        const r = rowOf(); if (!r) return;
-        showTip(`<b>${esc(r.name || r.sku)}</b><br>物量 <span class="n">${fmt(r.qty)}</span> · 累積 <span class="n">${pct(r.cum || 0)}</span>`, e);
-      });
-      b.addEventListener('mouseleave', hideTip);
-      // Clicking a bar pins that SKU (in-chart highlight) AND maps it to its rank
-      // so the selection PROPAGATES (xtab is rank-level). Plain click re-pins a
-      // single rank; shift/ctrl/cmd ADDS the rank to the multi-select set. Re-
-      // clicking the same SKU clears the pin (and removes its rank). Never sticks.
-      b.addEventListener('click', (e) => {
-        hideTip();
-        const r = rowOf(); if (!r) return;
-        const sku = b.dataset.sku;
-        const rk = rankOf(r);
-        const additive = isAdditive(e);
-        if (filterState.abc === sku) {        // toggle off this pinned sku
-          filterState.abc = null;
-          filterState.rank.delete(rk);
-        } else {                              // pin sku + propagate its rank
-          filterState.abc = sku;
-          if (additive) filterState.rank.add(rk);
-          else { filterState.rank.clear(); filterState.rank.add(rk); }
-        }
-        render();
-      });
-    });
-    // ABC legend ranks: click → cross-filter on rank A/B/C
-    root.querySelectorAll('.bia-leg').forEach((l) => {
-      const go = (e) => toggleFilter('rank', l.dataset.rank, isAdditive(e));
-      l.addEventListener('click', go);
-      // Enter/Space toggle single; Shift+Enter (or Ctrl/Cmd) add to the set.
-      l.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } });
-    });
-    // weekday cells: tooltip + click → cross-filter on that weekday
-    root.querySelectorAll('.bia-cell').forEach((c) => {
-      c.addEventListener('mousemove', (e) => {
-        const [lab, q] = (c.dataset.hd || '|').split('|');
-        showTip(`<b>${esc(lab)}曜</b> · <span class="n">${fmt(+q)}</span>`, e);
-      });
-      c.addEventListener('mouseleave', hideTip);
-      // data-wd is the numeric xtab weekday index (0..6) as a string; coerce to a
-      // Number so it joins cleanly against c.weekday in filteredCells(). Empty =>
-      // unknown weekday (no xtab match) -> skip toggling.
-      const go = (e) => {
-        hideTip();
-        const wd = c.dataset.wd;
-        if (wd === '' || wd == null) return;
-        toggleFilter('weekday', Number(wd), isAdditive(e));
-      };
-      c.addEventListener('click', go);
-      // Enter/Space toggle single; Shift+Enter (or Ctrl/Cmd) add to the set.
-      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } });
-    });
-    // time-series hover hotspots (daily area + hourly spark). Hourly hotspots
-    // (data-hr) additionally toggle the hour facet → re-aggregates weekday +
-    // insights + ABC overlay via xtab; daily hotspots stay hover-only.
-    root.querySelectorAll('.bia-pt').forEach((p) => {
-      p.addEventListener('mousemove', (e) => {
-        const [lab, q] = (p.dataset.pt || '|').split('|');
-        showTip(`<b>${esc(lab)}</b> · <span class="n">${fmt(+q)}</span>`, e);
-      });
-      p.addEventListener('mouseleave', hideTip);
-      if (p.dataset.hr != null && p.dataset.hr !== '') {
-        const go = (e) => { hideTip(); toggleFilter('hour', Number(p.dataset.hr), isAdditive(e)); };
-        p.addEventListener('click', go);
-        // Enter/Space toggle single; Shift+Enter (or Ctrl/Cmd) add to the set.
-        p.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(e); } });
-      }
-    });
-  }
-
   function wireFilterBar() {
-    // each pill's ✕ removes only ITS value: a set-facet pill carries data-val and
-    // removes that one member (weekday/hour vals are numeric in the Set, so coerce
-    // the string back); the abc pill (no data-val) clears the whole abc facet.
     root.querySelectorAll('.bia-pill[data-facet]').forEach((p) => {
       p.onclick = () => {
         const key = p.dataset.facet;
@@ -1369,11 +1051,9 @@ export function mountBIAnalytics(el, opts = {}) {
     if (clr) clr.onclick = () => clearFilter();
   }
 
-  // ── example placeholder rotation (gated: one-shot per visit, NOT a loop) ─
-  // Single 5s rotation through examples; stops after one full pass to honour the
-  // "no idle loops" rule and is skipped entirely under reduced-motion.
+  // ── example placeholder rotation (gated: one-shot per visit) ─────────────
   function startExampleRotation() {
-    if (matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    if (reduceMotion()) return;
     let passes = 0;
     stopRotation();
     exTimer = setInterval(() => {
@@ -1384,21 +1064,6 @@ export function mountBIAnalytics(el, opts = {}) {
     }, 5000);
   }
   function stopRotation() { if (exTimer) { clearInterval(exTimer); exTimer = 0; } }
-
-  // click-away clears an active hour brush: a click inside this view that is NOT
-  // on an interactive mark / pill / question UI drops the hour facet. Registered
-  // once on document and removed in dispose() (never per-render → no duplicates).
-  function onClickAway(e) {
-    if (!facetActive('hour')) return;
-    const t = e.target;
-    if (!el.contains(t)) return;                       // clicks elsewhere ignored
-    // ignore clicks on anything interactive so we don't fight the real handlers
-    if (t.closest && t.closest('.bia-pt,.bia-bar,.bia-cell,.bia-leg,.bia-pill,'
-      + '.bia-fclear,.bia-chip,.bia-spark,.bia-ask,.bia-card,.bia-drill a,[data-ex]')) return;
-    filterState.hour.clear();
-    render();
-  }
-  document.addEventListener('click', onClickAway);
 
   // `/` focuses the question box from anywhere in this view
   function onSlash(e) {
@@ -1423,7 +1088,7 @@ export function mountBIAnalytics(el, opts = {}) {
       startExampleRotation();
     } catch (e) {
       loadErr = (e && e.message) ? e.message : String(e);
-      render();   // render() shows the 再試行 error state (never a stuck spinner)
+      render();
       toast('分析BIの読み込みに失敗', 'error');
     }
   }
@@ -1433,19 +1098,18 @@ export function mountBIAnalytics(el, opts = {}) {
     refresh() {
       data = null;
       loadErr = null;
-      animatedOnce = false;                 // re-animate next load
-      filterState = freshFilterState();      // drop ALL stale facets (fresh empty Sets)
+      filterState = freshFilterState();
       render();
       load();
     },
     dispose() {
       stopRotation();
-      if (tweenRAF) { cancelAnimationFrame(tweenRAF); tweenRAF = 0; }
-      teardownBrush();   // detach brush pointerdown + any in-flight drag listeners
-      document.removeEventListener('click', onClickAway);
+      if (dzTimer) { clearTimeout(dzTimer); dzTimer = 0; }
+      disposeCharts();
+      if (ro) { ro.disconnect(); ro = null; }
+      window.removeEventListener('resize', onWinResize);
       document.removeEventListener('keydown', onSlash);
       document.removeEventListener('themechange', onThemeChange);
-      if (tip.parentNode) tip.parentNode.removeChild(tip);
       el.innerHTML = '';
     },
   };

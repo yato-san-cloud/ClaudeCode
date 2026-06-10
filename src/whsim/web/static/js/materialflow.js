@@ -3,11 +3,30 @@
 //   ・実データ(サンプル/出荷取込)から自動充填
 //   ・不足は手入力 or 生成(比率推計)で作成
 // → そのまま「タイムチャートで人員配置」へ渡す（whsim.analysis.staffing と同契約）。
+//
+// 物量の流れは ECharts の sankey 図で可視化（工程の depends を辺に、人時を太さに）。
+// 入力カードはそのまま編集可能；値を変えると sankey は in-place に更新（入力フォーカス
+// を壊さない）。テーマは CSS 変数を getComputedStyle で参照し themechange で再描画。
+import * as echarts from 'echarts';
 
 // Badge tints are HTML inline styles, so theme tokens (CSS vars) resolve fine.
-// 手入力 is a neutral/secondary tone — NOT the cyan accent, which is reserved.
 const SRC = { data: { t: '実データ', c: '#2ee6a0' }, manual: { t: '手入力', c: 'var(--ink-tertiary,#8195a8)' },
               generated: { t: '生成', c: '#f5b05a' }, none: { t: '未入力', c: '#8195a8' } };
+// Per-process node colours in the sankey, keyed by 工程セクション.
+const SECTION_HEX = { 入荷: '#5B9BD5', 出荷: '#16C0DE' };
+
+const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
+function cssColor(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+function hexAlpha(hex, a) {
+  let h = (hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) h = '16C0DE';
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 function injectStyle() {
   if (document.getElementById('mf-style')) return;
@@ -28,6 +47,14 @@ function injectStyle() {
   .mf-kpi .l{font-size:10.5px;letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);text-transform:uppercase;margin-bottom:7px}
   .mf-kpi .v{font-size:22px;font-weight:700;color:var(--ink-primary,#16202e)}
   .mf-kpi .v small{font-size:13px;font-weight:500;color:var(--ink-secondary,#52677c)}
+  .mf-sankey-wrap{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
+    border-radius:13px;padding:12px 14px}
+  .mf-sankey-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+  .mf-sankey-h h3{margin:0;font-size:13.5px;font-weight:600;color:var(--ink-primary,#16202e)}
+  .mf-sankey-h .sub{font-size:11px;color:var(--ink-tertiary,#8195a8)}
+  .mf-sankey{width:100%;height:260px}
+  .mf-sankey-empty{display:flex;align-items:center;justify-content:center;height:120px;
+    color:var(--ink-tertiary,#8195a8);font-size:12px}
   .mf-sec{font-family:var(--font-display,inherit);font-weight:700;font-size:12px;letter-spacing:.1em;color:var(--ink-tertiary,#8195a8);margin:6px 0 2px}
   .mf-flow{display:flex;gap:6px;flex-wrap:wrap;align-items:stretch}
   .mf-card{flex:1 1 150px;min-width:150px;background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
@@ -71,6 +98,16 @@ export function mountMaterialFlow(el, opts = {}) {
   const vol = {};                // {id: number}
   const src = {};                // {id: 'data'|'manual'|'generated'|'none'}
 
+  // ── sankey ECharts instance + theme/resize plumbing ──────────────────
+  let sankey = null;
+  let ro = null;
+  function disposeSankey() {
+    if (sankey) { try { sankey.dispose(); } catch (_) { /* noop */ } sankey = null; }
+  }
+  const resizeSankey = () => { if (sankey) { try { sankey.resize(); } catch (_) { /* noop */ } } };
+  window.addEventListener('resize', resizeSankey);
+  if (typeof ResizeObserver !== 'undefined') ro = new ResizeObserver(() => resizeSankey());
+
   async function getJSON(url, opt) {
     const r = await fetch(url, opt);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
@@ -79,13 +116,96 @@ export function mountMaterialFlow(el, opts = {}) {
 
   function manHours(p) { return (vol[p.id] || 0) / Math.max(1, p.productivity); }
 
-  // Toggle the "再計算中…" pill around any solve/fetch round-trip.
   function setBusy(on) {
     const pill = root.querySelector('[data-mf-recalc]');
     if (pill) pill.classList.toggle('on', !!on);
   }
 
+  // Build the sankey option from the current flow + volumes. Nodes are processes
+  // (value = 荷役物量); links follow each process's `depends` (upstream→this),
+  // weighted by the downstream process man-hours so the ribbon thickness reads as
+  // "work passed along the flow". Processes with no depends get a virtual section
+  // source so they still appear as flow entry points.
+  function sankeyOption() {
+    const p = {
+      ink: cssColor('--ink-primary', '#37352F'),
+      ink2: cssColor('--ink-secondary', 'rgba(55,53,47,0.65)'),
+      ink3: cssColor('--ink-tertiary', 'rgba(55,53,47,0.45)'),
+      line: cssColor('--line-hair', 'rgba(55,53,47,0.16)'),
+      panel: cssColor('--bg-app', '#FFFFFF'),
+      lineStrong: cssColor('--line-strong', 'rgba(55,53,47,0.16)'),
+      accent: cssColor('--accent', '#16C0DE'),
+      fontSans: cssColor('--font-sans', 'sans-serif'),
+      fontMono: cssColor('--font-mono', 'monospace'),
+    };
+    const byId = {}; flow.forEach((f) => { byId[f.id] = f; });
+    const nodes = flow.map((f) => ({
+      name: f.id,
+      itemStyle: { color: SECTION_HEX[f.section] || p.accent, borderColor: 'transparent' },
+      label: { color: p.ink, fontFamily: p.fontSans, fontSize: 11 },
+      value: vol[f.id] || 0,
+    }));
+    // section entry nodes (so depends-less processes have an inbound ribbon)
+    const sections = [...new Set(flow.map((f) => f.section))];
+    sections.forEach((sec) => nodes.push({
+      name: `${sec}（入口）`,
+      itemStyle: { color: hexAlpha(SECTION_HEX[sec] || p.accent, 0.5) },
+      label: { color: p.ink2, fontFamily: p.fontMono, fontSize: 10 },
+    }));
+    // links: edge weight = the downstream process man-hours (min 0.5 so 0-volume
+    // edges still draw a hairline). Carry both endpoints' volumes for the tooltip.
+    const links = [];
+    flow.forEach((f) => {
+      const mh = manHours(f);
+      const w = Math.max(0.5, mh);
+      const deps = (f.depends && f.depends.length) ? f.depends : [`${f.section}（入口）`];
+      deps.forEach((d) => {
+        if (d !== `${f.section}（入口）` && !byId[d]) return;   // skip dangling deps
+        links.push({ source: d, target: f.id, value: w,
+          lineStyle: { color: hexAlpha(SECTION_HEX[f.section] || p.accent, 0.32) } });
+      });
+    });
+    return {
+      animation: !reduceMotion(),
+      tooltip: {
+        trigger: 'item',
+        backgroundColor: p.panel, borderColor: p.lineStrong, borderWidth: 1,
+        textStyle: { color: p.ink, fontSize: 12, fontFamily: p.fontSans },
+        extraCssText: 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.16);',
+        formatter: (d) => {
+          if (d.dataType === 'edge') return `${d.data.source} → ${d.data.target}<br>人時 ${Number(d.data.value).toFixed(1)}`;
+          const f = byId[d.name];
+          if (!f) return d.name;
+          return `<b>${d.name}</b><br>荷役物量 ${fmt(vol[f.id] || 0)} ${f.unit ? `(${f.unit})` : ''}<br>人時 ${manHours(f).toFixed(1)}`;
+        },
+      },
+      series: [{
+        type: 'sankey', left: 8, right: 110, top: 12, bottom: 12,
+        nodeWidth: 16, nodeGap: 12, draggable: false,
+        emphasis: { focus: 'adjacency' },
+        data: nodes, links,
+        label: { color: p.ink, fontFamily: p.fontSans, fontSize: 11 },
+        lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.5 },
+        itemStyle: { borderWidth: 0 },
+      }],
+    };
+  }
+
+  // (Re)build or in-place update the sankey. `inPlace` avoids touching surrounding
+  // DOM (preserves input focus) — used on every keystroke; full mount on render.
+  function updateSankey() {
+    const node = root.querySelector('[data-mf-sankey]');
+    if (!node) return;
+    if (!flow.length) { disposeSankey(); return; }
+    if (!sankey) {
+      sankey = echarts.init(node, null, { renderer: 'canvas' });
+      if (ro) ro.observe(node);
+    }
+    sankey.setOption(sankeyOption(), true);
+  }
+
   function renderEmpty() {
+    disposeSankey();
     root.innerHTML =
       `<div class="mf-bar">
         <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
@@ -102,6 +222,7 @@ export function mountMaterialFlow(el, opts = {}) {
 
   function render() {
     if (!flow.length) { renderEmpty(); return; }
+    disposeSankey();   // about to rebuild the DOM the canvas lives in
     const totalMH = flow.reduce((s, p) => s + manHours(p), 0);
     const filled = flow.filter((p) => (vol[p.id] || 0) > 0).length;
     const sections = [...new Set(flow.map((p) => p.section))];
@@ -121,6 +242,7 @@ export function mountMaterialFlow(el, opts = {}) {
       return `<div class="mf-sec">${sec}</div><div class="mf-flow">${cards}</div>`;
     }).join('');
 
+    const anyVol = flow.some((p) => (vol[p.id] || 0) > 0);
     root.innerHTML =
       `<div class="mf-bar">
         <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
@@ -136,8 +258,14 @@ export function mountMaterialFlow(el, opts = {}) {
          <div class="mf-kpi"><div class="l">入力済み工程</div><div class="v"><span data-kpi="filled">${filled}</span> <small>/ ${flow.length}</small></div></div>
          <div class="mf-kpi"><div class="l">工程数</div><div class="v">${flow.length}</div></div>
        </div>
+       <div class="mf-sankey-wrap">
+         <div class="mf-sankey-h"><h3>マテリアルフロー</h3><span class="sub">工程間の流れ（リボン幅 = 人時）</span></div>
+         ${anyVol ? '<div class="mf-sankey" data-mf-sankey></div>'
+           : '<div class="mf-sankey-empty">荷役物量を入力すると、工程間の流れがここに描画されます。</div>'}
+       </div>
        ${flowHtml}`;
     wire();
+    if (anyVol) updateSankey();
   }
 
   function setVolumes(map, source) {
@@ -166,7 +294,6 @@ export function mountMaterialFlow(el, opts = {}) {
   }
 
   async function generate() {
-    // base = known process volumes mapped back to their measured drivers
     const base = {};
     for (const p of flow) if ((vol[p.id] || 0) > 0) base[p.driver] = vol[p.id];
     if (!Object.keys(base).length) { toast('元になる物量を1つ以上入力してください。', 'info'); return; }
@@ -200,9 +327,10 @@ export function mountMaterialFlow(el, opts = {}) {
     finally { setBusy(false); }
   }
 
-  // In-place update of just the affected card (man-hours + source badge) plus the
-  // KPI numbers — avoids a full innerHTML rebuild on every keystroke (which would
-  // destroy input focus/caret).
+  // In-place update of just the affected card (man-hours + source badge) + KPIs +
+  // the sankey — avoids a full innerHTML rebuild on every keystroke (which would
+  // destroy input focus/caret). If the sankey wasn't present yet (first non-zero
+  // volume), a full render() builds it.
   function updateCard(id) {
     const p = flow.find((q) => q.id === id);
     if (!p) return;
@@ -211,6 +339,9 @@ export function mountMaterialFlow(el, opts = {}) {
     const badge = root.querySelector(`[data-badge="${id}"]`);
     if (badge) { const sc = SRC[src[id] || 'none']; badge.textContent = sc.t; badge.style.background = sc.c; }
     updateKpis();
+    const node = root.querySelector('[data-mf-sankey]');
+    if (node) updateSankey();
+    else if (flow.some((q) => (vol[q.id] || 0) > 0)) render();   // first non-zero → draw it
   }
   function updateKpis() {
     const totalMH = flow.reduce((s, p) => s + manHours(p), 0);
@@ -219,7 +350,7 @@ export function mountMaterialFlow(el, opts = {}) {
     const f = root.querySelector('[data-kpi="filled"]'); if (f) f.textContent = String(filled);
   }
 
-  // Delegated listeners on root (one set, survives in-place updates; no per-node onX).
+  // Delegated listeners on root (one set, survives in-place updates).
   let wired = false;
   function wire() {
     const fileInput = root.querySelector('[data-mf-file]');
@@ -231,7 +362,7 @@ export function mountMaterialFlow(el, opts = {}) {
         fromBundle(getJSON('/api/analysis/upload', { method: 'POST', body: fd }), `「${f.name}」`);
       };
     }
-    if (wired) return;          // delegated handlers attach to root once
+    if (wired) return;
     wired = true;
     root.addEventListener('input', (e) => {
       const inp = e.target.closest('input[data-id]');
@@ -239,7 +370,7 @@ export function mountMaterialFlow(el, opts = {}) {
       const id = inp.dataset.id;
       vol[id] = Math.max(0, parseFloat(inp.value) || 0);
       src[id] = 'manual';
-      updateCard(id);           // in-place: preserves focus/caret
+      updateCard(id);
     });
     root.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-act]');
@@ -252,6 +383,11 @@ export function mountMaterialFlow(el, opts = {}) {
     });
   }
 
+  // Theme flip: sankey paints are resolved at build time, so rebuild from the
+  // fresh tokens (no refetch). Only when a canvas is actually mounted.
+  const onTheme = () => { if (sankey) updateSankey(); };
+  document.addEventListener('themechange', onTheme);
+
   (async () => {
     try {
       const seed = await getJSON('/api/materialflow/seed');
@@ -260,8 +396,17 @@ export function mountMaterialFlow(el, opts = {}) {
     } catch (e) {
       toast('工程フローの取得に失敗しました: ' + e.message, 'error');
     }
-    render();   // renders the empty-state panel + CTA when flow is empty
+    render();
   })();
 
-  return { dispose() { el.innerHTML = ''; }, refresh() {} };
+  return {
+    dispose() {
+      document.removeEventListener('themechange', onTheme);
+      disposeSankey();
+      if (ro) { ro.disconnect(); ro = null; }
+      window.removeEventListener('resize', resizeSankey);
+      el.innerHTML = '';
+    },
+    refresh() {},
+  };
 }

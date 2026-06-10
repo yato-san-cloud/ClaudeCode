@@ -1,11 +1,13 @@
 // dataanalysis.js — WMS 実データ分析タブ (3PL エンジン統合のフロント).
 // サンプル or アップロード → /api/analysis/* → KPI・インサイト・チャートを描画.
-// 自己完結 (テーマは CSS 変数を参照、無ければフォールバック値).
+// チャートは ECharts (市販BI級): 物量推移(エリア+dataZoom)・ABCパレート(棒+累積%)・
+// 曜日別ピーク(棒)・時間帯ピーク(棒)・時間帯別必要人員(エリア). 自己完結 (テーマは
+// CSS 変数を getComputedStyle で参照し、themechange で再描画).
 import { esc } from './util.js';
+import * as echarts from 'echarts';
+import { ABC_COLOR } from './constants.js';
 
-// Insight-card border colours, keyed by severity. Resolved from the theme
-// status tokens (critical→--bad, warning→--warn, info→--accent/--info) to
-// concrete hex so inline styles stay theme-consistent; rebuilt on themechange.
+// Insight-card border colours, keyed by severity (resolved from theme tokens).
 const SEV = {
   critical: { c: '#FF5A78', t: '重大' },
   warning:  { c: '#F5B05A', t: '注意' },
@@ -16,29 +18,55 @@ function refreshSevColors() {
   SEV.warning.c = cssColor('--warn', '#F5B05A');
   SEV.info.c = cssColor('--info', cssColor('--accent', '#34E3FF'));
 }
-// SVG <path>/<rect> paint attributes do NOT resolve CSS var(), so resolve the
-// shared ABC-rank tokens (--rank-a/b/c — identical to analysis.js) to concrete
-// colours. Refreshed on the document `themechange` event (see mountDataAnalysis).
 function cssColor(name, fallback) {
-  const v = getComputedStyle(document.documentElement)
-    .getPropertyValue(name).trim();
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }
-// Mutable rank palette; rebuilt on themechange so SVG fills track light/dark.
-let RANK_C = { A: '#1C5FA8', B: '#5B9BD5', C: '#B9D3EE' };
+// ABC rank palette (shared --rank-a/b/c tokens, falling back to constants).
+let RANK_C = { A: ABC_COLOR.A, B: ABC_COLOR.B, C: ABC_COLOR.C };
 function refreshRankColors() {
   RANK_C = {
-    A: cssColor('--rank-a', '#1C5FA8'),
-    B: cssColor('--rank-b', '#5B9BD5'),
-    C: cssColor('--rank-c', '#B9D3EE'),
+    A: cssColor('--rank-a', ABC_COLOR.A),
+    B: cssColor('--rank-b', ABC_COLOR.B),
+    C: cssColor('--rank-c', ABC_COLOR.C),
   };
 }
-
-// SVG <path>/<rect> paint attributes do NOT resolve CSS var(), so resolve the
-// brand accent to a concrete colour once and feed it to the chart builders.
-// Refreshed on the document `themechange` event (see mountDataAnalysis).
-function accentColor() {
-  return cssColor('--accent', '#34E3FF'); // cyan brand; flip handled by the token itself
+const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
+function hexAlpha(hex, a) {
+  let h = (hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) h = '16C0DE';
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+// Live design tokens an ECharts option needs (rebuilt per render → theme-aware).
+function palette() {
+  const accent = cssColor('--accent', '#16C0DE');
+  return {
+    accent, accentSoft: hexAlpha(accent, 0.4),
+    ink: cssColor('--ink-primary', '#37352F'),
+    ink2: cssColor('--ink-secondary', 'rgba(55,53,47,0.65)'),
+    ink3: cssColor('--ink-tertiary', 'rgba(55,53,47,0.45)'),
+    line: cssColor('--line-hair', 'rgba(55,53,47,0.09)'),
+    lineStrong: cssColor('--line-strong', 'rgba(55,53,47,0.16)'),
+    panel: cssColor('--bg-app', '#FFFFFF'),
+    warn: cssColor('--warn', '#B7791F'), bad: cssColor('--bad', '#C4453F'),
+    fontMono: cssColor('--font-mono', 'monospace'), fontSans: cssColor('--font-sans', 'sans-serif'),
+  };
+}
+function tipStyle(p) {
+  return {
+    backgroundColor: p.panel, borderColor: p.lineStrong, borderWidth: 1,
+    textStyle: { color: p.ink, fontSize: 12, fontFamily: p.fontSans },
+    extraCssText: 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.16);',
+  };
+}
+function toolbox(p) {
+  return {
+    right: 6, top: 2, iconStyle: { borderColor: p.ink3 },
+    emphasis: { iconStyle: { borderColor: p.accent } },
+    feature: { saveAsImage: { title: '画像保存', backgroundColor: p.panel, pixelRatio: 2 }, restore: { title: '初期化' } },
+  };
 }
 
 function injectStyle() {
@@ -67,6 +95,7 @@ function injectStyle() {
   .da-card{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
     border-radius:14px;padding:var(--sp-5)}
   .da-card h3{margin:0 0 14px;font-size:var(--fs-body);font-weight:600;color:var(--ink-primary,#16202e)}
+  .da-ec{width:100%}
   .da-ins{display:flex;flex-direction:column;gap:9px}
   .da-i{display:flex;gap:11px;padding:11px 13px;border-radius:11px;border:1px solid var(--line,rgba(120,140,170,.18));
     background:var(--bg-app,#fff);border-left-width:4px}
@@ -77,6 +106,8 @@ function injectStyle() {
   .da-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
     min-height:300px;text-align:center;color:var(--ink-tertiary,#8195a8)}
   .da-empty b{font-size:var(--fs-title);color:var(--ink-primary,#16202e)}
+  .da-chart-empty{display:flex;align-items:center;justify-content:center;min-height:120px;
+    color:var(--ink-tertiary,#8195a8);font-size:var(--fs-sm)}
   .da-src{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);font-family:monospace}
   .da-err{display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:var(--sp-3);min-height:240px;text-align:center;
@@ -96,75 +127,142 @@ function injectStyle() {
 
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const pct = (n) => (n == null ? '—' : (n * 100).toFixed(0) + '%');
-function svg(w, h, body, label) {
-  const a11y = label ? ` role="img" aria-label="${esc(label)}"` : '';
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block"${a11y}>${body}</svg>`;
+
+// ── ECharts option builders. Each returns an option object (or null when the
+// data array is empty, so the caller can show a friendly placeholder). ──────
+
+// daily quantity area + dataZoom scrub
+function trendOption(rows) {
+  if (!rows || !rows.length) return null;
+  const p = palette();
+  const cats = rows.map((r) => r.label || '');
+  const vals = rows.map((r) => r.qty || 0);
+  return {
+    animation: !reduceMotion(),
+    grid: { left: 52, right: 18, top: 16, bottom: rows.length > 1 ? 56 : 30 },
+    toolbox: toolbox(p),
+    tooltip: { trigger: 'axis', ...tipStyle(p), formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data)}` },
+    dataZoom: rows.length > 8 ? [
+      { type: 'inside' },
+      { type: 'slider', height: 20, bottom: 16, borderColor: p.line, fillerColor: hexAlpha(p.accent, 0.14),
+        handleStyle: { color: p.accent }, textStyle: { color: p.ink3, fontFamily: p.fontMono } },
+    ] : undefined,
+    xAxis: { type: 'category', data: cats, boundaryGap: false,
+      axisLabel: { color: p.ink3, fontFamily: p.fontMono, hideOverlap: true },
+      axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
+    series: [{
+      name: '物量', type: 'line', data: vals, showSymbol: false, symbol: 'circle', symbolSize: 4,
+      lineStyle: { color: p.accent, width: 2 }, itemStyle: { color: p.accent },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: hexAlpha(p.accent, 0.22) }, { offset: 1, color: hexAlpha(p.accent, 0.02) }]) },
+      markPoint: { symbol: 'pin', symbolSize: 38, data: [{ type: 'max', name: '最大' }],
+        itemStyle: { color: p.accent }, label: { color: p.panel, fontSize: 9, fontFamily: p.fontMono } },
+    }],
+  };
 }
 
-// daily quantity line/area
-function trendChart(rows) {
-  if (!rows || !rows.length) return '<div class="da-empty">データなし</div>';
-  const W = 560, H = 200, P = 28;
-  const xs = rows.map((r) => r.qty || 0);
-  const max = Math.max(1, ...xs);
-  const step = (W - 2 * P) / Math.max(1, rows.length - 1);
-  const pts = rows.map((r, i) => [P + i * step, H - P - (r.qty / max) * (H - 2 * P)]);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-  const area = `M${P} ${H - P} ` + pts.map((p) => `L${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ') + ` L${(W - P).toFixed(1)} ${H - P} Z`;
-  const ac = accentColor();
-  return svg(W, H,
-    `<path d="${area}" fill="${ac}" opacity="0.12"/>` +
-    `<path d="${line}" fill="none" stroke="${ac}" stroke-width="2"/>` +
-    `<line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" stroke="var(--line,#ccd)" stroke-width="1"/>` +
-    `<text x="${P}" y="16" font-size="11" fill="var(--ink-tertiary,#889)">最大 ${fmt(max)}</text>`,
-    `物量推移（日次）折れ線グラフ。最大 ${fmt(max)} ピース、${rows.length} 日分。`);
-}
-
-// ABC: top-N SKU bars colored by rank
-function abcChart(rows) {
-  if (!rows || !rows.length) return '<div class="da-empty">データなし</div>';
-  const top = rows.slice(0, 15);
-  const W = 560, rowH = 20, H = top.length * rowH + 16;
-  const max = Math.max(1, ...top.map((r) => r.qty));
-  const bars = top.map((r, i) => {
-    const w = (r.qty / max) * (W - 130);
-    const y = 8 + i * rowH;
-    return `<text x="0" y="${y + 12}" font-size="10.5" fill="var(--ink-secondary,#567)">${r.sku}</text>` +
-      `<rect x="64" y="${y + 3}" width="${w.toFixed(1)}" height="${rowH - 8}" rx="3" fill="${RANK_C[r.rank] || '#888'}"/>` +
-      `<text x="${(70 + w).toFixed(1)}" y="${y + 12}" font-size="10" fill="var(--ink-tertiary,#889)">${fmt(r.qty)}</text>`;
-  }).join('');
-  return svg(W, H, bars, `ABC分析。上位${top.length}SKUの物量を順位別に表示した横棒グラフ。`);
+// ABC: top-N SKU bars coloured by rank + cumulative % line (Pareto, dual axis)
+function abcOption(rows) {
+  if (!rows || !rows.length) return null;
+  const p = palette();
+  const top = rows.slice(0, 20);
+  const tot = rows.reduce((s, r) => s + (r.qty || 0), 0) || 1;
+  let acc = 0;
+  const cum = top.map((r) => { acc += (r.qty || 0) / tot; return Math.min(1, acc) * 100; });
+  const colOf = (r) => RANK_C[r.rank] || RANK_C.C;
+  return {
+    animation: !reduceMotion(),
+    grid: { left: 52, right: 50, top: 24, bottom: top.length > 10 ? 60 : 34 },
+    toolbox: toolbox(p),
+    legend: { top: 0, right: 86, icon: 'roundRect', itemWidth: 10, itemHeight: 10, selectedMode: false,
+      data: ['A (〜70%)', 'B (〜90%)', 'C'], textStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
+      formatter: (ps) => { const i = ps[0].dataIndex; const r = top[i]; return `<b>${esc(r.sku)}</b><br>物量 ${fmt(r.qty)} · ランク ${esc(r.rank)}<br>累積 ${pct(cum[i] / 100)}`; } },
+    xAxis: { type: 'category', data: top.map((r) => r.sku),
+      axisLabel: { color: p.ink3, fontFamily: p.fontMono, rotate: top.length > 8 ? 40 : 0, interval: 0, hideOverlap: true,
+        formatter: (v) => (String(v).length > 8 ? `${String(v).slice(0, 8)}…` : v) },
+      axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+    yAxis: [
+      { type: 'value', name: '物量', nameTextStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono },
+        axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
+      { type: 'value', name: '累積%', min: 0, max: 100, nameTextStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono },
+        axisLabel: { color: p.ink3, fontFamily: p.fontMono, formatter: '{value}%' }, splitLine: { show: false } },
+    ],
+    series: [
+      { name: 'A (〜70%)', type: 'bar', data: [], itemStyle: { color: RANK_C.A } },
+      { name: 'B (〜90%)', type: 'bar', data: [], itemStyle: { color: RANK_C.B } },
+      { name: 'C', type: 'bar', data: [], itemStyle: { color: RANK_C.C } },
+      { name: '物量', type: 'bar', yAxisIndex: 0, barMaxWidth: 30,
+        data: top.map((r) => ({ value: r.qty || 0, itemStyle: { color: colOf(r) } })) },
+      { name: '累積%', type: 'line', yAxisIndex: 1, data: cum, symbol: 'circle', symbolSize: 5,
+        lineStyle: { color: p.accent, width: 2 }, itemStyle: { color: p.accent }, z: 5,
+        // 70/90% ABC band guides ride the cumulative-% series so they map to the
+        // percentage axis (yAxisIndex 1), not the 物量 scale.
+        markLine: { silent: true, symbol: 'none', label: { color: p.ink2, fontFamily: p.fontMono, fontSize: 9, formatter: '{b}' },
+          data: [
+            { yAxis: 70, name: '70%', lineStyle: { color: p.warn, type: 'dashed' } },
+            { yAxis: 90, name: '90%', lineStyle: { color: p.bad, type: 'dashed' } },
+          ] } },
+    ],
+  };
 }
 
 // peak: weekday bars
-function weekdayChart(rows) {
-  if (!rows || !rows.length) return '<div class="da-empty">データなし</div>';
-  const W = 560, H = 180, P = 26;
-  const max = Math.max(1, ...rows.map((r) => r.qty));
-  const bw = (W - 2 * P) / rows.length;
-  const ac = accentColor();
-  const bars = rows.map((r, i) => {
-    const h = (r.qty / max) * (H - 2 * P);
-    const x = P + i * bw, y = H - P - h;
-    return `<rect x="${(x + 4).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 8).toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${ac}" opacity="0.85"/>` +
-      `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" font-size="11" text-anchor="middle" fill="var(--ink-secondary,#567)">${r.weekday}</text>`;
-  }).join('');
-  return svg(W, H, bars, '曜日別ピーク物量の棒グラフ。');
+function weekdayOption(rows) {
+  if (!rows || !rows.length) return null;
+  const p = palette();
+  return {
+    animation: !reduceMotion(),
+    grid: { left: 46, right: 16, top: 14, bottom: 28 },
+    toolbox: toolbox(p),
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
+      formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data)}` },
+    xAxis: { type: 'category', data: rows.map((r) => r.weekday),
+      axisLabel: { color: p.ink2, fontFamily: p.fontMono }, axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
+    series: [{ type: 'bar', data: rows.map((r) => r.qty || 0), barMaxWidth: 38,
+      itemStyle: { color: p.accent, borderRadius: [4, 4, 0, 0] } }],
+  };
 }
 
-function hourChart(rows) {
-  if (!rows || !rows.length) return '<div class="da-empty">データなし</div>';
-  const W = 560, H = 160, P = 24;
-  const max = Math.max(1, ...rows.map((r) => r.qty));
-  const bw = (W - 2 * P) / rows.length;
-  const ac = accentColor();
-  const bars = rows.map((r, i) => {
-    const h = (r.qty / max) * (H - 2 * P);
-    const x = P + i * bw, y = H - P - h;
-    const lbl = r.hour % 6 === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--ink-tertiary,#889)">${r.hour}</text>` : '';
-    return `<rect x="${(x + 1).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${ac}" opacity="0.55"/>${lbl}`;
-  }).join('');
-  return svg(W, H, bars, '時間帯別ピーク物量の棒グラフ（0〜23時）。');
+// peak: hourly bars (0..23)
+function hourOption(rows) {
+  if (!rows || !rows.length) return null;
+  const p = palette();
+  return {
+    animation: !reduceMotion(),
+    grid: { left: 44, right: 16, top: 14, bottom: 26 },
+    toolbox: toolbox(p),
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
+      formatter: (ps) => `<b>${esc(ps[0].axisValue)}時</b> · ${fmt(ps[0].data)}` },
+    xAxis: { type: 'category', data: rows.map((r) => r.hour),
+      axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: 3 },
+      axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
+    series: [{ type: 'bar', data: rows.map((r) => r.qty || 0), barMaxWidth: 18, itemStyle: { color: hexAlpha(p.accent, 0.6) } }],
+  };
+}
+
+// 24-hour total required-headcount area chart.
+function headcountOption(hours) {
+  if (!hours || !hours.length) return null;
+  const p = palette();
+  return {
+    animation: !reduceMotion(),
+    grid: { left: 40, right: 16, top: 16, bottom: 26 },
+    toolbox: toolbox(p),
+    tooltip: { trigger: 'axis', ...tipStyle(p), formatter: (ps) => `<b>${esc(ps[0].axisValue)}時</b> · ${fmt(ps[0].data)} 名` },
+    xAxis: { type: 'category', data: hours.map((_, i) => i), boundaryGap: false,
+      axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: 3 },
+      axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
+    yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } }, minInterval: 1 },
+    series: [{ type: 'line', data: hours, step: 'middle', showSymbol: false,
+      lineStyle: { color: p.accent, width: 2 }, itemStyle: { color: p.accent },
+      areaStyle: { color: hexAlpha(p.accent, 0.16) },
+      markPoint: { symbol: 'pin', symbolSize: 36, data: [{ type: 'max', name: '最大' }],
+        itemStyle: { color: p.accent }, label: { color: p.panel, fontSize: 9, fontFamily: p.fontMono } } }],
+  };
 }
 
 function kpiCards(k) {
@@ -195,23 +293,6 @@ function insightList(ins) {
   }).join('')}</div>`;
 }
 
-// 24-hour total required-headcount area chart.
-function headcountChart(hours) {
-  if (!hours || !hours.length) return '<div class="da-empty">データなし</div>';
-  const W = 560, H = 150, P = 24;
-  const max = Math.max(1, ...hours);
-  const bw = (W - 2 * P) / hours.length;
-  const ac = accentColor();
-  const bars = hours.map((v, i) => {
-    const h = (v / max) * (H - 2 * P);
-    const x = P + i * bw, y = H - P - h;
-    const lbl = i % 6 === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--ink-tertiary,#889)">${i}</text>` : '';
-    return `<rect x="${(x + 0.6).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, bw - 1.2).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${ac}" opacity="0.8"/>` +
-      (v > 0 && v === max ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" font-size="9" text-anchor="middle" fill="var(--ink-secondary,#567)">${v}</text>` : '') + lbl;
-  }).join('');
-  return svg(W, H, bars, `時間帯別の必要人員（合計）棒グラフ。最大 ${max} 名。`);
-}
-
 function staffingCard(s) {
   if (!s || !s.processes || !s.processes.length) return '';
   const rows = s.processes.map((p) =>
@@ -233,32 +314,17 @@ function staffingCard(s) {
       <tbody>${rows}</tbody>
     </table>
     <h3 style="margin:16px 0 6px">時間帯別 必要人員（合計）</h3>
-    ${headcountChart(s.total_headcount_by_hour)}
+    <div class="da-ec" data-ec="headcount" style="height:170px"></div>
     <div style="margin-top:12px"><button class="da-btn" data-act="to-timetable">タイムチャートで人員配置を見る →</button></div>
   </div>`;
 }
 
-function render(el, b) {
-  el.innerHTML =
-    `<div class="da-bar">
-       <button class="da-btn primary" data-act="sample">▶ サンプルで試す</button>
-       <button class="da-btn" data-act="upload">出荷データを取り込む</button>
-       <input type="file" data-da-file accept=".csv,.xlsx,.xls,.json" hidden />
-       <span class="da-hint">出荷WMSデータ(CSV/Excel)から物量推移・ABC・ピーク・在庫を分析</span>
-       ${b && b.source ? `<span class="da-src" style="margin-left:auto">source: ${b.source}</span>` : ''}
-     </div>` +
-    (b
-      ? kpiCards(b.kpis) +
-        `<div class="da-cards">
-           <div class="da-card"><h3>自動インサイト</h3>${insightList(b.insights)}</div>
-           <div class="da-card"><h3>物量推移（日次）</h3>${trendChart(b.trend_daily)}</div>
-           <div class="da-card"><h3>ABC分析（上位SKU）</h3>${abcChart(b.abc_sku)}</div>
-           <div class="da-card"><h3>曜日別ピーク</h3>${weekdayChart(b.peak && b.peak.by_weekday)}</div>
-           <div class="da-card" style="grid-column:1/-1"><h3>時間帯別ピーク</h3>${hourChart(b.peak && b.peak.by_hour)}</div>
-           ${staffingCard(b.staffing)}
-         </div>`
-      : `<div class="da-empty"><b>WMSデータを分析</b>
-           <div>「サンプルで試す」ですぐ確認、または出荷データを取り込んでください。</div></div>`);
+// A chart card whose body is an ECharts mount node (id) or a friendly empty note.
+function chartCard(title, id, hasData, full) {
+  const body = hasData
+    ? `<div class="da-ec" data-ec="${id}" style="height:200px"></div>`
+    : `<div class="da-chart-empty">データなし</div>`;
+  return `<div class="da-card"${full ? ' style="grid-column:1/-1"' : ''}><h3>${title}</h3>${body}</div>`;
 }
 
 export function mountDataAnalysis(el, opts = {}) {
@@ -272,41 +338,87 @@ export function mountDataAnalysis(el, opts = {}) {
   let bundle = null;
   const toast = opts.toast || (() => {});
 
-  // `makePromise` is a thunk (not a bare promise) so the same fetch can be
-  // re-invoked by the error-state 再試行 button.
+  // ── ECharts registry: id → instance; disposed each render so no leaks. ──
+  const charts = new Map();
+  let ro = null;
+  function disposeCharts() {
+    charts.forEach((c) => { try { c.dispose(); } catch (_) { /* noop */ } });
+    charts.clear();
+  }
+  function mountChart(id, option) {
+    const node = root.querySelector(`[data-ec="${id}"]`);
+    if (!node || !option) return;
+    const inst = echarts.init(node, null, { renderer: 'canvas' });
+    inst.setOption(option);
+    charts.set(id, inst);
+    if (ro) ro.observe(node);
+  }
+  function resizeAll() { charts.forEach((c) => { try { c.resize(); } catch (_) { /* noop */ } }); }
+  const onWinResize = () => resizeAll();
+  window.addEventListener('resize', onWinResize);
+  if (typeof ResizeObserver !== 'undefined') ro = new ResizeObserver(() => resizeAll());
+
+  // Build all charts for the current bundle (called after the DOM is laid out).
+  function mountAllCharts(b) {
+    if (!b) return;
+    mountChart('trend', trendOption(b.trend_daily));
+    mountChart('abc', abcOption(b.abc_sku));
+    mountChart('weekday', weekdayOption(b.peak && b.peak.by_weekday));
+    mountChart('hour', hourOption(b.peak && b.peak.by_hour));
+    if (b.staffing) mountChart('headcount', headcountOption(b.staffing.total_headcount_by_hour));
+  }
+
+  function render(b) {
+    disposeCharts();
+    root.innerHTML =
+      `<div class="da-bar">
+         <button class="da-btn primary" data-act="sample">▶ サンプルで試す</button>
+         <button class="da-btn" data-act="upload">出荷データを取り込む</button>
+         <input type="file" data-da-file accept=".csv,.xlsx,.xls,.json" hidden />
+         <span class="da-hint">出荷WMSデータ(CSV/Excel)から物量推移・ABC・ピーク・在庫を分析</span>
+         ${b && b.source ? `<span class="da-src" style="margin-left:auto">source: ${b.source}</span>` : ''}
+       </div>` +
+      (b
+        ? kpiCards(b.kpis) +
+          `<div class="da-cards">
+             <div class="da-card"><h3>自動インサイト</h3>${insightList(b.insights)}</div>
+             ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length))}
+             ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length))}
+             ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length))}
+             ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), true)}
+             ${staffingCard(b.staffing)}
+           </div>`
+        : `<div class="da-empty"><b>WMSデータを分析</b>
+             <div>「サンプルで試す」ですぐ確認、または出荷データを取り込んでください。</div></div>`);
+    wire();
+    mountAllCharts(b);
+  }
+
+  // `makePromise` is a thunk so the same fetch can be re-invoked by 再試行.
   async function load(makePromise, label) {
     root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = true));
     const bar = root.querySelector('.da-hint');
     if (bar) bar.textContent = label;
     try {
       bundle = await makePromise();
-      render(root, bundle);
-      wire();
+      render(bundle);
     } catch (e) {
       toast('分析に失敗しました: ' + e.message, 'error');
       renderError(e, makePromise, label);
     }
   }
-  // Replace the body (keeping the toolbar) with a token-styled error panel so
-  // the view is never left blank/stuck on a failed fetch.
   function renderError(e, makePromise, label) {
+    disposeCharts();
     root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = false));
     const bar = root.querySelector('.da-hint');
     if (bar) bar.textContent = 'エラーが発生しました';
     let panel = root.querySelector('.da-err');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.className = 'da-err';
-      root.appendChild(panel);
-    }
+    if (!panel) { panel = document.createElement('div'); panel.className = 'da-err'; root.appendChild(panel); }
     panel.innerHTML =
       `<b>読み込めませんでした</b>` +
       `<div class="da-err-msg">${esc(e && e.message ? e.message : e)}</div>` +
       `<button type="button" class="da-retry">再試行</button>`;
-    panel.querySelector('.da-retry').onclick = () => {
-      panel.remove();
-      load(makePromise, label);
-    };
+    panel.querySelector('.da-retry').onclick = () => { panel.remove(); load(makePromise, label); };
   }
   async function getJSON(url, opt) {
     const r = await fetch(url, opt);
@@ -315,13 +427,14 @@ export function mountDataAnalysis(el, opts = {}) {
   }
   function wire() {
     const fileInput = root.querySelector('[data-da-file]');
-    root.querySelector('[data-act="sample"]').onclick = () =>
-      load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
-    root.querySelector('[data-act="upload"]').onclick = () => fileInput.click();
+    const sample = root.querySelector('[data-act="sample"]');
+    if (sample) sample.onclick = () => load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
+    const upload = root.querySelector('[data-act="upload"]');
+    if (upload) upload.onclick = () => fileInput.click();
     const ttBtn = root.querySelector('[data-act="to-timetable"]');
     if (ttBtn) ttBtn.onclick = () => document.dispatchEvent(new CustomEvent(
       'whsim:load-timetable', { detail: { scenario: bundle && bundle.timetable_scenario } }));
-    fileInput.onchange = () => {
+    if (fileInput) fileInput.onchange = () => {
       const f = fileInput.files[0];
       if (!f) return;
       load(() => {
@@ -331,19 +444,19 @@ export function mountDataAnalysis(el, opts = {}) {
       }, `「${f.name}」を分析中…`);
     };
   }
-  render(root, bundle);
-  wire();
+  render(bundle);
 
-  // SVG paint attributes bake in the accent colour resolved at build time, so a
-  // light↔dark flip needs a re-render to pick up the new --accent. Re-render the
-  // current bundle (no refetch) and re-wire on the document `themechange` event;
-  // the listener is removed in dispose() to avoid leaks across remounts.
-  const onTheme = () => { refreshRankColors(); refreshSevColors(); render(root, bundle); wire(); };
+  // Re-render the current bundle (no refetch) and re-wire on theme flip so chart
+  // paints (resolved at build time) pick up the new tokens.
+  const onTheme = () => { refreshRankColors(); refreshSevColors(); render(bundle); };
   document.addEventListener('themechange', onTheme);
 
   return {
     dispose() {
       document.removeEventListener('themechange', onTheme);
+      disposeCharts();
+      if (ro) { ro.disconnect(); ro = null; }
+      window.removeEventListener('resize', onWinResize);
       el.innerHTML = '';
     },
     refresh() {},
