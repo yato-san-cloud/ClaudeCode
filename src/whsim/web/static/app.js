@@ -756,6 +756,7 @@ async function doRun() {
     renderKpis(r.kpis);
     await loadReplay();
     $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
+    renderProposalStory();
     if (S.export) S.export.refresh();
     if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
     return r;
@@ -792,7 +793,60 @@ async function loadReplay() {
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
   if (S.view === 'view3d') mount3d();
 }
+// ⑤提案: retell the run as a one-page story on screen — ① 課題 verdict, the
+// proposal sheet (② 設計 / ③ 検証 baked into the PNG), then ⑤ 裏付け provenance +
+// next-step CTAs. Mirrors the PPTX/PDF narrative spine. Degrades safely when
+// there's no run yet (verdict hidden; the PNG's alt copy shows).
+function renderProposalStory() {
+  const v = $('pstoryVerdict'), foot = $('pstoryFoot'), kp = $('pstoryKpis');
+  if (!v || !foot) return;
+  const k = S.kpis;
+  if (k) {
+    const ok = k.can_handle_demand;
+    v.className = 'pstory-verdict ' + (ok ? 'ok' : 'bad');
+    v.innerHTML = '<span class="pstory-kicker">① 課題</span>'
+      + `<span class="pstory-headword">${ok ? '捌ける' : '捌けない'}</span>`
+      + `<span class="pstory-line">${esc(k.verdict || '')}</span>`;
+    v.hidden = false;
+  } else {
+    v.hidden = true;
+  }
+  // ③ 検証: the decision-grade headline KPIs, lifted onto the proposal page so it
+  // reads as a self-contained story (the shared bottom kpiBar is hidden here).
+  if (kp) {
+    if (k) {
+      const cur = k.currency || '¥';
+      const chips = [
+        ['スループット', `${k.throughput_per_hr.toFixed(0)} 件/時`, false],
+        ['出荷完了', `${k.orders_completed.toFixed(0)} / ${k.orders_arrived.toFixed(0)} 件`,
+          !k.can_handle_demand],
+        ['ボトルネック', `${k.bottleneck_jp || ''} ${(k.bottleneck_utilization * 100).toFixed(0)}%`,
+          k.bottleneck_utilization >= 0.95],
+        ['処理時間 中央', `${(k.cycle_p50_s / 60).toFixed(0)} 分`, false],
+      ];
+      if (k.total_cost_per_order) chips.push(['1件コスト', `${cur}${k.total_cost_per_order.toFixed(1)}`, false]);
+      kp.innerHTML = '<span class="pstory-kicker">③ 検証</span>'
+        + chips.map(([lab, val, bad]) =>
+          `<span class="pstory-chip${bad ? ' bad' : ''}">`
+          + `<span class="pstory-chip-l">${esc(lab)}</span>`
+          + `<span class="pstory-chip-v">${esc(val)}</span></span>`).join('');
+      kp.hidden = false;
+    } else {
+      kp.hidden = true;
+    }
+  }
+  const prov = ($('provenance') && $('provenance').textContent) || '';
+  foot.innerHTML = `<span class="pstory-prov">⑤ 裏付け：${esc(prov)}</span>`
+    + '<span class="pstory-cta">'
+    + '<button type="button" class="pstory-btn" data-go="compare">④ 推奨：シナリオ比較 →</button>'
+    + '<button type="button" class="pstory-btn primary" data-go="export">提案書を書き出す →</button>'
+    + '</span>';
+  foot.querySelectorAll('[data-go]').forEach((b) => { b.onclick = () => switchView(b.dataset.go); });
+  foot.hidden = false;
+}
+
 function renderKpis(k) {
+  S.kpis = k;  // remember the latest verdict so ⑤提案 can retell it
   const cls = k.can_handle_demand ? 'ok' : 'bad';
   const cards = [
     ['スループット', k.throughput_p5 != null
@@ -1021,11 +1075,12 @@ function switchView(view) {
   kpiBar.style.display =
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
-      || view === 'bi' || view === 'bianalytics' || view === 'design')
+      || view === 'bi' || view === 'bianalytics' || view === 'design'
+      || view === 'viewpng')  // ⑤提案 carries its own ③検証 strip (pstoryKpis)
       ? 'none' : '';
   // ④検証: in the 2D/3D replay views the verdict + KPIs read as the page HERO
-  // (lifted above the replay canvas), not a footer strip. Elsewhere (e.g. PNG /
-  // 提案) it stays an inline summary below the content.
+  // (lifted above the replay canvas), not a footer strip. ⑤提案 renders its own
+  // ③検証 strip (pstoryKpis); elsewhere the bar stays an inline summary.
   kpiBar.classList.toggle('is-hero', replayView);
   // The 3D表現 preset control only belongs to the 3D view (kept out of the
   // journey row otherwise, so it isn't persistent noise for the salesperson).
@@ -1048,6 +1103,7 @@ function switchView(view) {
   if (view === 'analysis') { mountAnalysis($('analysis'), S.project); if (S.project) cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
   if (view === 'view3d') mount3d();
   if (view === 'view2d') { fitCanvas(); S._needs2d = true; } // repaint on entry (paused or empty)
+  if (view === 'viewpng') renderProposalStory();
   if (view === 'export') mountExport();
   if (view === 'dataanalysis') mountDataAnalysisView();
   if (view === 'materialflow') mountMaterialFlowView();

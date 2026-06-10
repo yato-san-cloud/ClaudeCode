@@ -592,22 +592,54 @@ button.primary:disabled { background: var(--bg-active); border-color: transparen
   border: 1px solid var(--line-hair);
 }
 #view3d { width: 100%; }
-#viewpng {
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-  background:
-    repeating-linear-gradient(45deg, var(--bg-panel) 0 10px, var(--bg-sunken) 10px 20px);
-  border-radius: var(--r-md);
-  padding: var(--sp-3);
-}
+#viewpng.panel.active { display: block; overflow: auto; }
+#viewpng { border-radius: var(--r-md); padding: var(--sp-3); }
+/* ⑤提案 on-screen story: verdict (① 課題) → proposal sheet → 裏付け + CTAs */
+.pstory { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column;
+  gap: var(--sp-3); padding-bottom: var(--sp-5); }
+.pstory-figure { margin: 0; padding: var(--sp-3); display: flex; justify-content: center;
+  background: repeating-linear-gradient(45deg, var(--bg-panel) 0 10px, var(--bg-sunken) 10px 20px);
+  border-radius: var(--r-md); }
 #pngImg {
   max-width: 100%;
-  max-height: 100%;
   border-radius: var(--r-sm);
   box-shadow: var(--sh-lg);
   background: #fff;
 }
+.pstory-verdict { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-4); border-radius: var(--r-lg);
+  border: 1px solid var(--line-hair); background: var(--bg-sunken); }
+.pstory-verdict[hidden] { display: none; }
+.pstory-kicker { font-family: var(--font-mono); font-size: var(--fs-micro);
+  letter-spacing: .12em; color: var(--ink-tertiary); }
+.pstory-headword { font-size: 22px; font-weight: var(--fw-bold); white-space: nowrap; }
+.pstory-line { color: var(--ink-secondary); font-size: var(--fs-body); min-width: 0; }
+.pstory-verdict.ok { background: var(--ok-tint); border-color: var(--ok-line); }
+.pstory-verdict.ok .pstory-headword { color: var(--ok-ink); }
+.pstory-verdict.bad { background: var(--bad-tint); border-color: var(--bad-line); }
+.pstory-verdict.bad .pstory-headword { color: var(--bad-ink); }
+.pstory-kpis { display: flex; align-items: stretch; gap: var(--sp-2); flex-wrap: wrap; }
+.pstory-kpis[hidden] { display: none; }
+.pstory-kpis .pstory-kicker { align-self: center; }
+.pstory-chip { display: flex; flex-direction: column; gap: 2px; min-width: 96px;
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md);
+  border: 1px solid var(--line-hair); background: var(--bg-sunken); }
+.pstory-chip-l { font-size: var(--fs-micro); color: var(--ink-tertiary); }
+.pstory-chip-v { font-size: var(--fs-body); font-weight: var(--fw-bold); }
+.pstory-chip.bad { background: var(--bad-tint); border-color: var(--bad-line); }
+.pstory-chip.bad .pstory-chip-v { color: var(--bad-ink); }
+.pstory-foot { display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-2) var(--sp-1);
+  border-top: 1px solid var(--line-hair); }
+.pstory-foot[hidden] { display: none; }
+.pstory-prov { font-size: var(--fs-sm); color: var(--ink-secondary); }
+.pstory-cta { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.pstory-btn { padding: 8px 16px; border-radius: var(--r-md); border: 1px solid var(--accent);
+  background: var(--accent-tint); color: var(--accent-ink); font: inherit; font-weight: 600;
+  cursor: pointer; white-space: nowrap; }
+.pstory-btn:hover { background: var(--accent); color: var(--ink-onAccent); }
+.pstory-btn.primary { background: var(--accent); color: var(--ink-onAccent); }
+.pstory-btn.primary:hover { background: var(--accent-hover); }
 
 /* =============================================================================
    TRANSPORT bar

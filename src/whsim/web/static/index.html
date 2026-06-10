@@ -191,7 +191,12 @@
         </div>
         <div id="view3d" class="panel" role="tabpanel" aria-labelledby="tab-view3d" tabindex="0" hidden></div>
         <div id="viewpng" class="panel" role="tabpanel" aria-labelledby="tab-viewpng" tabindex="0" hidden>
-          <img id="pngImg" alt="提案PNG（実行後に表示）" />
+          <div class="pstory">
+            <div class="pstory-verdict" id="pstoryVerdict" role="status" aria-live="polite" hidden></div>
+            <figure class="pstory-figure"><img id="pngImg" alt="提案PNG（実行後に表示）" /></figure>
+            <div class="pstory-kpis" id="pstoryKpis" hidden></div>
+            <div class="pstory-foot" id="pstoryFoot" hidden></div>
+          </div>
         </div>
         <div id="compare" class="panel" role="tabpanel" aria-labelledby="tab-compare" tabindex="0" hidden>
           <div class="compare-bar">
