@@ -130,7 +130,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     story.append(Spacer(1, 4 * mm))
 
     # --- Executive summary ----------------------------------------------------
-    _section("エグゼクティブサマリー")
+    _section("① 課題：エグゼクティブサマリー")
     story.append(Paragraph(_verdict_text(kpis), verdict_style))
     story.append(Spacer(1, 3 * mm))
     tiles = _headline_tiles(kpis)
@@ -160,7 +160,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     story.append(tiles_tbl)
 
     # --- Layout & congestion --------------------------------------------------
-    _section("レイアウトと混雑度")
+    _section("② 設計：レイアウトと混雑度")
     if png is not None:
         try:
             from PIL import Image as PILImage
@@ -174,7 +174,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         story.append(Paragraph("（レイアウト図は省略されました）", body_style))
 
     # --- KPI detail table -----------------------------------------------------
-    _section("KPI詳細")
+    _section("③ 検証：KPI詳細")
     data = [["指標", "値"]] + [list(r) for r in _detail_rows(kpis)]
     table = Table(data, colWidths=[avail_w * 0.6, avail_w * 0.4])
     table.setStyle(TableStyle([
@@ -196,7 +196,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Scenario comparison (only if provided) ------------------------------
     if scen:
-        _section("シナリオ比較（現行 vs 代替案）")
+        _section("④ 推奨と回収：シナリオ比較（現行 vs 代替案）")
         b_k = scen[0]["kpis"]
         metrics = _SCENARIO_METRICS
         header = ["指標"] + [
@@ -240,7 +240,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Recommendations (only if insights provided) -------------------------
     if recs:
-        _section("ご提案・次のステップ")
+        _section("④ 推奨：ご提案・次のステップ")
         for ins in recs:
             color = _SEV_COLOR.get(ins["severity"], INK)
             title = ins["title"] or ins["action"]
@@ -256,7 +256,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
             story.append(KeepTogether(block))
 
     # --- Methodology / provenance footer -------------------------------------
-    _section("前提条件とデータ出所")
+    _section("⑤ 裏付け：前提条件とデータ出所")
     for line in _assumptions_lines(kpis, prov):
         story.append(Paragraph(f"・ {line}", foot_style))
 

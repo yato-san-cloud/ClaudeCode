@@ -134,7 +134,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Slide 2: Executive summary (verdict + 4 hero tiles) -----------------
     s2 = prs.slides.add_slide(blank)
-    _header_band(s2, "エグゼクティブサマリー")
+    _header_band(s2, "① 課題：エグゼクティブサマリー")
     ok = _is_ok(kpis)
     vcolor = GREEN if ok else RED
     vtf = _textbox(s2, Inches(0.5), Inches(1.1), Inches(12.3), Inches(1.0))
@@ -158,7 +158,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Slide 3: Layout & congestion (embed PNG) ----------------------------
     s3 = prs.slides.add_slide(blank)
-    _header_band(s3, "レイアウトと混雑度")
+    _header_band(s3, "② 設計：レイアウトと混雑度")
     if png is not None:
         try:
             from PIL import Image
@@ -184,7 +184,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Slide 4: KPI detail table -------------------------------------------
     s4 = prs.slides.add_slide(blank)
-    _header_band(s4, "KPI詳細")
+    _header_band(s4, "③ 検証：KPI詳細")
     rows = _detail_rows(kpis)
     n = len(rows) + 1
     tbl_shape = s4.shapes.add_table(n, 2, Inches(2.0), Inches(1.1),
@@ -214,7 +214,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
     # --- Slide 5: Scenario comparison (only if provided) ---------------------
     if scen:
         s5 = prs.slides.add_slide(blank)
-        _header_band(s5, "シナリオ比較（現行 vs 代替案）")
+        _header_band(s5, "④ 推奨と回収：シナリオ比較（現行 vs 代替案）")
         b_k = scen[0]["kpis"]
         metrics = _SCENARIO_METRICS
         ncols = 1 + len(scen)
@@ -260,7 +260,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
     # --- Slide 6: Recommendations (only if insights provided) ----------------
     if recs:
         s6 = prs.slides.add_slide(blank)
-        _header_band(s6, "ご提案・次のステップ")
+        _header_band(s6, "④ 推奨：ご提案・次のステップ")
         rtf = _textbox(s6, Inches(0.6), Inches(1.2), Inches(12.1), Inches(5.6))
         first = True
         for ins in recs:
@@ -280,7 +280,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Final slide: Methodology / provenance -------------------------------
     sN = prs.slides.add_slide(blank)
-    _header_band(sN, "前提条件とデータ出所")
+    _header_band(sN, "⑤ 裏付け：前提条件とデータ出所")
     atf = _textbox(sN, Inches(0.6), Inches(1.3), Inches(12.1), Inches(5.0))
     first = True
     for line in _assumptions_lines(kpis, prov):
