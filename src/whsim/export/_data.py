@@ -116,7 +116,7 @@ def _detail_rows(kpis: dict) -> list[tuple[str, str]]:
     else:
         thr_range = DASH
     cycle = f"{_fmt_minutes(kpis.get('cycle_p50_s'))} / {_fmt_minutes(kpis.get('cycle_p95_s'))} 分"
-    return [
+    rows = [
         ("スループット (件/時)", _fmt_num(kpis.get("throughput_per_hr"), 1)),
         ("スループット p5〜p95", thr_range),
         ("出荷完了率", _fmt_pct(kpis.get("completion_rate"))),
@@ -130,6 +130,20 @@ def _detail_rows(kpis: dict) -> list[tuple[str, str]]:
         ("月間運用費 (OPEX)", _fmt_money(kpis.get("monthly_opex"), kpis)),
         ("1件あたりコスト", _fmt_money(kpis.get("total_cost_per_order"), kpis, 1)),
     ]
+    # 生産性の内訳 (要素作業分解): present only on runs that carry the breakdown.
+    walk_s = kpis.get("picker_walk_s")
+    handle_s = kpis.get("picker_handle_s")
+    idle_s = kpis.get("picker_idle_s")
+    if isinstance(walk_s, (int, float)) and (walk_s or handle_s or idle_s):
+        total = (walk_s or 0) + (handle_s or 0) + (idle_s or 0)
+        if total > 0:
+            rows.append(("ピッカー生産性 (件/人時)",
+                         _fmt_num(kpis.get("orders_per_picker_hr"), 1)))
+            rows.append(("　└ 内訳 移動/手扱い/手待ち",
+                         f"{_fmt_pct((walk_s or 0) / total)} / "
+                         f"{_fmt_pct((handle_s or 0) / total)} / "
+                         f"{_fmt_pct((idle_s or 0) / total)}"))
+    return rows
 
 
 def _normalize_scenarios(scenarios) -> list[dict]:
@@ -247,6 +261,41 @@ def _png_exists(png_path) -> Path | None:
         return None
     p = Path(png_path)
     return p if p.is_file() else None
+
+
+def _storage_table(storage: dict | None):
+    """設備機器数の取りまとめ for the proposal 保管設計 slide. Returns
+    ``(header, rows, summary)`` or ``None`` when there's no storage estimate.
+
+      header  = ["保管方法", "SKU数", "間口", "台数", "坪数"]
+      rows    = per-method string cells (racktypes order)
+      summary = {"units","cells","tsubo","skus","cost"} preformatted strings
+    """
+    if not isinstance(storage, dict) or not storage.get("has_data"):
+        return None
+    methods = storage.get("by_method") or []
+    if not methods:
+        return None
+    header = ["保管方法", "SKU数", "間口", "台数", "坪数"]
+    rows = []
+    for m in methods:
+        rows.append([
+            str(m.get("label", m.get("rack_type", ""))),
+            _fmt_num(m.get("items"), 0),
+            _fmt_num(m.get("cells"), 0),
+            _fmt_num(m.get("units"), 0),
+            _fmt_num(m.get("footprint_tsubo"), 1),
+        ])
+    t = storage.get("totals") or {}
+    c = storage.get("cost") or {}
+    summary = {
+        "skus": _fmt_num(t.get("skus"), 0),
+        "cells": _fmt_num(t.get("cells"), 0),
+        "units": _fmt_num(t.get("units"), 0),
+        "tsubo": f"{_fmt_num(t.get('tsubo_storage'), 1)} 坪",
+        "cost": _fmt_money(c.get("total_yen"), {"currency": "¥"}, 0),
+    }
+    return header, rows, summary
 
 
 # Shared scenario-comparison metric spec, used by both builders.

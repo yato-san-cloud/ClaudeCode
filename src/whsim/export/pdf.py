@@ -27,6 +27,7 @@ from ._data import (
     _normalize_insights,
     _normalize_scenarios,
     _png_exists,
+    _storage_table,
     _verdict_text,
 )
 from .fonts import _register_cjk_font
@@ -34,7 +35,7 @@ from .fonts import _register_cjk_font
 
 def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
               png_path, out_path, *, scenarios=None, insights=None,
-              provenance=None) -> Path:
+              provenance=None, storage=None) -> Path:
     """Build a multi-section A4 proposal PDF and write it to `out_path`.
 
     Mirrors the PPTX sections: cover header -> executive summary (verdict + hero
@@ -193,6 +194,36 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
     story.append(table)
+
+    # --- Storage design (保管設計) — only if an estimate is provided ----------
+    st = _storage_table(storage)
+    if st is not None:
+        header, srows, summary = st
+        _section("③ 設計：保管設備の試算（間口・台数・坪数）")
+        sdata = [header] + srows
+        stbl = Table(sdata, colWidths=[avail_w * 0.32, avail_w * 0.17,
+                                       avail_w * 0.17, avail_w * 0.17, avail_w * 0.17])
+        stbl.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), font),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), _rgb(NOTION_BLUE)),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), _rgb(INK)),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _rgb(LIGHT)]),
+            ("GRID", (0, 0), (-1, -1), 0.4, _rgb((0xD0, 0xDC, 0xEC))),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(stbl)
+        story.append(Spacer(1, 2 * mm))
+        story.append(Paragraph(
+            f"合計：必要坪数 {summary['tsubo']}・什器 {summary['units']}台"
+            f"（{summary['cells']}間口）・対象 {summary['skus']}品目"
+            f"／参考保管費 {summary['cost']}/月", body_style))
 
     # --- Scenario comparison (only if provided) ------------------------------
     if scen:

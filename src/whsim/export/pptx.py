@@ -30,13 +30,14 @@ from ._data import (
     _normalize_insights,
     _normalize_scenarios,
     _png_exists,
+    _storage_table,
     _verdict_text,
 )
 
 
 def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                png_path, out_path, *, scenarios=None, insights=None,
-               provenance=None) -> Path:
+               provenance=None, storage=None) -> Path:
     """Build an editable, multi-section proposal deck and write it to `out_path`.
 
     Sections (slides): cover -> executive summary -> layout & congestion -> KPI
@@ -90,6 +91,17 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         tf = tb.text_frame
         tf.word_wrap = True
         return tf
+
+    def _cell_in(tbl, r_i, c_i, text, *, size=12, bold=False, color=INK, fill=None):
+        """Table-agnostic cell setter (the s4 _cell closure is bound to one table)."""
+        cell = tbl.cell(r_i, c_i)
+        if fill is not None:
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = RGBColor(*fill)
+        cell.text = ""
+        run = cell.text_frame.paragraphs[0].add_run()
+        run.text = text
+        _set_run(run, size=size, bold=bold, color=color)
 
     def _para(tf, text, *, size, bold=False, color=INK, bullet=False, first=False):
         p = tf.paragraphs[0] if first else tf.add_paragraph()
@@ -210,6 +222,40 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         _cell(i, 0, label, size=12, bold=True, fill=zebra)
         _cell(i, 1, value, size=12, fill=zebra)
     _footer(s4)
+
+    # --- Slide 4b: Storage design (保管設計) — only if an estimate is provided -
+    st = _storage_table(storage)
+    if st is not None:
+        header, srows, summary = st
+        s4b = prs.slides.add_slide(blank)
+        _header_band(s4b, "③ 設計：保管設備の試算（間口・台数・坪数）")
+        ncol = len(header)
+        nrow = len(srows) + 1
+        st_shape = s4b.shapes.add_table(nrow, ncol, Inches(0.7), Inches(1.1),
+                                        Inches(8.4), Inches(0.4 * nrow + 0.3))
+        st_tbl = st_shape.table
+        for ci, htext in enumerate(header):
+            _cell_in(st_tbl, 0, ci, htext, size=12, bold=True, color=WHITE,
+                     fill=NOTION_BLUE)
+        for ri, row in enumerate(srows, start=1):
+            zebra = LIGHT if ri % 2 == 0 else WHITE
+            for ci, val in enumerate(row):
+                _cell_in(st_tbl, ri, ci, val, size=11,
+                         bold=(ci == 0), fill=zebra)
+        # Summary tiles (右側): 必要坪数 / 台数 / 参考保管費.
+        tiles = [("必要坪数（保管）", summary["tsubo"]),
+                 ("什器台数 / 間口", f"{summary['units']}台・{summary['cells']}間口"),
+                 ("対象SKU", f"{summary['skus']} 品目"),
+                 ("参考: 保管費/月", summary["cost"])]
+        ty = 1.2
+        for label, value in tiles:
+            _rect(s4b, Inches(9.5), Inches(ty), Inches(3.2), Inches(1.0), LIGHT)
+            tf = _textbox(s4b, Inches(9.65), Inches(ty + 0.08),
+                          Inches(2.95), Inches(0.85))
+            _para(tf, label, size=10, color=SUBTLE, first=True)
+            _para(tf, value, size=16, bold=True)
+            ty += 1.15
+        _footer(s4b)
 
     # --- Slide 5: Scenario comparison (only if provided) ---------------------
     if scen:

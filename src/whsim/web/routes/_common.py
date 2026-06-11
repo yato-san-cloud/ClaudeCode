@@ -220,7 +220,16 @@ def _proposal_extras(proj: Project, model, metrics: dict) -> dict:
         provenance = proj.load_provenance().summary()
     except Exception:  # noqa: BLE001
         provenance = None
-    return {"scenarios": scenarios, "insights": insights, "provenance": provenance}
+    # 保管設計の試算 (間口/台数/坪数) so the proposal carries the equipment plan.
+    try:
+        from whsim import storage as _storage
+        storage = _storage.estimate_storage(model, {})
+        if not storage.get("has_data"):
+            storage = None
+    except Exception:  # noqa: BLE001 — storage section is an enhancement, optional
+        storage = None
+    return {"scenarios": scenarios, "insights": insights,
+            "provenance": provenance, "storage": storage}
 
 
 def _call_export(builder, kpis, model_name, prov, png, out, extras: dict):
@@ -232,10 +241,18 @@ def _call_export(builder, kpis, model_name, prov, png, out, extras: dict):
         return builder(kpis, model_name, prov, png, out,
                        scenarios=extras.get("scenarios"),
                        insights=extras.get("insights"),
-                       provenance=extras.get("provenance"))
+                       provenance=extras.get("provenance"),
+                       storage=extras.get("storage"))
     except TypeError:
-        # Older export_doc without the new optional params.
-        return builder(kpis, model_name, prov, png, out)
+        # Builder predates one of the optional params — retry without the newest
+        # (storage), then fall back to the original positional signature.
+        try:
+            return builder(kpis, model_name, prov, png, out,
+                           scenarios=extras.get("scenarios"),
+                           insights=extras.get("insights"),
+                           provenance=extras.get("provenance"))
+        except TypeError:
+            return builder(kpis, model_name, prov, png, out)
 
 
 def _analysis_payload(model, metrics: dict, source: str) -> dict:
