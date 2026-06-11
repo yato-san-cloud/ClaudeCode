@@ -143,6 +143,33 @@ def api_storage(name: str, stock_days: float | None = None, tsubo_rate: float | 
     return storage.estimate_storage(_open(name).load_model(), params)
 
 
+@router.post("/api/projects/{name}/storage/apply-layout")
+def api_storage_apply(name: str, payload: dict | None = None):
+    """保管設計→レイアウト反映: size the equipment from demand (same params as
+    GET /storage, via the JSON body) and author it into the largest storage zone
+    as shelf runs (REPLACING that zone's shelves), re-materialise locations, and
+    mark layout/locations GENERATED. Returns the placement summary."""
+    from whsim import storage
+    from whsim.design import materialize_racks
+    from whsim.provenance import Source
+    proj = _open(name)
+    model = proj.load_model()
+    est = storage.estimate_storage(model, payload or {})
+    if not est.get("has_data"):
+        return {"ok": False, "message": "配置できる保管物量がまだありません。"}
+    placed = storage.place_equipment(model, est)
+    materialize_racks(model)
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("layout", Source.GENERATED)
+    prov.mark("locations", Source.GENERATED)
+    proj.save_provenance(prov)
+    return {"ok": True, **placed, "locations": len(model.locations),
+            "provenance_summary": prov.summary(),
+            "message": (f"{placed['placed']}台を{placed['shelves']}列に配置しました"
+                        + (f"（{placed['unplaced']}台は入りきりません）" if placed["unplaced"] else "。"))}
+
+
 @router.get("/api/projects/{name}/analysis")
 def api_analysis(name: str):
     """Analysis-dashboard payload (the "分析" tab).

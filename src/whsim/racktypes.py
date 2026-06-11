@@ -43,8 +43,22 @@ RACK_TYPES: dict[str, dict] = {
                   "capacity": 2000, "color": "#5cebff", "bays_per_unit": 1,
                   "unit_price": 600000, "life_months": 120,
                   "desc": "高層自動倉庫。クレーン入出庫。"},
+    # ---- catalog round 2 (LOGISTEED 保管機器事例: メザニン/移動ラック/ハンガー) ----
+    "mezzanine": {"label": "メザニン",          "bay": 2.0, "depth": 2.00, "levels": 2,
+                  "capacity": 500,  "color": "#b0885f", "bays_per_unit": 1,
+                  "unit_price": 250000, "life_months": 120,
+                  "desc": "中二階で床面積を倍化。上段からの出荷は昇降設備前提。"},
+    "mobile":    {"label": "移動ラック",        "bay": 1.2, "depth": 0.65, "levels": 5,
+                  "capacity": 150,  "color": "#e07ad2", "bays_per_unit": 3,
+                  "unit_price": 80000, "life_months": 84,
+                  "desc": "通路を共有し保管効率最大。低頻度・長期滞留品向き。"},
+    "hanger":    {"label": "ハンガーラック",    "bay": 1.8, "depth": 0.60, "levels": 1,
+                  "capacity": 60,   "color": "#c8d44e", "bays_per_unit": 2,
+                  "unit_price": 30000, "life_months": 60,
+                  "desc": "アパレル吊るし保管。シワ・畳みじわ回避。"},
 }
-ORDER = ["light", "medium", "pallet", "nestainer", "flow", "asrs"]
+ORDER = ["light", "medium", "pallet", "nestainer", "flow", "asrs",
+         "mezzanine", "mobile", "hanger"]
 DEFAULT = "medium"
 
 

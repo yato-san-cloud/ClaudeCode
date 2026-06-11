@@ -48,6 +48,9 @@ const RACK_DIMS = {
   nestainer: { bay: 1.1, depth: 1.40, levels: 3, h: 3.6 },   // ネステナー段積み
   flow:      { bay: 1.0, depth: 1.50, levels: 3, h: 2.6 },   // フローラック
   asrs:      { bay: 0.8, depth: 1.20, levels: 12, h: 16.0 }, // 自動倉庫(AS/RS)
+  mezzanine: { bay: 2.0, depth: 2.00, levels: 2, h: 4.5 },   // メザニン (中二階)
+  mobile:    { bay: 1.2, depth: 0.65, levels: 5, h: 2.6 },   // 移動ラック (レール台車)
+  hanger:    { bay: 1.8, depth: 0.60, levels: 1, h: 2.2 },   // ハンガーラック (吊るし)
 };
 const RACK_DEFAULT = 'medium';
 function rackDims(rt) { return RACK_DIMS[rt] || RACK_DIMS[RACK_DEFAULT]; }
@@ -62,6 +65,9 @@ const RACK_LEGEND = {
   nestainer: { label: 'ネステナー', sw: RACK_COLOR.nestainer },
   flow:      { label: 'フローラック', sw: RACK_COLOR.flow },
   asrs:      { label: '自動倉庫(AS/RS)', sw: RACK_COLOR.asrs },
+  mezzanine: { label: 'メザニン', sw: RACK_COLOR.mezzanine },
+  mobile:    { label: '移動ラック', sw: RACK_COLOR.mobile },
+  hanger:    { label: 'ハンガーラック', sw: RACK_COLOR.hanger },
 };
 
 // Steel / accent colours shared by the realistic rack builders.

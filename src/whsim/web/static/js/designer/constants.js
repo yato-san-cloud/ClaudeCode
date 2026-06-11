@@ -71,10 +71,20 @@ export const RACK_TYPES = {
   asrs:      { label: '自動倉庫(AS/RS)', bay: 0.8, depth: 1.2, levels: 12, capacity: 2000,
                color: '#5cebff', silhouette: 'asrs', h: 16.0,
                desc: '高層自動倉庫。クレーン入出庫。' },
+  mezzanine: { label: 'メザニン', bay: 2.0, depth: 2.0, levels: 2, capacity: 500,
+               color: '#b0885f', silhouette: 'shelving', h: 4.5,
+               desc: '中二階で床面積を倍化。上段からの出荷は昇降設備前提。' },
+  mobile:    { label: '移動ラック', bay: 1.2, depth: 0.65, levels: 5, capacity: 150,
+               color: '#e07ad2', silhouette: 'shelving', h: 2.6,
+               desc: '通路を共有し保管効率最大。低頻度・長期滞留品向き。' },
+  hanger:    { label: 'ハンガーラック', bay: 1.8, depth: 0.6, levels: 1, capacity: 60,
+               color: '#c8d44e', silhouette: 'shelving', h: 2.2,
+               desc: 'アパレル吊るし保管。シワ・畳みじわ回避。' },
 };
 // Insertion order = catalog order; mutated in place if /api/racktypes returns a
 // different (or extended) ordering. The seed value matches racktypes.ORDER.
-export const RACK_ORDER = ['light', 'medium', 'pallet', 'nestainer', 'flow', 'asrs'];
+export const RACK_ORDER = ['light', 'medium', 'pallet', 'nestainer', 'flow', 'asrs',
+                           'mezzanine', 'mobile', 'hanger'];
 // Unknown ids (e.g. a future backend preset) fall back to the generic shelving
 // silhouette so an extended catalog still renders a sensible card icon.
 export const RACK_SILHOUETTE_FALLBACK = 'shelving';

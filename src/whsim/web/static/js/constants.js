@@ -33,6 +33,7 @@ export const STATE_COLOR = {
 export const RACK_COLOR = {
   light: '#7fb0f2', medium: '#2ee6a0', pallet: '#f5b05a',
   nestainer: '#9b6bff', flow: '#34e3ff', asrs: '#5cebff',
+  mezzanine: '#b0885f', mobile: '#e07ad2', hanger: '#c8d44e',
 };
 
 // AGV action -> colour.

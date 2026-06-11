@@ -136,7 +136,7 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
     warehouse_yen = tsubo_total * tsubo_rate
     total_yen = warehouse_yen + equip_yen
 
-    return {
+    out = {
         "has_data": sized_skus > 0,
         "params": {"stock_days": stock_days, "tsubo_rate": int(tsubo_rate),
                    "aisle_factor": aisle, "office_tsubo": float(p["office_tsubo"]),
@@ -157,3 +157,81 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
             "total_yen": round(total_yen),           # 保管費/月
         },
     }
+    return out
+
+
+# --- 試算 → レイアウト反映 (place the sized equipment as authored shelves) ----
+
+_AISLE_M = {"pallet": 3.0, "nestainer": 3.0, "asrs": 1.6}  # フォーク系は広め
+_AISLE_DEFAULT = 2.5
+
+
+def place_equipment(model: WarehouseModel, estimate: dict) -> dict:
+    """Author the sized equipment into the model as ShelfArea runs.
+
+    Lays each method's units (1台 = bays_per_unit×bay long, depth deep) in rows
+    inside the largest storage zone (created spanning the floor if none exists),
+    facing down, with per-type aisle gaps. REPLACES that zone's shelves (the
+    button is explicit about this) and leaves other zones untouched. Tolerant:
+    units that don't fit are reported as `unplaced`, never an error."""
+    from whsim.schema.model import ShelfArea, Zone
+
+    methods = [m for m in (estimate or {}).get("by_method", []) if m.get("units")]
+    if not methods:
+        return {"placed": 0, "unplaced": 0, "shelves": 0, "zone": None}
+
+    # Target zone: the largest storage zone by area, else create one on the floor.
+    zones = [z for z in model.layout.zones if z.type == "storage"]
+    if zones:
+        zone = max(zones, key=lambda z: (z.w or 0) * (z.h or 0))
+    else:
+        b = model.layout.bounds
+        zone = Zone(id="storage-auto", type="storage",
+                    x=2.0, y=2.0, w=max(6.0, b.width - 4.0), h=max(6.0, b.depth - 4.0))
+        model.layout.zones.append(zone)
+
+    margin = 1.0
+    x0, y0 = zone.x + margin, zone.y + margin
+    x1, y1 = zone.x + zone.w - margin, zone.y + zone.h - margin
+    usable_w = max(0.0, x1 - x0)
+
+    shelves: list[ShelfArea] = []
+    placed = 0
+    unplaced = 0
+    cy = y0                      # row cursor (top → bottom)
+    seq = 0
+    for m in methods:
+        rt = racktypes.get(m["rack_type"])
+        bays = max(1, int(rt.get("bays_per_unit", 1)))
+        run_w = float(rt["bay"]) * bays  # 1台 footprint along the row
+        depth = float(rt["depth"])
+        aisle = _AISLE_M.get(m["rack_type"], _AISLE_DEFAULT)
+        per_row = max(1, int(usable_w // run_w)) if usable_w >= run_w else 0
+        todo = int(m["units"])
+        if per_row == 0:
+            unplaced += todo
+            continue
+        row_no = 0
+        while todo > 0:
+            if cy + depth > y1:          # zone is full — report the shortfall
+                unplaced += todo
+                break
+            n = min(per_row, todo)
+            # One ShelfArea per row keeps the designer light (a run of n units).
+            seq += 1
+            row_no += 1
+            shelves.append(ShelfArea(
+                id=f"auto-{m['rack_type']}-{seq}",
+                name=f"{rt.get('label', m['rack_type'])}{row_no:02d}",
+                x=round(x0, 2), y=round(cy, 2),
+                w=round(run_w * n, 2), h=round(depth, 2),
+                rack_type=m["rack_type"], facing="down",
+            ))
+            placed += n
+            todo -= n
+            cy += depth + aisle          # next row below, behind the pick aisle
+        cy += 0.5                        # small break between equipment groups
+
+    zone.shelves = shelves               # explicit REPLACE of this zone's shelves
+    return {"placed": placed, "unplaced": unplaced,
+            "shelves": len(shelves), "zone": zone.id}

@@ -79,6 +79,15 @@ function injectStyle() {
     color:var(--ink-secondary);border:1px solid var(--line-strong);border-radius:999px;
     background:transparent;padding:4px 12px;cursor:pointer}
   .st-csv:hover{color:var(--accent);border-color:var(--accent)}
+  /* 試算 → レイアウト反映 CTA (the next-step of this view) */
+  .st-apply{padding:12px 16px;border:1px solid var(--ok-line,rgba(52,227,160,.3));
+    border-left:4px solid var(--ok,#34c97a);border-radius:12px;
+    background:var(--ok-tint,rgba(52,227,160,.07));display:flex;flex-direction:column;gap:9px}
+  .st-apply-t{font-size:var(--fs-sm,12.5px);color:var(--ink-secondary)}
+  .st-apply-btn{align-self:flex-start;padding:9px 16px;border:none;border-radius:10px;
+    background:var(--accent);color:var(--ink-onAccent,#04222c);font:inherit;font-weight:700;cursor:pointer}
+  .st-apply-btn:hover{background:var(--accent-hover)}
+  .st-apply-btn:disabled{opacity:.55;cursor:wait}
   `;
   document.head.appendChild(s);
 }
@@ -162,12 +171,40 @@ export function mountStorage(el, opts = {}) {
       <div class="st-sec"><h3>必要保管機器（坪数の内訳）</h3><div class="st-ec" data-ec></div></div>
       <div class="st-sec"><h3>設備機器数 取りまとめ
         <button type="button" class="st-csv" data-csv>⤓ CSV出力</button></h3>
-        <div data-tbl></div></div>`;
+        <div data-tbl></div></div>
+      <div class="st-apply">
+        <div class="st-apply-t">この什器構成を保管ゾーンに自動配置します（既存の棚は置き換え。配置後はレイアウトで自由に調整できます）。</div>
+        <button type="button" class="st-apply-btn" data-apply>⛏ この設備をレイアウトに配置 →</button>
+      </div>`;
     buildChart(root.querySelector('[data-ec]'));
     buildTable(root.querySelector('[data-tbl]'));
     wireKnobs();
     const csv = root.querySelector('[data-csv]');
     if (csv) csv.onclick = () => exportCsv();
+    const ap = root.querySelector('[data-apply]');
+    if (ap) ap.onclick = () => applyLayout(ap);
+  }
+
+  // 試算 → レイアウト: author the sized equipment into the storage zone (server
+  // replaces that zone's shelves + re-materialises locations), then reopen the
+  // project (provenance/readiness refresh) and land on the designer to adjust.
+  async function applyLayout(btn) {
+    const name = getProject();
+    if (!name) { toast('先にプロジェクトを作ってください。', 'error'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = '配置中…'; }
+    try {
+      const body = {};
+      KNOBS.forEach((k) => { body[k.key] = knob[k.key]; });
+      const r = await api(`/api/projects/${encodeURIComponent(name)}/storage/apply-layout`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r || !r.ok) { toast((r && r.message) || '配置できませんでした。', 'error'); return; }
+      toast(r.message || '配置しました。', 'ok');
+      document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: { nav: 'design' } }));
+    } catch (e) {
+      toast('配置に失敗: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '⛏ この設備をレイアウトに配置 →'; }
+    }
   }
 
   function buildChart(node) {
