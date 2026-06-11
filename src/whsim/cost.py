@@ -34,23 +34,28 @@ _DRIVER_VOL = {
 
 def _labor_lines(model: WarehouseModel, vol: dict, days: float, rate: float):
     """Per-process daily 人時 and its monthly labour cost, from the SAME drivers/
-    productivities the analytic timetable uses. Returns (lines, total_mh_day,
-    monthly_yen)."""
+    productivities the analytic timetable uses. A 実測採用値
+    (settings.productivity_overrides[process]) supersedes the benchmark prod when
+    present — the 想定→実測 swap. Returns (lines, total_mh_day, monthly_yen)."""
+    overrides = getattr(model.settings, "productivity_overrides", {}) or {}
     lines = []
     total_mh = 0.0
     for p in GENERIC_PROCESSES:
         v = float(vol.get(_DRIVER_VOL.get(p["driver"], ""), 0.0) or 0.0)
-        prod = max(1.0, float(p["prod"]))
+        ov = overrides.get(p["id"])
+        prod = max(1.0, float(ov)) if ov else max(1.0, float(p["prod"]))
         mh = v / prod                      # 人時/日
         if mh <= 0:
             continue
         total_mh += mh
         lines.append({
             "id": p["id"], "section": p["section"],
-            "volume": round(v, 1), "unit": p["unit"], "prod": p["prod"],
+            "volume": round(v, 1), "unit": p["unit"], "prod": round(prod, 1),
+            "adopted": bool(ov),   # True = 実測採用値 (else 想定/ベンチマーク)
             "mh_day": round(mh, 2),
             "yen_month": round(mh * days * rate),
-            "formula": f"{v:,.0f}{p['unit'].split('/')[0]} ÷ {p['prod']} = "
+            "formula": f"{v:,.0f}{p['unit'].split('/')[0]} ÷ {prod:g}"
+                       f"{'(実測)' if ov else ''} = "
                        f"{mh:.1f}人時/日 × {days:g}日 × {rate:,.0f}",
         })
     return lines, total_mh, round(total_mh * days * rate)

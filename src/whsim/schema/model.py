@@ -370,6 +370,10 @@ class Settings(BaseModel):
     delivery_cost_per_cage: float = 0.0      # 輸配送 ¥/カゴ台車 (opt-in)
     system_cost_per_month: float = 0.0       # 情報システム費 ¥/月 (opt-in)
     overhead_rate: float = 0.0               # 運営費率 (作業+保管+輸配送+IT の比率; opt-in)
+    # 生産性フィードバック: per-process 実測採用値 (process_id → rate in その工程の単位).
+    # When present, overrides the analytic benchmark (staffing.GENERIC_PROCESSES) in
+    # the 原価試算 labour build-up — the 想定→実測 swap. Empty = use the benchmark.
+    productivity_overrides: dict[str, float] = Field(default_factory=dict)
 
 
 class Scenario(BaseModel):

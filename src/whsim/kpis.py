@@ -172,6 +172,9 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         # 移動 = pick trip distance ÷ 歩行速度; 手扱い = busy − 移動 (ピック+仕分+荷渡し);
         # 手待ち = 在席時間 − busy。エンジン変更なしでイベントログから純粋に導出。
         **_picker_breakdown(res, model, picker_busy, completed),
+        # 実測生産性 (this layout) per process, for the 想定→実測 feedback loop.
+        "measured_productivity": _measured_productivity(
+            res, model, picker_busy, packer_busy, completed),
         "on_time_rate": on_time / completed if completed else 1.0,
         "headcount": headcount,
         "labour_cost_per_order": labour_cost / completed if completed else 0.0,
@@ -185,6 +188,24 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "labour_rate_per_hr": rate,
         "currency": c["currency"],
     }
+
+
+def _measured_productivity(res: RunResult, model: WarehouseModel | None,
+                           picker_busy: float, packer_busy: float, completed: int) -> dict:
+    """実測生産性 for the processes the DES actually simulates, in the SAME units as
+    the analytic benchmark (staffing.GENERIC_PROCESSES): ピッキング 行/h, 梱包 件/h.
+    Rate = work done ÷ that resource's busy person-hours. Only populated where the
+    sim provides it (busy>0); inbound/格納/出荷 keep the benchmark. The 想定→実測
+    swap (生産性フィードバック) consumes this."""
+    out: dict[str, float] = {}
+    orders = (model.orders.outbound if model else []) or []
+    avg_lines = (sum(len(o.lines) for o in orders) / len(orders)) if orders else 1.0
+    if picker_busy > 0 and completed > 0:
+        lines_picked = completed * avg_lines
+        out["ピッキング"] = round(lines_picked / (picker_busy / 3600.0), 1)  # 行/h
+    if packer_busy > 0 and completed > 0:
+        out["梱包"] = round(completed / (packer_busy / 3600.0), 1)            # 件/h
+    return out
 
 
 def _picker_breakdown(res: RunResult, model: WarehouseModel | None,

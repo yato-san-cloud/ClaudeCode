@@ -507,6 +507,29 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
             ],
         }
 
+    # (d) 生産性フィードバック: per-process 想定(benchmark) vs 実測(this layout),
+    # with whether the 実測 has been adopted into the cost build-up.
+    from whsim.analysis.staffing import GENERIC_PROCESSES
+    measured = metrics.get("measured_productivity") or {}
+    overrides = {}
+    try:
+        overrides = getattr(model.settings, "productivity_overrides", {}) or {}
+    except Exception:  # noqa: BLE001
+        overrides = {}
+    bench = {p["id"]: p for p in GENERIC_PROCESSES}
+    prod_compare = []
+    for pid, meas in measured.items():
+        b = bench.get(pid)
+        if not b or not meas:
+            continue
+        benchmark = float(b["prod"])
+        gap = (meas - benchmark) / benchmark if benchmark else 0.0
+        prod_compare.append({
+            "process": pid, "unit": b["unit"],
+            "benchmark": round(benchmark, 1), "measured": round(meas, 1),
+            "gap": round(gap, 3), "adopted": pid in overrides,
+        })
+
     return {
         "name": model.meta.name,
         "source": source,
@@ -515,4 +538,5 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
         "kpis": {"hero": hero[:4], "groups": groups},
         "charts": {"stages": stages_chart, "cost": cost_chart,
                    "productivity": prod_chart},
+        "productivity_compare": prod_compare,
     }

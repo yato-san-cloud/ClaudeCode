@@ -198,6 +198,26 @@ function injectStyle() {
   transition:opacity var(--an-d3) var(--an-ease),
     transform var(--an-d3) var(--an-ease);
 }
+/* 生産性フィードバック (想定→実測→採用) */
+#analysis .an-view .an-prod{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+#analysis .an-view .an-prod-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:9px 12px;border:1px solid var(--line-hair,rgba(255,255,255,.08));border-radius:10px;
+  background:var(--bg-sunken,rgba(255,255,255,.02))}
+#analysis .an-view .an-prod-row.adopted{border-color:var(--accent,#16C0DE);
+  background:color-mix(in srgb,var(--accent,#16C0DE) 8%,transparent)}
+#analysis .an-view .an-prod-name{font-weight:700;min-width:84px}
+#analysis .an-view .an-prod-vals{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;
+  font-family:var(--font-mono,monospace);font-size:13px;color:var(--ink-secondary,#9fb0c0)}
+#analysis .an-view .an-prod-meas{color:var(--ink-primary,#e6edf3);font-weight:700}
+#analysis .an-view .an-prod-arrow{color:var(--ink-tertiary,#8195a8)}
+#analysis .an-view .an-prod-gap{font-weight:700;padding:0 6px;border-radius:5px}
+#analysis .an-view .an-prod-gap.up{color:#34c97a}
+#analysis .an-view .an-prod-gap.down{color:var(--warn,#f5b05a)}
+#analysis .an-view .an-prod-btn{flex:none;padding:6px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--accent,#16C0DE);background:transparent;color:var(--accent,#16C0DE);
+  font:inherit;font-weight:700;font-size:12px;white-space:nowrap}
+#analysis .an-view .an-prod-btn:hover{background:color-mix(in srgb,var(--accent,#16C0DE) 14%,transparent)}
+#analysis .an-view .an-prod-btn.on{background:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222c)}
 
 /* (2) sparkline draw-on, once (stroke-dashoffset) */
 #analysis .an-view .an-spark.an-draw polyline{
@@ -1023,6 +1043,65 @@ function animateView(root) {
   });
 }
 
+// ---- 生産性フィードバック (想定 → 実測 → 採用) -------------------------------
+// Show per-process benchmark (想定) vs this-layout measured (実測) productivity,
+// and let the user adopt the measured value into the 原価試算 with one click.
+// Adopting persists to settings.productivity_overrides and re-renders.
+async function adoptProductivity(targetEl, process, rate, adopt) {
+  const proj = targetEl && targetEl._anProject;
+  if (!proj) return;
+  try {
+    const sres = await fetch(`/api/projects/${encodeURIComponent(proj)}/settings`);
+    const settings = sres.ok ? await sres.json() : {};
+    const ov = (settings && typeof settings.productivity_overrides === 'object'
+      && settings.productivity_overrides) ? { ...settings.productivity_overrides } : {};
+    if (adopt) ov[process] = rate; else delete ov[process];
+    await fetch(`/api/projects/${encodeURIComponent(proj)}/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productivity_overrides: ov }),
+    });
+    document.dispatchEvent(new CustomEvent('whsim:toast',
+      { detail: { msg: adopt ? `${process}の実測値を原価に採用しました。` : `${process}を想定値に戻しました。`, kind: 'ok' } }));
+    // Re-fetch analysis so the adopted state + (if open) cost reflect it.
+    const ar = await fetch(`/api/projects/${encodeURIComponent(proj)}/analysis`);
+    if (ar.ok) { targetEl._anPayload = await ar.json(); render(targetEl, targetEl._anPayload); }
+  } catch (e) {
+    document.dispatchEvent(new CustomEvent('whsim:toast',
+      { detail: { msg: '採用に失敗しました。', kind: 'error' } }));
+  }
+}
+
+function buildProdFeedback(compare, targetEl) {
+  if (!Array.isArray(compare) || !compare.length) return null;
+  const sec = el('section', { class: 'an-section' });
+  sec.appendChild(el('h2', { class: 'an-section-title' }, '生産性フィードバック（想定 → 実測）'));
+  const card = el('div', { class: 'chart-card' });
+  card.appendChild(el('div', { class: 'chart-sub' },
+    'このレイアウトで実測した生産性です。ベンチマーク（想定）より低ければ、A品の配置や通路を見直して再実行すると改善します。「採用」で原価試算に反映。'));
+  const grid = el('div', { class: 'an-prod' });
+  for (const r of compare) {
+    const better = r.measured >= r.benchmark;
+    const row = el('div', { class: 'an-prod-row' + (r.adopted ? ' adopted' : '') });
+    row.appendChild(el('div', { class: 'an-prod-name' }, r.process));
+    const vals = el('div', { class: 'an-prod-vals' });
+    vals.appendChild(el('span', { class: 'an-prod-bench' }, `想定 ${fmtCount(r.benchmark, 0)}`));
+    vals.appendChild(el('span', { class: 'an-prod-arrow' }, '→'));
+    vals.appendChild(el('span', { class: 'an-prod-meas' }, `実測 ${fmtCount(r.measured, 0)} ${r.unit}`));
+    const gapPct = Math.round(r.gap * 100);
+    vals.appendChild(el('span', { class: 'an-prod-gap ' + (better ? 'up' : 'down') },
+      (gapPct >= 0 ? '+' : '') + gapPct + '%'));
+    row.appendChild(vals);
+    const btn = el('button', { class: 'an-prod-btn' + (r.adopted ? ' on' : '') },
+      r.adopted ? '✓ 採用中（戻す）' : '実測を採用 →');
+    btn.onclick = () => adoptProductivity(targetEl, r.process, r.measured, !r.adopted);
+    row.appendChild(btn);
+    grid.appendChild(row);
+  }
+  card.appendChild(grid);
+  sec.appendChild(card);
+  return sec;
+}
+
 // ---- mount ------------------------------------------------------------------
 
 function render(targetEl, payload) {
@@ -1059,6 +1138,8 @@ function render(targetEl, payload) {
   root.appendChild(buildKpiSection(kpis));
   const chartsSec = buildChartsSection(charts, data.currency);
   if (chartsSec) root.appendChild(chartsSec);
+  const prodSec = buildProdFeedback(data.productivity_compare, targetEl);
+  if (prodSec) root.appendChild(prodSec);
 
   targetEl.appendChild(root);
 
@@ -1096,6 +1177,7 @@ export async function mountAnalysis(targetEl, projectName) {
   // Stash the latest payload on the element so the (one-time) theme handler
   // always re-renders the CURRENT data, not the payload captured on first mount.
   targetEl._anPayload = payload;
+  targetEl._anProject = projectName;  // for the 生産性フィードバック 採用 button
   render(targetEl, payload);
 
   // Re-render on theme change so the self-drawn SVG charts pick up new

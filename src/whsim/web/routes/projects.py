@@ -301,6 +301,19 @@ def api_put_settings(name: str, payload: dict):
             merged[key] = value
         elif key == "currency":
             merged[key] = str(value)
+        elif key == "productivity_overrides":
+            # 生産性フィードバック: a {process_id: rate} map of 実測採用値. Keep only
+            # positive-number values; an empty/invalid map clears the overrides.
+            ov = {}
+            if isinstance(value, dict):
+                for pk, pv in value.items():
+                    try:
+                        f = float(pv)
+                    except (TypeError, ValueError):
+                        continue
+                    if f > 0:
+                        ov[str(pk)] = f
+            merged[key] = ov
         # Unknown keys: ignored (forward-compatible, never fatal).
     md["settings"] = merged
 
