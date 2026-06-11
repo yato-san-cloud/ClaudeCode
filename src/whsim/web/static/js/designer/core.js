@@ -1129,35 +1129,68 @@ export class Designer {
 
   // ---- 動線 tool: floor view + control bar + live distance/time table ------
   _renderRoute() {
+    if (!this.routeMode) this.routeMode = 'measure';   // 'measure' | 'draw'
+    if (this.routeNetOn == null) this.routeNetOn = true;
     // left column: control bar above the floor canvas
     const left = document.createElement('div');
     left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
 
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
-    // mover selector
+    // mode: A→B計測 (auto shortest path) vs 手動で描く (legacy free polyline)
+    for (const [m, label, tip] of [
+      ['measure', 'A→B計測', '2点をクリックすると、壁・棚を迂回した最短経路と距離/時間を自動計算'],
+      ['draw', '手動で描く', '床をクリックで頂点追加、ダブルクリックで確定（自由線）'],
+    ]) {
+      const b = this._btn(bar, label, () => {
+        this.routeMode = m;
+        this.routeDraft = null;
+        this._measureA = this._measureB = this._measurePath = null;
+        this.selected = null;
+        this._renderRoute();
+      });
+      b.title = tip;
+      if (this.routeMode === m) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
+    }
+    // mover selector + speed (used by 計測の時間換算 and by new manual routes)
     const moverSel = this._select(bar, MOVER_OPTS, this.routeMover);
     this._on(moverSel, 'change', () => {
       this.routeMover = moverSel.value;
       this.routeSpeed = MOVER_SPEED[this.routeMover] || 1.2;
       this._renderRoute();
     });
-    // speed input (m/s)
     const spLbl = document.createElement('span');
     spLbl.textContent = '速度(m/s)';
     spLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);';
     bar.appendChild(spLbl);
-    const spInp = this._num(this.routeSpeed, (v) => { this.routeSpeed = Math.max(0.1, v); }, 0.1);
+    const spInp = this._num(this.routeSpeed, (v) => { this.routeSpeed = Math.max(0.1, v); this._renderRouteTable(); }, 0.1);
     spInp.style.cssText += ';width:70px;padding:5px 7px;border:1px solid var(--line-hair);border-radius:var(--r-sm);font-size:13px;background:var(--bg-app);color:var(--ink-primary);transition:border-color var(--dur-1) var(--ease-out);';
     bar.appendChild(spInp);
-    this._btn(bar, '新規ルート', () => {
-      if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
-      this.routeDraft = [];
-      this.selected = null;
-      this._renderRoute();
-    });
-    this._btn(bar, '確定', () => this._finishRoute());
+    if (this.routeMode === 'draw') {
+      this._btn(bar, '新規ルート', () => {
+        if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
+        this.routeDraft = [];
+        this.selected = null;
+        this._renderRoute();
+      });
+      this._btn(bar, '確定', () => this._finishRoute());
+    }
     this._btn(bar, '削除', () => this._deleteSelectedRoute(), 'color:var(--bad);');
+    const spacer2 = document.createElement('div'); spacer2.style.flex = '1'; bar.appendChild(spacer2);
+    // 工程フロー動線: auto-generate routes along the process flow (one per leg)
+    const genBtn = this._btn(bar, '工程フロー動線を自動生成', () => this._genFlowRoutes());
+    genBtn.title = '入荷→…→出荷の各工程間の最短経路を自動計算し、動線として一括作成します';
+    genBtn.className = 'primary';
+    // 通路ネットワーク display toggle
+    const netLbl = document.createElement('label');
+    netLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-secondary);cursor:pointer;';
+    const netCb = document.createElement('input');
+    netCb.type = 'checkbox';
+    netCb.checked = !!this.routeNetOn;
+    this._on(netCb, 'change', () => { this.routeNetOn = netCb.checked; this._drawCanvas(); });
+    netLbl.appendChild(netCb);
+    netLbl.appendChild(document.createTextNode('通路網'));
+    bar.appendChild(netLbl);
     left.appendChild(bar);
 
     // floor canvas
@@ -1181,6 +1214,158 @@ export class Designer {
     this._fitCanvas();
     this._renderRouteTable();
     this._drawCanvas();
+    // fetch the walkable lane network for the CURRENT (possibly unsaved) layout.
+    this._fetchRouteNet();
+  }
+
+  // ---- 経路ネットワーク自動生成 (engine.graph as a service) -------------------
+  // The 動線 tab routes with the SAME AisleGraph the simulation uses, via the
+  // stateless POST /api/routes/network — so drawn 動線 and simulated travel agree.
+  _routeLayoutPayload() {
+    const L = this.model.layout;
+    const shelves = [];
+    for (const z of L.zones || []) {
+      if (z.type !== 'storage') continue;
+      for (const sh of z.shelves || []) shelves.push([sh.x, sh.y, sh.w, sh.h]);
+    }
+    return {
+      bounds: { width: L.bounds.width, depth: L.bounds.depth },
+      walls: (L.walls || []).map((w) => ({ points: w.points || [] })),
+      shelves,
+    };
+  }
+
+  async _fetchRouteNet() {
+    if (this._routeNetBusy) return;
+    this._routeNetBusy = true;
+    try {
+      const res = await fetch('/api/routes/network', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...this._routeLayoutPayload(), include_edges: true }),
+      });
+      if (res.ok) {
+        this.routeNet = await res.json();
+        if (this.tool === 'route') this._drawCanvas();
+      }
+    } catch (_e) { /* offline: the tab still works for manual drawing */ }
+    this._routeNetBusy = false;
+  }
+
+  // A→B計測: ask the server for the wall/棚-aware shortest path between 2 points.
+  async _measureQuery() {
+    if (!this._measureA || !this._measureB) return;
+    try {
+      const res = await fetch('/api/routes/network', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...this._routeLayoutPayload(),
+          queries: [{ a: this._measureA, b: this._measureB }],
+        }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        this._measurePath = (d.paths && d.paths[0]) || null;
+        this._renderRouteTable();
+        this._drawCanvas();
+      }
+    } catch (_e) { /* leave the markers; user can retry */ }
+  }
+
+  // 工程フロー動線を自動生成: shortest path for every consecutive flow leg whose
+  // stages are both bound to zones; existing auto legs are replaced (re-runnable).
+  async _genFlowRoutes() {
+    const stages = this._orderedStages().filter((st) => st.zone && this._zoneById(st.zone));
+    const legs = [];
+    for (let i = 0; i < stages.length - 1; i++) {
+      const a = this._zoneCenter(this._zoneById(stages[i].zone));
+      const b = this._zoneCenter(this._zoneById(stages[i + 1].zone));
+      legs.push({ from: stages[i], to: stages[i + 1], a, b });
+    }
+    if (!legs.length) {
+      this._renderRouteTable();
+      if (this.side) this._note(this.side, '工程にゾーンが割り当てられていません。フロータブの「床図でフロー配置」で工程→ゾーンを割り当ててください。');
+      return;
+    }
+    try {
+      const res = await fetch('/api/routes/network', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...this._routeLayoutPayload(),
+          queries: legs.map((l) => ({ a: l.a, b: l.b })),
+        }),
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      this._pushUndo();
+      // replace previous auto-generated legs, keep hand-drawn routes untouched.
+      this.model.routes = (this.model.routes || []).filter((r) => !String(r.id).startsWith('autoflow'));
+      d.paths.forEach((p, i) => {
+        const leg = legs[i];
+        if (!leg || !p || !(p.points || []).length) return;
+        // 格納 leg is typically forklift work; everything else walks.
+        const mover = (leg.to.id === 'putaway' || leg.from.id === 'putaway') ? 'forklift' : 'person';
+        this.model.routes.push({
+          id: `autoflow_${leg.from.id}_${leg.to.id}`,
+          name: `${leg.from.label || leg.from.id}→${leg.to.label || leg.to.id}`,
+          mover, speed_mps: MOVER_SPEED[mover] || 1.2,
+          points: p.points,
+        });
+      });
+      this.selected = null;
+      this._renderRouteTable();
+      this._drawCanvas();
+    } catch (_e) { /* network down: nothing generated, nothing destroyed */ }
+  }
+
+  // save the current A→B measurement as a persistent route (shows in 2D/3D).
+  _saveMeasureAsRoute() {
+    const p = this._measurePath;
+    if (!p || !(p.points || []).length) return;
+    this._pushUndo();
+    const n = (this.model.routes || []).filter((r) => String(r.id).startsWith('measure')).length + 1;
+    this.model.routes.push({
+      id: uid('measure'),
+      name: `計測${n}`,
+      mover: this.routeMover,
+      speed_mps: Math.max(0.1, +this.routeSpeed || MOVER_SPEED[this.routeMover] || 1.2),
+      points: p.points,
+    });
+    this._measureA = this._measureB = this._measurePath = null;
+    this._renderRouteTable();
+    this._drawCanvas();
+  }
+
+  // A→B計測 overlay: A/B pins + the computed wall/棚-aware shortest path.
+  _drawMeasure() {
+    if (this.routeMode !== 'measure') return;
+    const ctx = this.ctx;
+    const pin = (pt, color, label) => {
+      const x = this._X(pt[0]), y = this._Y(pt[1]);
+      ctx.fillStyle = color;
+      ctx.strokeStyle = this.pal.markerStroke; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, x, y + 0.5);
+    };
+    const p = this._measurePath;
+    if (p && Array.isArray(p.points) && p.points.length >= 2) {
+      ctx.save();
+      ctx.strokeStyle = this.pal.accent; ctx.lineWidth = 3.5;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.setLineDash([9, 6]);
+      ctx.beginPath();
+      ctx.moveTo(this._X(p.points[0][0]), this._Y(p.points[0][1]));
+      for (let i = 1; i < p.points.length; i++) ctx.lineTo(this._X(p.points[i][0]), this._Y(p.points[i][1]));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      const mid = p.points[Math.floor(p.points.length / 2)];
+      const t = p.distance_m / Math.max(0.1, +this.routeSpeed || 1.2);
+      this._label(this._X(mid[0]), this._Y(mid[1]) - 14, `${p.distance_m.toFixed(1)} m / ${t.toFixed(0)} 秒`);
+    }
+    if (this._measureA) pin(this._measureA, '#1db954', 'A');
+    if (this._measureB) pin(this._measureB, '#e3401c', 'B');
   }
 
   // length of a polyline in meters
@@ -1196,8 +1381,33 @@ export class Designer {
   _renderRouteTable() {
     const s = this.side; if (!s) return;
     s.innerHTML = '';
+
+    // A→B計測 panel (auto shortest-path measurement)
+    if (this.routeMode === 'measure') {
+      this._h(s, 'A→B計測');
+      if (!this._measureA) {
+        this._note(s, '床をクリックして始点Aを置いてください。壁・棚を迂回した最短経路を自動計算します。');
+      } else if (!this._measureB) {
+        this._note(s, '次に終点Bをクリックしてください。');
+      } else if (this._measurePath) {
+        const p = this._measurePath;
+        const t = p.distance_m / Math.max(0.1, +this.routeSpeed || 1.2);
+        const box = this._div(s, 'padding:8px 10px;border:1px solid var(--line-strong);border-radius:var(--r-md);'
+          + 'background:var(--bg-app);margin-bottom:8px;font-variant-numeric:tabular-nums;');
+        box.innerHTML = `<div style="font-size:18px;font-weight:700;">${p.distance_m.toFixed(1)} m</div>`
+          + `<div style="font-size:12px;color:var(--ink-secondary);">${MOVER_JP[this.routeMover] || this.routeMover}`
+          + ` ${(+this.routeSpeed).toFixed(1)} m/s → 約 ${t.toFixed(0)} 秒</div>`;
+        this._btn(s, '動線として保存', () => this._saveMeasureAsRoute(), 'margin-bottom:8px;');
+        this._note(s, 'もう一度クリックすると新しいAから測り直します。');
+      } else {
+        this._note(s, '経路を計算中…');
+      }
+    }
+
     this._h(s, '動線一覧');
-    this._note(s, '床をクリックで頂点追加、ダブルクリックか「確定」で完了。ルート付近をクリックで選択。');
+    this._note(s, this.routeMode === 'measure'
+      ? '「工程フロー動線を自動生成」で入荷→…→出荷の経路を一括作成。行をクリックで選択。'
+      : '床をクリックで頂点追加、ダブルクリックか「確定」で完了。ルート付近をクリックで選択。');
 
     const routes = this.model.routes || [];
     const table = document.createElement('table');
@@ -1275,7 +1485,29 @@ export class Designer {
     const b = this.model.layout.bounds;
     const inside = mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth;
 
-    // when not actively drawing, a click near a finished route selects it
+    // A→B計測 mode: 1st click = A, 2nd = B (auto-route), 3rd starts over.
+    if (this.routeMode === 'measure') {
+      // a click near an existing route still selects it (so 削除 works here too)
+      const hit = this._routeHit(px, py);
+      if (hit) {
+        this.selected = { kind: 'route', id: hit.id };
+        this._renderRouteTable(); this._drawCanvas();
+        return;
+      }
+      if (!inside) return;
+      if (!this._measureA || this._measureB) {
+        this._measureA = [mx, my];
+        this._measureB = null;
+        this._measurePath = null;
+      } else {
+        this._measureB = [mx, my];
+        this._measureQuery();         // async; draws when the path returns
+      }
+      this._renderRouteTable(); this._drawCanvas();
+      return;
+    }
+
+    // 手動で描く mode (legacy free polyline)
     if (!this.routeDraft || !this.routeDraft.length) {
       const hit = this._routeHit(px, py);
       if (hit) {
@@ -1541,8 +1773,23 @@ export class Designer {
       this._drawStationGlyph(s, this._isSel('station', s.id));
     }
 
-    // 動線 tool: faint walls for context, then colored route polylines
+    // 動線 tool: walkable lane network + walls for context + route polylines
     if (this.tool === 'route') {
+      // auto-generated 通路ネットワーク (faint lattice: aisles read as corridors,
+      // walls/shelves as holes) — the same graph the simulation routes on.
+      if (this.routeNetOn && this.routeNet && Array.isArray(this.routeNet.edges)) {
+        ctx.save();
+        ctx.strokeStyle = P.accent;
+        ctx.globalAlpha = 0.13;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (const [x1, y1, x2, y2] of this.routeNet.edges) {
+          ctx.moveTo(this._X(x1), this._Y(y1));
+          ctx.lineTo(this._X(x2), this._Y(y2));
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
       ctx.save();
       ctx.globalAlpha = 0.35;
       for (const w of this.model.layout.walls) this._drawWall(w.points, w.thickness, false, false);
@@ -1556,6 +1803,8 @@ export class Designer {
         ctx.restore();
       }
       if (this.routeDraft) this._drawRoute(this.routeDraft, MOVER_COLOR[this.routeMover] || P.draft, true, null);
+      // A→B計測 overlay: endpoint markers + the computed shortest path.
+      this._drawMeasure();
     }
 
     // placement ghost: the armed brush's real footprint under the cursor.
@@ -3067,6 +3316,11 @@ export class Designer {
     if (e.key === 'Escape') {
       if (this._dialogEl) { this._dialogEl.remove(); this._dialogEl = null; return; }
       if (this.shelfDraft) { this.shelfDraft = null; this.drag = null; this.snapLine = null; this._repaint(); return; }
+      if (this.tool === 'route' && (this._measureA || this._measurePath)) {
+        this._measureA = this._measureB = this._measurePath = null;
+        this._renderRouteTable(); this._drawCanvas();
+        return;
+      }
       if (this.conveyorDraft || this.wallDraft || this.routeDraft) {
         this.conveyorDraft = this.wallDraft = this.routeDraft = null;
         this._renderTool();

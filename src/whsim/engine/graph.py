@@ -75,6 +75,27 @@ def _manhattan(a: tuple[float, float], b: tuple[float, float]) -> float:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+def simplify_collinear(pts: list[tuple[float, float]], eps: float = 1e-6) -> list:
+    """Drop interior waypoints that lie on the segment of their neighbours.
+
+    Grid paths are runs of 1-cell steps; collapsing collinear runs turns a
+    200-point Dijkstra chain into the handful of corner vertices a human would
+    draw — small to store (model.routes) and clean to render (2D/3D 動線).
+    """
+    if len(pts) <= 2:
+        return list(pts)
+    out = [pts[0]]
+    for i in range(1, len(pts) - 1):
+        (ax, ay), (bx, by), (cx, cy) = out[-1], pts[i], pts[i + 1]
+        cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+        if abs(cross) <= eps and min(ax, cx) - eps <= bx <= max(ax, cx) + eps \
+                and min(ay, cy) - eps <= by <= max(ay, cy) + eps:
+            continue                      # b sits on segment a→c: drop it
+        out.append(pts[i])
+    out.append(pts[-1])
+    return out
+
+
 def _ccw(ax, ay, bx, by, cx, cy) -> float:
     """Twice the signed area of triangle (a, b, c); sign = orientation."""
     return (by - ay) * (cx - ax) - (bx - ax) * (cy - ay)
@@ -438,6 +459,34 @@ class AisleGraph:
     def enabled(self) -> bool:
         """True only when walls are present (otherwise callers prefer Manhattan)."""
         return self._has_walls
+
+    def edges_xy(self) -> list[tuple[float, float, float, float]]:
+        """Passable lane edges as (x1, y1, x2, y2) — the display 通路ネットワーク.
+
+        Enumerates every unblocked +x / +y grid edge whose endpoints both lie
+        outside the shelf footprints, so a canvas can draw the walkable network
+        (aisles read as dense corridors, walls/shelves as holes). Bounded by the
+        node cap, so the payload stays drawable.
+        """
+        out: list[tuple[float, float, float, float]] = []
+        for r in range(self.nrows):
+            for c in range(self.ncols):
+                x1, y1 = self._node_xy(c, r)
+                if self._inside_obstacle(x1, y1):
+                    continue
+                idx = self._node_index(c, r)
+                for dc, dr in ((1, 0), (0, 1)):
+                    nc, nr = c + dc, r + dr
+                    if nc >= self.ncols or nr >= self.nrows:
+                        continue
+                    x2, y2 = self._node_xy(nc, nr)
+                    if self._inside_obstacle(x2, y2):
+                        continue
+                    nidx = self._node_index(nc, nr)
+                    if (min(idx, nidx), max(idx, nidx)) in self._blocked:
+                        continue
+                    out.append((x1, y1, x2, y2))
+        return out
 
     def distance(
         self, a: tuple[float, float], b: tuple[float, float]

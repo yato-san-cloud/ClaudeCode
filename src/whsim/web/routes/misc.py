@@ -151,6 +151,74 @@ def api_cody_chat(payload: dict):
     return result
 
 
+@router.post("/api/routes/network")
+def api_routes_network(payload: dict | None = None):
+    """経路ネットワーク自動生成 (MapMaker's 経路自動計算, as a pure function).
+
+    Stateless: the 動線 editor POSTs its LIVE (possibly unsaved) layout —
+    bounds + walls + shelf footprints — and gets back the walkable lane network
+    plus wall/棚-aware shortest paths for any (a, b) queries. Powered by the
+    same ``engine.graph.AisleGraph`` the simulation itself routes with, so the
+    drawn 動線 and the simulated travel agree by construction.
+
+    Body: {bounds:{width,depth}, walls:[{points:[[x,y],..]},..],
+           shelves:[[x,y,w,h],..], include_edges:bool,
+           queries:[{a:[x,y], b:[x,y]},..]}
+    →     {enabled, resolution, edges:[[x1,y1,x2,y2],..]?, paths:[{points,distance_m},..]}
+
+    Tolerant: malformed walls/shelves/queries are skipped, never a 500.
+    """
+    from whsim.engine.graph import AisleGraph, simplify_collinear
+    p = payload or {}
+    bounds = p.get("bounds") or {}
+
+    def _f(v, default):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+    width = max(1.0, _f(bounds.get("width"), 80.0))
+    depth = max(1.0, _f(bounds.get("depth"), 40.0))
+
+    walls = [w for w in (p.get("walls") or []) if isinstance(w, dict)]
+    try:
+        segments = AisleGraph._segments_from_walls(walls)
+    except (TypeError, ValueError):  # noqa: BLE001 — junk points: route without walls
+        segments = []
+    obstacles: list[tuple[float, float, float, float]] = []
+    for sh in (p.get("shelves") or []):
+        try:
+            x, y, w, h = (float(v) for v in sh[:4])
+            if w > 0 and h > 0:
+                obstacles.append((x, y, w, h))
+        except (TypeError, ValueError, IndexError):
+            continue
+
+    # Display-grade resolution: keep the grid small enough that the edge list
+    # stays drawable (≤ ~6000 nodes → ≤ ~12k edges) while paths remain ~1m-true.
+    res = max(1.0, ((width * depth) / 6000.0) ** 0.5)
+    g = AisleGraph(width, depth, segments, resolution=res, obstacle_rects=obstacles)
+
+    out: dict = {
+        "enabled": bool(segments or obstacles),
+        "resolution": g.resolution,
+        "paths": [],
+    }
+    if p.get("include_edges"):
+        out["edges"] = [list(e) for e in g.edges_xy()]
+    for q in (p.get("queries") or []):
+        try:
+            a = (float(q["a"][0]), float(q["a"][1]))
+            b = (float(q["b"][0]), float(q["b"][1]))
+        except (TypeError, ValueError, KeyError, IndexError):
+            continue
+        pts = simplify_collinear(g.path(a, b))
+        dist = g.distance(a, b)
+        out["paths"].append({"points": [list(pt) for pt in pts],
+                             "distance_m": round(dist, 2)})
+    return out
+
+
 @router.post("/api/workmethod/name")
 def api_workmethod_name(payload: dict | None = None):
     """Reverse-name a 5-axis WorkMethod: return {name, explain}.
