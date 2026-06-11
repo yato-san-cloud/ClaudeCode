@@ -228,6 +228,21 @@ function injectStyle() {
   @media (prefers-reduced-motion:reduce){.bia-cta{transition:none}}
   .bia-scaffold{opacity:.5;filter:grayscale(.4)}
   .bia-scaffold-note{padding:18px;text-align:center;color:var(--ink-tertiary);font-size:13px}
+
+  /* ── KPI summary strip (re-aggregates under cross-filtering) ── */
+  .bia-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:var(--sp-2)}
+  .bia-kpi{padding:var(--sp-2) var(--sp-3);border:1px solid var(--line-hair);
+    border-radius:var(--r-md);background:var(--bg-sunken);min-width:0}
+  .bia-kpi .l{font-size:var(--fs-micro);color:var(--ink-tertiary);white-space:nowrap}
+  .bia-kpi .v{font-family:var(--font-mono);font-size:17px;font-weight:700;
+    color:var(--ink-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bia-kpi .d{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--accent)}
+
+  /* ── CSV export (lives at the right edge of the filter bar) ── */
+  .bia-export{margin-left:auto;font-family:var(--font-mono);font-size:var(--fs-micro);
+    color:var(--ink-secondary);border:1px solid var(--line-strong);border-radius:var(--r-pill);
+    background:transparent;padding:3px 12px;cursor:pointer}
+  .bia-export:hover{color:var(--accent);border-color:var(--accent)}
   `;
   document.head.appendChild(s);
 }
@@ -386,6 +401,65 @@ export function mountBIAnalytics(el, opts = {}) {
       byRank[c.rank].qty += (c.qty || 0);
     });
     return ranks.map((r) => byRank[r]);
+  }
+
+  // ── KPI summary strip: headline numbers that RE-AGGREGATE with the filter ─
+  function kpiData() {
+    const cells = filteredCells();
+    const all = xtabCells();
+    const sum = (arr, k) => arr.reduce((s, c) => s + (c[k] || 0), 0);
+    const wk = weekdayProfile();
+    const hr = hourProfile();
+    const top = (arr) => arr.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), arr[0]);
+    return {
+      qty: sum(cells, 'qty'),
+      lines: sum(cells, 'lines'),
+      orders: sum(cells, 'orders'),
+      totQty: sum(all, 'qty'),
+      peakWd: wk.length ? top(wk) : null,
+      peakHr: hr.length ? top(hr) : null,
+      skus: (data.abc_summary || []).reduce((s, r) => s + (r.skus || 0), 0)
+        || (data.abc || []).length,
+      days: (data.daily || []).length,
+    };
+  }
+  function kpiStrip() {
+    if (!xtabCells().length) return '';
+    const k = kpiData();
+    const filt = filterActive();
+    const share = (filt && k.totQty > 0)
+      ? ` <span class="d">全体の${pct(k.qty / k.totQty)}</span>` : '';
+    const cards = [
+      [filt ? '物量（絞込）' : '物量', `${fmt(k.qty)}${share}`],
+      ['行数', fmt(k.lines)],
+      ['オーダー', fmt(k.orders)],
+      ['SKU数（全体）', fmt(k.skus)],
+      ['ピーク曜日', k.peakWd ? `${esc(k.peakWd.label)}曜` : '—'],
+      ['ピーク時間', k.peakHr ? `${k.peakHr.hour}時` : '—'],
+      ['データ日数', k.days ? `${fmt(k.days)}日` : '—'],
+    ];
+    return `<div class="bia-kpis" role="group" aria-label="サマリー指標">${cards.map(([l, v]) =>
+      `<div class="bia-kpi"><div class="l">${esc(l)}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+  }
+
+  // ── CSV export of the CURRENT filtered aggregate (rank×weekday×hour) ─────
+  function exportCsv() {
+    const cells = filteredCells();
+    if (!cells.length) { toast('出力できるデータがありません。', 'error'); return; }
+    const wd = xtabWeekdays();
+    const head = 'rank,weekday,hour,lines,qty,orders';
+    const rows = cells.map((c) =>
+      [c.rank, wd[c.weekday] || c.weekday, c.hour, c.lines, c.qty, c.orders].join(','));
+    // BOM so Excel opens the Japanese weekday column as UTF-8.
+    const blob = new Blob(['\ufeff' + [head, ...rows].join('\r\n')],
+      { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `bi_${getProject() || 'data'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    toast('CSVを書き出しました。', 'info');
   }
 
   const root = document.createElement('div');
@@ -714,6 +788,99 @@ export function mountBIAnalytics(el, opts = {}) {
     });
   }
 
+  // ── ③b SKU composition treemap: area = qty, colour = ABC rank ──────────
+  // Same rows as the Pareto (so it re-ranks under a weekday selection), grouped
+  // under ランクA/B/C parents; the tail beyond the served top-N appears as one
+  // muted 「他N品目」 block per rank (from abc_summary) so areas reconcile to the
+  // true totals. Click semantics mirror the Pareto: leaf → pin SKU + its rank;
+  // rank parent → toggle that rank facet.
+  function buildTreemap(node) {
+    const p = palette();
+    const pr = paretoRows();
+    const rows = pr.rows.filter((r) => (r.qty || 0) > 0);
+    if (!rows.length) {
+      node.parentElement.replaceWith(scaffoldShell('tree', 'SKU構成ツリーマップ', '面積=物量・色=ABCランク'));
+      return;
+    }
+    const rankBase = { A: p.rankA, B: p.rankB, C: p.rankC };
+    const byRank = { A: [], B: [], C: [] };
+    rows.forEach((r) => { (byRank[rankOf(r)] || byRank.C).push(r); });
+    // The full-class totals only reconcile when the ranking is the global one
+    // (a weekday re-rank redistributes qty, so the tail block is dropped there).
+    const summary = !pr.reranked ? (data.abc_summary || []) : [];
+    const children = [];
+    ['A', 'B', 'C'].forEach((rank) => {
+      const col = rankBase[rank];
+      const items = (byRank[rank] || []).map((r) => ({
+        name: r.name || r.sku, value: r.qty || 0, sku: r.sku || r.name, rank,
+        itemStyle: { color: hexAlpha(col, 0.78) },
+      }));
+      const topQty = items.reduce((s, it) => s + (it.value || 0), 0);
+      const full = summary.find((s) => s.rank === rank);
+      if (full && (full.qty || 0) > topQty + 1e-9) {
+        items.push({
+          name: `他${Math.max(0, (full.skus || 0) - items.length)}品目`,
+          value: full.qty - topQty, rank, tail: true,
+          itemStyle: { color: hexAlpha(col, 0.28) },
+        });
+      }
+      if (items.length) {
+        children.push({
+          name: `ランク${rank}`, rank,
+          value: items.reduce((s, it) => s + (it.value || 0), 0),
+          children: items,
+          itemStyle: { color: hexAlpha(col, 0.16), borderColor: hexAlpha(col, 0.6) },
+          upperLabel: { show: true, color: p.ink, fontFamily: p.fontMono, fontSize: 11 },
+        });
+      }
+    });
+    const total = children.reduce((s, c) => s + (c.value || 0), 0) || 1;
+    const inst = ensureChart(node, 'tree');
+    inst.setOption({
+      animation: !reduceMotion(),
+      tooltip: {
+        ...tipStyle(p),
+        formatter: (d) => {
+          const v = d.value || 0;
+          return `<b>${esc(d.name)}</b> · ${fmt(v)}（${pct(v / total)}）`;
+        },
+      },
+      series: [{
+        type: 'treemap', nodeClick: false, roam: false,
+        breadcrumb: { show: false },
+        left: 2, right: 2, top: 6, bottom: 6,
+        label: {
+          show: true, color: p.ink, fontFamily: p.fontSans, fontSize: 11,
+          formatter: (d) => `${d.name}\n${pct((d.value || 0) / total)}`,
+        },
+        upperLabel: { show: true, height: 18 },
+        itemStyle: { borderColor: p.panel, borderWidth: 1, gapWidth: 1 },
+        levels: [
+          { itemStyle: { gapWidth: 3, borderWidth: 2 } },
+          { itemStyle: { gapWidth: 1 } },
+        ],
+        data: children,
+      }],
+    }, true);
+    inst.on('click', (params) => {
+      const d = params.data || {};
+      const additive = !!(params.event && (params.event.event
+        ? (params.event.event.shiftKey || params.event.event.ctrlKey || params.event.event.metaKey)
+        : (params.event.shiftKey || params.event.ctrlKey || params.event.metaKey)));
+      if (d.sku) {            // leaf → pin SKU + propagate its rank (Pareto parity)
+        if (filterState.abc === d.sku) { filterState.abc = null; filterState.rank.delete(d.rank); }
+        else {
+          filterState.abc = d.sku;
+          if (!additive) filterState.rank.clear();
+          filterState.rank.add(d.rank);
+        }
+        render();
+      } else if (d.rank) {    // rank parent or tail block → toggle the rank facet
+        toggleFilter('rank', d.rank, additive);
+      }
+    });
+  }
+
   // ── ④ weekday heatmap (single-row) with visualMap colour ramp ──────────
   function buildWeekday(node) {
     const p = palette();
@@ -773,6 +940,87 @@ export function mountBIAnalytics(el, opts = {}) {
       if (!r || r.weekday == null) return;
       const additive = !!(params.event && (params.event.shiftKey || params.event.ctrlKey || params.event.metaKey));
       toggleFilter('weekday', r.weekday, additive);
+    });
+  }
+
+  // ── ④b weekday×hour PUNCH-CARD heatmap (7×24) ──────────────────────────
+  // The classic logistics view: WHEN does the warehouse burn. Cells come from
+  // the same xtab (rank facet applies; weekday/hour do NOT filter the matrix —
+  // it IS their picker, selections are outlined instead). Cell click commits
+  // weekday+hour together (shift/ctrl adds), so 「金曜の14時だけ」 is one tap.
+  // Replaces the single-row weekday heatmap when xtab exists (buildWeekday
+  // remains the degrade path for payloads without xtab).
+  function buildMatrix(node) {
+    const p = palette();
+    const wd = xtabWeekdays();
+    const grid = new Map(); // 'd:h' -> qty (rank-filtered only)
+    let max = 0;
+    xtabCells().forEach((c) => {
+      if (facetActive('rank') && !filterState.rank.has(c.rank)) return;
+      const key = `${c.weekday}:${c.hour}`;
+      const v = (grid.get(key) || 0) + (c.qty || 0);
+      grid.set(key, v);
+      if (v > max) max = v;
+    });
+    const cells = [];
+    for (let d = 0; d < wd.length; d += 1) {
+      for (let h = 0; h < 24; h += 1) {
+        const v = grid.get(`${d}:${h}`) || 0;
+        const sel = filterState.weekday.has(d) && (facetActive('hour') ? filterState.hour.has(h) : true);
+        cells.push({
+          value: [h, d, v],
+          itemStyle: sel ? { borderColor: p.accent, borderWidth: 1.5 } : undefined,
+        });
+      }
+    }
+    const inst = ensureChart(node, 'matrix');
+    inst.setOption({
+      animation: !reduceMotion(),
+      grid: { left: 8, right: 16, top: 8, bottom: 54, containLabel: true },
+      toolbox: toolbox(p),
+      tooltip: {
+        ...tipStyle(p),
+        formatter: (d) => `<b>${esc(wd[d.value[1]] || '')}曜 ${d.value[0]}時</b> · ${fmt(d.value[2])}`,
+      },
+      xAxis: {
+        type: 'category', data: Array.from({ length: 24 }, (_, h) => `${h}`),
+        splitArea: { show: true },
+        axisLabel: { color: p.ink3, fontFamily: p.fontMono, fontSize: 10, interval: 1 },
+        axisLine: { show: false }, axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'category', data: wd, inverse: true, splitArea: { show: true },
+        axisLabel: { color: p.ink2, fontFamily: p.fontMono, fontSize: 11 },
+        axisLine: { show: false }, axisTick: { show: false },
+      },
+      visualMap: {
+        min: 0, max: Math.max(max, 1), calculable: true,
+        orient: 'horizontal', left: 'center', bottom: 0,
+        inRange: { color: [hexAlpha(p.accent, 0.06), p.accent] },
+        textStyle: { color: p.ink3, fontFamily: p.fontMono },
+      },
+      series: [{
+        type: 'heatmap', data: cells,
+        emphasis: { itemStyle: { shadowBlur: 8, shadowColor: hexAlpha(p.accent, 0.5) } },
+      }],
+    }, true);
+    inst.on('click', (params) => {
+      const h = params.value && params.value[0];
+      const d = params.value && params.value[1];
+      if (h == null || d == null) return;
+      const additive = !!(params.event && (params.event.shiftKey || params.event.ctrlKey || params.event.metaKey));
+      // Exactly this cell selected → clear both facets; else commit the pair.
+      const only = filterState.weekday.size === 1 && filterState.weekday.has(d)
+        && filterState.hour.size === 1 && filterState.hour.has(h);
+      if (only && !additive) {
+        filterState.weekday.clear(); filterState.hour.clear();
+      } else if (additive) {
+        filterState.weekday.add(d); filterState.hour.add(h);
+      } else {
+        filterState.weekday.clear(); filterState.weekday.add(d);
+        filterState.hour.clear(); filterState.hour.add(h);
+      }
+      render();
     });
   }
 
@@ -930,6 +1178,7 @@ export function mountBIAnalytics(el, opts = {}) {
       ${askBox()}
       ${chipsRow()}
       ${filterBar()}
+      ${kpiStrip()}
       ${ins.length ? `<div class="bia-ins">${ins.map(insCard).join('')}</div>` : ''}
       <div data-charts></div>`;
     const slot = root.querySelector('[data-charts]');
@@ -937,11 +1186,22 @@ export function mountBIAnalytics(el, opts = {}) {
     const paretoSec = chartShell('abc', 'ABCパレート', '物量降順の棒＋累積%線', 'バー/凡例クリックで絞込', 280);
     slot.appendChild(paretoSec);
     buildPareto(paretoSec.querySelector('[data-ec]'));
-    // weekday heatmap
+    // SKU composition treemap (shares the 'abc' rows; own focus target 'tree')
+    const treeSub = propagatingActive() ? `${filterDescription()}で絞込中` : '面積=物量・色=ABCランク';
+    const treeSec = chartShell('tree', 'SKU構成ツリーマップ', treeSub, 'クリックでSKU/ランクを絞込', 300);
+    slot.appendChild(treeSec);
+    buildTreemap(treeSec.querySelector('[data-ec]'));
+    // weekday×hour punch-card (7×24) when xtab exists; single-row fallback else
     const wkSub = propagatingActive() ? `${filterDescription()}で絞込中` : '濃いほど物量大';
-    const wkSec = chartShell('weekday', '曜日別ヒートマップ', wkSub, 'セルクリックで曜日を絞込', 180);
-    slot.appendChild(wkSec);
-    buildWeekday(wkSec.querySelector('[data-ec]'));
+    if (xtabCells().length) {
+      const mSec = chartShell('weekday', '曜日×時間ヒートマップ', wkSub, 'セルクリックで曜日×時間を絞込', 250);
+      slot.appendChild(mSec);
+      buildMatrix(mSec.querySelector('[data-ec]'));
+    } else {
+      const wkSec = chartShell('weekday', '曜日別ヒートマップ', wkSub, 'セルクリックで曜日を絞込', 180);
+      slot.appendChild(wkSec);
+      buildWeekday(wkSec.querySelector('[data-ec]'));
+    }
     // daily time series
     const tSec = chartShell('time', '時系列（日次）', '日次エリア＋スクラブ', 'スライダーで日を絞込', 240);
     slot.appendChild(tSec);
@@ -976,7 +1236,11 @@ export function mountBIAnalytics(el, opts = {}) {
   }
 
   function filterBar() {
-    if (!filterActive()) return '<div class="bia-filterbar"></div>';
+    // The CSV export rides the filter bar's right edge (exports the CURRENT
+    // filtered aggregate), so it's always visible once data exists.
+    const csvBtn = xtabCells().length
+      ? '<button type="button" class="bia-export" data-bia="csv" title="現在の絞込をCSVで保存">⤓ CSV出力</button>' : '';
+    if (!filterActive()) return `<div class="bia-filterbar">${csvBtn}</div>`;
     const pills = [];
     if (filterState.abc != null) pills.push(['abc', null, `SKU:${filterState.abc}`]);
     if (facetActive('rank')) facetValues('rank').forEach((v) => pills.push(['rank', v, `ランク:${v}`]));
@@ -990,6 +1254,7 @@ export function mountBIAnalytics(el, opts = {}) {
       <span class="lbl">絞込:</span>
       ${pillHtml}
       <button type="button" class="bia-fclear" data-bia="clearf">すべて解除</button>
+      ${csvBtn}
     </div>`;
   }
 
@@ -1049,6 +1314,8 @@ export function mountBIAnalytics(el, opts = {}) {
     });
     const clr = root.querySelector('[data-bia="clearf"]');
     if (clr) clr.onclick = () => clearFilter();
+    const csv = root.querySelector('[data-bia="csv"]');
+    if (csv) csv.onclick = () => exportCsv();
   }
 
   // ── example placeholder rotation (gated: one-shot per visit) ─────────────
