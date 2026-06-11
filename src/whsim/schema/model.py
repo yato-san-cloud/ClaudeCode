@@ -276,7 +276,7 @@ class WorkerGroup(BaseModel):
 
 class Equipment(BaseModel):
     id: str = "equip"
-    type: Literal["agv", "forklift", "asrs", "robot_arm", "crane"] = "agv"
+    type: Literal["agv", "forklift", "asrs", "robot_arm", "crane", "sorter"] = "agv"
     count: int = 0
     speed_mps: float = 1.6
     capacity: int = 1

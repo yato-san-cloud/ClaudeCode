@@ -154,6 +154,7 @@ const EQUIP_COLOR = {
   asrs:      0x8d949c,
   robot_arm: 0x9aa3ad,
   crane:     0x424a52,
+  sorter:    0x2bb6a3,   // 仕分機/ソーター — industrial teal
 };
 
 // Sample [t, x, y, state, hit?] from a worker's sorted keyframe array (see spec).
@@ -1146,6 +1147,7 @@ export class Scene3D {
         case 'asrs':      group = this._makeAsrs(mat); break;
         case 'robot_arm': group = this._makeRobotArm(mat); break;
         case 'crane':     group = this._makeCrane(mat); break;
+        case 'sorter':    group = this._makeSorter(mat); break;
         case 'agv':       group = this._makeDock(mat); break;
         default:          group = this._makeDock(mat); break;
       }
@@ -1274,6 +1276,54 @@ export class Scene3D {
     const postMesh = new THREE.Mesh(post, mat);
     postMesh.position.set(0, 0.4, -0.7);
     g.add(postMesh);
+    return g;
+  }
+
+  // 仕分機/ソーター: an elevated belt deck on legs with a scrolling tread (reuses
+  // the conveyor belt texture + _belts registry so it flows), flanked by a row of
+  // angled diverter chutes — reads instantly as a sortation line. ~8m long.
+  _makeSorter(mat) {
+    const g = new THREE.Group();
+    const LEN = 8, W = 1.4, DECK_Y = 0.95;
+    // Deck frame (matte) + moving belt tread on its top face (six-material box).
+    const deckGeom = new THREE.BoxGeometry(LEN, 0.34, W);
+    this._geometries.push(deckGeom);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x6b7681, roughness: 0.4, metalness: 0.7 });
+    this._materials.push(frameMat);
+    const treadTex = this._makeBeltTexture().clone();
+    treadTex.needsUpdate = true;
+    treadTex.repeat.set(LEN, 1);
+    this._textures.push(treadTex);
+    const treadMat = new THREE.MeshStandardMaterial({
+      color: 0x222a31, roughness: 0.55, metalness: 0.25, map: treadTex,
+      emissive: new THREE.Color(0x0f2b27), emissiveIntensity: 0.3,
+    });
+    this._materials.push(treadMat);
+    const deck = new THREE.Mesh(deckGeom, [frameMat, frameMat, treadMat, frameMat, frameMat, frameMat]);
+    deck.position.set(0, DECK_Y, 0);
+    deck.castShadow = true; deck.receiveShadow = true;
+    g.add(deck);
+    this._belts.push({ mat: treadMat, speed: 1.4 });   // flows like a conveyor
+    // Support legs.
+    const legGeom = new THREE.BoxGeometry(0.18, DECK_Y, 0.18);
+    this._geometries.push(legGeom);
+    for (const lx of [-LEN / 2 + 0.5, -LEN / 6, LEN / 6, LEN / 2 - 0.5]) {
+      for (const lz of [-W / 2 + 0.15, W / 2 - 0.15]) {
+        const leg = new THREE.Mesh(legGeom, frameMat);
+        leg.position.set(lx, DECK_Y / 2, lz);
+        g.add(leg);
+      }
+    }
+    // Diverter chutes fanning off one side (the sort destinations) — accent mat.
+    const chuteGeom = new THREE.BoxGeometry(1.5, 0.08, 0.7);
+    this._geometries.push(chuteGeom);
+    for (let i = 0; i < 5; i++) {
+      const chute = new THREE.Mesh(chuteGeom, mat);
+      chute.position.set(-LEN / 2 + 1.2 + i * 1.5, DECK_Y - 0.18, W / 2 + 0.7);
+      chute.rotation.set(-0.18, 0, 0);  // tilt down toward the floor
+      chute.castShadow = true;
+      g.add(chute);
+    }
     return g;
   }
 
