@@ -103,6 +103,33 @@ async def api_analysis_upload(shipments: UploadFile, inbound: UploadFile | None 
     return bundle
 
 
+@router.post("/api/projects/{name}/import/shipments")
+async def api_import_shipments(name: str, shipments: UploadFile):
+    """ETL: read a shipments file (CSV/Excel/JSON), auto-map its columns, and
+    ingest it as the project's outbound orders so the BI views AND the SimPy run
+    use the customer's REAL demand. Returns a summary {orders, lines, skus, …}.
+
+    Honours 'never blocks': unreadable files 400 with a friendly message; a file
+    with no usable rows returns ok:false (the model is left untouched)."""
+    import pandas as pd  # noqa: F401  (load_table needs pandas importable)
+
+    from whsim.analysis import ingest
+    from whsim.analysis.data_io import (
+        SHIPMENT_FIELDS,
+        apply_mapping,
+        initial_mapping,
+        load_table,
+    )
+
+    raw = await shipments.read()
+    try:
+        df = load_table(raw, shipments.filename)
+    except Exception as e:  # noqa: BLE001 — surface a friendly 400
+        raise HTTPException(400, f"読込に失敗しました（{shipments.filename}）: {e}") from e
+    mapped = apply_mapping(df, initial_mapping(df, SHIPMENT_FIELDS), SHIPMENT_FIELDS)
+    return ingest.ingest_shipments(_open(name), mapped)
+
+
 @router.get("/api/projects/{name}/analysis")
 def api_analysis(name: str):
     """Analysis-dashboard payload (the "分析" tab).

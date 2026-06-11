@@ -1319,6 +1319,16 @@ document.addEventListener('whsim:nav', (e) => {
   if (typeof view === 'string' && view) switchView(view);
 });
 
+// A module imported/changed the model on disk (e.g. the 物量サマリ ETL ingested a
+// shipments CSV into orders). Re-open the project to refresh provenance / 実データ%
+// / readiness, then optionally navigate (e.g. to きいて分析 to see real demand).
+document.addEventListener('whsim:model-changed', async (e) => {
+  if (!S.project) return;
+  await openProject(S.project);
+  const dest = e && e.detail && e.detail.nav;
+  if (typeof dest === 'string' && dest) switchView(dest);
+});
+
 // 物量サマリタブ → タイムチャート: place the day from the measured volumes.
 document.addEventListener('whsim:load-timetable', (e) => {
   const scenario = e && e.detail && e.detail.scenario;

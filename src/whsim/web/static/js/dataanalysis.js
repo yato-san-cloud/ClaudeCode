@@ -126,6 +126,21 @@ function injectStyle() {
   .da-chart-empty{display:flex;align-items:center;justify-content:center;min-height:120px;
     color:var(--ink-tertiary,#8195a8);font-size:var(--fs-sm)}
   .da-src{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);font-family:monospace}
+  /* ── one-click ingest banner (upload → project orders) ── */
+  .da-ingest{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    background:var(--ok-tint,rgba(52,227,160,.08));border:1px solid var(--ok-line,rgba(52,227,160,.3));
+    border-left:4px solid var(--ok,#34c97a);border-radius:12px;padding:12px 16px}
+  .da-ingest-t{font-size:var(--fs-sm,12.5px);color:var(--ink-secondary,#52677c);min-width:240px;flex:1}
+  .da-ingest-t b{color:var(--ink-primary,#16202e)}
+  .da-ingest-sub{display:block;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);margin-top:2px}
+  .da-ingest .da-btn{margin-left:auto;white-space:nowrap}
+  /* ── drag-and-drop affordance (drop a CSV/Excel anywhere on the panel) ── */
+  #dataanalysis.da-drag, .da-drag{position:relative}
+  .da-drag::after{content:"⤓ ここにCSV/Excelをドロップして取り込み";
+    position:absolute;inset:6px;z-index:30;display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-size:15px;color:var(--accent);
+    background:color-mix(in srgb,var(--bg-app,#fff) 78%,transparent);
+    border:2px dashed var(--accent);border-radius:14px;pointer-events:none}
   .da-err{display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:var(--sp-3);min-height:240px;text-align:center;
     border:1px solid var(--line-hair,rgba(120,140,170,.18));border-radius:var(--r-3,14px);
@@ -380,8 +395,11 @@ export function mountDataAnalysis(el, opts = {}) {
   root.className = 'da';
   el.innerHTML = '';
   el.appendChild(root);
+  setupDropZone();
   let bundle = null;
+  let lastFile = null;   // remember the upload so it can be ingested into the model
   const toast = opts.toast || (() => {});
+  const getProject = opts.getProject || (() => null);
 
   // ── ECharts registry: id → instance; disposed each render so no leaks. ──
   const charts = new Map();
@@ -424,6 +442,16 @@ export function mountDataAnalysis(el, opts = {}) {
          <span class="da-hint">出荷WMSデータ(CSV/Excel)から物量推移・ABC・ピーク・在庫を分析</span>
          ${b && b.source ? `<span class="da-src" style="margin-left:auto">source: ${b.source}</span>` : ''}
        </div>` +
+      // After an upload, offer one-click ingest into the project model (so BI +
+      // SimPy use the real demand). Hidden for the bundled sample.
+      (lastFile && b && b.source === 'upload'
+        ? `<div class="da-ingest">
+             <div class="da-ingest-t">「${esc(lastFile.name)}」を読み込みました。
+               <b>このデータでシミュレーションしますか？</b>
+               <span class="da-ingest-sub">出荷明細をオーダーとして取り込み、きいて分析・物量シミュ・実行に反映します。</span></div>
+             <button class="da-btn primary" data-act="ingest">このデータでシミュレーション（取り込む）→</button>
+           </div>`
+        : '') +
       (b
         ? kpiCards(b.kpis) +
           `<div class="da-cards">
@@ -485,15 +513,64 @@ export function mountDataAnalysis(el, opts = {}) {
     const ttBtn = root.querySelector('[data-act="to-timetable"]');
     if (ttBtn) ttBtn.onclick = () => document.dispatchEvent(new CustomEvent(
       'whsim:load-timetable', { detail: { scenario: bundle && bundle.timetable_scenario } }));
-    if (fileInput) fileInput.onchange = () => {
-      const f = fileInput.files[0];
-      if (!f) return;
-      load(() => {
-        const fd = new FormData();
-        fd.append('shipments', f);
-        return getJSON('/api/analysis/upload', { method: 'POST', body: fd });
-      }, `「${f.name}」を分析中…`);
-    };
+    if (fileInput) fileInput.onchange = () => analyzeFile(fileInput.files[0]);
+    const ingest = root.querySelector('[data-act="ingest"]');
+    if (ingest) ingest.onclick = () => ingestFile();
+  }
+
+  // Analyze an uploaded shipments file (describe it) and remember it so the user
+  // can then ingest it into the project with one click.
+  function analyzeFile(f) {
+    if (!f) return;
+    lastFile = f;
+    load(() => {
+      const fd = new FormData();
+      fd.append('shipments', f);
+      return getJSON('/api/analysis/upload', { method: 'POST', body: fd });
+    }, `「${f.name}」を分析中…`);
+  }
+
+  // ETL: push the uploaded shipments into the project's outbound orders, so the
+  // BI (きいて分析) and the SimPy run use the REAL demand. Then refresh + jump to
+  // きいて分析 so the effect is immediate.
+  async function ingestFile() {
+    const f = lastFile;
+    const proj = getProject();
+    if (!f) { toast('先に出荷データを取り込んでください。', 'error'); return; }
+    if (!proj) { toast('先にプロジェクトを作成してください（左上の「作成」）。', 'error'); return; }
+    const btn = root.querySelector('[data-act="ingest"]');
+    if (btn) { btn.disabled = true; btn.textContent = '取り込み中…'; }
+    try {
+      const fd = new FormData();
+      fd.append('shipments', f);
+      const r = await getJSON(`/api/projects/${encodeURIComponent(proj)}/import/shipments`,
+        { method: 'POST', body: fd });
+      if (!r || !r.ok) { toast((r && r.message) || '取り込める明細がありませんでした。', 'error'); }
+      else {
+        toast(r.message || '取り込みました。', 'ok');
+        // Refresh provenance / 実データ% / readiness, then show the BI on real data.
+        document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: { nav: 'bianalytics' } }));
+      }
+    } catch (e) {
+      toast('取り込みに失敗: ' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'このデータでシミュレーション（取り込む）→'; }
+    }
+  }
+
+  // Drag-and-drop a file anywhere on the panel → analyze it. Attached once to the
+  // panel element (survives render()'s innerHTML swaps of `root`).
+  function setupDropZone() {
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    let depth = 0; // dragenter/leave fire per child; count to know when we truly left
+    el.addEventListener('dragenter', (e) => { stop(e); depth += 1; el.classList.add('da-drag'); });
+    el.addEventListener('dragover', stop);
+    el.addEventListener('dragleave', (e) => { stop(e); depth = Math.max(0, depth - 1); if (!depth) el.classList.remove('da-drag'); });
+    el.addEventListener('drop', (e) => {
+      stop(e); depth = 0; el.classList.remove('da-drag');
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) analyzeFile(f);
+    });
   }
   render(bundle);
 
