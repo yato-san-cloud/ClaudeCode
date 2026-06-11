@@ -664,7 +664,16 @@ async function openProject(name) {
   updateProjMenuState();
   // Reset replay/analysis state and restore this project's chat thread.
   S.replay = null;
-  S.hasRun = false;
+  // Restore run state from the server: a project that already has a completed run
+  // should reopen with ④検証/⑤提案 unlocked and its KPIs/PNG/replay in place —
+  // not re-locked until the user runs again.
+  S.hasRun = !!m.has_run;
+  if (m.has_run) {
+    if (m.kpis) renderKpis(m.kpis);
+    $('pngImg').src = `/api/projects/${name}/png?ts=${Date.now()}`;
+    renderProposalStory();
+    loadReplay().catch(() => {});  // best-effort; replay may be absent
+  }
   // Invalidate the Designer model cache so the next design mount refetches
   // /full (the model may have changed via import/generate on (re)open).
   S._designerProj = null;

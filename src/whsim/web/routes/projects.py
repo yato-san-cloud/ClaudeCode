@@ -138,12 +138,26 @@ def api_model(name: str):
     proj = _open(name)
     manifest = templates.load_manifest(proj.meta()["template_id"])
     model = proj.load_model()
+    # Surface whether a completed run exists (+ its KPIs) so reopening a project
+    # restores the ④検証/⑤提案 result state instead of re-locking those phases
+    # until the user runs again (a project with a run should read as "already run").
+    has_run = False
+    kpis = None
+    try:
+        rd = proj.latest_run_dir()
+        if rd is not None and (rd / "kpis.json").is_file():
+            has_run = True
+            kpis = json.loads((rd / "kpis.json").read_text("utf-8"))
+    except Exception:  # noqa: BLE001 — best-effort; never block the open
+        has_run, kpis = False, None
     return {
         "name": name,
         "headline_fields": manifest.get("headline_fields", []),
         "headline_values": _headline_values(model.model_dump(), manifest),
         "provenance": proj.load_provenance().to_dict(),
         "provenance_summary": proj.load_provenance().summary(),
+        "has_run": has_run,
+        "kpis": kpis,
     }
 
 
