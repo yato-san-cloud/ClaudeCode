@@ -23,6 +23,7 @@ from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
 from matplotlib.colors import to_rgba  # noqa: E402
 
 from whsim import racktypes  # noqa: E402
+from whsim import storage  # noqa: E402
 from whsim.render.fonts import setup_jp_font  # noqa: E402
 from whsim.render.heatmap import blur  # noqa: E402
 from whsim.render.shelves import shelf_runs  # noqa: E402
@@ -229,13 +230,51 @@ def render(
         rows.append(("月間コスト", f"{cur}{_safe(kpis.get('monthly_cost')):,.0f}", None))
 
     rows = rows[:8]  # keep the sheet uncluttered
-    y_top, y_bot = 0.80, 0.13
+
+    # --- 保管設計 band (compact storage-equipment sizing summary) ------------
+    # One calm two-line band + tiny rack chips; only when demand sizes some
+    # storage. Wrapped so a sizing failure never breaks the PNG; when absent the
+    # sheet renders exactly as before (cards reclaim the freed space).
+    try:
+        est = storage.estimate_storage(model, {})
+    except Exception:
+        est = {"has_data": False}
+    has_storage = bool(est.get("has_data"))
+
+    # Reserve a calm band above the footer for the storage summary when present.
+    y_bot = 0.205 if has_storage else 0.13
+    y_top = 0.80
     n = len(rows)
     gap = 0.012
     h = min(0.082, (y_top - y_bot - gap * (n - 1)) / max(n, 1))
     for i, (label, val, tone) in enumerate(rows):
         y = y_top - h - i * (h + gap)
         _card(panel, 0.0, y, 1.0, h, label, val, tone)
+
+    if has_storage:
+        tot = est.get("totals", {})
+        panel.plot([0.0, 1.0], [0.185, 0.185], color=LINE, lw=0.8,
+                   transform=panel.transAxes, clip_on=False)
+        panel.text(0.0, 0.158, "保管設計", fontsize=8, weight="bold", color=INK_DIM,
+                   va="bottom")
+        panel.text(0.0, 0.132,
+                   f"必要坪数 {tot.get('tsubo_storage', 0):g} 坪 ・ "
+                   f"什器 {tot.get('units', 0)}台（{tot.get('cells', 0)}間口）",
+                   fontsize=7.8, color=INK, va="bottom")
+        # Top methods (by 台数) as tiny color chips: ■ label N台.
+        methods = sorted(est.get("by_method", []), key=lambda m: m.get("units", 0),
+                         reverse=True)[:3]
+        cx = 0.0
+        for m in methods:
+            label = str(m.get("label", m.get("rack_type", "")))
+            chip = f"{label} {m.get('units', 0)}台"
+            panel.text(cx, 0.108, "■", fontsize=7.2, color=m.get("color", "#888"),
+                       va="bottom", ha="left")
+            panel.text(cx + 0.024, 0.108, chip, fontsize=7.0, color=INK_DIM,
+                       va="bottom", ha="left")
+            # Advance: chip width ≈ chip chars (CJK ~0.030, ascii ~0.013 of axes).
+            w_est = sum(0.030 if ord(ch) > 0x2E7F else 0.013 for ch in chip)
+            cx += 0.030 + w_est + 0.020
 
     foot = "概算見積り ／ " + str(provenance_summary or "")
     if kpis.get("total_cost_per_order"):
