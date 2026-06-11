@@ -15,13 +15,22 @@ export const ZONE_DEFAULT_COLOR = {
   packing: '#f46d43', shipping: '#5e4fa2', staging: '#d9d9d9',
 };
 // Equipment palette: label, schema type, fill color.
+// w×d = nominal top-view footprint in METERS (render/ghost only — the schema
+// keeps x,y; the footprint lets the canvas draw CAD-like scaled symbols instead
+// of fixed-px circles, and gives the placement ghost its real size).
 export const EQUIP_PALETTE = [
-  { key: 'agv', label: 'AGV(搬送ロボ)', type: 'agv', color: '#1f78b4' },
-  { key: 'conveyor', label: 'コンベア', type: 'conveyor', color: '#33a02c' },
-  { key: 'asrs', label: '自動倉庫', type: 'asrs', color: '#6a3d9a' },
-  { key: 'station', label: '梱包台', type: 'station', color: '#08519c' },
-  { key: 'robot_arm', label: 'ロボットアーム', type: 'robot_arm', color: '#e6550d' },
-  { key: 'crane', label: 'ホイストクレーン', type: 'crane', color: '#8c564b' },
+  { key: 'agv', label: 'AGV(搬送ロボ)', type: 'agv', color: '#1f78b4', w: 1.2, d: 0.9,
+    desc: '無人搬送ロボ。棚↔梱包台の搬送を自動化。' },
+  { key: 'conveyor', label: 'コンベア', type: 'conveyor', color: '#33a02c', w: 0, d: 0,
+    desc: '搬送ライン。クリックで頂点を追加して描く。' },
+  { key: 'asrs', label: '自動倉庫', type: 'asrs', color: '#6a3d9a', w: 3.0, d: 1.4,
+    desc: '高層自動倉庫(AS/RS)。クレーンで入出庫。' },
+  { key: 'station', label: '梱包台', type: 'station', color: '#08519c', w: 1.8, d: 0.9,
+    desc: '梱包・検品の作業台。' },
+  { key: 'robot_arm', label: 'ロボットアーム', type: 'robot_arm', color: '#e6550d', w: 1.0, d: 1.0,
+    desc: 'ピース仕分け・パレタイズ用アーム。' },
+  { key: 'crane', label: 'ホイストクレーン', type: 'crane', color: '#8c564b', w: 2.4, d: 1.0,
+    desc: '重量物の吊り上げ搬送。' },
 ];
 // Layout object palette (PPT-like): pick an object, then click the floor to place it.
 //   key       — palette/brush id (also a tooltip for the cursor)
@@ -174,4 +183,22 @@ export const SHELFGEN_FACES = [
   { facing: 'up', axis: 'x', label: '上を向く（棚は左右に連結）' },
   { facing: 'right', axis: 'y', label: '右を向く（棚は上下に連結）' },
   { facing: 'left', axis: 'y', label: '左を向く（棚は上下に連結）' },
+];
+
+// ---- Library / hotbar (Minecraft-style place tool) --------------------------
+// The 配置 tool replaces the old ゾーン棚/設備/躯体 tab trio with one object
+// LIBRARY: every placeable thing is a card; clicking (or dragging onto the
+// floor) arms it as the active brush. `LIBRARY_DIGITS` pins the digit keys 1-9
+// to the most-used brushes, MapMaker-style (its OperationModeToolBar used fixed
+// digits: 1=編集 3=棚 4=壁 5=検品場), so MapMaker muscle memory transfers.
+export const LIBRARY_DIGITS = [
+  { digit: 1, kind: 'select' },                 // 編集 (select/move)
+  { digit: 2, kind: 'zone', key: 'storage' },   // 保管ゾーン (棚の容れ物)
+  { digit: 3, kind: 'rack' },                   // 棚 (active rack type)
+  { digit: 4, kind: 'wall' },                   // 壁
+  { digit: 5, kind: 'equip', key: 'station' },  // 梱包台 (検品場相当)
+  { digit: 6, kind: 'equip', key: 'agv' },
+  { digit: 7, kind: 'equip', key: 'conveyor' },
+  { digit: 8, kind: 'equip', key: 'asrs' },
+  { digit: 9, kind: 'door', key: 'dock' },
 ];

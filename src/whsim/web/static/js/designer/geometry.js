@@ -30,6 +30,7 @@ export function resolvePalette() {
     wall:         cssVar('--canvas-wall', '#5a6472'),
     draft:        cssVar('--canvas-draft', '#e31a1c'),
     accent:       cssVar('--accent', '#1f78b4'),
+    grid:         cssVar('--canvas-grid', 'rgba(128,140,160,0.45)'),
   };
 }
 

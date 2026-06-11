@@ -1,12 +1,15 @@
 // designer/core.js — interactive, structured/parametric warehouse design editor.
 //
-// Three sub-tools share one container and one deep-copied model:
-//   (1) レイアウト  — Canvas2D floor view; select/move/resize zones, edit type
-//                     and rack spacing, add/delete zones.
-//   (2) 設備        — same floor view; click-to-place AGV / 自動倉庫 / 梱包台,
-//                     draw コンベア polylines; edit count/speed; delete.
-//   (3) フロー      — DOM workflow strip of stages with per-stage method
-//                     dropdowns + a pick-strategy selector.
+// One unified 配置 (place) tool + two line tools share one container and one
+// deep-copied model:
+//   (1) 配置   — Canvas2D floor view with an object LIBRARY (Minecraft-style):
+//                every placeable thing (棚9種 / ゾーン / マテハン設備 / 壁・ドア)
+//                is a visual card; click or drag-onto-the-floor arms it as the
+//                active brush, a ghost previews the real footprint under the
+//                cursor, click stamps it. 選択 brush edits everything in place
+//                (zones, shelves, equipment, walls, doors — unified hit-test).
+//   (2) フロー — DOM workflow strip of stages with per-stage method dropdowns.
+//   (3) 動線   — walking/forklift route polylines with distance/time readout.
 //
 // Pure DOM / Canvas2D. Mutates an internal deep copy of `model` and only writes
 // back to the host via handlers.save({layout, resources, process}). The palettes,
@@ -25,6 +28,7 @@ import {
   DOOR_PALETTE, DOOR_JP, METHOD_OPTS, METHOD_COLOR, PICK_STRATS,
   WORK_AXES, DEFAULT_WORK, MOVER_OPTS, MOVER_JP, MOVER_SPEED, MOVER_COLOR,
   HANDLE, MIN_M, SNAP_PX, SHELF_MIN_M, CP_HALF, CONTROL_POINTS, SHELFGEN_FACES,
+  LIBRARY_DIGITS,
 } from './constants.js';
 import { resolvePalette, clone, clamp, snap, uid, hexA } from './geometry.js';
 
@@ -32,24 +36,26 @@ export class Designer {
   constructor(container, model, handlers) {
     this.container = container;
     this.handlers = handlers || {};
-    this.tool = 'layout';          // 'layout' | 'equip' | 'building' | 'flow' | 'route'
+    this.tool = 'place';           // 'place' | 'flow' | 'route'
+    // The active brush (Minecraft hotbar model). One of:
+    //   {kind:'select'}                  — edit: click selects, drag moves/resizes
+    //   {kind:'rack',  key:<rack id>}    — stamp/drag a shelf of that type
+    //   {kind:'zone',  key:<zone type>}  — stamp a zone (default footprint)
+    //   {kind:'equip', key:<equip key>}  — stamp equipment (conveyor = vertices)
+    //   {kind:'wall'}                    — click vertices (Shift=ortho), dbl=確定
+    //   {kind:'door',  key:<door type>}  — stamp a door on the building edge
+    this.brush = { kind: 'select' };
+    this.hover = null;             // {mx,my} cursor in meters (ghost + status bar)
     this.selected = null;          // {kind, id} of selected canvas object
     // M2: when shelves are selected, `selShelves` is a Set of shelf ids inside the
     // active storage zone (`shelfZoneId`). Single zone selection still uses `selected`.
     this.selShelves = new Set();   // selected ShelfArea ids (MapMaker multi-select)
     this.shelfZoneId = null;       // storage zone whose shelves are being edited
-    this.layoutMode = 'zone';      // レイアウト sub-mode: 'zone' | 'shelf' (free placement)
-    this.shelfBrush = null;        // shelf sub-tool: 'draw' | 'bulk' | 'area' | null(=select)
     this.shelfDraft = null;        // {x0,y0,x1,y1} while corner-dragging a new shelf
     this.snapLine = null;          // {x?, y?} green snap guide in world coords
     this.noSnap = false;           // true while Ctrl held (disables edge snapping)
-    this.layoutBrush = null;       // active palette key in レイアウト tool (null = select/move)
-    this.shelfType = 'medium';     // storage-equipment preset applied to new 棚ブロック
-    this.rackPaletteOpen = true;   // M3: show the visual equipment palette in 棚 mode
-    this.showUnderlay = true;      // draw DXF walls as a faint trace underlay in レイアウト
-    this.equipBrush = 'agv';       // active palette key in 設備 tool
-    this.doorBrush = 'dock';       // active door type in 躯体 tool
-    this.buildMode = 'wall';       // 'wall' | 'door' within the 躯体 tool
+    this.shelfType = 'medium';     // storage-equipment preset applied to new 棚
+    this.showUnderlay = true;      // draw DXF walls as a faint trace underlay
     this.wallDraft = null;         // [[x,y],...] while drawing a wall polyline
     this.conveyorDraft = null;     // [[x,y],...] while drawing a conveyor
     this.routeMover = 'person';    // active mover for new 動線 routes
@@ -73,7 +79,7 @@ export class Designer {
     this._bindWindow();
     this._bindKeys();
     this._bindTheme();
-    this._selectTool('layout');
+    this._selectTool('place');
     // M3: pull the live storage-equipment catalog (/api/racktypes) so the palette
     // tracks the backend presets; falls back silently to the seed RACK_TYPES.
     this._loadRackCatalog();
@@ -112,8 +118,8 @@ export class Designer {
       if (order.length) { RACK_ORDER.length = 0; RACK_ORDER.push(...order); }
       // ensure the active type still exists in the (possibly reordered) catalog.
       if (!RACK_TYPES[this.shelfType]) this.shelfType = RACK_ORDER[0] || 'medium';
-      // repaint so the palette, legend and chip reflect the live catalog.
-      if (this.tool === 'layout' && this.layoutMode === 'shelf') this._renderTool();
+      // repaint so the library cards reflect the live catalog.
+      if (this.tool === 'place') this._renderTool();
     } catch (_e) { /* offline / not-served: keep the seed catalog */ }
   }
 
@@ -174,22 +180,22 @@ export class Designer {
       + 'background:var(--bg-panel);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--sh-lg);'
       + 'padding:14px 16px;font-size:12px;color:var(--ink-secondary);line-height:1.7;';
     box.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--ink-primary);">操作ヘルプ</div>'
-      + '<div><b>レイアウト（ゾーン）</b>: パレットを選んで床をクリックで配置。ゾーンをドラッグで移動、右下のハンドルでサイズ変更。</div>'
-      + '<div><b>レイアウト（棚）</b>: 「棚」モードで保管ゾーン内に棚を自由配置。<b>棚を描く</b>＝角から角へドラッグ。'
-      + '<b>棚一括生成</b>＝間口の向き・連結数を指定。<b>面積オート生成</b>＝矩形を描くと棚列＋通路を自動配置。'
-      + '8つのハンドルでサイズ変更（複数選択は比率で拡大縮小）。<b>Ctrl</b>でエッジスナップ無効。</div>'
-      + '<div><b>設備パレット（棚）</b>: 6種の標準保管設備（軽量棚/中量棚/パレットラック/ネステナー/'
-      + 'フローラック/自動倉庫）をカードで選択。選んだ種別が「配置中」になり、描画・一括生成・面積生成に反映され、'
-      + '2Dの色と3Dの形状（パレットビーム/棚板/ローラ/クレーン）が切り替わります。棚を選択してカードを押すと、'
-      + 'その棚の種別を変更します。色↔種別の凡例はパレット下に表示。</div>'
-      + '<div><b>設備</b>: 床をクリックで設置、マーカーで選択。コンベアは頂点を追加してダブルクリックで確定。</div>'
-      + '<div><b>躯体</b>: 壁は頂点を追加してダブルクリックで確定。ドアは縁をクリックで配置。</div>'
+      + '<div><b>配置</b>: 左のライブラリから置きたい物を選ぶ（またはカードを床へドラッグ）。'
+      + 'カーソルに実寸のゴーストが出るので、床をクリックで配置。連続で置けます。'
+      + '<b>Esc</b>か右クリックで「選択」に戻ります。</div>'
+      + '<div><b>選択</b>: クリックで選択（棚はShiftで複数）、ドラッグで移動、ハンドルでサイズ変更。'
+      + '右パネルで名前・寸法・台数などを数値編集。</div>'
+      + '<div><b>棚</b>: クリック=1台スタンプ / ドラッグ=角から角で1枚。エッジに自動スナップ'
+      + '（<b>Ctrl</b>で無効）。<b>一括生成</b>＝間口の向き・連結数を指定、<b>面積生成</b>＝矩形から棚列＋通路を自動配置。</div>'
+      + '<div><b>壁</b>: クリックで頂点追加（<b>Shift</b>=水平/垂直固定、長さ表示）、ダブルクリックで確定。</div>'
+      + '<div><b>コンベア</b>: クリックで頂点追加、ダブルクリックで確定。</div>'
       + '<div><b>フロー</b>: 工程をクリックで作業方法を設定。「床図でフロー配置」で工程→ゾーンを割当。</div>'
       + '<div><b>動線</b>: 床をクリックで頂点追加、ダブルクリックで確定。距離と所要時間を自動計算。</div>'
       + '<div style="margin-top:6px;">ホイールで拡大縮小、中ボタンドラッグで移動、「全体表示」でリセット。</div>'
       + '<div style="margin-top:8px;border-top:1px solid var(--line-hair);padding-top:8px;">'
-      + '<b>キーボード</b><br>選択を削除: <b>Delete</b> / 複製(棚): <b>D</b> / 取消: <b>Esc</b><br>'
-      + '棚種別を選ぶ(棚モード): <b>1〜6</b><br>'
+      + '<b>キーボード</b><br>ライブラリ: <b>1</b>=選択 <b>2</b>=保管ゾーン <b>3</b>=棚 <b>4</b>=壁 '
+      + '<b>5</b>=梱包台 <b>6</b>=AGV <b>7</b>=コンベア <b>8</b>=自動倉庫 <b>9</b>=ドックドア<br>'
+      + '選択を削除: <b>Delete</b> / 複製(棚): <b>D</b> / 取消: <b>Esc</b><br>'
       + '元に戻す: <b>Ctrl/⌘+Z</b> / やり直す: <b>Ctrl/⌘+Shift+Z</b></div>'
       + '<div style="margin-top:8px;color:var(--ink-tertiary);">変更は「レイアウトを保存」を押すまでサーバーに保存されません。</div>';
     const close = document.createElement('button');
@@ -404,13 +410,11 @@ export class Designer {
     bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
     this._toolBtns = {};
     const TOOL_TIP = {
-      layout: 'ゾーン（区画）の配置・移動・サイズ変更',
-      equip: 'AGV・コンベア・自動倉庫・梱包台などの設備を設置',
-      building: '建屋の壁とドア（ドック/通用口/シャッター）を作図',
+      place: 'ライブラリから棚・設備・ゾーン・壁を選んで床に配置（編集も）',
       flow: '工程の順序と作業方法、各工程の場所（ゾーン）を設定',
       route: '作業員・フォークリフトの動線を作図し距離/時間を確認',
     };
-    for (const [key, label] of [['layout', 'ゾーン/棚'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー'], ['route', '動線']]) {
+    for (const [key, label] of [['place', '配置'], ['flow', 'フロー'], ['route', '動線']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.title = TOOL_TIP[key] || label;
@@ -501,11 +505,9 @@ export class Designer {
   _selectTool(key) {
     this.tool = key;
     this.selected = null;
-    this.layoutBrush = null;
     this.selShelves = new Set();
     this.shelfDraft = null;
     this.snapLine = null;
-    if (key === 'layout' && this.layoutMode === 'shelf' && !this.shelfBrush) this.shelfBrush = 'draw';
     this.conveyorDraft = null;
     this.wallDraft = null;
     this.routeDraft = null;
@@ -523,38 +525,39 @@ export class Designer {
 
   _renderTool() {
     this.body.innerHTML = '';
-    if (this.tool === 'flow') { this._renderFlow(); return; }
-    if (this.tool === 'route') { this._renderRoute(); return; }
-    // canvas-based tools (layout / equip / building) share the floor view + a side panel.
-    // The レイアウト tool gets a control bar above the canvas (palette / underlay / inventory).
-    let canvasHost;
-    if (this.tool === 'layout') {
-      const left = document.createElement('div');
-      left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
-      this._renderLayoutBar(left);
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
-      wrap.classList.add('dz-canvas-wrap');
-      this.canvas = document.createElement('canvas');
-      const layoutCursor = this.layoutMode === 'shelf'
-        ? (this.shelfBrush === 'draw' || this.shelfBrush === 'area' ? 'crosshair' : 'default')
-        : (this.layoutBrush ? 'crosshair' : 'default');
-      this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${layoutCursor};`;
-      wrap.appendChild(this.canvas);
-      left.appendChild(wrap);
-      this.body.appendChild(left);
-      canvasHost = wrap;
-    } else {
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'flex:1;min-width:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
-      wrap.classList.add('dz-canvas-wrap');
-      this.canvas = document.createElement('canvas');
-      // equip/building tools are click-to-place: a crosshair signals placement.
-      this.canvas.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair;';
-      wrap.appendChild(this.canvas);
-      this.body.appendChild(wrap);
-      canvasHost = wrap;
+    if (this.tool === 'flow' || this.tool === 'route') {
+      this.lib = null; this._stPos = null;       // drop stale 配置-tool DOM refs
+      this.body.style.flexWrap = 'wrap';
+      if (this.tool === 'flow') this._renderFlow(); else this._renderRoute();
+      return;
     }
+    // 配置 tool must NOT wrap: with wrap, the flex line's height grows to the
+    // tall library content, blowing the canvas past the viewport (clicks then
+    // land outside the floor). nowrap keeps all three columns at panel height
+    // and lets the library scroll internally.
+    this.body.style.flexWrap = 'nowrap';
+    // 配置 tool: [library | canvas+status | object editor] in one row.
+    this.lib = document.createElement('div');
+    this.lib.style.cssText = 'width:218px;flex:0 0 218px;min-height:0;overflow-y:auto;'
+      + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);padding:8px;';
+    this.lib.classList.add('dz-enter');
+    this.body.appendChild(this.lib);
+    this._renderLibrary(this.lib);
+
+    const mid = document.createElement('div');
+    mid.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;';
+    this._renderCanvasBar(mid);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
+    wrap.classList.add('dz-canvas-wrap');
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.brush.kind === 'select' ? 'default' : 'crosshair'};`;
+    wrap.appendChild(this.canvas);
+    // canvas accepts drops from the library cards (drag a card → place at drop).
+    this._bindCanvasDrop(wrap);
+    mid.appendChild(wrap);
+    this._buildStatusBar(mid);
+    this.body.appendChild(mid);
 
     this.side = document.createElement('div');
     this.side.style.cssText = 'width:240px;flex:0 0 240px;overflow-y:auto;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);padding:10px;';
@@ -566,63 +569,15 @@ export class Designer {
     this._fitCanvas();
     this._renderSide();
     this._drawCanvas();
+    this._updateStatus();
   }
 
-  // ---- レイアウト control bar: object palette + underlay toggle + inventory ----
-  _renderLayoutBar(parent) {
-    // mode switch row: ゾーン (区画) vs 棚 (free shelf placement, MapMaker-style).
-    const modeBar = document.createElement('div');
-    modeBar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
-    const modeLbl = document.createElement('span');
-    modeLbl.textContent = 'モード:';
-    modeLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);font-weight:700;';
-    modeBar.appendChild(modeLbl);
-    for (const [m, label, tip] of [
-      ['zone', 'ゾーン', '区画（保管/出荷など）を配置・編集'],
-      ['shelf', '棚', '保管ゾーン内に棚を自由配置（MapMaker式）'],
-    ]) {
-      const b = this._btn(modeBar, label, () => {
-        this.layoutMode = m;
-        this.layoutBrush = null;
-        this.shelfBrush = (m === 'shelf') ? 'draw' : null;
-        this.selected = null;
-        this.selShelves = new Set();
-        this.shelfDraft = null;
-        this._renderTool();
-      });
-      b.title = tip;
-      if (this.layoutMode === m) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
-    }
-    // zoom-to-fit (camera reset) — available in both modes.
-    const zfSpacer = document.createElement('div'); zfSpacer.style.flex = '1'; modeBar.appendChild(zfSpacer);
-    this._btn(modeBar, '全体表示', () => this._zoomToFit(), 'font-size:12px;').title = '全体が収まるように表示（ホイールで拡大縮小、ドラッグで移動）';
-    parent.appendChild(modeBar);
-
-    if (this.layoutMode === 'shelf') { this._renderShelfBar(parent); return; }
-
+  // ---- thin bar above the canvas: zoom-to-fit / underlay / inventory --------
+  _renderCanvasBar(parent) {
     const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
-
-    const palLbl = document.createElement('span');
-    palLbl.textContent = '配置:';
-    palLbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);font-weight:700;';
-    bar.appendChild(palLbl);
-
-    // PPT-like object palette: click an object, then click the floor to place it.
-    for (const p of LAYOUT_PALETTE) {
-      const b = this._btn(bar, p.label, () => {
-        this.layoutBrush = (this.layoutBrush === p.key) ? null : p.key;
-        this.selected = null;
-        this._renderTool();
-      });
-      if (this.layoutBrush === p.key) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
-    }
-
-    const spacer = document.createElement('div');
-    spacer.style.flex = '1';
-    bar.appendChild(spacer);
-
-    // DXF underlay toggle (only meaningful when walls exist, but always shown)
+    bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 8px;'
+      + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
+    this._btn(bar, '全体表示', () => this._zoomToFit(), 'font-size:12px;').title = '全体が収まるように表示（ホイールで拡大縮小、中ボタンドラッグで移動）';
     const ulLbl = document.createElement('label');
     ulLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-secondary);cursor:pointer;';
     const ulCb = document.createElement('input');
@@ -630,179 +585,395 @@ export class Designer {
     ulCb.checked = !!this.showUnderlay;
     this._on(ulCb, 'change', () => { this.showUnderlay = ulCb.checked; this._drawCanvas(); });
     ulLbl.appendChild(ulCb);
-    ulLbl.appendChild(document.createTextNode('下地を表示'));
+    ulLbl.appendChild(document.createTextNode('下地(壁)を表示'));
     bar.appendChild(ulLbl);
-
-    // inventory assignment button (calls optional handlers.assignInventory)
-    this._btn(bar, '在庫を割付', () => this._assignInventory());
-
-    // status line for placement hint / inventory result
-    this._layoutStatus = document.createElement('span');
-    this._layoutStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);max-width:100%;flex-basis:100%;';
-    this._layoutStatus.textContent = this.layoutBrush
-      ? `「${(LAYOUT_PALETTE.find((q) => q.key === this.layoutBrush) || {}).label}」を選択中。床をクリックして配置します。`
-      : 'パレットから配置する物を選ぶか、既存のゾーンをクリックして編集します。';
-    bar.appendChild(this._layoutStatus);
-
-    parent.appendChild(bar);
-  }
-
-  // ---- 棚モード control bar: free placement + bulk-gen + area-fill ----------
-  // The active storage zone (`shelfZoneId`, defaulting to the first storage zone)
-  // is the container into which all new shelves are written. Shelves live in
-  // `zone.shelves` and become named locations on save (materialize_racks).
-  _renderShelfBar(parent) {
-    const bar = document.createElement('div');
-    bar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
-
-    // storage-zone selector (the shelves' container). Auto-creates one if none.
-    const stores = this._storageZones();
-    const zlbl = document.createElement('span');
-    zlbl.textContent = '保管ゾーン:';
-    zlbl.style.cssText = 'font-size:12px;color:var(--ink-secondary);font-weight:700;';
-    bar.appendChild(zlbl);
-    if (!stores.length) {
-      this._btn(bar, '保管ゾーンを作成', () => {
-        this._addZone('storage');
-        this.shelfZoneId = this.selected && this.selected.id;
-        this.selected = null;
-        this._renderTool();
-      });
-    } else {
-      if (!this.shelfZoneId || !stores.find((z) => z.id === this.shelfZoneId)) {
-        this.shelfZoneId = stores[0].id;
-      }
-      const sel = this._select(bar, stores.map((z, i) => ({ value: z.id, label: `保管${i + 1}` })), this.shelfZoneId);
-      this._on(sel, 'change', () => {
-        this.shelfZoneId = sel.value; this.selShelves = new Set(); this._renderTool();
-      });
-    }
-
-    // shelf sub-tools: 棚を描く / 棚一括生成 / 面積オート生成.
-    for (const [key, label, tip] of [
-      ['draw', '棚を描く', 'ドラッグで角から角へ棚を1枚描く（エッジスナップ／Ctrlで無効）'],
-      ['bulk', '棚一括生成', '間口の向き・連結数を指定してまとめて生成'],
-      ['area', '面積オート生成', '矩形を描くと棚列＋通路を自動でタイル配置'],
-    ]) {
-      const b = this._btn(bar, label, () => {
-        if (key === 'bulk') { this._openBulkGenDialog(); return; }
-        this.shelfBrush = (this.shelfBrush === key) ? 'draw' : key;
-        this.selShelves = new Set();
-        this.shelfDraft = null;
-        this._renderTool();
-      });
-      b.title = tip;
-      if (this.shelfBrush === key) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
-    }
-
+    this._btn(bar, '在庫を割付', () => this._assignInventory(), 'font-size:12px;');
     const spacer = document.createElement('div'); spacer.style.flex = '1'; bar.appendChild(spacer);
-
-    // M3: "配置中" chip — the active storage-equipment type, prominent so the user
-    // always knows what 棚を描く / 一括生成 / 面積オート生成 will produce. Clicking it
-    // toggles the visual equipment palette (rendered below the bar).
-    const active = RACK_TYPES[this.shelfType] || RACK_TYPES.medium;
-    const chip = document.createElement('button');
-    chip.setAttribute('aria-expanded', this.rackPaletteOpen ? 'true' : 'false');
-    chip.setAttribute('aria-label', `配置中の保管設備: ${active.label}。クリックで設備パレットを開閉`);
-    chip.title = '配置中の保管設備（クリックで設備パレットを開閉）';
-    chip.style.cssText = 'display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border:1px solid var(--line-strong);'
-      + 'border-radius:var(--r-pill);background:var(--bg-app);color:var(--ink-primary);font-size:12px;cursor:pointer;';
-    const sw = document.createElement('span');
-    sw.style.cssText = `width:13px;height:13px;border-radius:3px;flex:0 0 auto;background:${active.color};box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);`;
-    const chipTxt = document.createElement('span');
-    chipTxt.innerHTML = `<span style="color:var(--ink-tertiary);">配置中:</span> <b>${active.label}</b>`;
-    const caret = document.createElement('span');
-    caret.textContent = this.rackPaletteOpen ? '▴' : '▾';
-    caret.style.cssText = 'color:var(--ink-tertiary);font-size:10px;';
-    chip.appendChild(sw); chip.appendChild(chipTxt); chip.appendChild(caret);
-    this._on(chip, 'click', () => { this.rackPaletteOpen = !this.rackPaletteOpen; this._renderTool(); });
-    bar.appendChild(chip);
-
-    // status / hint line
+    // status line for placement hint / inventory result (kept from the old bar).
     this._layoutStatus = document.createElement('span');
-    this._layoutStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);max-width:100%;flex-basis:100%;';
-    this._layoutStatus.textContent = this._shelfHint();
+    this._layoutStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;';
+    this._layoutStatus.textContent = this._brushHint();
     bar.appendChild(this._layoutStatus);
-
     parent.appendChild(bar);
+  }
 
-    // M3: the visual equipment palette + the color→type legend live below the bar.
-    if (this.rackPaletteOpen) this._renderRackPalette(parent);
-    this._renderRackLegend(parent);
+  // ---- CAD-style status bar under the canvas ---------------------------------
+  // Live readout: cursor position (m) / armed brush / selection size / zoom. The
+  // numbers are what make the editor feel trustworthy — you always see exactly
+  // where you are and how big things are (MapMaker/CAD convention).
+  _buildStatusBar(parent) {
+    const bar = document.createElement('div');
+    bar.style.cssText = 'flex:0 0 auto;display:flex;gap:14px;align-items:center;padding:3px 10px;'
+      + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);'
+      + 'font-size:11.5px;color:var(--ink-secondary);font-variant-numeric:tabular-nums;min-height:22px;';
+    this._stPos = this._div(bar, 'min-width:120px;');
+    this._stBrush = this._div(bar, 'min-width:150px;font-weight:700;color:var(--ink-primary);');
+    this._stSel = this._div(bar, 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+    this._stZoom = this._div(bar, 'margin-left:auto;');
+    parent.appendChild(bar);
+  }
+
+  _updateStatus() {
+    if (!this._stPos) return;
+    const h = this.hover;
+    this._stPos.textContent = h ? `X ${h.mx.toFixed(2)}m  Y ${h.my.toFixed(2)}m` : 'X —  Y —';
+    this._stBrush.textContent = `配置: ${this._brushLabel()}`;
+    let sel = '';
+    if (this.selShelves && this.selShelves.size) {
+      const objs = this._selShelfObjs();
+      if (objs.length === 1) {
+        const sh = objs[0].sh;
+        sel = `棚「${sh.name || sh.id}」 ${sh.w.toFixed(2)}×${sh.h.toFixed(2)}m @ (${sh.x.toFixed(2)}, ${sh.y.toFixed(2)})`;
+      } else if (objs.length > 1) sel = `棚 ${objs.length}枚を選択中`;
+    } else if (this.selected) {
+      const k = this.selected.kind;
+      if (k === 'zone') {
+        const z = this._zoneById(this.selected.id);
+        if (z) sel = `${ZONE_JP[z.type] || z.type} ${z.w.toFixed(1)}×${z.h.toFixed(1)}m @ (${z.x.toFixed(1)}, ${z.y.toFixed(1)})`;
+      } else if (k === 'equip') {
+        const e = (this.model.resources.equipment || []).find((q) => q.id === this.selected.id);
+        const p = e && EQUIP_PALETTE.find((x) => x.type === e.type);
+        if (e) sel = `${p ? p.label : e.type} ×${e.count ?? 1} @ (${(+e.x).toFixed(1)}, ${(+e.y).toFixed(1)})`;
+      } else if (k === 'station') {
+        const st = (this.model.resources.stations || []).find((q) => q.id === this.selected.id);
+        if (st) sel = `梱包台 ×${st.count ?? 1} @ (${(+st.x).toFixed(1)}, ${(+st.y).toFixed(1)})`;
+      } else if (k === 'wall') {
+        const w = (this.model.layout.walls || []).find((q) => q.id === this.selected.id);
+        if (w) sel = `壁 ${(w.points || []).length}頂点 / 厚 ${(w.thickness || 0.3).toFixed(2)}m`;
+      } else if (k === 'door') {
+        const d = (this.model.layout.doors || []).find((q) => q.id === this.selected.id);
+        if (d) sel = `${DOOR_JP[d.type] || d.type} 幅${(d.w || 1).toFixed(1)}m @ (${(+d.x).toFixed(1)}, ${(+d.y).toFixed(1)})`;
+      }
+    }
+    this._stSel.textContent = sel ? `選択: ${sel}` : '';
+    const zoomPct = this._view ? Math.round((this._cam.zoom || 1) * 100) : 100;
+    this._stZoom.textContent = `倍率 ${zoomPct}%`;
+  }
+
+  _brushLabel() {
+    const b = this.brush;
+    if (!b || b.kind === 'select') return '選択 / 編集';
+    if (b.kind === 'rack') { const rt = RACK_TYPES[b.key || this.shelfType]; return `棚: ${rt ? rt.label : ''}`; }
+    if (b.kind === 'zone') return `ゾーン: ${ZONE_JP[b.key] || b.key}`;
+    if (b.kind === 'equip') { const p = EQUIP_PALETTE.find((x) => x.key === b.key); return p ? p.label : b.key; }
+    if (b.kind === 'wall') return '壁';
+    if (b.kind === 'door') return DOOR_JP[b.key] || 'ドア';
+    return '';
+  }
+
+  _brushHint() {
+    const b = this.brush;
+    if (!b || b.kind === 'select') return 'ライブラリから置きたい物を選択（またはカードを床へドラッグ）。クリックで編集。';
+    if (b.kind === 'rack') return 'クリック=1台 / ドラッグ=角から角で1枚。Esc・右クリックで選択に戻る。';
+    if (b.kind === 'wall') return 'クリックで頂点追加（Shift=水平/垂直）、ダブルクリックで確定。';
+    if (b.kind === 'equip' && b.key === 'conveyor') return 'クリックで頂点追加、ダブルクリックで確定。';
+    if (b.kind === 'door') return '建屋の縁をクリックして配置。';
+    return '床をクリックで配置。連続で置けます。Esc・右クリックで選択に戻る。';
   }
 
   // ===========================================================================
-  // M3 — storage-equipment palette (WITNESS-style object library).
-  // A grid of selectable cards, one per rack type. Each card shows the Japanese
-  // label, the preset colour swatch, a tiny 2D silhouette hinting the 3D form
-  // (pallet beams vs shelving vs flow rollers vs AS/RS crane), and key specs
-  // (間口×奥行き / 段数 / 収容). Picking a card sets the *active* rack_type used by
-  // 棚を描く / 棚一括生成 / 面積オート生成. If shelves are currently selected, the
-  // card instead RE-ASSIGNS their rack_type (undoable) — selection takes priority
-  // so a card click is "apply to selection" when there is one.
+  // The object LIBRARY (Minecraft-style hotbar/palette).
+  // Every placeable thing is a visual card in one scrollable panel, grouped by
+  // category (編集 / 保管設備(棚) / ゾーン / マテハン設備 / 躯体). Clicking a card
+  // arms it as the active brush; dragging a card onto the floor places it at the
+  // drop point. Digit keys 1-9 jump to the pinned brushes (MapMaker parity).
   // ===========================================================================
-  _renderRackPalette(parent) {
-    const wrap = this._div(parent,
-      'margin-top:2px;padding:8px;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);');
-    wrap.classList.add('dz-enter');
-    wrap.setAttribute('role', 'listbox');
-    wrap.setAttribute('aria-label', '保管設備パレット');
-    // header row: title + (contextual) "選択中の棚に適用" note + digit-shortcut hint.
+  _setBrush(brush) {
+    this.brush = brush || { kind: 'select' };
+    // leaving a draft-y brush cancels its in-progress polyline.
+    if (this.brush.kind !== 'wall') this.wallDraft = null;
+    if (!(this.brush.kind === 'equip' && this.brush.key === 'conveyor')) this.conveyorDraft = null;
+    this.shelfDraft = null;
+    this.snapLine = null;
+    if (this.brush.kind !== 'select') { this.selected = null; this.selShelves = new Set(); }
+    if (this.canvas) this.canvas.style.cursor = this.brush.kind === 'select' ? 'default' : 'crosshair';
+    if (this._layoutStatus) {
+      this._layoutStatus.style.color = 'var(--ink-secondary)';
+      this._layoutStatus.textContent = this._brushHint();
+    }
+    if (this.lib) this._renderLibrary(this.lib);
+    this._renderSide();
+    this._updateStatus();
+    this._repaint();
+  }
+
+  // digit→brush map: digit 3 is "棚" = the ACTIVE rack type.
+  _digitBrush(d) {
+    const ent = LIBRARY_DIGITS.find((q) => q.digit === d);
+    if (!ent) return null;
+    if (ent.kind === 'rack') return { kind: 'rack', key: this.shelfType };
+    return { kind: ent.kind, key: ent.key };
+  }
+  _digitFor(kind, key) {
+    const ent = LIBRARY_DIGITS.find((q) => q.kind === kind && (q.kind === 'rack' || q.kind === 'select' || q.kind === 'wall' || q.key === key));
+    return ent ? ent.digit : null;
+  }
+
+  _renderLibrary(host) {
+    host.innerHTML = '';
+    const sec = (title) => {
+      const h = this._div(host, 'font-size:11px;font-weight:700;color:var(--ink-tertiary);'
+        + 'letter-spacing:.06em;margin:10px 2px 5px;');
+      h.textContent = title;
+      return h;
+    };
+    const b = this.brush || {};
+
+    // --- 編集 ---------------------------------------------------------------
+    sec('編集');
+    host.appendChild(this._libCard({
+      icon: this._selIcon(), label: '選択 / 移動', sub: 'クリックで選択・ドラッグで移動',
+      active: b.kind === 'select', digit: this._digitFor('select'),
+      onPick: () => this._setBrush({ kind: 'select' }),
+    }));
+
+    // --- 保管設備（棚） -------------------------------------------------------
+    sec('保管設備（棚）');
+    // bulk tools row (apply to the active rack type)
+    const tools = this._div(host, 'display:flex;gap:5px;margin:0 0 6px;');
+    const bulkBtn = this._btn(tools, '一括生成', () => this._openBulkGenDialog(), 'flex:1;font-size:11.5px;padding:4px 4px;');
+    bulkBtn.title = '間口の向き・連結数を指定してまとめて生成';
+    const areaBtn = this._btn(tools, '面積生成', () => {
+      this._setBrush({ kind: 'rack', key: this.shelfType, area: true });
+    }, 'flex:1;font-size:11.5px;padding:4px 4px;');
+    areaBtn.title = '矩形をドラッグで描くと棚列＋通路を自動でタイル配置';
+    if (b.kind === 'rack' && b.area) areaBtn.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
+    // multi storage-zone: which zone receives new shelves
+    const stores = this._storageZones();
+    if (stores.length > 1) {
+      if (!this.shelfZoneId || !stores.find((z) => z.id === this.shelfZoneId)) this.shelfZoneId = stores[0].id;
+      const zrow = this._div(host, 'display:flex;align-items:center;gap:5px;margin:0 0 6px;font-size:11px;color:var(--ink-secondary);');
+      zrow.appendChild(document.createTextNode('配置先:'));
+      const sel = this._select(zrow, stores.map((z, i) => ({ value: z.id, label: `保管ゾーン${i + 1}` })), this.shelfZoneId);
+      sel.style.flex = '1';
+      this._on(sel, 'change', () => { this.shelfZoneId = sel.value; this.selShelves = new Set(); this._repaint(); });
+    }
     const selCount = (this.selShelves && this.selShelves.size) || 0;
-    const head = this._div(wrap, 'display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;');
-    const ttl = this._div(head, 'font-size:12px;font-weight:700;color:var(--ink-secondary);');
-    ttl.textContent = '設備パレット';
-    const hint = this._div(head, 'font-size:11px;color:var(--ink-tertiary);');
-    hint.textContent = selCount
-      ? `カードを選ぶと選択中の ${selCount} 棚に適用`
-      : 'カードを選ぶと配置中の種別になります（1〜6キー）';
-    // card grid
-    const grid = this._div(wrap, 'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;');
-    RACK_ORDER.forEach((key, i) => {
+    if (selCount) {
+      this._div(host, 'font-size:10.5px;color:var(--ink-tertiary);margin:0 2px 5px;')
+        .textContent = `カードを押すと選択中の ${selCount} 棚に種別を適用`;
+    }
+    RACK_ORDER.forEach((key) => {
       const rt = RACK_TYPES[key];
       if (!rt) return;
-      const isActive = !selCount && this.shelfType === key;
-      // a selected-shelf homogeneous type is highlighted as "current" too.
       const selType = selCount ? this._selectionRackType() : null;
-      const isSelType = selCount && selType === key;
-      const card = document.createElement('button');
-      card.setAttribute('role', 'option');
-      card.setAttribute('aria-selected', (isActive || isSelType) ? 'true' : 'false');
-      card.setAttribute('aria-label',
-        `${rt.label}。間口${rt.bay}m×奥行${rt.depth}m、${rt.levels || 1}段、収容${rt.capacity || 0}。`
-        + (selCount ? '選択中の棚に適用' : `配置中にする（${i + 1}キー）`));
-      card.title = rt.desc || rt.label;
-      const on = isActive || isSelType;
-      card.style.cssText = 'text-align:left;display:flex;flex-direction:column;gap:6px;padding:9px;border-radius:var(--r-md);cursor:pointer;'
-        + `border:2px solid ${on ? rt.color : 'var(--line-hair)'};`
-        + `background:${on ? hexA(rt.color, 0.14) : 'var(--bg-app)'};color:var(--ink-primary);`;
-      // top row: silhouette icon + label + color swatch + (digit) badge
-      const top = this._div(card, 'display:flex;align-items:center;gap:7px;');
-      top.appendChild(this._rackIcon(rt));
-      const name = this._div(top, 'flex:1;min-width:0;font-size:12.5px;font-weight:700;line-height:1.25;'
-        + 'overflow:hidden;text-overflow:ellipsis;');
-      name.textContent = rt.label;
-      const sw2 = this._div(top, `width:12px;height:12px;border-radius:3px;flex:0 0 auto;background:${rt.color};box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);`);
-      sw2.setAttribute('aria-hidden', 'true');
-      if (i < 9) {
-        const kb = this._div(top, 'flex:0 0 auto;font-size:10px;color:var(--ink-tertiary);border:1px solid var(--line-hair);'
-          + 'border-radius:4px;padding:0 4px;line-height:15px;font-variant-numeric:tabular-nums;');
-        kb.textContent = String(i + 1);
-      }
-      // specs line: 間口×奥行き / 段数 / 収容
-      const specs = this._div(card, 'font-size:11px;color:var(--ink-secondary);line-height:1.45;');
-      specs.innerHTML =
-        `<span style="font-variant-numeric:tabular-nums;">間口 ${rt.bay} × 奥行 ${rt.depth} m</span>`
-        + `<br>段数 ${rt.levels || 1}・収容 ${rt.capacity || 0}`;
-      // desc (one line, muted)
-      if (rt.desc) {
-        const d = this._div(card, 'font-size:10.5px;color:var(--ink-tertiary);line-height:1.4;'
-          + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
-        d.textContent = rt.desc;
-      }
-      this._on(card, 'click', () => this._pickRackType(key));
-      grid.appendChild(card);
+      const active = selCount ? selType === key : (b.kind === 'rack' && !b.area && (b.key || this.shelfType) === key)
+        || (b.kind === 'rack' && b.area && this.shelfType === key);
+      host.appendChild(this._libCard({
+        icon: this._rackIcon(rt), label: rt.label,
+        sub: `間口${rt.bay}×奥行${rt.depth}m・${rt.levels || 1}段・収容${rt.capacity || 0}`,
+        title: rt.desc || rt.label, color: rt.color, active,
+        digit: key === this.shelfType ? this._digitFor('rack') : null,
+        drag: { kind: 'rack', key },
+        onPick: () => this._pickRackType(key),
+      }));
     });
+
+    // --- ゾーン ---------------------------------------------------------------
+    sec('ゾーン（区画）');
+    for (const t of ZONE_TYPES) {
+      host.appendChild(this._libCard({
+        icon: this._zoneIcon(t), label: ZONE_JP[t] || t,
+        sub: this._zoneDefaults(t).desc, color: ZONE_DEFAULT_COLOR[t],
+        active: b.kind === 'zone' && b.key === t,
+        digit: t === 'storage' ? this._digitFor('zone', 'storage') : null,
+        drag: { kind: 'zone', key: t },
+        onPick: () => this._setBrush({ kind: 'zone', key: t }),
+      }));
+    }
+
+    // --- マテハン設備 ----------------------------------------------------------
+    sec('マテハン設備');
+    for (const p of EQUIP_PALETTE) {
+      host.appendChild(this._libCard({
+        icon: this._equipIcon(p), label: p.label,
+        sub: p.w ? `${p.w}×${p.d}m` : 'ライン（頂点を描く）',
+        title: p.desc || p.label, color: p.color,
+        active: b.kind === 'equip' && b.key === p.key,
+        digit: this._digitFor('equip', p.key),
+        drag: p.key === 'conveyor' ? null : { kind: 'equip', key: p.key },
+        onPick: () => this._setBrush({ kind: 'equip', key: p.key }),
+      }));
+    }
+
+    // --- 躯体 ------------------------------------------------------------------
+    sec('躯体（建屋）');
+    host.appendChild(this._libCard({
+      icon: this._wallIcon(), label: '壁', sub: '頂点をクリック・Shift=直交・W×繰返',
+      active: b.kind === 'wall', digit: this._digitFor('wall'),
+      onPick: () => this._setBrush({ kind: 'wall' }),
+    }));
+    for (const p of DOOR_PALETTE) {
+      host.appendChild(this._libCard({
+        icon: this._doorIcon(p), label: p.label,
+        sub: p.type === 'dock' ? 'トラック接車口 (幅3m)' : p.type === 'shutter' ? '大型開口 (幅4m)' : '人の出入口 (幅1m)',
+        color: p.color,
+        active: b.kind === 'door' && b.key === p.type,
+        digit: this._digitFor('door', p.type),
+        drag: { kind: 'door', key: p.type },
+        onPick: () => this._setBrush({ kind: 'door', key: p.type }),
+      }));
+    }
+  }
+
+  // One library card: [icon] label/sub [digit]. Draggable when opts.drag is set.
+  _libCard(opts) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.title = opts.title || opts.label;
+    card.setAttribute('aria-pressed', opts.active ? 'true' : 'false');
+    const accent = opts.color || 'var(--acc)';
+    card.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;box-sizing:border-box;'
+      + 'text-align:left;padding:5px 7px;margin:0 0 4px;border-radius:var(--r-md);cursor:pointer;'
+      + `border:2px solid ${opts.active ? accent : 'var(--line-hair)'};`
+      + `background:${opts.active ? hexA(typeof accent === 'string' && accent[0] === '#' ? accent : '#39c2ff', 0.14) : 'var(--bg-app)'};`
+      + 'color:var(--ink-primary);';
+    card.appendChild(opts.icon);
+    const txt = this._div(card, 'flex:1;min-width:0;');
+    const name = this._div(txt, 'font-size:12px;font-weight:700;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+    name.textContent = opts.label;
+    if (opts.sub) {
+      const sub = this._div(txt, 'font-size:10px;color:var(--ink-tertiary);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;');
+      sub.textContent = opts.sub;
+    }
+    if (opts.digit) {
+      const kb = this._div(card, 'flex:0 0 auto;font-size:10px;color:var(--ink-tertiary);border:1px solid var(--line-hair);'
+        + 'border-radius:4px;padding:0 4px;line-height:15px;font-variant-numeric:tabular-nums;');
+      kb.textContent = String(opts.digit);
+    }
+    this._on(card, 'click', opts.onPick);
+    // drag a card onto the canvas → place at the drop point (and arm the brush).
+    if (opts.drag) {
+      card.draggable = true;
+      this._on(card, 'dragstart', (e) => {
+        this._dragBrush = opts.drag;
+        try { e.dataTransfer.setData('text/plain', JSON.stringify(opts.drag)); } catch (_e) { /* IE-ish */ }
+        e.dataTransfer.effectAllowed = 'copy';
+      });
+      this._on(card, 'dragend', () => { this._dragBrush = null; this.hover = null; this._repaint(); });
+    }
+    return card;
+  }
+
+  // The canvas accepts library-card drops: dragover tracks the ghost, drop stamps.
+  _bindCanvasDrop(wrap) {
+    this._on(wrap, 'dragover', (e) => {
+      if (!this._dragBrush) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      const r = this.canvas.getBoundingClientRect();
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      this.hover = { mx: this._mx(px), my: this._my(py), px, py, ghost: this._dragBrush };
+      this._repaint();
+      this._updateStatus();
+    });
+    this._on(wrap, 'drop', (e) => {
+      if (!this._dragBrush) return;
+      e.preventDefault();
+      const r = this.canvas.getBoundingClientRect();
+      const mx = this._mx(e.clientX - r.left), my = this._my(e.clientY - r.top);
+      const brush = this._dragBrush;
+      this._dragBrush = null;
+      this._setBrush(brush);          // arm it (so repeat-placement continues)…
+      this._stampAt(brush, mx, my);   // …and place this first one at the drop point.
+    });
+  }
+
+  // ---- tiny library icons (top-view, canvas-drawn so they match the floor) --
+  _iconCanvas(bg) {
+    const W = 26, H = 22, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const c = document.createElement('canvas');
+    c.width = W * dpr; c.height = H * dpr;
+    c.style.cssText = `width:${W}px;height:${H}px;flex:0 0 auto;border-radius:3px;background:${bg};`;
+    c.setAttribute('aria-hidden', 'true');
+    const x = c.getContext('2d');
+    x.scale(dpr, dpr);
+    return [c, x, W, H];
+  }
+  _selIcon() {
+    const [c, x, W, H] = this._iconCanvas('var(--bg-sunken)');
+    // cursor arrow
+    x.fillStyle = '#9aa4b0'; x.strokeStyle = '#9aa4b0'; x.lineWidth = 1.2;
+    x.beginPath();
+    x.moveTo(9, 4); x.lineTo(9, 16); x.lineTo(12.2, 13); x.lineTo(14.6, 18);
+    x.lineTo(16.6, 17); x.lineTo(14.2, 12.2); x.lineTo(18.5, 12); x.closePath();
+    x.fill();
+    return c;
+  }
+  _zoneIcon(t) {
+    const color = ZONE_DEFAULT_COLOR[t] || '#999';
+    const [c, x, W, H] = this._iconCanvas(hexA(color, 0.10));
+    x.fillStyle = hexA(color, 0.35); x.strokeStyle = color; x.lineWidth = 1.4;
+    x.fillRect(4, 4, W - 8, H - 8); x.strokeRect(4, 4, W - 8, H - 8);
+    return c;
+  }
+  _wallIcon() {
+    const [c, x, W, H] = this._iconCanvas('var(--bg-sunken)');
+    x.strokeStyle = '#8a93a0'; x.lineWidth = 3; x.lineCap = 'square';
+    x.beginPath(); x.moveTo(4, H - 5); x.lineTo(4, 5); x.lineTo(W - 5, 5); x.stroke();
+    return c;
+  }
+  _doorIcon(p) {
+    const [c, x, W, H] = this._iconCanvas(hexA(p.color, 0.10));
+    // wall segment with a gap + swing arc = the universal plan-view door symbol
+    x.strokeStyle = '#8a93a0'; x.lineWidth = 2.4;
+    x.beginPath(); x.moveTo(2, 6); x.lineTo(8, 6); x.stroke();
+    x.beginPath(); x.moveTo(18, 6); x.lineTo(W - 2, 6); x.stroke();
+    x.strokeStyle = p.color; x.lineWidth = 1.4;
+    x.beginPath(); x.moveTo(8, 6); x.lineTo(8, 17); x.stroke();          // leaf
+    x.beginPath(); x.arc(8, 6, 11, 0, Math.PI / 2); x.stroke();          // swing
+    return c;
+  }
+  _equipIcon(p) {
+    const [c, x, W, H] = this._iconCanvas(hexA(p.color, 0.10));
+    x.strokeStyle = p.color; x.fillStyle = p.color; x.lineWidth = 1.4; x.lineCap = 'round';
+    if (p.key === 'agv') {
+      // rounded chassis + 2 wheels + heading notch
+      x.globalAlpha = 0.9; x.strokeRect(5, 7, W - 10, H - 13);
+      x.globalAlpha = 0.5; x.fillRect(7, H - 5.4, 4, 2); x.fillRect(W - 11, H - 5.4, 4, 2);
+      x.globalAlpha = 1;
+      x.beginPath(); x.moveTo(W - 5, H / 2 - 2.5); x.lineTo(W - 2.4, H / 2); x.lineTo(W - 5, H / 2 + 2.5); x.closePath(); x.fill();
+    } else if (p.key === 'conveyor') {
+      // belt with rollers
+      x.strokeRect(3, 8, W - 6, 6);
+      x.globalAlpha = 0.7;
+      for (let cx = 6; cx < W - 4; cx += 4) { x.beginPath(); x.arc(cx, 11, 1.2, 0, 7); x.stroke(); }
+      x.globalAlpha = 1;
+    } else if (p.key === 'asrs') {
+      // high-bay block + crane aisle
+      x.globalAlpha = 0.9; x.strokeRect(4, 4, 7, H - 8); x.strokeRect(W - 11, 4, 7, H - 8);
+      x.setLineDash([2, 2]); x.beginPath(); x.moveTo(W / 2, 4); x.lineTo(W / 2, H - 4); x.stroke(); x.setLineDash([]);
+      x.globalAlpha = 1;
+    } else if (p.key === 'station') {
+      // work bench: table top + legs
+      x.strokeRect(4, 7, W - 8, 7);
+      x.beginPath(); x.moveTo(6, 14); x.lineTo(6, 18); x.moveTo(W - 6, 14); x.lineTo(W - 6, 18); x.stroke();
+    } else if (p.key === 'robot_arm') {
+      // base + articulated arm
+      x.beginPath(); x.arc(8, H - 7, 3.4, 0, 7); x.fill();
+      x.lineWidth = 2.2;
+      x.beginPath(); x.moveTo(8, H - 7); x.lineTo(14, 8); x.lineTo(20, 11); x.stroke();
+      x.lineWidth = 1.4;
+      x.beginPath(); x.arc(20.5, 11.2, 1.8, 0, 7); x.stroke();
+    } else { // crane
+      // gantry: two rails + trolley hook
+      x.beginPath(); x.moveTo(4, 6); x.lineTo(W - 4, 6); x.moveTo(4, H - 6); x.lineTo(W - 4, H - 6); x.stroke();
+      x.lineWidth = 2.4; x.beginPath(); x.moveTo(W / 2, 6); x.lineTo(W / 2, H - 6); x.stroke();
+      x.lineWidth = 1.4; x.beginPath(); x.arc(W / 2, H / 2, 2, 0, 7); x.stroke();
+    }
+    return c;
+  }
+
+  // Zone-brush defaults: footprint + a one-line description for the card.
+  _zoneDefaults(t) {
+    const p = LAYOUT_PALETTE.find((q) => q.zoneType === t);
+    const base = { w: p ? p.w : 10, h: p ? p.h : 6 };
+    const desc = {
+      receiving: '入荷・検品の区画', storage: '棚の容れ物（保管区画）',
+      picking: 'ピッキング区画', packing: '梱包・出荷検品の区画',
+      shipping: '出荷バース前の区画', staging: '一時保管・仮置きの区画',
+    }[t] || '';
+    return { ...base, desc: `${desc}（${base.w}×${base.h}m）` };
   }
 
   // The homogeneous rack_type of the current selection, or null if mixed/empty.
@@ -813,9 +984,9 @@ export class Designer {
     return objs.every(({ sh }) => sh.rack_type === t) ? t : null;
   }
 
-  // Pick a rack type from the palette. If shelves are selected, re-assign their
+  // Pick a rack type from the library. If shelves are selected, re-assign their
   // rack_type (undoable, re-fits cells via the save→materialize path); otherwise
-  // set the active type used by new shelves and refresh the bulk/area defaults.
+  // arm the rack brush with that type and refresh the bulk/area defaults.
   _pickRackType(key) {
     if (!RACK_TYPES[key]) return;
     if (this.selShelves && this.selShelves.size) {
@@ -824,7 +995,7 @@ export class Designer {
     }
     this.shelfType = key;
     this._syncRackDefaults(key);
-    this._renderTool();
+    this._setBrush({ kind: 'rack', key });
   }
 
   // Re-assign the active rack_type to every selected shelf (M3 deliverable #4).
@@ -915,47 +1086,6 @@ export class Designer {
       x.globalAlpha = 1;
     }
     return c;
-  }
-
-  // ---- color→type legend (keeps the 2D canvas legible) ----------------------
-  // A compact, always-on swatch row under the shelf bar mapping each preset
-  // colour to its label, so coloured shelves on the canvas are self-describing.
-  _renderRackLegend(parent) {
-    const row = this._div(parent,
-      'display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:5px 8px;'
-      + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);margin-top:2px;');
-    row.setAttribute('aria-label', '棚種別の凡例');
-    const lbl = this._div(row, 'font-size:11px;color:var(--ink-tertiary);font-weight:700;');
-    lbl.textContent = '凡例:';
-    const selType = (this.selShelves && this.selShelves.size) ? this._selectionRackType() : null;
-    for (const key of RACK_ORDER) {
-      const rt = RACK_TYPES[key];
-      if (!rt) continue;
-      const on = selType ? selType === key : this.shelfType === key;
-      const item = this._div(row, 'display:inline-flex;align-items:center;gap:5px;font-size:11px;'
-        + `color:${on ? 'var(--ink-primary)' : 'var(--ink-secondary)'};${on ? 'font-weight:700;' : ''}`);
-      const sw = this._div(item, `width:11px;height:11px;border-radius:3px;flex:0 0 auto;background:${rt.color};`
-        + `box-shadow:inset 0 0 0 1px rgba(0,0,0,.18);${on ? `outline:1.5px solid ${rt.color};outline-offset:1px;` : ''}`);
-      sw.setAttribute('aria-hidden', 'true');
-      const t = document.createElement('span');
-      t.textContent = rt.label;
-      item.appendChild(t);
-    }
-  }
-
-  _shelfHint() {
-    const t = (RACK_TYPES[this.shelfType] || RACK_TYPES.medium).label;
-    // First-run empty state: the active storage zone has no shelves yet. Point at
-    // the three ways to start (draw / bulk-gen / area-fill) + the import path so a
-    // salesperson is never staring at an empty floor with no obvious next move.
-    const zone = this._activeStoreZone();
-    const noShelves = !zone || !(zone.shelves && zone.shelves.length);
-    if (noShelves && this.shelfBrush !== 'area' && this.shelfBrush !== 'draw') {
-      return 'まだ棚がありません。「棚を描く」で1枚ずつ、「棚一括生成」でまとめて、「面積オート生成」で矩形から自動配置。①取込のMapMakerレイアウトを読み込んでもOKです。';
-    }
-    if (this.shelfBrush === 'area') return `面積オート生成（${t}）: 保管ゾーン内でドラッグして矩形を描くと、棚列と通路を自動配置します。`;
-    if (this.shelfBrush === 'draw') return `棚を描く（${t}）: 角から角へドラッグで棚を1枚作成。クリックで選択、ハンドルでサイズ変更、Ctrlでスナップ無効。`;
-    return '棚をクリックで選択（Shiftで追加選択）、ドラッグで移動、ハンドルでサイズ変更。設備パレットから種別を選べます。';
   }
 
   _storageZones() {
@@ -1327,6 +1457,7 @@ export class Designer {
       zoom: next,
     };
     this._animateCamera();
+    this._updateStatus();   // live 倍率 readout in the status bar
   }
   // Zoom-to-fit: recenter the floor and reset zoom to 1, animated.
   _zoomToFit() {
@@ -1345,13 +1476,18 @@ export class Designer {
     // dim canvas fill in dark mode (transparent in light → parent --bg-app shows)
     if (P.bg && P.bg !== 'transparent') { ctx.fillStyle = P.bg; ctx.fillRect(0, 0, w, h); }
 
+    // CAD grid: 1m minor / 5m major lines, faded with zoom so the floor never
+    // turns into noise. The grid is what makes snapping *visible* and the sheet
+    // feel like an engineering drawing instead of a blank page.
+    this._drawGrid();
+
     // floor
     ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
 
-    // DXF underlay: in the レイアウト tool, draw imported walls as a faint gray
-    // trace beneath everything so the user can trace over the building outline.
-    if (this.tool === 'layout' && this.showUnderlay) {
+    // DXF underlay: imported walls as a faint gray trace beneath everything so
+    // the user can trace over the building outline.
+    if (this.tool === 'place' && this.showUnderlay) {
       const walls = this.model.layout.walls || [];
       if (walls.length) {
         ctx.save();
@@ -1361,9 +1497,9 @@ export class Designer {
       }
     }
 
-    const dim = this.tool === 'equip' || this.tool === 'building' || this.tool === 'route';   // zones rendered faintly under equipment/walls/routes
+    const dim = this.tool === 'route';   // zones rendered faintly under routes
     for (const z of this.model.layout.zones) {
-      const sel = this.tool === 'layout' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
+      const sel = this.tool === 'place' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
       const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
       ctx.fillStyle = hexA(color, dim ? 0.12 : (sel ? 0.42 : 0.3));
       ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
@@ -1377,7 +1513,7 @@ export class Designer {
       ctx.fillStyle = dim ? P.inkDim : P.ink;
       ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(ZONE_JP[z.type] || z.type, this._X(z.x + z.w / 2), this._Y(z.y + z.h / 2));
-      // resize handle + live size badge when selected in layout tool
+      // resize handle + live size badge when selected
       if (sel) {
         ctx.fillStyle = P.sel;
         ctx.fillRect(this._X(z.x + z.w) - HANDLE, this._Y(z.y) - HANDLE, HANDLE, HANDLE);
@@ -1385,27 +1521,24 @@ export class Designer {
       }
     }
 
-    // conveyors (under markers)
-    for (const cv of this.model.resources.conveyors) this._drawConveyor(cv.points, '#33a02c', false);
-    if (this.conveyorDraft) this._drawConveyor(this.conveyorDraft, P.draft, true);
-
-    // equipment markers
-    for (const e of this.model.resources.equipment) {
-      const p = EQUIP_PALETTE.find((x) => x.type === e.type);
-      this._marker(e.x, e.y, p ? p.color : '#777', (p ? p.label.split('(')[0] : e.type) + `×${e.count ?? 0}`,
-        this._isSel('equip', e.id));
-    }
-    // pack stations as blue stars
-    for (const s of this.model.resources.stations) {
-      this._star(this._X(s.x), this._Y(s.y), '#08519c', this._isSel('station', s.id));
-      this._label(this._X(s.x), this._Y(s.y) + 16, `梱包台×${s.count ?? 0}`);
-    }
-
-    // building tool: walls + doors (drawn above the faint zones)
-    if (this.tool === 'building') {
+    // walls + doors — ALWAYS drawn at full strength in the 配置 tool (the old
+    // per-tab hiding made the floor look different per tab, which read as bugs).
+    if (this.tool === 'place') {
       for (const w of this.model.layout.walls) this._drawWall(w.points, w.thickness, this._isSel('wall', w.id), false);
-      if (this.wallDraft) this._drawWall(this.wallDraft, 0.3, false, true);
+      if (this.wallDraft) this._drawWallDraft();
       for (const d of this.model.layout.doors) this._drawDoor(d, this._isSel('door', d.id));
+    }
+
+    // conveyors (under equipment glyphs)
+    for (const cv of this.model.resources.conveyors) this._drawConveyor(cv.points, '#33a02c', false);
+    if (this.conveyorDraft) this._drawConveyorDraft();
+
+    // equipment + stations as CAD-style top-view glyphs (real-meter footprints)
+    for (const e of this.model.resources.equipment) {
+      this._drawEquipGlyph(e, this._isSel('equip', e.id));
+    }
+    for (const s of this.model.resources.stations) {
+      this._drawStationGlyph(s, this._isSel('station', s.id));
     }
 
     // 動線 tool: faint walls for context, then colored route polylines
@@ -1425,25 +1558,248 @@ export class Designer {
       if (this.routeDraft) this._drawRoute(this.routeDraft, MOVER_COLOR[this.routeMover] || P.draft, true, null);
     }
 
-    // hint text
-    if (this.tool === 'equip') {
-      ctx.fillStyle = P.inkFaint; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      const hint = this.equipBrush === 'conveyor'
-        ? 'コンベア: 床をクリックで頂点追加、ダブルクリックか「確定」で完了'
-        : '床をクリックして設置 / マーカーをクリックで選択';
-      ctx.fillText(hint, 8, 8);
-    } else if (this.tool === 'building') {
-      ctx.fillStyle = P.inkFaint; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      const hint = this.buildMode === 'door'
-        ? 'ドア: 床をクリックして配置 / マーカーをクリックで選択'
-        : '壁: 床をクリックで頂点追加、ダブルクリックか「壁を確定」で完了';
-      ctx.fillText(hint, 8, 8);
-    }
+    // placement ghost: the armed brush's real footprint under the cursor.
+    if (this.tool === 'place') this._drawGhost();
 
     // Figma-flavoured selection chrome (additive overlay; reads state only).
     this._drawSelectionChrome();
     // M2 shelf editor chrome (bbox + control points + snap guides + draft rect).
     this._drawShelfChrome();
+  }
+
+  // ---- CAD grid (1m minor, 5m major) ----------------------------------------
+  _drawGrid() {
+    const ctx = this.ctx, { sc } = this._view;
+    const b = this.model.layout.bounds;
+    if (sc < 2.5) return;                       // zoomed way out: skip the noise
+    const x0 = this._X(0), x1 = this._X(b.width);
+    const yTop = this._Y(b.depth), yBot = this._Y(0);
+    const minorA = Math.min(0.5, Math.max(0, (sc - 2.5) / 30));  // fade in with zoom
+    ctx.save();
+    ctx.lineWidth = 1;
+    for (let gx = 0; gx <= b.width + 1e-6; gx += 1) {
+      const major = gx % 5 === 0;
+      if (!major && sc < 6) continue;           // minor lines only when close
+      ctx.strokeStyle = this.pal.grid || 'rgba(128,140,160,0.18)';
+      ctx.globalAlpha = major ? Math.min(0.5, minorA * 2.2) : minorA;
+      const X = this._X(gx);
+      ctx.beginPath(); ctx.moveTo(X, yTop); ctx.lineTo(X, yBot); ctx.stroke();
+    }
+    for (let gy = 0; gy <= b.depth + 1e-6; gy += 1) {
+      const major = gy % 5 === 0;
+      if (!major && sc < 6) continue;
+      ctx.strokeStyle = this.pal.grid || 'rgba(128,140,160,0.18)';
+      ctx.globalAlpha = major ? Math.min(0.5, minorA * 2.2) : minorA;
+      const Y = this._Y(gy);
+      ctx.beginPath(); ctx.moveTo(x0, Y); ctx.lineTo(x1, Y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---- placement ghost (real footprint under the cursor) --------------------
+  _drawGhost() {
+    const hov = this.hover;
+    const brush = (hov && hov.ghost) || this.brush;
+    if (!hov || !brush || brush.kind === 'select') return;
+    if (this.drag) return;                       // mid-drag drafts draw themselves
+    const ctx = this.ctx, { sc } = this._view;
+    const b = this.model.layout.bounds;
+    const inside = hov.mx >= 0 && hov.mx <= b.width && hov.my >= 0 && hov.my <= b.depth;
+    if (!inside && brush.kind !== 'wall') return;
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    if (brush.kind === 'rack' && !brush.area) {
+      const rt = RACK_TYPES[brush.key || this.shelfType] || RACK_TYPES.medium;
+      let x = hov.mx - rt.bay / 2, y = hov.my - rt.depth / 2;
+      if (!this.noSnap) {
+        const hints = this._snapHints(null);
+        const sx = this._snapWorldX(x, hints), sx2 = this._snapWorldX(x + rt.bay, hints);
+        if (sx != null) x = sx; else if (sx2 != null) x = sx2 - rt.bay;
+        const sy = this._snapWorldY(y, hints), sy2 = this._snapWorldY(y + rt.depth, hints);
+        if (sy != null) y = sy; else if (sy2 != null) y = sy2 - rt.depth;
+      }
+      x = clamp(x, 0, b.width - rt.bay); y = clamp(y, 0, b.depth - rt.depth);
+      ctx.fillStyle = hexA(rt.color, 0.4); ctx.strokeStyle = rt.color; ctx.lineWidth = 1.6;
+      ctx.fillRect(this._X(x), this._Y(y + rt.depth), rt.bay * sc, rt.depth * sc);
+      ctx.strokeRect(this._X(x), this._Y(y + rt.depth), rt.bay * sc, rt.depth * sc);
+      ctx.globalAlpha = 1;
+      this._label(this._X(x + rt.bay / 2), this._Y(y + rt.depth) - 9, `${rt.label} ${rt.bay}×${rt.depth}m`);
+    } else if (brush.kind === 'rack' && brush.area) {
+      // area brush: crosshair hint only (the rectangle appears on drag).
+      ctx.strokeStyle = this.pal.draft; ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(hov.px - 14, hov.py); ctx.lineTo(hov.px + 14, hov.py); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(hov.px, hov.py - 14); ctx.lineTo(hov.px, hov.py + 14); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      this._label(hov.px, hov.py - 16, 'ドラッグで範囲を指定 → 棚列を自動配置');
+    } else if (brush.kind === 'zone') {
+      const d = this._zoneDefaults(brush.key);
+      const w = Math.min(d.w, b.width), hh = Math.min(d.h, b.depth);
+      const x = clamp(snap(hov.mx - w / 2), 0, Math.max(0, b.width - w));
+      const y = clamp(snap(hov.my - hh / 2), 0, Math.max(0, b.depth - hh));
+      const color = ZONE_DEFAULT_COLOR[brush.key] || '#999';
+      ctx.fillStyle = hexA(color, 0.25); ctx.strokeStyle = color; ctx.lineWidth = 1.6;
+      ctx.setLineDash([6, 4]);
+      ctx.fillRect(this._X(x), this._Y(y + hh), w * sc, hh * sc);
+      ctx.strokeRect(this._X(x), this._Y(y + hh), w * sc, hh * sc);
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      this._label(this._X(x + w / 2), this._Y(y + hh) - 9, `${ZONE_JP[brush.key] || brush.key} ${w}×${hh}m`);
+    } else if (brush.kind === 'equip') {
+      const p = EQUIP_PALETTE.find((q) => q.key === brush.key);
+      if (p && p.key !== 'conveyor') {
+        const mx = snap(hov.mx), my = snap(hov.my);
+        if (p.key === 'station') this._drawStationGlyph({ x: mx, y: my }, false, true);
+        else this._drawEquipGlyph({ type: p.key, x: mx, y: my, count: '' }, false, true);
+        ctx.globalAlpha = 1;
+        this._label(this._X(mx), this._Y(my) - (Math.max(p.d || 1, 0.8) / 2) * sc - 9, `${p.label} ${p.w}×${p.d}m`);
+      } else if (p) {
+        // conveyor: rubber segment from the draft's last vertex to the cursor.
+        this._drawPolyGhost(this.conveyorDraft, p.color);
+      }
+    } else if (brush.kind === 'door') {
+      const p = DOOR_PALETTE.find((q) => q.type === brush.key) || DOOR_PALETTE[0];
+      const mx = snap(hov.mx), my = snap(hov.my);
+      this._drawDoor({ type: p.type, x: mx, y: my, w: p.type === 'dock' ? 3 : p.type === 'shutter' ? 4 : 1 }, false);
+      ctx.globalAlpha = 1;
+      this._label(this._X(mx), this._Y(my) - 14, DOOR_JP[p.type] || 'ドア');
+    } else if (brush.kind === 'wall') {
+      this._drawPolyGhost(this.wallDraft, this.pal.draft, true);
+    }
+    ctx.restore();
+  }
+
+  // rubber-band segment from a draft polyline's last vertex to the cursor, with
+  // a live length label (and Shift-ortho preview for walls).
+  _drawPolyGhost(draft, color, ortho) {
+    const hov = this.hover;
+    if (!hov) return;
+    const ctx = this.ctx;
+    let tx = snap(hov.mx), ty = snap(hov.my);
+    if (draft && draft.length) {
+      const [lx, ly] = draft[draft.length - 1];
+      if (ortho && hov.shift) {
+        if (Math.abs(tx - lx) >= Math.abs(ty - ly)) ty = ly; else tx = lx;
+      }
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(this._X(lx), this._Y(ly)); ctx.lineTo(this._X(tx), this._Y(ty)); ctx.stroke();
+      ctx.setLineDash([]);
+      const len = Math.hypot(tx - lx, ty - ly);
+      ctx.globalAlpha = 1;
+      this._label((this._X(lx) + this._X(tx)) / 2, (this._Y(ly) + this._Y(ty)) / 2 - 10, `${len.toFixed(2)} m`);
+    } else {
+      // no vertices yet: crosshair + start hint
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(hov.px - 12, hov.py); ctx.lineTo(hov.px + 12, hov.py); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(hov.px, hov.py - 12); ctx.lineTo(hov.px, hov.py + 12); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // wall draft polyline + per-segment lengths (CAD trust: numbers while drawing).
+  _drawWallDraft() {
+    const pts = this.wallDraft;
+    if (!pts || !pts.length) return;
+    this._drawWall(pts, 0.3, false, true);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+      const len = Math.hypot(bx - ax, by - ay);
+      if (len < 0.05) continue;
+      this._label((this._X(ax) + this._X(bx)) / 2, (this._Y(ay) + this._Y(by)) / 2 - 10, `${len.toFixed(2)} m`);
+    }
+  }
+
+  _drawConveyorDraft() {
+    this._drawConveyor(this.conveyorDraft, this.pal.draft, true);
+  }
+
+  // ---- CAD-style top-view equipment glyphs (replace the old circles) --------
+  // Footprints come from EQUIP_PALETTE (meters) so symbols scale with zoom; a
+  // minimum pixel size keeps them legible when zoomed out.
+  _drawEquipGlyph(e, sel, ghost) {
+    const ctx = this.ctx, { sc } = this._view;
+    const p = EQUIP_PALETTE.find((x) => x.type === e.type) || { color: '#777', w: 1.2, d: 0.9, label: e.type };
+    const wPx = Math.max((p.w || 1.2) * sc, 18), dPx = Math.max((p.d || 0.9) * sc, 14);
+    const cx = this._X(e.x), cy = this._Y(e.y);
+    const l = cx - wPx / 2, t = cy - dPx / 2;
+    ctx.save();
+    ctx.fillStyle = hexA(p.color, ghost ? 0.4 : 0.22);
+    ctx.strokeStyle = sel ? this.pal.sel : p.color;
+    ctx.lineWidth = sel ? 2.4 : 1.6;
+    const r = Math.min(4, wPx / 5);
+    // body (rounded rect)
+    ctx.beginPath();
+    ctx.moveTo(l + r, t);
+    ctx.arcTo(l + wPx, t, l + wPx, t + dPx, r);
+    ctx.arcTo(l + wPx, t + dPx, l, t + dPx, r);
+    ctx.arcTo(l, t + dPx, l, t, r);
+    ctx.arcTo(l, t, l + wPx, t, r);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // type-specific internals
+    ctx.strokeStyle = p.color; ctx.fillStyle = p.color; ctx.lineWidth = 1.4;
+    if (e.type === 'agv') {
+      // heading arrow + wheel pads
+      ctx.beginPath();
+      ctx.moveTo(cx + wPx * 0.32, cy - dPx * 0.22);
+      ctx.lineTo(cx + wPx * 0.46, cy);
+      ctx.lineTo(cx + wPx * 0.32, cy + dPx * 0.22);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.5;
+      ctx.fillRect(l + wPx * 0.12, t + dPx - 3, wPx * 0.18, 2.4);
+      ctx.fillRect(l + wPx * 0.70, t + dPx - 3, wPx * 0.18, 2.4);
+      ctx.globalAlpha = 1;
+    } else if (e.type === 'asrs') {
+      // crane aisle (dashed center line) + side racks
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(l + 4, cy); ctx.lineTo(l + wPx - 4, cy); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(l + 3, t + 2.5, wPx - 6, dPx * 0.18);
+      ctx.fillRect(l + 3, t + dPx - 2.5 - dPx * 0.18, wPx - 6, dPx * 0.18);
+      ctx.globalAlpha = 1;
+    } else if (e.type === 'robot_arm') {
+      // base + articulated arm
+      ctx.beginPath(); ctx.arc(cx - wPx * 0.18, cy + dPx * 0.16, Math.max(2.6, wPx * 0.12), 0, 7); ctx.fill();
+      ctx.lineWidth = Math.max(2, wPx * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(cx - wPx * 0.18, cy + dPx * 0.16);
+      ctx.lineTo(cx + wPx * 0.05, cy - dPx * 0.2);
+      ctx.lineTo(cx + wPx * 0.3, cy - dPx * 0.05);
+      ctx.stroke();
+    } else if (e.type === 'crane') {
+      // gantry rails + trolley
+      ctx.beginPath(); ctx.moveTo(l + 3, t + 3); ctx.lineTo(l + wPx - 3, t + 3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(l + 3, t + dPx - 3); ctx.lineTo(l + wPx - 3, t + dPx - 3); ctx.stroke();
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(cx, t + 3); ctx.lineTo(cx, t + dPx - 3); ctx.stroke();
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(cx, cy, 2.2, 0, 7); ctx.stroke();
+    }
+    ctx.restore();
+    if (!ghost) {
+      const lbl = (p.label || e.type).split('(')[0] + (e.count != null && e.count !== '' ? `×${e.count}` : '');
+      this._label(cx, t + dPx + 10, lbl);
+    }
+  }
+
+  _drawStationGlyph(s, sel, ghost) {
+    const ctx = this.ctx, { sc } = this._view;
+    const p = EQUIP_PALETTE.find((x) => x.key === 'station') || { color: '#08519c', w: 1.8, d: 0.9 };
+    const wPx = Math.max(p.w * sc, 20), dPx = Math.max(p.d * sc, 12);
+    const cx = this._X(s.x), cy = this._Y(s.y);
+    const l = cx - wPx / 2, t = cy - dPx / 2;
+    ctx.save();
+    ctx.fillStyle = hexA(p.color, ghost ? 0.4 : 0.22);
+    ctx.strokeStyle = sel ? this.pal.sel : p.color;
+    ctx.lineWidth = sel ? 2.4 : 1.6;
+    ctx.fillRect(l, t, wPx, dPx);
+    ctx.strokeRect(l, t, wPx, dPx);
+    // worktop edge (the operator side) — a thicker line on the bottom edge
+    ctx.strokeStyle = p.color; ctx.lineWidth = 2.6;
+    ctx.beginPath(); ctx.moveTo(l + 2, t + dPx - 2); ctx.lineTo(l + wPx - 2, t + dPx - 2); ctx.stroke();
+    ctx.restore();
+    if (!ghost) this._label(cx, t + dPx + 10, `梱包台×${s.count ?? 0}`);
   }
 
   // ---- selection chrome (Figma-style, additive, read-only) ------------------
@@ -1453,7 +1809,7 @@ export class Designer {
   // no listeners. No selection (or non-zone selection) → draws nothing, so the
   // prior behaviour is byte-for-byte preserved.
   _drawSelectionChrome() {
-    if (this.tool !== 'layout') return;
+    if (this.tool !== 'place') return;
     if (!this.selected || this.selected.kind !== 'zone') return;
     const z = (this.model.layout.zones || []).find((q) => q.id === this.selected.id);
     if (!z) return;
@@ -1554,11 +1910,9 @@ export class Designer {
     // Draw each authored SHELF area as a rack body (tinted by equipment type)
     // with its cells at the type's pitch — MapMaker SHELF → cells, in the editor.
     const ctx = this.ctx;
-    const shelfMode = this.tool === 'layout' && this.layoutMode === 'shelf';
-    // Legacy zone-mode convenience: a lone shelf tracks the zone footprint (so
-    // resizing the zone resizes it). In free-placement (shelf) mode shelves keep
-    // their own geometry, so this auto-sync is suppressed.
-    if (!shelfMode && z.shelves.length === 1) Object.assign(z.shelves[0], { x: z.x, y: z.y, w: z.w, h: z.h });
+    // The 配置 tool always edits shelves in place (the old zone-mode auto-sync of
+    // a lone shelf to its zone footprint is gone — shelves own their geometry).
+    const shelfMode = this.tool === 'place';
     for (const sh of z.shelves) {
       const rt = RACK_TYPES[sh.rack_type] || RACK_TYPES.medium;
       const bay = +sh.cell_w || rt.bay, depth = +sh.cell_d || rt.depth;
@@ -1604,10 +1958,11 @@ export class Designer {
 
   // ---- M2 shelf selection chrome: bbox + 8 control points + snap guides + draft -
   _drawShelfChrome() {
-    if (this.tool !== 'layout' || this.layoutMode !== 'shelf') return;
+    if (this.tool !== 'place') return;
     const ctx = this.ctx;
     const CY = '#34E3FF';
-    // draft rectangle while corner-dragging (draw=cyan dashed, area=red dashed).
+    // draft rectangle while corner-dragging (draw=cyan dashed, area=red dashed),
+    // with a live W×D readout — CAD trust: you see the numbers while you drag.
     if (this.shelfDraft) {
       const d = this.shelfDraft;
       const x0 = this._X(Math.min(d.x0, d.x1)), x1 = this._X(Math.max(d.x0, d.x1));
@@ -1618,6 +1973,10 @@ export class Designer {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
       ctx.restore();
+      const wM = Math.abs(d.x1 - d.x0), hM = Math.abs(d.y1 - d.y0);
+      if (wM > 0.05 || hM > 0.05) {
+        this._label((x0 + x1) / 2, y0 - 14, `${wM.toFixed(2)} × ${hM.toFixed(2)} m`);
+      }
     }
     // selection bbox + control points
     const bb = this._selBBox();
@@ -1681,23 +2040,6 @@ export class Designer {
     for (const p of pts) { ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3.5, 0, 7); ctx.fill(); }
   }
 
-  _marker(x, y, color, label, sel) {
-    const ctx = this.ctx, px = this._X(x), py = this._Y(y);
-    ctx.fillStyle = color; ctx.strokeStyle = sel ? this.pal.sel : this.pal.markerStroke; ctx.lineWidth = sel ? 2.5 : 1.5;
-    ctx.beginPath(); ctx.arc(px, py, 9, 0, 7); ctx.fill(); ctx.stroke();
-    this._label(px, py + 16, label);
-  }
-  _star(px, py, color, sel) {
-    const ctx = this.ctx;
-    ctx.fillStyle = color; ctx.strokeStyle = sel ? this.pal.sel : this.pal.markerStroke; ctx.lineWidth = sel ? 2.5 : 1.2;
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 4 : 9;
-      const fx = px + Math.cos(a) * r, fy = py + Math.sin(a) * r;
-      i ? ctx.lineTo(fx, fy) : ctx.moveTo(fx, fy);
-    }
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-  }
   _label(px, py, text) {
     const ctx = this.ctx;
     ctx.fillStyle = this.pal.ink; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -1733,6 +2075,22 @@ export class Designer {
     // M2: wheel = smooth zoom toward the cursor; middle-drag = pan (handled in
     // _onMove via this.drag.mode==='pan'). All tools get pan/zoom for free.
     this._on(this.canvas, 'wheel', (e) => this._onWheel(e), { passive: false });
+    // Right-click = back to 選択 (Minecraft "empty the hand"). Suppress the
+    // browser menu only when a placing brush/draft is active, so inspect etc.
+    // still work in select mode.
+    this._on(this.canvas, 'contextmenu', (e) => {
+      if (this.tool !== 'place') return;
+      const placing = (this.brush && this.brush.kind !== 'select') || this.wallDraft || this.conveyorDraft;
+      if (!placing) return;
+      e.preventDefault();
+      this._setBrush({ kind: 'select' });
+    });
+    // leaving the canvas drops the ghost (no stale preview in the corner).
+    this._on(this.canvas, 'mouseleave', () => {
+      this.hover = null;
+      this._updateStatus();
+      if (this.brush && this.brush.kind !== 'select') this._repaint();
+    });
   }
 
   // ---- M2 wheel zoom (toward cursor) ---------------------------------------
@@ -1761,29 +2119,234 @@ export class Designer {
       return;
     }
     if (e.button !== 0 && e.button !== undefined) return;
-    if (this.tool === 'layout') {
-      if (this.layoutMode === 'shelf') return this._shelfDown(px, py, e);
-      return this._layoutDown(px, py);
-    }
-    if (this.tool === 'equip') return this._equipDown(px, py);
-    if (this.tool === 'building') return this._buildingDown(px, py);
+    if (this.tool === 'place') return this._placeDown(px, py, e);
     if (this.tool === 'route') return this._routeDown(px, py);
     if (this.tool === 'flow') return this._flowDown(px, py);
   }
 
-  // --- layout tool: place (palette) / select / move / resize zones ---
-  _layoutDown(px, py) {
-    const zs = this.model.layout.zones;
-    // palette brush active: click the floor to place a new object there
-    if (this.layoutBrush) {
-      const mx = snap(this._mx(px)), my = snap(this._my(py));
-      const b = this.model.layout.bounds;
-      if (mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth) {
-        this._placeFromPalette(this.layoutBrush, mx, my);
+  // --- 配置 tool: brush dispatch (place) or unified select/move/resize -------
+  _placeDown(px, py, e) {
+    const b = this.brush || { kind: 'select' };
+    const bounds = this.model.layout.bounds;
+    const mxRaw = this._mx(px), myRaw = this._my(py);
+    const inside = mxRaw >= 0 && mxRaw <= bounds.width && myRaw >= 0 && myRaw <= bounds.depth;
+
+    if (b.kind === 'select') return this._selectDown(px, py, e);
+
+    if (b.kind === 'rack') {
+      // area-fill: corner-drag a rectangle, tiled on mouse-up.
+      if (b.area) {
+        this.shelfDraft = { x0: mxRaw, y0: myRaw, x1: mxRaw, y1: myRaw, kind: 'area' };
+        this.drag = { mode: 'shelfCreate' };
+        return;
       }
+      // draw: corner-to-corner drag (a tiny click-drag stamps one bay×depth unit
+      // on commit — Minecraft-style click-click-click lays bays).
+      const hints = this._snapHints(null);
+      const sx = this._snapWorldX(mxRaw, hints), sy = this._snapWorldY(myRaw, hints);
+      this.snapLine = { x: sx, y: sy };
+      this.shelfDraft = { x0: sx == null ? mxRaw : sx, y0: sy == null ? myRaw : sy,
+        x1: mxRaw, y1: myRaw, kind: 'draw' };
+      this.drag = { mode: 'shelfCreate' };
       return;
     }
-    // resize handle of the currently selected zone?
+
+    if (b.kind === 'wall') {
+      if (!inside && !this.wallDraft) return;
+      if (!this.wallDraft) this.wallDraft = [];
+      let mx = snap(mxRaw), my = snap(myRaw);
+      // Shift = ortho lock against the previous vertex (CAD line discipline).
+      if (e && e.shiftKey && this.wallDraft.length) {
+        const [lx, ly] = this.wallDraft[this.wallDraft.length - 1];
+        if (Math.abs(mx - lx) >= Math.abs(my - ly)) my = ly; else mx = lx;
+      }
+      this.wallDraft.push([mx, my]);
+      this._renderSide(); this._drawCanvas();
+      return;
+    }
+
+    if (b.kind === 'equip' && b.key === 'conveyor') {
+      if (!inside) return;
+      if (!this.conveyorDraft) this.conveyorDraft = [];
+      this.conveyorDraft.push([snap(mxRaw), snap(myRaw)]);
+      this._drawCanvas(); this._renderSide();
+      return;
+    }
+
+    if (!inside) return;
+    this._stampAt(b, mxRaw, myRaw);
+  }
+
+  // Stamp a brush at (mx,my) — shared by canvas click and library-card drop.
+  _stampAt(b, mxRaw, myRaw) {
+    const bounds = this.model.layout.bounds;
+    const mx = snap(clamp(mxRaw, 0, bounds.width)), my = snap(clamp(myRaw, 0, bounds.depth));
+    if (b.kind === 'zone') { this._placeZone(b.key, mxRaw, myRaw); return; }
+    if (b.kind === 'door') {
+      this._pushUndo();
+      const pal = DOOR_PALETTE.find((x) => x.type === b.key) || DOOR_PALETTE[0];
+      const w = pal.type === 'dock' ? 3 : pal.type === 'shutter' ? 4 : 1;
+      const d = { id: uid('door'), type: pal.type, x: mx, y: my, w };
+      this.model.layout.doors.push(d);
+      this.selected = { kind: 'door', id: d.id };
+      this._renderSide(); this._drawCanvas(); this._updateStatus();
+      return;
+    }
+    if (b.kind === 'rack') {
+      // drop / synthetic stamp: one bay×depth unit of the active type.
+      this._stampRackUnit(mxRaw, myRaw);
+      return;
+    }
+    if (b.kind === 'equip') {
+      if (b.key === 'station') {
+        this._pushUndo();
+        const s = { id: uid('st'), zone: 'packing', x: mx, y: my, count: 1 };
+        this.model.resources.stations.push(s);
+        this.selected = { kind: 'station', id: s.id };
+      } else {
+        this._pushUndo();
+        const fast = b.key === 'agv';
+        const eq = {
+          id: uid('eq'), type: b.key,
+          count: fast ? 5 : 1,
+          speed_mps: fast ? 1.6 : 1.0,
+          x: mx, y: my,
+        };
+        this.model.resources.equipment.push(eq);
+        this.selected = { kind: 'equip', id: eq.id };
+      }
+      this._renderSide(); this._drawCanvas(); this._updateStatus();
+    }
+  }
+
+  // One rack unit (bay×depth, facing down) centered at the point, edge-snapped.
+  _stampRackUnit(mxRaw, myRaw) {
+    const rt = RACK_TYPES[this.shelfType] || RACK_TYPES.medium;
+    const zone = this._zoneForShelfAt(mxRaw, myRaw);
+    if (!zone) return;
+    const bounds = this.model.layout.bounds;
+    let x = mxRaw - rt.bay / 2, y = myRaw - rt.depth / 2;
+    if (!this.noSnap) {
+      const hints = this._snapHints(null);
+      const sx = this._snapWorldX(x, hints), sx2 = this._snapWorldX(x + rt.bay, hints);
+      if (sx != null) x = sx; else if (sx2 != null) x = sx2 - rt.bay;
+      const sy = this._snapWorldY(y, hints), sy2 = this._snapWorldY(y + rt.depth, hints);
+      if (sy != null) y = sy; else if (sy2 != null) y = sy2 - rt.depth;
+    }
+    x = clamp(x, 0, bounds.width - rt.bay);
+    y = clamp(y, 0, bounds.depth - rt.depth);
+    this._pushUndo();
+    const sh = {
+      id: uid('s'), name: this._nextShelfName(''),
+      x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100,
+      w: rt.bay, h: rt.depth,
+      rack_type: this.shelfType, facing: 'down',
+    };
+    zone.shelves.push(sh);
+    this._warnOverlap([sh], zone);
+    this._renderSide(); this._repaint(); this._updateStatus();
+  }
+
+  // Storage zone receiving a shelf at (mx,my): the zone under the cursor, else
+  // the active one, else the first, else AUTO-CREATE one spanning the floor —
+  // "never blocks": stamping a shelf on an empty floor just works.
+  _zoneForShelfAt(mx, my) {
+    const stores = this._storageZones();
+    const undercursor = stores.find((z) => mx >= z.x && mx <= z.x + z.w && my >= z.y && my <= z.y + z.h);
+    if (undercursor) { this.shelfZoneId = undercursor.id; return undercursor; }
+    const active = stores.find((z) => z.id === this.shelfZoneId) || stores[0];
+    if (active) { this.shelfZoneId = active.id; return active; }
+    const b = this.model.layout.bounds;
+    this._pushUndo();
+    const z = {
+      id: uid('zone'), type: 'storage', x: 0, y: 0, w: b.width, h: b.depth,
+      color: ZONE_DEFAULT_COLOR.storage, rack: null, shelves: [],
+    };
+    this.model.layout.zones.push(z);
+    this.shelfZoneId = z.id;
+    if (this._layoutStatus) this._layoutStatus.textContent = '保管ゾーンを自動作成しました（床全面）。';
+    return z;
+  }
+
+  // --- 選択 brush: one hit-test across every object family --------------------
+  // Priority: shelf control-points > equipment/stations > doors > shelves >
+  // walls > zone resize handle > zones. Small things win over big things so a
+  // click lands on what the eye sees on top.
+  _selectDown(px, py, e) {
+    const zs = this.model.layout.zones;
+    const mx = this._mx(px), my = this._my(py);
+
+    // 1) shelf control points (resize of an existing shelf selection)
+    if (this.selShelves.size) {
+      const cp = this._controlAt(px, py);
+      if (cp) {
+        this._pushUndo();
+        const bb = this._selBBox();
+        const rel = [];
+        for (const { sh } of this._selShelfObjs()) {
+          rel.push({ sh,
+            pL: bb.r === bb.l ? 0 : (sh.x - bb.l) / (bb.r - bb.l),
+            pR: bb.r === bb.l ? 1 : (sh.x + sh.w - bb.l) / (bb.r - bb.l),
+            pT: bb.b === bb.t ? 0 : (sh.y - bb.t) / (bb.b - bb.t),
+            pB: bb.b === bb.t ? 1 : (sh.y + sh.h - bb.t) / (bb.b - bb.t) });
+        }
+        this.drag = { mode: 'shelfResize', cp, bb: { ...bb }, rel };
+        return;
+      }
+    }
+
+    // 2) equipment / stations (point markers, generous 14px halo)
+    const hitEq = (this.model.resources.equipment || []).find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 14);
+    const hitSt = (this.model.resources.stations || []).find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 14);
+    if (hitEq || hitSt) {
+      const o = hitEq || hitSt;
+      this.selShelves = new Set();
+      this.selected = { kind: hitEq ? 'equip' : 'station', id: o.id };
+      this.drag = { mode: 'moveObj', kind: this.selected.kind, id: o.id };
+      this._renderSide(); this._drawCanvas(); this._updateStatus();
+      return;
+    }
+
+    // 3) doors
+    const hitDoor = (this.model.layout.doors || []).find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 12);
+    if (hitDoor) {
+      this.selShelves = new Set();
+      this.selected = { kind: 'door', id: hitDoor.id };
+      this.drag = { mode: 'moveDoor', id: hitDoor.id };
+      this._renderSide(); this._drawCanvas(); this._updateStatus();
+      return;
+    }
+
+    // 4) shelves (Shift = add/remove from the multi-selection)
+    const hit = this._shelfAt(px, py);
+    if (hit) {
+      const additive = e && e.shiftKey;
+      if (!additive && !this.selShelves.has(hit.sh.id)) this.selShelves = new Set();
+      if (additive && this.selShelves.has(hit.sh.id)) {
+        this.selShelves.delete(hit.sh.id);
+        this.selected = null; this._renderSide(); this._repaint(); this._updateStatus();
+        return;
+      }
+      this.selShelves.add(hit.sh.id);
+      this.shelfZoneId = hit.zone.id;
+      this.selected = null;
+      this._pushUndo();
+      const items = this._selShelfObjs().map(({ sh }) => ({ sh, ox: sh.x, oy: sh.y }));
+      this.drag = { mode: 'shelfMove', items, downX: mx, downY: my, _snapped: true };
+      this._renderSide(); this._repaint(); this._updateStatus();
+      return;
+    }
+
+    // 5) walls
+    const hitWall = this._wallHit(px, py);
+    if (hitWall) {
+      this.selShelves = new Set();
+      this.selected = { kind: 'wall', id: hitWall.id };
+      this._renderSide(); this._drawCanvas(); this._updateStatus();
+      return;
+    }
+
+    // 6) zone resize handle of the current selection
     if (this.selected && this.selected.kind === 'zone') {
       const z = zs.find((q) => q.id === this.selected.id);
       if (z) {
@@ -1794,61 +2357,23 @@ export class Designer {
         }
       }
     }
-    // hit-test zones top-most first
+
+    // 7) zones, top-most first
     for (let i = zs.length - 1; i >= 0; i--) {
       const z = zs[i];
-      const mx = this._mx(px), my = this._my(py);
       if (mx >= z.x && mx <= z.x + z.w && my >= z.y && my <= z.y + z.h) {
+        this.selShelves = new Set();
         this.selected = { kind: 'zone', id: z.id };
         this.drag = { mode: 'move', id: z.id, dx: mx - z.x, dy: my - z.y };
-        this._renderSide(); this._drawCanvas();
+        this._renderSide(); this._drawCanvas(); this._updateStatus();
         return;
       }
     }
-    this.selected = null; this._renderSide(); this._drawCanvas();
-  }
 
-  // --- equipment tool: place / select ---
-  _equipDown(px, py) {
-    const mx = snap(this._mx(px)), my = snap(this._my(py));
-    const b = this.model.layout.bounds;
-    const inside = mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth;
-
-    // first: hit-test existing equipment & stations for selection/move
-    const hitEq = this.model.resources.equipment.find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 11);
-    const hitSt = this.model.resources.stations.find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 11);
-    if (this.equipBrush !== 'conveyor' && (hitEq || hitSt)) {
-      const o = hitEq || hitSt;
-      this.selected = { kind: hitEq ? 'equip' : 'station', id: o.id };
-      this.drag = { mode: 'moveObj', kind: this.selected.kind, id: o.id };
-      this._renderSide(); this._drawCanvas();
-      return;
-    }
-    if (!inside) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
-
-    if (this.equipBrush === 'conveyor') {
-      if (!this.conveyorDraft) this.conveyorDraft = [];
-      this.conveyorDraft.push([mx, my]);
-      this._drawCanvas(); this._renderSide();
-    } else if (this.equipBrush === 'station') {
-      this._pushUndo();
-      const s = { id: uid('st'), zone: 'packing', x: mx, y: my, count: 1 };
-      this.model.resources.stations.push(s);
-      this.selected = { kind: 'station', id: s.id };
-      this._renderSide(); this._drawCanvas();
-    } else { // agv / asrs / robot_arm / crane
-      this._pushUndo();
-      const fast = this.equipBrush === 'agv';
-      const e = {
-        id: uid('eq'), type: this.equipBrush,
-        count: fast ? 5 : 1,
-        speed_mps: fast ? 1.6 : 1.0,
-        x: mx, y: my,
-      };
-      this.model.resources.equipment.push(e);
-      this.selected = { kind: 'equip', id: e.id };
-      this._renderSide(); this._drawCanvas();
-    }
+    // empty space: clear all selection
+    this.selShelves = new Set();
+    this.selected = null;
+    this._renderSide(); this._drawCanvas(); this._updateStatus();
   }
 
   // ===========================================================================
@@ -1945,79 +2470,7 @@ export class Designer {
   }
 
   // --- mousedown in shelf mode ---
-  _shelfDown(px, py, e) {
-    const zone = this._activeStoreZone();
-    const mxRaw = this._mx(px), myRaw = this._my(py);
-
-    // area-fill brush: corner-drag a rectangle, then tile it (handled on up).
-    if (this.shelfBrush === 'area') {
-      if (!zone) { if (this._layoutStatus) this._layoutStatus.textContent = '先に保管ゾーンを作成してください。'; return; }
-      this.shelfDraft = { x0: mxRaw, y0: myRaw, x1: mxRaw, y1: myRaw, kind: 'area' };
-      this.drag = { mode: 'shelfCreate' };
-      return;
-    }
-
-    // 1) control-point grab (resize) takes priority when a selection exists.
-    if (this.selShelves.size) {
-      const cp = this._controlAt(px, py);
-      if (cp) {
-        this._pushUndo();
-        const bb = this._selBBox();
-        // Cache each selected shelf's 0..1 relative position within the bbox
-        // (SelectionManager.updateObjectRelativePositions) for proportional scale.
-        const rel = [];
-        for (const { sh } of this._selShelfObjs()) {
-          rel.push({ sh,
-            pL: bb.r === bb.l ? 0 : (sh.x - bb.l) / (bb.r - bb.l),
-            pR: bb.r === bb.l ? 1 : (sh.x + sh.w - bb.l) / (bb.r - bb.l),
-            pT: bb.b === bb.t ? 0 : (sh.y - bb.t) / (bb.b - bb.t),
-            pB: bb.b === bb.t ? 1 : (sh.y + sh.h - bb.t) / (bb.b - bb.t) });
-        }
-        this.drag = { mode: 'shelfResize', cp, bb: { ...bb }, rel };
-        return;
-      }
-    }
-
-    // 2) hit-test a shelf body → select / move (Shift = add to selection).
-    const hit = this._shelfAt(px, py);
-    if (hit) {
-      const additive = e && e.shiftKey;
-      if (!additive && !this.selShelves.has(hit.sh.id)) this.selShelves = new Set();
-      if (additive && this.selShelves.has(hit.sh.id)) {
-        this.selShelves.delete(hit.sh.id);
-        this.selected = null; this._renderSide(); this._repaint();
-        return;
-      }
-      this.selShelves.add(hit.sh.id);
-      this.shelfZoneId = hit.zone.id;
-      this.selected = null;
-      this._pushUndo();
-      // cache original bounds for the move (snap uses the moving group's edges).
-      const items = this._selShelfObjs().map(({ sh }) => ({ sh, ox: sh.x, oy: sh.y }));
-      this.drag = { mode: 'shelfMove', items, downX: mxRaw, downY: myRaw, _snapped: true };
-      this._renderSide(); this._repaint();
-      return;
-    }
-
-    // 3) empty space:
-    if (this.shelfBrush === 'draw') {
-      // start corner-to-corner shelf draft (only meaningful inside a storage zone).
-      if (!zone) { if (this._layoutStatus) this._layoutStatus.textContent = '先に保管ゾーンを作成してください。'; return; }
-      const hints = this._snapHints(null);
-      const sx = this._snapWorldX(mxRaw, hints), sy = this._snapWorldY(myRaw, hints);
-      this.snapLine = { x: sx, y: sy };
-      this.shelfDraft = { x0: sx == null ? mxRaw : sx, y0: sy == null ? myRaw : sy,
-        x1: mxRaw, y1: myRaw, kind: 'draw' };
-      this.drag = { mode: 'shelfCreate' };
-      return;
-    }
-    // select-mode click on empty space clears selection.
-    this.selShelves = new Set();
-    this.selected = null;
-    this._renderSide(); this._repaint();
-  }
-
-  // --- mousemove in shelf mode (create / move / resize) ---
+  // --- mousemove in shelf drags (create / move / resize) ---
   _shelfMove(px, py) {
     const b = this.model.layout.bounds;
     let mx = this._mx(px), my = this._my(py);
@@ -2108,16 +2561,22 @@ export class Designer {
     }
   }
 
-  // --- commit a corner-drag (draw → 1 shelf, area → tiled fill) ---
+  // --- commit a corner-drag (draw → 1 shelf or a stamp, area → tiled fill) ---
   _shelfCreateCommit() {
     const d = this.shelfDraft;
     this.shelfDraft = null;
     if (!d) return;
-    const zone = this._activeStoreZone();
-    if (!zone) return;
     let l = Math.min(d.x0, d.x1), r = Math.max(d.x0, d.x1);
     let t = Math.min(d.y0, d.y1), btm = Math.max(d.y0, d.y1);
     if (d.kind === 'draw') {
+      // A click (or tiny wiggle) stamps one bay×depth unit of the active type —
+      // Minecraft-style block laying. A real drag draws corner-to-corner.
+      if (r - l < SHELF_MIN_M && btm - t < SHELF_MIN_M) {
+        this._stampRackUnit(d.x0, d.y0);
+        return;
+      }
+      const zone = this._zoneForShelfAt((l + r) / 2, (t + btm) / 2);
+      if (!zone) return;
       // enforce min size (MapMaker AddObjectPanel.regionSelected grows to min).
       if (r - l < SHELF_MIN_M) r = l + SHELF_MIN_M;
       if (btm - t < SHELF_MIN_M) btm = t + SHELF_MIN_M;
@@ -2131,10 +2590,11 @@ export class Designer {
         facing: (btm - t) >= (r - l) ? 'right' : 'down',
       };
       zone.shelves.push(sh);
-      this.selShelves = new Set([sh.id]);
       // overlap warn (touching allowed) — MapMaker rejects; whsim only warns.
       this._warnOverlap([sh], zone);
     } else if (d.kind === 'area') {
+      const zone = this._zoneForShelfAt((l + r) / 2, (t + btm) / 2);
+      if (!zone) return;
       if (r - l < 1 || btm - t < 1) {
         if (this._layoutStatus) this._layoutStatus.textContent = '面積が小さすぎます。もう少し大きな矩形を描いてください。';
         return;
@@ -2184,11 +2644,10 @@ export class Designer {
   // side ALONG the frontage so the 間口 stays open (never stacked in depth).
   // ===========================================================================
   _openBulkGenDialog() {
-    const zone = this._activeStoreZone();
-    if (!zone) {
-      if (this._layoutStatus) this._layoutStatus.textContent = '先に保管ゾーンを作成してください。';
-      return;
-    }
+    // auto-creates a floor-spanning storage zone when none exists (never blocks).
+    const b = this.model.layout.bounds;
+    const zone = this._zoneForShelfAt(b.width / 2, b.depth / 2);
+    if (!zone) return;
     const rt = RACK_TYPES[this.shelfType] || RACK_TYPES.medium;
     // remember last inputs across opens (whsim equivalent of Prefs).
     const st = this._bulkPrefs || (this._bulkPrefs = {
@@ -2432,10 +2891,20 @@ export class Designer {
   }
 
   _onMove(e) {
-    if (!this.drag || !this.canvas) return;
+    if (!this.canvas) return;
     const { px, py } = this._pt(e);
     const b = this.model.layout.bounds;
     this.noSnap = !!(e.ctrlKey || e.metaKey);  // Ctrl disables edge snapping
+    // Hover tracking (no drag): drive the placement ghost + the status readout.
+    if (!this.drag) {
+      if (this.tool !== 'place') return;
+      this.hover = { mx: this._mx(px), my: this._my(py), px, py, shift: !!e.shiftKey };
+      this._updateStatus();
+      // ghost preview repaint only when a placing brush (or a draft) is armed —
+      // select mode stays repaint-free on hover for cheapness.
+      if ((this.brush && this.brush.kind !== 'select') || this.wallDraft || this.conveyorDraft) this._repaint();
+      return;
+    }
     // Camera pan (middle-drag): no model mutation, no undo entry.
     if (this.drag.mode === 'pan') {
       const dxMeters = (px - this.drag.startPx) / this._view.sc;
@@ -2446,8 +2915,10 @@ export class Designer {
       this._fitCanvas(); this._repaint();
       return;
     }
-    // Shelf-mode drags (create / move / resize) have their own handler.
-    if (this.tool === 'layout' && this.layoutMode === 'shelf'
+    this.hover = { mx: this._mx(px), my: this._my(py), px, py, shift: !!e.shiftKey };
+    this._updateStatus();
+    // Shelf drags (create / move / resize) have their own handler.
+    if (this.tool === 'place'
         && (this.drag.mode === 'shelfCreate' || this.drag.mode === 'shelfMove' || this.drag.mode === 'shelfResize')) {
       return this._shelfMove(px, py);
     }
@@ -2477,6 +2948,7 @@ export class Designer {
       o.y = clamp(snap(this._my(py)), 0, b.depth);
     }
     this._drawCanvas();
+    this._updateStatus();
   }
 
   _onUp() {
@@ -2485,14 +2957,16 @@ export class Designer {
     if (mode === 'pan') { this.drag = null; return; }
     if (mode === 'shelfCreate') { this._shelfCreateCommit(); this.drag = null; this.snapLine = null; this._renderSide(); this._repaint(); return; }
     if (mode === 'shelfMove' || mode === 'shelfResize') {
-      this.snapLine = null; this.drag = null; this._renderSide(); this._repaint(); return;
+      this.snapLine = null; this.drag = null; this._renderSide(); this._repaint(); this._updateStatus(); return;
     }
-    this.drag = null; this._renderSide();
+    this.drag = null; this._renderSide(); this._updateStatus();
   }
 
   _onDbl(e) {
-    if (this.tool === 'equip' && this.equipBrush === 'conveyor') this._finishConveyor();
-    if (this.tool === 'building' && this.buildMode === 'wall') this._finishWall();
+    if (this.tool === 'place') {
+      if (this.conveyorDraft) this._finishConveyor();
+      if (this.wallDraft) this._finishWall();
+    }
     if (this.tool === 'route') this._finishRoute();
   }
 
@@ -2505,11 +2979,16 @@ export class Designer {
     const t = e.touches[0];
     const r = this.canvas.getBoundingClientRect();
     const px = t.clientX - r.left, py = t.clientY - r.top;
-    if (this.tool === 'layout' && this.layoutMode === 'shelf') this._shelfDown(px, py, { shiftKey: false });
-    else if (this.tool === 'layout') this._layoutDown(px, py);
-    else if (this.tool === 'equip') this._equipDown(px, py);
-    else if (this.tool === 'building') this._buildingDown(px, py);
-    else if (this.tool === 'route') this._routeDown(px, py);
+    if (this.tool === 'place') {
+      // a tap with the rack brush stamps a unit directly (no drag on touch).
+      if (this.brush && this.brush.kind === 'rack' && !this.brush.area) {
+        const bounds = this.model.layout.bounds;
+        const mx = this._mx(px), my = this._my(py);
+        if (mx >= 0 && mx <= bounds.width && my >= 0 && my <= bounds.depth) this._stampRackUnit(mx, my);
+      } else {
+        this._placeDown(px, py, { shiftKey: false });
+      }
+    } else if (this.tool === 'route') this._routeDown(px, py);
     else if (this.tool === 'flow') this._flowDown(px, py);
     this.drag = null;  // no touch-drag; a tap should not start a move
     this.shelfDraft = null;  // a tap should not leave a dangling shelf draft
@@ -2585,6 +3064,9 @@ export class Designer {
       if (this.conveyorDraft || this.wallDraft || this.routeDraft) {
         this.conveyorDraft = this.wallDraft = this.routeDraft = null;
         this._renderTool();
+      } else if (this.tool === 'place' && this.brush && this.brush.kind !== 'select') {
+        // armed brush → back to 選択 (the Minecraft "empty hand").
+        this._setBrush({ kind: 'select' });
       } else if (this.selShelves && this.selShelves.size) {
         this.selShelves = new Set(); this._renderTool();
       } else if (this.selected) {
@@ -2592,27 +3074,27 @@ export class Designer {
       }
       return;
     }
-    // M2: duplicate selected shelves (MapMaker 'd' key) in the shelf editor.
-    if ((e.key === 'd' || e.key === 'D') && !meta && this.tool === 'layout'
-        && this.layoutMode === 'shelf' && this.selShelves && this.selShelves.size) {
+    // M2: duplicate selected shelves (MapMaker 'd' key).
+    if ((e.key === 'd' || e.key === 'D') && !meta && this.tool === 'place'
+        && this.selShelves && this.selShelves.size) {
       e.preventDefault(); this._duplicateShelves(); return;
     }
-    // M3: digit 1..N picks the storage-equipment type in the 棚 editor. With a
-    // selection it re-assigns those shelves' type; otherwise it sets the active
-    // type for new shelves. Scoped to shelf mode (and no modifier) so it never
-    // clashes with the tool tabs or browser chrome.
-    if (!meta && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)
-        && this.tool === 'layout' && this.layoutMode === 'shelf') {
-      const idx = parseInt(e.key, 10) - 1;
-      if (idx >= 0 && idx < RACK_ORDER.length) {
+    // Digits 1-9 = pinned library brushes (MapMaker's fixed digit toolbar).
+    // With shelves selected, the rack digit applies the ACTIVE type to them.
+    if (!meta && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key) && this.tool === 'place') {
+      const brush = this._digitBrush(parseInt(e.key, 10));
+      if (brush) {
         e.preventDefault();
-        if (!this.rackPaletteOpen) this.rackPaletteOpen = true;
-        this._pickRackType(RACK_ORDER[idx]);
+        if (brush.kind === 'rack' && this.selShelves && this.selShelves.size) {
+          this._assignRackTypeToSelection(this.shelfType);
+        } else {
+          this._setBrush(brush);
+        }
       }
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (this.tool === 'layout' && this.layoutMode === 'shelf' && this.selShelves && this.selShelves.size) {
+      if (this.tool === 'place' && this.selShelves && this.selShelves.size) {
         e.preventDefault(); this._deleteShelves(); return;
       }
       if (this.selected) { e.preventDefault(); this._deleteSelected(); }
@@ -2646,46 +3128,6 @@ export class Designer {
   }
 
   // --- building tool: walls (polyline) + doors (markers) ---
-  _buildingDown(px, py) {
-    const mx = snap(this._mx(px)), my = snap(this._my(py));
-    const b = this.model.layout.bounds;
-    const inside = mx >= 0 && mx <= b.width && my >= 0 && my <= b.depth;
-
-    if (this.buildMode === 'door') {
-      // hit-test existing doors first for selection / move
-      const hit = this.model.layout.doors.find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 12);
-      if (hit) {
-        this.selected = { kind: 'door', id: hit.id };
-        this.drag = { mode: 'moveDoor', id: hit.id };
-        this._renderSide(); this._drawCanvas();
-        return;
-      }
-      if (!inside) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
-      this._pushUndo();
-      const pal = DOOR_PALETTE.find((x) => x.type === this.doorBrush) || DOOR_PALETTE[0];
-      const w = pal.type === 'dock' ? 3 : pal.type === 'shutter' ? 4 : 1;
-      const d = { id: uid('door'), type: pal.type, x: mx, y: my, w };
-      this.model.layout.doors.push(d);
-      this.selected = { kind: 'door', id: d.id };
-      this._renderSide(); this._drawCanvas();
-      return;
-    }
-
-    // wall mode: hit-test walls for selection, else extend draft polyline
-    if (!this.wallDraft) {
-      const hit = this._wallHit(px, py);
-      if (hit) {
-        this.selected = { kind: 'wall', id: hit.id };
-        this._renderSide(); this._drawCanvas();
-        return;
-      }
-    }
-    if (!inside && !this.wallDraft) { this.selected = null; this._renderSide(); this._drawCanvas(); return; }
-    if (!this.wallDraft) this.wallDraft = [];
-    this.wallDraft.push([mx, my]);
-    this._renderSide(); this._drawCanvas();
-  }
-
   _wallHit(px, py) {
     for (let i = this.model.layout.walls.length - 1; i >= 0; i--) {
       const w = this.model.layout.walls[i];
@@ -2720,19 +3162,62 @@ export class Designer {
   }
 
   // ---- side editor panels (layout + equip tools) ---------------------------
+  // The side panel is now an OBJECT INSPECTOR: it shows the editor for whatever
+  // is selected (shelf / zone / equipment / wall / door), and floor-level
+  // settings (倉庫サイズ etc.) when nothing is. The placement palettes that used
+  // to live here moved to the library on the left.
   _renderSide() {
     if (!this.side) return;
     const s = this.side; s.innerHTML = '';
-    if (this.tool === 'layout' && this.layoutMode === 'shelf') this._sideShelf(s);
-    else if (this.tool === 'layout') this._sideLayout(s);
-    else if (this.tool === 'building') this._sideBuilding(s);
-    else this._sideEquip(s);
+    if (this.selShelves && this.selShelves.size) { this._sideShelf(s); return; }
+    const k = this.selected && this.selected.kind;
+    if (k === 'zone') this._sideLayout(s);
+    else if (k === 'wall' || k === 'door') this._sideBuilding(s);
+    else if (k === 'equip' || k === 'station') this._sideEquip(s);
+    else this._sideFloor(s);
+  }
+
+  // ---- no-selection inspector: floor settings + active drafts ---------------
+  _sideFloor(s) {
+    const b = this.brush || {};
+    // active draft controls (wall / conveyor mid-draw)
+    if (this.wallDraft) {
+      this._h(s, '壁を作図中');
+      this._note(s, `頂点 ${this.wallDraft.length} 点。クリックで追加（Shift=水平/垂直）、ダブルクリックか下のボタンで確定。`);
+      this._btn(s, '壁を確定', () => this._finishWall(), 'margin-bottom:8px;');
+    } else if (this.conveyorDraft) {
+      this._h(s, 'コンベアを作図中');
+      this._note(s, `頂点 ${this.conveyorDraft.length} 点。クリックで追加、ダブルクリックか下のボタンで確定。`);
+      this._btn(s, 'コンベアを確定', () => this._finishConveyor(), 'margin-bottom:8px;');
+    } else if (b.kind && b.kind !== 'select') {
+      this._h(s, `配置中: ${this._brushLabel()}`);
+      this._note(s, this._brushHint());
+      if (b.kind === 'rack') {
+        const rt = RACK_TYPES[this.shelfType] || RACK_TYPES.medium;
+        this._note(s, `${rt.label}: 間口${rt.bay}m × 奥行${rt.depth}m・${rt.levels || 1}段・収容${rt.capacity || 0}。${rt.desc || ''}`);
+      }
+      this._btn(s, '選択モードに戻る (Esc)', () => this._setBrush({ kind: 'select' }), 'margin-bottom:8px;');
+    } else {
+      this._h(s, 'オブジェクト情報');
+      this._note(s, '床の物をクリックすると、ここで名前・寸法・台数などを数値で編集できます。');
+    }
+
+    // 倉庫サイズ — set the floor extents up front, MapMaker-style.
+    this._h(s, '倉庫サイズ');
+    const bnd = this.model.layout.bounds;
+    this._field(s, '幅 W (m)', () => this._num(bnd.width, (v) => {
+      bnd.width = Math.max(MIN_M, v); this._fitCanvas(); this._drawCanvas(); }));
+    this._field(s, '奥行 D (m)', () => this._num(bnd.depth, (v) => {
+      bnd.depth = Math.max(MIN_M, v); this._fitCanvas(); this._drawCanvas(); }));
+
+    if ((this.model.resources.conveyors || []).length) {
+      this._h(s, `コンベア (${this.model.resources.conveyors.length})`);
+      this._btn(s, '最後のコンベアを削除', () => { this._pushUndo(); this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
+    }
   }
 
   // ---- per-shelf editor (ShelfEditor.java port): name / type / facing / size ----
   _sideShelf(s) {
-    this._h(s, '棚（自由配置）');
-    this._note(s, '棚を描く/一括生成/面積オート生成で配置。クリックで選択（Shiftで複数）、ハンドルでサイズ変更。');
     const objs = this._selShelfObjs();
     const zone = this._activeStoreZone();
     const total = zone ? (zone.shelves || []).length : 0;
@@ -2832,91 +3317,49 @@ export class Designer {
     this._renderTool();
   }
 
+  // selected wall / door inspector (placement happens via the library brushes).
   _sideBuilding(s) {
-    this._h(s, '躯体（建屋）');
-    // mode switch: walls vs doors
-    const modeRow = this._div(s, 'display:flex;gap:6px;margin-bottom:8px;');
-    for (const [m, label] of [['wall', '壁'], ['door', 'ドア']]) {
-      const b = this._btn(modeRow, label, () => {
-        this.buildMode = m;
-        if (m !== 'wall') this.wallDraft = null;
-        this.selected = null;
-        this._renderSide(); this._drawCanvas();
-      });
-      b.style.flex = '1';
-      if (this.buildMode === m) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);';
+    const w = this.selected && this.selected.kind === 'wall'
+      ? this.model.layout.walls.find((q) => q.id === this.selected.id) : null;
+    if (w) {
+      this._h(s, '選択中の壁');
+      this._field(s, '厚さ (m)', () => this._num(w.thickness, (v) => { w.thickness = Math.max(0.05, v); this._drawCanvas(); }));
+      const pts = w.points || [];
+      let len = 0;
+      for (let i = 0; i < pts.length - 1; i++) len += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+      this._note(s, `頂点 ${pts.length} 点・全長 ${len.toFixed(2)} m。`);
+      this._btn(s, '削除', () => {
+        this._pushUndo();
+        this.model.layout.walls = this.model.layout.walls.filter((q) => q.id !== w.id);
+        this.selected = null; this._renderSide(); this._drawCanvas();
+      }, 'margin-top:10px;color:var(--bad);');
+      return;
     }
-
-    if (this.buildMode === 'wall') {
-      this._btn(s, '壁を確定', () => this._finishWall(), 'margin-bottom:8px;');
-      this._note(s, `頂点 ${this.wallDraft ? this.wallDraft.length : 0} 点。床をクリックで追加、ダブルクリックか「壁を確定」で完了。`);
-      const w = this.selected && this.selected.kind === 'wall'
-        ? this.model.layout.walls.find((q) => q.id === this.selected.id) : null;
-      if (w) {
-        this._h(s, '選択中の壁');
-        this._field(s, '厚さ (m)', () => this._num(w.thickness, (v) => { w.thickness = Math.max(0.05, v); this._drawCanvas(); }));
-        this._note(s, `頂点 ${(w.points || []).length} 点。`);
-        this._btn(s, '削除', () => {
-          this._pushUndo();
-          this.model.layout.walls = this.model.layout.walls.filter((q) => q.id !== w.id);
-          this.selected = null; this._renderSide(); this._drawCanvas();
-        }, 'margin-top:10px;color:var(--bad);');
-      } else {
-        this._note(s, '壁をクリックして選択すると編集・削除できます。');
-      }
-    } else {
-      this._h(s, 'ドアの種類');
-      const pal = this._div(s, 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;');
-      for (const p of DOOR_PALETTE) {
-        const b = this._btn(pal, p.label, () => { this.doorBrush = p.type; this._renderSide(); this._drawCanvas(); });
-        if (this.doorBrush === p.type) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);';
-      }
-      const d = this.selected && this.selected.kind === 'door'
-        ? this.model.layout.doors.find((q) => q.id === this.selected.id) : null;
-      if (d) {
-        this._h(s, `選択中: ${DOOR_JP[d.type] || d.type}`);
-        this._field(s, '種別', () => {
-          const sel = this._select(null, DOOR_PALETTE.map((p) => ({ value: p.type, label: p.label })), d.type);
-          this._on(sel, 'change', () => { d.type = sel.value; this._renderSide(); this._drawCanvas(); });
-          return sel;
-        });
-        this._field(s, '幅 (m)', () => this._num(d.w, (v) => { d.w = Math.max(0.3, v); this._drawCanvas(); }));
-        this._btn(s, '削除', () => {
-          this._pushUndo();
-          this.model.layout.doors = this.model.layout.doors.filter((q) => q.id !== d.id);
-          this.selected = null; this._renderSide(); this._drawCanvas();
-        }, 'margin-top:10px;color:var(--bad);');
-      } else {
-        this._note(s, '建屋の縁をクリックしてドアを配置、または既存のドアをクリックして編集します。');
-      }
+    const d = this.selected && this.selected.kind === 'door'
+      ? this.model.layout.doors.find((q) => q.id === this.selected.id) : null;
+    if (d) {
+      this._h(s, `選択中: ${DOOR_JP[d.type] || d.type}`);
+      this._field(s, '種別', () => {
+        const sel = this._select(null, DOOR_PALETTE.map((p) => ({ value: p.type, label: p.label })), d.type);
+        this._on(sel, 'change', () => { d.type = sel.value; this._renderSide(); this._drawCanvas(); });
+        return sel;
+      });
+      this._field(s, '幅 (m)', () => this._num(d.w, (v) => { d.w = Math.max(0.3, v); this._drawCanvas(); }));
+      this._field(s, 'X (m)', () => this._num(d.x, (v) => { d.x = clamp(v, 0, this.model.layout.bounds.width); this._drawCanvas(); }, 0.1));
+      this._field(s, 'Y (m)', () => this._num(d.y, (v) => { d.y = clamp(v, 0, this.model.layout.bounds.depth); this._drawCanvas(); }, 0.1));
+      this._btn(s, '削除', () => {
+        this._pushUndo();
+        this.model.layout.doors = this.model.layout.doors.filter((q) => q.id !== d.id);
+        this.selected = null; this._renderSide(); this._drawCanvas();
+      }, 'margin-top:10px;color:var(--bad);');
     }
   }
 
+  // selected zone inspector (zones are placed from the library's ゾーン cards).
   _sideLayout(s) {
-    const head = this._h(s, 'ゾーン');
-    // add-zone control
-    const addRow = this._div(s, 'display:flex;gap:6px;margin-bottom:8px;');
-    const typeSel = this._select(addRow, ZONE_TYPES.map((t) => ({ value: t, label: ZONE_JP[t] })), 'storage');
-    const addBtn = this._btn(addRow, 'ゾーン追加', () => this._addZone(typeSel.value));
-    addBtn.style.flex = '0 0 auto';
-
-    // Warehouse size (倉庫サイズ) — set the floor extents up front, MapMaker-style.
-    this._h(s, '倉庫サイズ');
-    const bnd = this.model.layout.bounds;
-    this._field(s, '幅 W (m)', () => this._num(bnd.width, (v) => {
-      bnd.width = Math.max(MIN_M, v); this._fitCanvas(); this._drawCanvas(); }));
-    this._field(s, '奥行 D (m)', () => this._num(bnd.depth, (v) => {
-      bnd.depth = Math.max(MIN_M, v); this._fitCanvas(); this._drawCanvas(); }));
-    // Default storage equipment applied to new 棚ブロック.
-    this._field(s, '棚種別(新規)', () => {
-      const sel = this._select(null, RACK_ORDER.map((k) => ({ value: k, label: RACK_TYPES[k].label })), this.shelfType);
-      this._on(sel, 'change', () => { this.shelfType = sel.value; });
-      return sel;
-    });
-
     const z = this.selected && this.selected.kind === 'zone'
       ? this.model.layout.zones.find((q) => q.id === this.selected.id) : null;
-    if (!z) { this._note(s, 'ゾーンをクリックして選択すると編集できます。'); return; }
+    if (!z) { this._sideFloor(s); return; }
 
     this._h(s, '選択中のゾーン');
     // type
@@ -2971,27 +3414,19 @@ export class Designer {
     this._btn(s, '削除', () => this._deleteZone(z.id), 'margin-top:10px;color:var(--bad);');
   }
 
+  // selected equipment / station inspector (placement via the library brushes).
   _sideEquip(s) {
-    this._h(s, '設備パレット');
-    const pal = this._div(s, 'display:flex;flex-direction:column;gap:4px;margin-bottom:8px;');
-    for (const p of EQUIP_PALETTE) {
-      const b = this._btn(pal, p.label, () => { this.equipBrush = p.key; this.conveyorDraft = null; this._renderSide(); this._drawCanvas(); });
-      if (this.equipBrush === p.key) b.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);';
-    }
-    if (this.equipBrush === 'conveyor') {
-      this._btn(s, '確定（コンベア完了）', () => this._finishConveyor(), 'margin-bottom:8px;');
-      this._note(s, `頂点 ${this.conveyorDraft ? this.conveyorDraft.length : 0} 点。床をクリックで追加。`);
-    }
-
-    // selected object editor
     const sel = this.selected;
     if (sel && sel.kind === 'equip') {
       const e = this.model.resources.equipment.find((q) => q.id === sel.id);
       if (e) {
         const p = EQUIP_PALETTE.find((x) => x.type === e.type);
         this._h(s, `選択中: ${p ? p.label : e.type}`);
+        if (p && p.desc) this._note(s, p.desc);
         this._field(s, '台数', () => this._num(e.count, (v) => { e.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
         this._field(s, '速度 (m/s)', () => this._num(e.speed_mps, (v) => { e.speed_mps = Math.max(0, v); }));
+        this._field(s, 'X (m)', () => this._num(e.x, (v) => { e.x = clamp(v, 0, this.model.layout.bounds.width); this._drawCanvas(); }, 0.1));
+        this._field(s, 'Y (m)', () => this._num(e.y, (v) => { e.y = clamp(v, 0, this.model.layout.bounds.depth); this._drawCanvas(); }, 0.1));
         this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.equipment = this.model.resources.equipment.filter((q) => q.id !== e.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:var(--bad);');
       }
     } else if (sel && sel.kind === 'station') {
@@ -2999,56 +3434,44 @@ export class Designer {
       if (st) {
         this._h(s, '選択中: 梱包台');
         this._field(s, '台数', () => this._num(st.count, (v) => { st.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
+        this._field(s, 'X (m)', () => this._num(st.x, (v) => { st.x = clamp(v, 0, this.model.layout.bounds.width); this._drawCanvas(); }, 0.1));
+        this._field(s, 'Y (m)', () => this._num(st.y, (v) => { st.y = clamp(v, 0, this.model.layout.bounds.depth); this._drawCanvas(); }, 0.1));
         this._btn(s, '削除', () => { this._pushUndo(); this.model.resources.stations = this.model.resources.stations.filter((q) => q.id !== st.id); this.selected = null; this._renderSide(); this._drawCanvas(); }, 'margin-top:10px;color:var(--bad);');
       }
-    } else {
-      this._note(s, '床をクリックして設置、または既存マーカーをクリックして編集します。');
-    }
-
-    if (this.model.resources.conveyors.length) {
-      this._h(s, `コンベア (${this.model.resources.conveyors.length})`);
-      const last = this.model.resources.conveyors[this.model.resources.conveyors.length - 1];
-      this._btn(s, '最後のコンベアを削除', () => { this._pushUndo(); this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
     }
   }
 
   // place an object from the レイアウト palette, centered on (mx,my), clamped to floor
-  _placeFromPalette(key, mx, my) {
-    const p = LAYOUT_PALETTE.find((q) => q.key === key);
-    if (!p) return;
+  _placeZone(type, mx, my) {
+    const d = this._zoneDefaults(type);
     this._pushUndo();
     const b = this.model.layout.bounds;
-    const w = Math.min(p.w, b.width), h = Math.min(p.h, b.depth);
+    const w = Math.min(d.w, b.width), h = Math.min(d.h, b.depth);
     const x = clamp(snap(mx - w / 2), 0, Math.max(0, b.width - w));
     const y = clamp(snap(my - h / 2), 0, Math.max(0, b.depth - h));
     const z = {
-      id: uid('zone'), type: p.zoneType, x, y, w, h,
-      color: ZONE_DEFAULT_COLOR[p.zoneType] || null,
+      id: uid('zone'), type, x, y, w, h,
+      color: ZONE_DEFAULT_COLOR[type] || null,
       rack: null,
+      // Storage zones start EMPTY — shelves are stamped/drawn with the 棚 brush
+      // (or 一括/面積生成), so the zone is just the container.
+      shelves: [],
     };
-    // Storage zones author a SHELF area (MapMaker-style) of the chosen equipment
-    // type filling the block; cells materialise inside it on save.
-    if (p.zoneType === 'storage') {
-      z.shelves = [{ id: uid('s'), x, y, w, h, rack_type: this.shelfType }];
-    }
     this.model.layout.zones.push(z);
-    this.selected = { kind: 'zone', id: z.id };
-    // keep the brush active so the user can drop several of the same object (PPT-like)
-    this._renderSide(); this._drawCanvas();
-    if (this._layoutStatus) this._layoutStatus.textContent = `「${p.label}」を配置しました。続けて配置するか、選択を解除して編集できます。`;
+    if (type === 'storage') this.shelfZoneId = z.id;
+    // keep the brush armed so the user can drop several of the same object.
+    this._renderSide(); this._drawCanvas(); this._updateStatus();
+    if (this._layoutStatus) this._layoutStatus.textContent = `「${ZONE_JP[type] || type}」を配置しました。続けて置けます（Escで選択へ）。`;
   }
 
   _addZone(type) {
     this._pushUndo();
     const b = this.model.layout.bounds;
     const w = Math.min(12, b.width / 2), h = Math.min(8, b.depth / 2);
-    // Storage zones created from the shelf editor start EMPTY (no legacy rack
-    // fill) so the user draws shelves freely; zone-mode adds the parametric rack.
-    const fromShelf = this.layoutMode === 'shelf';
     const z = {
       id: uid('zone'), type, x: clamp(2, 0, b.width - w), y: clamp(2, 0, b.depth - h),
       w, h, color: ZONE_DEFAULT_COLOR[type] || null,
-      rack: (type === 'storage' && !fromShelf) ? { col_spacing: 4, row_spacing: 3, margin: 2 } : null,
+      rack: null,
       shelves: [],
     };
     this.model.layout.zones.push(z);
@@ -3421,8 +3844,8 @@ export class Designer {
   // ---- save ----------------------------------------------------------------
   async _save() {
     if (!this.handlers.save) { this._saveMsg.textContent = '保存ハンドラがありません。'; return; }
-    if (this.tool === 'equip' && this.conveyorDraft) this._finishConveyor();
-    if (this.tool === 'building' && this.wallDraft) this._finishWall();
+    if (this.conveyorDraft) this._finishConveyor();
+    if (this.wallDraft) this._finishWall();
     if (this.routeDraft && this.routeDraft.length >= 2) this._finishRoute();
     this.routeDraft = null;
     this._saveBtn.disabled = true;
