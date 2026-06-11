@@ -42,8 +42,9 @@ const PROCS = [
   { id: '格納', sec: '入荷', driver: 'in_pallets', prod: null, unit: 'PL/h', derived: true },
   { id: 'ピッキング', sec: '出荷', driver: 'out_lines', prod: 60, unit: '行/h' },
   { id: '検品', sec: '出荷', driver: 'out_lines', prod: 120, unit: '行/h' },
-  { id: '梱包', sec: '出荷', driver: 'out_orders', prod: 30, unit: '件/h' },
-  { id: '出荷', sec: '出荷', driver: 'out_orders', prod: 120, unit: '件/h' },
+  // 梱包/出荷 are 荷姿-driven (オリコン詰め・カゴ台車積込) — the 仮値派生 numbers.
+  { id: '梱包', sec: '出荷', driver: 'out_orikon', prod: 25, unit: 'OC/h' },
+  { id: '出荷', sec: '出荷', driver: 'out_cages', prod: 12, unit: '台車/h' },
 ];
 
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
@@ -118,6 +119,15 @@ function injectStyle() {
   .bi-focus{box-shadow:0 0 0 2px var(--accent);border-radius:var(--r-md);
     transition:box-shadow var(--dur-2) var(--ease-out)}
   @media (prefers-reduced-motion: reduce){ .bi-bar i,.bi-proc,.bi-focus{transition:none} }
+  /* 基礎物量 → タイムチャート CTA (the next-step of this view) */
+  .bi-apply{margin-top:14px;padding:12px 14px;border:1px solid var(--ok-line,rgba(52,227,160,.3));
+    border-left:4px solid var(--ok,#34c97a);border-radius:12px;
+    background:var(--ok-tint,rgba(52,227,160,.07));display:flex;flex-direction:column;gap:9px}
+  .bi-apply-t{font-size:11.5px;color:var(--ink-secondary)}
+  .bi-apply-btn{align-self:flex-start;padding:9px 16px;border:none;border-radius:10px;
+    background:var(--accent);color:var(--ink-onAccent,#04222c);font:inherit;font-weight:700;cursor:pointer}
+  .bi-apply-btn:hover{background:var(--accent-hover)}
+  .bi-apply-btn:disabled{opacity:.55;cursor:wait}
   `;
   document.head.appendChild(s);
 }
@@ -153,6 +163,8 @@ export function mountBI(el, opts = {}) {
   let linesPerOrder = 0;// 仮値: lines per order (受注→出荷ライン); 0 = seed from data
   let peak = 1.0;       // 仮値: peak-day factor (日量→ピーク係数)
   let showPeak = false; // right pane: 平常 vs ピーク toggle
+  let piecesPerOrikon = 30; // 仮値: オリコン入数 (点/OC) — バラ出荷の荷姿変換
+  let unitsPerCage = 14;    // 仮値: カゴ台車積載 ((OC+ケース)/台)
 
   // Seed 仮値 from server volumes once, so sliders open near the real numbers.
   function seedRecipes() {
@@ -180,9 +192,16 @@ export function mountBI(el, opts = {}) {
     // ケース→ピース 検算: out_pieces ≈ out_cases × 入数.
     const outCases = (vol && vol.out_cases) || 0;
     const piecesFromCases = Math.round(outCases * qtyPerCase);
+    // 出荷側荷姿: バラピース → オリコン → (＋ケース) → カゴ台車。
+    // ピース実績が無ければ 行×入数 の補完値で派生する（never blocks）。
+    const effPieces = piecesActual > 0 ? piecesActual : piecesFromLines;
+    const outOrikon = piecesPerOrikon > 0 ? Math.ceil(effPieces / piecesPerOrikon) : 0;
+    const cageLoad = outOrikon + outCases;
+    const outCages = unitsPerCage > 0 ? Math.ceil(cageLoad / unitsPerCage) : 0;
     return {
       inPallets, putawayMh: palletProd > 0 ? inPallets / palletProd : 0,
       piecesFromLines, piecesActual, linesFromOrders, piecesFromCases,
+      effPieces, outOrikon, cageLoad, outCages,
     };
   }
 
@@ -194,6 +213,8 @@ export function mountBI(el, opts = {}) {
       in_pallets: d.inPallets,
       out_lines: (vol && vol.out_lines) || 0,
       out_orders: (vol && vol.out_orders) || 0,
+      out_orikon: d.outOrikon,
+      out_cages: d.outCages,
     };
     return PROCS.map((p) => {
       const v = drv[p.driver] || 0;
@@ -319,6 +340,30 @@ export function mountBI(el, opts = {}) {
         <div class="bi-chain" id="bi-cp-chain">出荷ケース ${fmt(vol.out_cases)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromCases)} 点（実績との差 ${fmt(d.piecesFromCases - d.piecesActual)} 点）</div>
       </div>` : '';
 
+    // ピース → オリコン → カゴ台車: 出荷側の荷姿変換（データに無い前提条件を仮値で
+    // 作る）。物量分析ツールの「梱包形態と入数」「搬送形態」に相当する whsim 版。
+    const cageCard = `
+      <div class="bi-derive">
+        <div class="dl">ピース → オリコン → カゴ台車（出荷荷姿の仮値）<span class="bi-est">推計</span></div>
+        <div class="bi-row">
+          <label>オリコン入数(仮値)</label>
+          <input type="range" id="bi-ppo" min="5" max="80" step="1" value="${piecesPerOrikon}">
+          <span class="rv" id="bi-ppo-v">${piecesPerOrikon} 点/OC</span>
+        </div>
+        <div class="bi-row">
+          <label>カゴ台車積載(仮値)</label>
+          <input type="range" id="bi-upc" min="4" max="32" step="1" value="${unitsPerCage}">
+          <span class="rv" id="bi-upc-v">${unitsPerCage} 個/台</span>
+        </div>
+        <div class="bi-out">
+          <div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">オリコン数/日</div>
+            <div class="big" id="bi-oc">${fmt(d.outOrikon)}<span class="u">OC</span></div></div>
+          <div style="margin-left:auto;text-align:right"><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">出荷カゴ台車数/日</div>
+            <div class="big" id="bi-cage" style="font-size:24px">${fmt(d.outCages)}<span class="u">台</span></div></div>
+        </div>
+        <div class="bi-chain" id="bi-cage-chain">バラ ${fmt(d.effPieces)} 点 ÷ ${piecesPerOrikon} = ${fmt(d.outOrikon)} OC →（＋ケース ${fmt(vol.out_cases)}）÷ ${unitsPerCage} = ${fmt(d.outCages)} 台</div>
+      </div>`;
+
     // 日量 → ピーク係数: scales the right-pane man-hours to a peak-day assumption.
     const peakCard = `
       <div class="bi-derive">
@@ -347,12 +392,17 @@ export function mountBI(el, opts = {}) {
         ${linesPiecesCard}
         ${ordersLinesCard}
         ${casePiecesCard}
+        ${cageCard}
         ${peakCard}
         <div class="bi-chain">※ 派生値は実値が無いため仮値で派生／補完。実データが入れば差し替わります（provenance＝生成・推計）。</div>
       </section>
       <section class="bi-pane" id="bi-right">
         ${rightHeader()}
         ${renderFlow(procs, maxMh, totalMh)}
+        <div class="bi-apply">
+          <div class="bi-apply-t">この基礎物量（仮値ごと）を保存し、人員タイムチャートに展開します。</div>
+          <button type="button" class="bi-apply-btn" id="bi-apply-btn">💾 基礎物量を保存 → タイムチャートで人員配置 →</button>
+        </div>
       </section>`;
 
     wire();
@@ -399,7 +449,8 @@ export function mountBI(el, opts = {}) {
   }
 
   function driverUnit(dr) {
-    return { in_cases: 'ケース', in_pallets: 'PL', out_lines: '行', out_orders: '件' }[dr] || '';
+    return { in_cases: 'ケース', in_pallets: 'PL', out_lines: '行', out_orders: '件',
+             out_orikon: 'OC', out_cages: '台車' }[dr] || '';
   }
 
   // Build/refresh the right-pane man-hours bar from the current procs. Inbound vs
@@ -526,8 +577,18 @@ export function mountBI(el, opts = {}) {
       setHTML('#bi-cp', `${fmt(d.piecesFromCases)}<span class="u">点</span>`);
       setText('#bi-cp-chain',
         `出荷ケース ${fmt(vol.out_cases)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromCases)} 点（実績との差 ${fmt(d.piecesFromCases - d.piecesActual)} 点）`);
+      refreshCageOut(d);  // バラ補完値の変化は荷姿派生 (OC/台車) にも波及する
     };
     on('#bi-qpc', 'oninput', updateQpc);
+
+    // Shared: repaint the オリコン/カゴ台車 outputs (+ right pane) from a derived().
+    const refreshCageOut = (d) => {
+      setHTML('#bi-oc', `${fmt(d.outOrikon)}<span class="u">OC</span>`);
+      setHTML('#bi-cage', `${fmt(d.outCages)}<span class="u">台</span>`);
+      setText('#bi-cage-chain',
+        `バラ ${fmt(d.effPieces)} 点 ÷ ${piecesPerOrikon} = ${fmt(d.outOrikon)} OC →（＋ケース ${fmt(vol.out_cases)}）÷ ${unitsPerCage} = ${fmt(d.outCages)} 台`);
+      repaintRight();
+    };
 
     // 受注 → 出荷ライン.
     const updateLpo = () => {
@@ -541,6 +602,50 @@ export function mountBI(el, opts = {}) {
         `出荷オーダー ${fmt(vol.out_orders)} × ${fmt(linesPerOrder, 1)} 行 = ${fmt(d.linesFromOrders)} 行${linesMissing ? '' : `（実績 ${fmt(vol.out_lines)} 行との差 ${fmt(d.linesFromOrders - (vol.out_lines || 0))} 行）`}`);
     };
     on('#bi-lpo', 'oninput', updateLpo);
+
+    // ピース → オリコン → カゴ台車: 荷姿仮値 (梱包/出荷の人時ドライバー → 右も再描画).
+    const updateCage = () => {
+      const ppoEl = root.querySelector('#bi-ppo');
+      const upcEl = root.querySelector('#bi-upc');
+      if (ppoEl) piecesPerOrikon = parseInt(ppoEl.value, 10);
+      if (upcEl) unitsPerCage = parseInt(upcEl.value, 10);
+      setText('#bi-ppo-v', `${piecesPerOrikon} 点/OC`);
+      setText('#bi-upc-v', `${unitsPerCage} 個/台`);
+      refreshCageOut(derived());
+    };
+    on('#bi-ppo', 'oninput', updateCage);
+    on('#bi-upc', 'oninput', updateCage);
+
+    // 保存 → タイムチャート: persist the 仮値派生 (bi/apply → bi.json + provenance)
+    // then hand the from-bi scenario to the timetable via the shell event.
+    on('#bi-apply-btn', 'onclick', async () => {
+      const name = getProject();
+      if (!name) { toast('先にプロジェクトを作ってください。', 'error'); return; }
+      const btn = root.querySelector('#bi-apply-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '保存して展開中…'; }
+      try {
+        const params = {
+          cases_per_pallet: cpp, pallet_prod: palletProd,
+          lines_per_order: linesPerOrder, peak_factor: peak,
+          pieces_per_orikon: piecesPerOrikon, units_per_cage: unitsPerCage,
+        };
+        let r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/apply`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+        r = await fetch(`/api/projects/${encodeURIComponent(name)}/timetable/from-bi`);
+        if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+        const tt = await r.json();
+        if (!tt.available) throw new Error('基礎物量を展開できませんでした');
+        document.dispatchEvent(new CustomEvent('whsim:load-timetable',
+          { detail: { scenario: tt.scenario } }));
+      } catch (e) {
+        toast('展開に失敗: ' + (e && e.message ? e.message : e), 'error');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '💾 基礎物量を保存 → タイムチャートで人員配置 →'; }
+      }
+    });
 
     // 日量 → ピーク係数: factor slider + 平常/ピーク toggle, both repaint right.
     const updatePeak = () => {

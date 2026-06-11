@@ -989,6 +989,7 @@ function mountMaterialFlowView() {
   if (S.materialflow) return;
   S.materialflow = mountMaterialFlow($('materialflow'), {
     toast: (msg, kind) => toast(msg, kind),
+    getProject: () => S.project,
   });
 }
 

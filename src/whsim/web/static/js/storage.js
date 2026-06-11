@@ -152,12 +152,12 @@ export function mountStorage(el, opts = {}) {
       </div>
       ${knobsBar()}
       <div class="st-cost">
-        <div class="st-card hero"><div class="l">保管費 / 月</div><div class="v">${yen(c.total_yen)}</div>
-          <div class="d">倉庫料 ${yen(c.warehouse_yen)} ＋ 設備 ${yen(c.equipment_yen)}</div></div>
-        <div class="st-card"><div class="l">必要坪数（保管）</div><div class="v">${fmt(t.tsubo_storage, 1)} ${TSUBO}</div>
-          <div class="d">坪単価 ${yen(c.tsubo_rate)}/${TSUBO}月</div></div>
+        <div class="st-card hero"><div class="l">必要坪数（保管）</div><div class="v">${fmt(t.tsubo_storage, 1)} ${TSUBO}</div>
+          <div class="d">通路率 ×${fmt(data.params.aisle_factor, 1)} 込み</div></div>
         <div class="st-card"><div class="l">什器台数 / 間口</div><div class="v">${fmt(t.units)} 台</div>
           <div class="d">${fmt(t.cells)} 間口・${fmt(t.skus)} SKU</div></div>
+        <div class="st-card"><div class="l">参考: 保管費 / 月</div><div class="v">${yen(c.total_yen)}</div>
+          <div class="d">倉庫料 ${yen(c.warehouse_yen)} ＋ 設備 ${yen(c.equipment_yen)}</div></div>
       </div>
       <div class="st-sec"><h3>必要保管機器（坪数の内訳）</h3><div class="st-ec" data-ec></div></div>
       <div class="st-sec"><h3>設備機器数 取りまとめ

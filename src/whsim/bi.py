@@ -12,6 +12,7 @@ provenance never overstates it.
 from __future__ import annotations
 
 import json
+import math
 
 import duckdb
 import pandas as pd
@@ -322,11 +323,22 @@ def derive_volumes(model: WarehouseModel, params: dict) -> dict:
         params.get("lines_per_order"),
         base["out_lines"] / base["out_orders"] if base["out_orders"] else 1.0)
     peak_factor = _pos(params.get("peak_factor"), 1.0)
+    # 出荷側荷姿 (搬送・梱包形態): バラピースはオリコンに詰め、オリコン/正梱ケースを
+    # カゴ台車に積んで出荷する — データに無い前提条件を仮値で派生 (物量分析ツールの
+    # 「梱包形態と入数設定」「搬送形態」の whsim 版).
+    pieces_per_orikon = _pos(params.get("pieces_per_orikon"), 30.0)  # 点/オリコン
+    units_per_cage = _pos(params.get("units_per_cage"), 14.0)        # (OC+cs)/台車
 
     in_pallets = base["in_cases"] / cases_per_pallet if cases_per_pallet else 0.0
     out_pallets = base["out_cases"] / cases_per_pallet if cases_per_pallet else 0.0
     in_pallets_peak = in_pallets * peak_factor
     in_hours = in_pallets_peak / pallet_prod if pallet_prod else 0.0
+    # バラ出荷ピース (実績、無ければ 行×入数 で補完済みの out_pieces) → オリコン数。
+    out_orikon = math.ceil(base["out_pieces"] / pieces_per_orikon) \
+        if pieces_per_orikon and base.get("out_pieces") else 0
+    # オリコン + 正梱ケースを同等荷姿としてカゴ台車に積載 (近似; chainで式は明示).
+    cage_load = out_orikon + (base.get("out_cases") or 0)
+    out_cages = math.ceil(cage_load / units_per_cage) if units_per_cage and cage_load else 0
 
     return {
         "inputs": {
@@ -334,12 +346,16 @@ def derive_volumes(model: WarehouseModel, params: dict) -> dict:
             "pallet_prod": round(pallet_prod, 2),
             "lines_per_order": round(lines_per_order, 2),
             "peak_factor": round(peak_factor, 2),
+            "pieces_per_orikon": round(pieces_per_orikon, 1),
+            "units_per_cage": round(units_per_cage, 1),
         },
         "derived": {
             "in_pallets": round(in_pallets, 1),
             "out_pallets": round(out_pallets, 1),
             "in_pallets_peak": round(in_pallets_peak, 1),
             "inbound_handling_hours": round(in_hours, 2),
+            "out_orikon": int(out_orikon),
+            "out_cages": int(out_cages),
         },
         "base": base,
     }
