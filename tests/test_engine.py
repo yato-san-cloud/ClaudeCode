@@ -1,5 +1,6 @@
 from whsim import analytic, kpis, templates
-from whsim.engine.run import run_once, run_replications
+from whsim.engine.run import representative_day, run_once, run_replications
+from whsim.schema.model import Order, OrderLine
 
 
 def _fast_model():
@@ -37,3 +38,28 @@ def test_analytic_estimate_is_in_the_same_ballpark_as_sim():
     results, _ = run_replications(m)
     sim = kpis.compute(results)
     assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.2
+
+
+def test_multiday_imported_demand_is_simulated():
+    # Regression: the real-calendar ETL anchors arrival_s to a Monday-00:00 offset,
+    # so a multi-day import pushes every order past the default 8h window. The
+    # engine must isolate a representative day (re-based to t=0) and actually
+    # process those orders — not replay an empty pre-dawn window (orders_arrived 0).
+    m = _fast_model()
+    m.orders.profile.rate_per_hr = 0.0  # demand comes only from the explicit orders
+    sku = m.items[0].sku
+    orders = []
+    for day in range(3):  # 3 calendar days, activity at 09:00 and 14:00 each
+        for h in (9, 14):
+            t = float(day * 86400 + h * 3600)
+            orders.append(Order(order_id=f"D{day}H{h}", arrival_s=t,
+                                lines=[OrderLine(sku=sku, qty=1)]))
+    m.orders.outbound = orders
+
+    eff = representative_day(m)
+    assert len(eff.orders.outbound) == 2                  # one day's worth
+    assert min(o.arrival_s for o in eff.orders.outbound) == 0.0  # re-based to t=0
+    assert eff.simulation.duration_s >= 5 * 3600.0        # active span + drain tail
+
+    k = kpis.compute(run_replications(m)[0])
+    assert k["orders_arrived"] > 0 and k["orders_completed"] > 0

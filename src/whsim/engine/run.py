@@ -43,11 +43,51 @@ class RunResult:
     cost: dict = field(default_factory=dict)
 
 
+def representative_day(model: WarehouseModel) -> WarehouseModel:
+    """Pick one representative day to simulate when imported demand spans many days.
+
+    The real-calendar ETL (``analysis.ingest``) anchors each order's ``arrival_s``
+    to a Monday-00:00 offset so the BI views keep the true weekday/hour. That pushes
+    every order past the default 8h window (first activity lands at ~08:00 = 28800s),
+    so the engine would otherwise replay an empty pre-dawn window and process ZERO
+    orders. Here we isolate the busiest single day (the sizing-relevant peak),
+    re-base it so its first order starts at t=0, and size the window to that day's
+    active span plus a drain tail — so utilisation/KPIs reflect a real working day
+    instead of being diluted across nights and weekends. The saved multi-day orders
+    are untouched (this returns a copy); profile / single-day demand passes through.
+    """
+    orders = model.orders.outbound
+    if len(orders) < 2:
+        return model
+    days: dict[int, list] = {}
+    for o in orders:
+        days.setdefault(int((o.arrival_s or 0.0) // 86400), []).append(o)
+    if len(days) < 2:
+        return model  # already a single day — honour the authored window
+    best = max(days, key=lambda d: (len(days[d]), -d))  # busiest; ties → earliest
+    day_orders = days[best]
+    first = min(o.arrival_s or 0.0 for o in day_orders)
+    last = max(o.arrival_s or 0.0 for o in day_orders)
+    m = model.model_copy(deep=True)
+    rebased = []
+    for o in day_orders:
+        oo = o.model_copy(deep=True)
+        oo.arrival_s = max(0.0, (o.arrival_s or 0.0) - first)
+        rebased.append(oo)
+    rebased.sort(key=lambda x: x.arrival_s)
+    m.orders.outbound = rebased
+    # Active span + a 2h drain tail so the last orders can complete; floored so a
+    # degenerate (near-instant) day still produces a sane window.
+    m.simulation.duration_s = max(3600.0, (last - first) + 2 * 3600.0)
+    return m
+
+
 def run_once(
     model: WarehouseModel,
     seed: int | None = None,
     replay_window_s: float | None = None,
 ) -> RunResult:
+    model = representative_day(model)
     rng = random.Random(model.simulation.random_seed if seed is None else seed)
     env = simpy.Environment()
     window = DEFAULT_REPLAY_WINDOW_S if replay_window_s is None else replay_window_s
