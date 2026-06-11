@@ -15,6 +15,7 @@ import { mountBIAnalytics } from './js/bianalytics.js';
 import { mountPhaseHint } from './js/phasehint.js';
 import { mountTimetable } from './js/timetable.js';
 import { mountStorage } from './js/storage.js';
+import { mountCost } from './js/cost.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
 import { mountNotes } from './js/notes.js';
@@ -1105,7 +1106,7 @@ function switchView(view) {
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
       || view === 'bi' || view === 'bianalytics' || view === 'design'
-      || view === 'storage'
+      || view === 'storage' || view === 'cost'
       || view === 'viewpng')  // ⑤提案 carries its own ③検証 strip (pstoryKpis)
       ? 'none' : '';
   // ④検証: in the 2D/3D replay views the verdict + KPIs read as the page HERO
@@ -1140,6 +1141,7 @@ function switchView(view) {
   if (view === 'notes') mountNotesView();
   if (view === 'timetable') mountTimetableView();
   if (view === 'storage') mountStorageView();
+  if (view === 'cost') mountCostView();
   if (view === 'overview') mountOverviewView();
   if (view === 'bi') mountBIView();
   if (view === 'bianalytics') mountBIAnalyticsView();
@@ -1157,6 +1159,7 @@ const VIEW_PHASE = {
   dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze',
   design: 'design', storage: 'design', timetable: 'design', materialflow: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate',
+  cost: 'design',
   viewpng: 'propose', compare: 'propose', export: 'propose',
 };
 
@@ -1251,6 +1254,14 @@ async function fetchLayoutFor(name) {
 function mountStorageView() {
   if (S.storage) { S.storage.refresh(); return; }
   S.storage = mountStorage($('storage'), {
+    getProject: () => S.project,
+    toast: (m, k) => toast(m, k),
+  });
+}
+
+function mountCostView() {
+  if (S.cost) { S.cost.refresh(); return; }
+  S.cost = mountCost($('cost'), {
     getProject: () => S.project,
     toast: (m, k) => toast(m, k),
   });
