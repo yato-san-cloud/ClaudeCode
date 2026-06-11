@@ -128,6 +128,14 @@ function injectStyle() {
     background:var(--accent);color:var(--ink-onAccent,#04222c);font:inherit;font-weight:700;cursor:pointer}
   .bi-apply-btn:hover{background:var(--accent-hover)}
   .bi-apply-btn:disabled{opacity:.55;cursor:wait}
+  /* 稼働日カレンダ weekday toggles */
+  .bi-cal{display:flex;gap:5px;flex-wrap:wrap;margin:2px 0 4px}
+  .bi-wd{width:30px;height:30px;border-radius:8px;border:1px solid var(--line-strong,rgba(120,140,170,.4));
+    background:var(--accent-tint-2,rgba(22,192,222,.12));color:var(--ink-primary);font:inherit;font-size:12px;
+    font-weight:700;cursor:pointer;transition:background var(--dur-1) var(--ease-out)}
+  .bi-wd:hover{border-color:var(--accent)}
+  .bi-wd.off{background:transparent;color:var(--ink-tertiary);border-style:dashed;text-decoration:line-through}
+  @media (prefers-reduced-motion: reduce){ .bi-wd{transition:none} }
   `;
   document.head.appendChild(s);
 }
@@ -165,6 +173,7 @@ export function mountBI(el, opts = {}) {
   let showPeak = false; // right pane: 平常 vs ピーク toggle
   let piecesPerOrikon = 30; // 仮値: オリコン入数 (点/OC) — バラ出荷の荷姿変換
   let unitsPerCage = 14;    // 仮値: カゴ台車積載 ((OC+ケース)/台)
+  const nonworking = new Set(); // 非稼働日 weekday indices (0=月 … 6=日)
 
   // Seed 仮値 from server volumes once, so sliders open near the real numbers.
   function seedRecipes() {
@@ -263,6 +272,19 @@ export function mountBI(el, opts = {}) {
         <div class="bi-m"><div class="k">出荷 ケース/日</div><div class="v">${fmt(vol.out_cases)}<span class="u">c</span></div></div>
         <div class="bi-m"><div class="k">入荷 ケース/日 ${estIn}</div><div class="v">${fmt(vol.in_cases)}<span class="u">c</span></div></div>
         <div class="bi-m"><div class="k">平均入数</div><div class="v">${fmt(vol.avg_case_qty, 1)}<span class="u">点/c</span></div></div>
+      </div>`;
+
+    // 稼働日カレンダ: mark 非稼働日 (曜日) → その分の物量を稼働日に寄せ、/日 を再計算.
+    const WDLABEL = ['月', '火', '水', '木', '金', '土', '日'];
+    const calendarCard = `
+      <div class="bi-derive">
+        <div class="dl">稼働日カレンダ（非稼働日を除外し物量を稼働日へ寄せる）</div>
+        <div class="bi-cal">
+          ${WDLABEL.map((lab, i) => `<button type="button" class="bi-wd${nonworking.has(i) ? ' off' : ''}"
+            data-wd="${i}" aria-pressed="${nonworking.has(i)}" title="${nonworking.has(i) ? '非稼働' : '稼働'}">${lab}</button>`).join('')}
+        </div>
+        <div class="bi-chain">稼働日 <b>${fmt(vol.working_days)}日</b>分の平均で表示中。
+          ${nonworking.size ? `${Array.from(nonworking).sort().map((i) => WDLABEL[i]).join('・')}曜を非稼働として除外。` : '土日や祝日のボタンを押すと、その日の物量を稼働日に振り分けて再計算します。'}</div>
       </div>`;
 
     const deriveCard = `
@@ -389,6 +411,7 @@ export function mountBI(el, opts = {}) {
           ${(vol.working_days || 1) > 1 ? `<span class="bi-badge">稼動日 ${fmt(vol.working_days)}日の平均</span>` : ''}
           <span class="bi-badge" style="margin-left:auto">${esc(vol.engine || 'DuckDB')}</span></div>
         ${baseGrid}
+        ${calendarCard}
         ${deriveCard}
         ${linesPiecesCard}
         ${ordersLinesCard}
@@ -546,6 +569,16 @@ export function mountBI(el, opts = {}) {
   function wire() {
     const on = (sel, ev, fn) => { const n = root.querySelector(sel); if (n) n[ev] = fn; };
 
+    // 稼働日カレンダ: toggle a weekday's 稼働/非稼働 → refetch volumes (server
+    // redistributes onto working days) → re-render with the new daily averages.
+    root.querySelectorAll('.bi-wd[data-wd]').forEach((b) => {
+      b.onclick = () => {
+        const i = parseInt(b.dataset.wd, 10);
+        if (nonworking.has(i)) nonworking.delete(i); else nonworking.add(i);
+        load();   // refetch /bi/volumes?nonworking=… then render()
+      };
+    });
+
     // ケース → パレット (existing): drives 格納 pallets + putaway 人時.
     const updateCpp = () => {
       const cppEl = root.querySelector('#bi-cpp');
@@ -629,6 +662,7 @@ export function mountBI(el, opts = {}) {
           cases_per_pallet: cpp, pallet_prod: palletProd,
           lines_per_order: linesPerOrder, peak_factor: peak,
           pieces_per_orikon: piecesPerOrikon, units_per_cage: unitsPerCage,
+          nonworking: Array.from(nonworking).sort((a, b) => a - b),
         };
         let r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/apply`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -672,7 +706,9 @@ export function mountBI(el, opts = {}) {
     const name = getProject();
     if (!name) { render(); return; }
     try {
-      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/volumes`);
+      const nw = Array.from(nonworking).sort((a, b) => a - b).join(',');
+      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/volumes`
+        + (nw ? `?nonworking=${encodeURIComponent(nw)}` : ''));
       if (!r.ok) throw new Error(r.statusText);
       vol = await r.json();
       loadErr = null;

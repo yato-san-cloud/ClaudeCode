@@ -20,9 +20,15 @@ import pandas as pd
 from whsim.schema.model import WarehouseModel
 
 
-def base_volumes(model: WarehouseModel) -> dict:
+def base_volumes(model: WarehouseModel, nonworking: set[int] | None = None) -> dict:
     """Aggregate the base volumes we genuinely have, via DuckDB. Pallet/case
-    *derivations* are intentionally left to the client (provisional 仮値)."""
+    *derivations* are intentionally left to the client (provisional 仮値).
+
+    ``nonworking`` is a set of weekday indices (0=月 … 6=日) the user has marked
+    as 非稼働日 (物量分析ツールの稼動日設定). Those days are dropped from the working
+    calendar, so the /日 averages divide by FEWER days — i.e. the excluded days'
+    volume is redistributed onto the working days (the total is unchanged)."""
+    nonworking = set(nonworking or ())
     items = {it.sku: it for it in model.items}
     rows = []
     for o in model.orders.outbound:
@@ -87,10 +93,16 @@ def base_volumes(model: WarehouseModel) -> dict:
     # 稼動日カレンダ (物量分析ツール Default): a day with even 1pcs of movement is
     # a working day. The /日 figures are TRUE daily averages over those days —
     # without this a multi-day import showed the period TOTAL labelled "/日".
-    out_days = max(1, len({int((o.arrival_s or 0.0) // 86400)
-                           for o in model.orders.outbound})) if rows else 1
-    in_days = max(1, len({int((o.arrival_s or 0.0) // 86400)
-                          for o in (model.orders.inbound or [])})) \
+    # 非稼働日 (nonworking weekdays, 0=月) drop their days from the divisor so the
+    # remaining working days absorb the volume (period total stays the same).
+    def _work_days(orders) -> int:
+        days = {int((o.arrival_s or 0.0) // 86400) for o in orders}
+        if nonworking:
+            days = {d for d in days if (d % 7) not in nonworking}
+        return max(1, len(days))
+
+    out_days = _work_days(model.orders.outbound) if rows else 1
+    in_days = _work_days(model.orders.inbound) \
         if (model.orders.inbound and not in_estimated) else out_days
     if in_estimated:
         in_days = out_days  # estimated inbound tracks the outbound calendar
@@ -108,6 +120,7 @@ def base_volumes(model: WarehouseModel) -> dict:
         "out_estimated": out_estimated,
         "working_days": out_days,
         "in_working_days": in_days,
+        "nonworking": sorted(nonworking),
     }
 
 
@@ -321,7 +334,14 @@ def derive_volumes(model: WarehouseModel, params: dict) -> dict:
     (cases_per_pallet, pallet_prod[allets/hr], lines_per_order?, peak_factor?),
     derive inbound/outbound pallet counts and handling-hour estimates. Inputs
     are clamped to sane ranges so a bad slider value never blows up."""
-    base = base_volumes(model)
+    # 非稼働日 (weekday indices) flow through to the daily-average divisor.
+    nw = params.get("nonworking")
+    nonworking = set()
+    if isinstance(nw, (list, tuple, set)):
+        nonworking = {int(x) for x in nw if str(x).strip().isdigit() or isinstance(x, int)}
+    elif isinstance(nw, str) and nw.strip():
+        nonworking = {int(x) for x in nw.split(",") if x.strip().isdigit()}
+    base = base_volumes(model, nonworking)
 
     def _pos(v, default):
         try:

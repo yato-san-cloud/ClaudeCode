@@ -16,11 +16,13 @@ router = APIRouter()
 
 
 @router.get("/api/projects/{name}/bi/volumes")
-def api_bi_volumes(name: str):
+def api_bi_volumes(name: str, nonworking: str | None = None):
     """物量BI: base volumes aggregated in DuckDB. Pallet/case derivations are done
-    client-side from provisional 仮値 (so sliders feel instant)."""
+    client-side from provisional 仮値 (so sliders feel instant). ``nonworking`` is a
+    comma list of weekday indices (0=月) to drop from the working calendar (非稼働日)."""
     from whsim import bi
-    return bi.base_volumes(_open(name).load_model())
+    nw = {int(x) for x in (nonworking or "").split(",") if x.strip().isdigit()}
+    return bi.base_volumes(_open(name).load_model(), nw)
 
 
 @router.get("/api/projects/{name}/bi/analysis")
