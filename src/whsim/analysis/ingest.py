@@ -35,17 +35,35 @@ def build_orders(df: pd.DataFrame) -> tuple[list[Order], list[Item], dict]:
         return [], [], summary
 
     d = df.copy()
+    n_in = len(d)
     # Clean: drop blank/null SKUs, coerce qty, keep positive quantities only.
     # (astype(str) on a str-dtype column turns None into float nan, which would
     # slip past the != "" guard — so drop nulls first, then block nan/none too.)
+    # Track what gets dropped + why so the UI can show the SLC-style「確認」.
+    cleansing = {"rows_in": n_in, "dropped_no_sku": 0, "dropped_zero_qty": 0,
+                 "bad_date": 0, "qty_outliers": 0}
+    before = len(d)
     d = d[d["sku"].notna()]
     d["sku"] = d["sku"].astype(str).str.strip()
     d = d[(d["sku"] != "") & (~d["sku"].str.lower().isin(["nan", "none"]))]
+    cleansing["dropped_no_sku"] = before - len(d)
     d["qty"] = pd.to_numeric(d.get("qty"), errors="coerce").fillna(0)
+    before = len(d)
     d = d[d["qty"] > 0]
+    cleansing["dropped_zero_qty"] = before - len(d)
     if d.empty:
+        summary["cleansing"] = cleansing
         return [], [], summary
     d["qty"] = d["qty"].round().astype(int)
+    # 異常値の目印 (drop はしない; 人が確認できるよう件数だけ報告): qty が中央値の
+    # ~50倍を超える極端な行を outlier として数える (SLC の「異常値タブ」相当の軽量版).
+    try:
+        med = float(d["qty"].median()) or 1.0
+        cleansing["qty_outliers"] = int((d["qty"] > med * 50).sum())
+        cleansing["qty_median"] = round(med, 1)
+        cleansing["qty_max"] = int(d["qty"].max())
+    except Exception:  # noqa: BLE001 — diagnostics only, never fatal
+        pass
 
     # Effective datetime per row: prefer a real timestamp, else the date.
     dt = pd.Series(pd.NaT, index=d.index, dtype="datetime64[ns]")
@@ -131,6 +149,11 @@ def build_orders(df: pd.DataFrame) -> tuple[list[Order], list[Item], dict]:
     skus = list(dict.fromkeys(d["sku"].tolist()))
     items = [Item(sku=s, name=s) for s in skus]
 
+    # bad_date: rows that had a date column but failed to parse (kept anyway, on a
+    # synthetic timeline) — surfaced so the user can fix the source if they want.
+    if "date" in df.columns and dated:
+        cleansing["bad_date"] = int(d["__dt"].isna().sum())
+    summary["cleansing"] = cleansing
     summary.update({
         "orders": len(orders),
         "lines": int(sum(len(o.lines) for o in orders)),

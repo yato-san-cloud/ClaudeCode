@@ -146,6 +146,12 @@ function injectStyle() {
   .da-map-chip i{font-style:normal;color:var(--ink-primary,#16202e)}
   .da-map-chip.miss{border-color:var(--warn,#f5b05a)}
   .da-map-chip.miss i{color:var(--warn,#b7791f)}
+  .da-clean .da-clean-chip{font-size:var(--fs-xs,12px);color:var(--ink-secondary,#52677c);
+    background:var(--bg-app,#fff);border:1px solid var(--line,rgba(120,140,170,.18));border-radius:999px;padding:3px 11px}
+  .da-clean-chip b{font-family:var(--font-mono);color:var(--ink-primary,#16202e)}
+  .da-clean-chip.warn{border-color:var(--warn,#f5b05a)} .da-clean-chip.warn b{color:var(--warn,#b7791f)}
+  .da-clean-chip.bad{border-color:var(--bad,#c4453f)} .da-clean-chip.bad b{color:var(--bad,#c4453f)}
+  .da-clean-note{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);margin-top:5px}
   /* ── drag-and-drop affordance (drop a CSV/Excel anywhere on the panel) ── */
   #dataanalysis.da-drag, .da-drag{position:relative}
   .da-drag::after{content:"⤓ ここにCSV/Excelをドロップして取り込み";
@@ -481,6 +487,7 @@ export function mountDataAnalysis(el, opts = {}) {
                   <div class="da-map-rows">${lastImport.item_mapping.map((mp) =>
                     `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
                        <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}</div>` : ''}
+             ${cleansingHtml(lastImport.summary && lastImport.summary.cleansing)}
            </div>`
         : '') +
       (b
@@ -555,6 +562,27 @@ export function mountDataAnalysis(el, opts = {}) {
       const lab = root.querySelector('[data-master-name]');
       if (lab) lab.textContent = masterFile ? `商品マスタ: ${masterFile.name}` : '';
     };
+  }
+
+  // クレンジング確認 (SLC「異常値タブ」の軽量版): 取込時に落とした行と異常値を表示。
+  function cleansingHtml(c) {
+    if (!c) return '';
+    const chip = (label, n, cls) => (n
+      ? `<span class="da-clean-chip${cls ? ' ' + cls : ''}">${label} <b>${Number(n).toLocaleString()}</b></span>` : '');
+    const chips = [
+      chip('読込行', c.rows_in, ''),
+      chip('SKU空で除外', c.dropped_no_sku, 'warn'),
+      chip('数量0で除外', c.dropped_zero_qty, 'warn'),
+      chip('日付不正(仮timeline)', c.bad_date, 'warn'),
+      chip('数量の異常値', c.qty_outliers, 'bad'),
+    ].filter(Boolean).join('');
+    if (!chips) return '';
+    const note = c.qty_outliers
+      ? `中央値 ${esc(String(c.qty_median))} に対し最大 ${esc(String(c.qty_max))}。元データの確認をおすすめします。`
+      : '除外行はオーダー化していません（元データ修正で取り込めます）。';
+    return `<div class="da-map-h" style="margin-top:8px">クレンジング確認</div>
+      <div class="da-map-rows da-clean">${chips}</div>
+      <div class="da-clean-note">${note}</div>`;
   }
 
   // Analyze an uploaded shipments file (describe it) and remember it so the user
