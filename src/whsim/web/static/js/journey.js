@@ -33,6 +33,28 @@ const VIEW_LABEL = {
   export: 'エクスポート', chat: 'OCTA', notes: '知見',
 };
 
+// One-line "what this view does" — surfaced as a sub-tab tooltip (title) so the
+// now-many views are recognisable without clicking (recognition over recall).
+const VIEW_DESC = {
+  overview: '案件の概要・準備状況チェック',
+  dataanalysis: '取込データのKPI・チャート（物量サマリ）',
+  bianalytics: '言葉で問う：ABC・曜日×時間・SKU構成',
+  bi: '仮値で荷姿変換し基礎物量を作る（→人員配置）',
+  design: 'レイアウト・ゾーン・棚を配置/編集',
+  storage: '物量から必要保管設備・坪数を試算→配置',
+  timetable: '工程別の必要人員を時間帯で配置',
+  materialflow: '工程フローの荷役物量（→人員配置）',
+  cost: '解析的に6費目を積み上げ（実行不要・爆速）',
+  analysis: '捌けるかの判定・KPI・改善提案',
+  view2d: '動きの2Dアニメ＋混雑ヒート',
+  view3d: '3Dで設備・人・搬送を可視化',
+  viewpng: '提案PNG（①課題→⑤裏付け）',
+  compare: '現行 vs 代替案の比較（投資回収）',
+  export: '提案書(PPTX/PDF)を書き出す',
+  chat: 'OCTA（横断アシスタント）',
+  notes: '知見ボード（横断メモ）',
+};
+
 // Phases that require a completed run (hasRun) before their KPIs/output are real.
 const RUN_REQUIRED = new Set(['validate', 'propose']);
 // Phases that are more useful once data is imported (soft hint only).
@@ -126,6 +148,10 @@ function injectStyle() {
 }
 
 // --- Component ----------------------------------------------------------------
+
+// One-line description of a view (shared with the phase-hint banner so the
+// "what am I looking at" line is consistent across desktop tooltip + mobile).
+export function viewDesc(v) { return VIEW_DESC[v] || ''; }
 
 export function mountJourney(el, opts = {}) {
   injectStyle();
@@ -255,6 +281,7 @@ export function mountJourney(el, opts = {}) {
           // applied to the referenced panel if present (see linkPanels()).
           `<button class="jn-sub" data-view="${v}" role="tab" id="jn-tab-${v}"`
           + ` aria-controls="panel-${v}" aria-selected="false" tabindex="-1"`
+          + (VIEW_DESC[v] ? ` title="${esc(VIEW_DESC[v])}"` : '')
           + `>${esc(VIEW_LABEL[v] || v)}</button>`).join('');
         html += '<span class="jn-sub-hint" data-jn-subhint hidden></span>';
         // Arrow-key affordance lives at the end of the row (own lane via margin).
@@ -286,8 +313,12 @@ export function mountJourney(el, opts = {}) {
         const { locked } = phaseStatus(p, state);
         if (locked) hint = '🔒 実行するとここで結果を確認できます';
         else if (DATA_HINTED.has(p.id) && !state.hasData) hint = 'データ取込後がおすすめ';
+        // Otherwise show what the ACTIVE sub-view does (recognition aid, touch-
+        // friendly — a persistent "what am I looking at" line, not just a tooltip).
+        else hint = VIEW_DESC[activeView] || '';
       } else {
-        hint = activeView === 'chat' ? 'OCTA（横断アシスタント）' : '知見ボード（横断メモ）';
+        hint = VIEW_DESC[activeView]
+          || (activeView === 'chat' ? 'OCTA（横断アシスタント）' : '知見ボード（横断メモ）');
       }
       hintEl.textContent = hint;
       hintEl.hidden = !hint;

@@ -117,13 +117,15 @@ export function mountPhaseHint(el, opts = {}) {
     else if (p.ctaTargetView) onCta(p.ctaTargetView);
   };
 
-  function show(phaseId, { empty: isEmpty = false } = {}) {
+  function show(phaseId, { empty: isEmpty = false, desc = '' } = {}) {
     const p = PHASES[phaseId];
     if (!p) { hide(); return; }
     current = phaseId;
     currentEmpty = !!isEmpty;
 
-    sub.textContent = p.subtitle;
+    // Phase goal + the ACTIVE view's one-liner (recognition aid, mobile-visible):
+    // 「<phase goal> ・ <view desc>」 so the user always sees what they're on.
+    sub.textContent = desc ? `${p.subtitle} ・ ${desc}` : p.subtitle;
     // ④検証が未実行のときは、CTA自体を実行アクションにする(結果が無いのに
     // 「提案をまとめる」と促さない)。それ以外は各フェーズ既定のCTA文言。
     const runCta = phaseId === 'validate' && isEmpty;

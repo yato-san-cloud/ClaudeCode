@@ -8,7 +8,7 @@ import { mountCody, codyAvatarSVG } from './js/cody.js';
 import { mountChat } from './js/chat.js';
 import { mountSettings } from './js/settings.js';
 import { mountOnboarding } from './js/onboarding.js';
-import { mountJourney } from './js/journey.js';
+import { mountJourney, viewDesc } from './js/journey.js';
 import { mountOverview } from './js/overview.js';
 import { mountBI } from './js/bi.js';
 import { mountBIAnalytics } from './js/bianalytics.js';
@@ -1173,7 +1173,7 @@ function updatePhaseHint(view) {
   if (phase === 'validate' || phase === 'propose') empty = !S.hasRun;
   else if (phase === 'analyze') empty = !S.hasData;
   else if (phase === 'intake') empty = !S.project;
-  S.phaseHint.show(phase, { empty });
+  S.phaseHint.show(phase, { empty, desc: viewDesc(view) });
 }
 
 function mountBIAnalyticsView() {
