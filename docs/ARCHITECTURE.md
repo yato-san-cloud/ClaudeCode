@@ -47,11 +47,12 @@
 - `engine/`：`processes.py` / `graph.py`（壁考慮グリッド＋Dijkstra＝**timing権威**）/ `navnet.py`（MapMaker風 Delaunay waypoint網＝**viz層**、facing開放面ピック点）/ `build.py` / `run.py` / `routing.py` / `scenarios.py`（dotted-path what-if）。
 
 ### 設計 / 在庫
-- `design.py`（`materialize_racks`：parametric/authored shelves→concrete locations、棚名→ロケ名伝播）/ `slotting.py`（ABC割付）/ `datagen.py`（不足生成）/ `racktypes.py`（6種プリセット＝**JS のミラー源**、`/api/racktypes`）。
+- `design.py`（`materialize_racks`：parametric/authored shelves→concrete locations、棚名→ロケ名伝播）/ `slotting.py`（ABC割付）/ `datagen.py`（不足生成）/ `racktypes.py`（9種プリセット＝**JS のミラー源**、`/api/racktypes`；台あたり間口/設備単価/償却月の unit economics 付き）。
+- `storage.py` — **保管設備の試算**（物量→保管方法→間口/台数/坪数→参考保管費；LOGISTEED 設備費用算出ステップ）＋ `place_equipment`（試算結果を ShelfArea 列として保管ゾーンへ自動配置、`POST /storage/apply-layout`）。
 - ※ `design`/`slotting`/`datagen` は小モジュール群。将来 `design/` パッケージへ統合候補。
 
 ### 分析 / BI（2系統）
-- `bi.py`（DuckDB **物量集計**）/ `analysis/`（WMSデータ分析：`analyses` `insights` `staffing` `data_io` `report` `sample`）/ `analytic.py`（M/M/c oracle）/ `kpis.py`（イベント→KPI＋日本語verdict）/ `timetable.py`（人員タイムチャート、**JSミラー parity test 有り**）/ `workmethod.py`。
+- `bi.py`（DuckDB **物量集計**＋`derive_volumes` 仮値派生：パレット/オリコン/カゴ台車の荷姿変換。`bi/apply`→`bi.json`→`timetable/from-bi` が **BI→タイムチャートの橋**）/ `analysis/`（WMSデータ分析：`analyses` `insights` `staffing` `data_io` `report` `sample` ＋ `ingest.py`＝出荷CSV→model.orders の **ETL**、`POST /import/shipments`）/ `analytic.py`（M/M/c oracle）/ `kpis.py`（イベント→KPI＋日本語verdict）/ `timetable.py`（人員タイムチャート、**JSミラー parity test 有り**）/ `workmethod.py`。
 
 ### レンダ
 - `render/`：`replay.py`（**replay契約**）/ `png2d.py` / `shelves.py`（ロケ→棚ラン；authored shelf は1棚=1ラン、name/facing/cell sku-qty 付き）/ `anim2d.py` / `fonts.py` / `heatmap.py`。
@@ -63,7 +64,8 @@
 - シェル：`app.js`（bootstrap・`switchView`・2Dキャンバス・mount配線）。抽出済：`state.js`（共有`S`シングルトン）・`imports.js`（取込ハンドラ）・`projectmenu.js`。共有：`util.js`（`$`/`api`/`esc`）・`constants.js`（ラベル/色マップ）。
 - 動線：`journey.js`（5フェーズ stepper）・`phasehint.js`・`overview.js`（①取込ホーム＋取込/基本条件）・`onboarding.js`。
 - 編集/3D：`designer.js`（ファサード）→`designer/{core,constants,geometry}.js`（MapMaker式棚編集＋設備パレット）・`view3d.js`（three.js・rack_type別リアル形状・人型ピッカー・pick発光・ホバー/追従/選択）。
-- 分析/BI：`bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**ECharts**描画＝`vendor/echarts`、テーマ追従・toolbox・dispose）・`analysis.js`（KPI・判定）。
+- 分析/BI：`bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**ECharts**描画＝`vendor/echarts`、テーマ追従・toolbox・dispose）・`analysis.js`（KPI・判定）・`storage.js`（③設計「保管設計」：試算つまみ＋レイアウト配置CTA）。
+- **基礎物量チェーン**（②分析→③設計の背骨）：`bi.js` 仮値→`bi/apply`保存→`from-bi`→`whsim:load-timetable`（タイムチャート）；`materialflow.js` は「物量シミュの基礎物量を取込」で同じ from-bi を取り込む。モデル変更後は `whsim:model-changed` イベントで再オープン＋遷移。
 - その他：`compare.js` `export.js` `timetable.js`(+`timetable_solver.js`) `settings.js` `notes.js` `cody.js`(+`chat.js`)。
 
 ---

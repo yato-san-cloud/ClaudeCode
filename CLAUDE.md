@@ -24,8 +24,9 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   never fatal; partial import is fine.
 - `mapcsv.py` / `rmpm.py` — tolerant MapMaker importers (Hitachi WorldMap Map CSV /
   native `.rmpm.json`); shelves keep their MapMaker name (→ slottable location names),
-  walls/stations mapped, mm→m. `racktypes.py` — 6 storage-equipment presets served at
-  `/api/racktypes` and mirrored into the JS editor/3D (keep in parity).
+  walls/stations mapped, mm→m. `racktypes.py` — 9 storage-equipment presets (incl.
+  メザニン/移動ラック/ハンガー) with unit economics, served at `/api/racktypes` and
+  mirrored into the JS editor/3D (keep in parity).
 - `provenance.py` — tracks each subtree's source (imported/interview/provisional);
   surfaced in output as "N% your data". First-class, not bookkeeping.
 - `project.py` — persists workspace under `projects/<name>/` (gitignored runtime
@@ -43,6 +44,14 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - `design.py` — design-side helpers: `materialize_racks` expands a storage zone's
   parametric rack params (or authored MapMaker-style shelves) into the concrete
   `locations` grid, propagating shelf names to location names and re-pegging SKUs.
+- `storage.py` — 保管設備の試算 (demand → 保管方法 → 間口/台数/坪数; cost is 参考) +
+  `place_equipment` authors the sized units into the storage zone (`POST
+  /storage/apply-layout`); surfaced as the ③設計「保管設計」 view (`js/storage.js`).
+- `analysis/ingest.py` — ETL: uploaded shipments CSV → `model.orders.outbound`
+  (`POST /import/shipments`); real calendar weekday/hour survive via `arrival_s`.
+- `bi.py` `derive_volumes` — 仮値 荷姿変換 (パレット/オリコン/カゴ台車); the BI→
+  タイムチャート bridge is `bi/apply` → `bi.json` → `timetable/from-bi` (the 物量シミュ
+  CTA and マテリアルフロー「基礎物量を取込」 both consume it).
 - `cad.py` — tolerant DXF import (ezdxf) → bounds/walls/zones in meters (unit auto-detect).
 - `export_doc.py` — editable PPTX + PDF proposal (python-pptx / reportlab, CJK fonts).
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
