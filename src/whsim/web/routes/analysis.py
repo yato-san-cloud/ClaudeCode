@@ -104,10 +104,14 @@ async def api_analysis_upload(shipments: UploadFile, inbound: UploadFile | None 
 
 
 @router.post("/api/projects/{name}/import/shipments")
-async def api_import_shipments(name: str, shipments: UploadFile):
+async def api_import_shipments(name: str, shipments: UploadFile,
+                               items: UploadFile | None = None):
     """ETL: read a shipments file (CSV/Excel/JSON), auto-map its columns, and
     ingest it as the project's outbound orders so the BI views AND the SimPy run
-    use the customer's REAL demand. Returns a summary {orders, lines, skus, …}.
+    use the customer's REAL demand. An OPTIONAL 商品マスタ file enriches SKUs with
+    入数(case_qty)/名前/ABC so the 荷姿・保管設備 chain is accurate. Returns a
+    summary {orders, lines, skus, enriched, …} plus the resolved column `mapping`
+    (so the UI can show 何をどう取り込んだか — the 物量分析ツール「項目の紐付け確認」).
 
     Honours 'never blocks': unreadable files 400 with a friendly message; a file
     with no usable rows returns ok:false (the model is left untouched)."""
@@ -115,6 +119,7 @@ async def api_import_shipments(name: str, shipments: UploadFile):
 
     from whsim.analysis import ingest
     from whsim.analysis.data_io import (
+        ITEM_FIELDS,
         SHIPMENT_FIELDS,
         apply_mapping,
         initial_mapping,
@@ -126,8 +131,31 @@ async def api_import_shipments(name: str, shipments: UploadFile):
         df = load_table(raw, shipments.filename)
     except Exception as e:  # noqa: BLE001 — surface a friendly 400
         raise HTTPException(400, f"読込に失敗しました（{shipments.filename}）: {e}") from e
-    mapped = apply_mapping(df, initial_mapping(df, SHIPMENT_FIELDS), SHIPMENT_FIELDS)
-    return ingest.ingest_shipments(_open(name), mapped)
+    ship_map = initial_mapping(df, SHIPMENT_FIELDS)
+    mapped = apply_mapping(df, ship_map, SHIPMENT_FIELDS)
+
+    items_df = None
+    item_map = None
+    if items is not None:
+        iraw = await items.read()
+        try:
+            idf = load_table(iraw, items.filename)
+            item_map = initial_mapping(idf, ITEM_FIELDS)
+            items_df = apply_mapping(idf, item_map, ITEM_FIELDS)
+        except Exception:  # noqa: BLE001 — master is optional; never fail the import
+            items_df = None
+
+    result = ingest.ingest_shipments(_open(name), mapped, items_df)
+    # Surface the resolved column mapping (label → matched source column) so the
+    # client can confirm/trust the auto-紐付け. None means "not found".
+    src_by_key = {f.key: f.label for f in SHIPMENT_FIELDS}
+    result["mapping"] = [{"field": src_by_key[k], "column": v}
+                         for k, v in ship_map.items() if k in src_by_key]
+    if item_map is not None:
+        ilabel = {f.key: f.label for f in ITEM_FIELDS}
+        result["item_mapping"] = [{"field": ilabel[k], "column": v}
+                                  for k, v in item_map.items() if k in ilabel]
+    return result
 
 
 @router.get("/api/projects/{name}/storage")

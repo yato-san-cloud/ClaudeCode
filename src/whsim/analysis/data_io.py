@@ -41,6 +41,17 @@ INVENTORY_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("location", "ロケーション", ("ロケ", "location", "棚"), required=False),
 )
 
+# 商品マスタ (item master): the source of 入数 (CS入数) + 商品名 + ABC, which the
+# shipments file alone never carries — without it case_qty defaults to 1 and the
+# whole 荷姿(ケース/パレット/オリコン)・保管設備 chain understates. All but sku are
+# optional so a header-only master still loads ("never blocks").
+ITEM_FIELDS: tuple[FieldSpec, ...] = (
+    FieldSpec("sku", "SKU", ("sku", "品番", "商品コード", "コード", "jan")),
+    FieldSpec("name", "商品名", ("商品名", "品名", "name", "名称"), required=False),
+    FieldSpec("case_qty", "入数(CS入数)", ("入数", "cs入数", "ケース入数", "case", "ｹｰｽ入数", "balling"), required=False),
+    FieldSpec("abc_class", "ABC区分", ("abc", "ランク", "区分"), required=False),
+)
+
 
 def _read_csv_resilient(buf: bytes, **kwargs) -> pd.DataFrame:
     for enc in ("utf-8-sig", "utf-8", "cp932"):
@@ -125,6 +136,7 @@ __all__ = [
     "SHIPMENT_FIELDS",
     "INBOUND_FIELDS",
     "INVENTORY_FIELDS",
+    "ITEM_FIELDS",
     "list_excel_sheets",
     "load_table",
     "guess_column",

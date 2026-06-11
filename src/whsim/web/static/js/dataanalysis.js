@@ -133,7 +133,19 @@ function injectStyle() {
   .da-ingest-t{font-size:var(--fs-sm,12.5px);color:var(--ink-secondary,#52677c);min-width:240px;flex:1}
   .da-ingest-t b{color:var(--ink-primary,#16202e)}
   .da-ingest-sub{display:block;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);margin-top:2px}
-  .da-ingest .da-btn{margin-left:auto;white-space:nowrap}
+  .da-ingest .da-btn{white-space:nowrap}
+  .da-ingest .da-btn[data-act="master"]{margin-left:auto}
+  /* 取込項目の紐付け確認 (column-mapping transparency) */
+  .da-map{border:1px solid var(--line,rgba(120,140,170,.18));border-radius:12px;
+    padding:10px 14px;background:var(--bg-panel,#f7f6f3)}
+  .da-map-h{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);font-weight:700}
+  .da-map-rows{display:flex;gap:8px;flex-wrap:wrap;margin-top:5px}
+  .da-map-chip{font-size:var(--fs-xs,12px);color:var(--ink-secondary,#52677c);
+    background:var(--bg-app,#fff);border:1px solid var(--line,rgba(120,140,170,.18));
+    border-radius:999px;padding:3px 11px}
+  .da-map-chip i{font-style:normal;color:var(--ink-primary,#16202e)}
+  .da-map-chip.miss{border-color:var(--warn,#f5b05a)}
+  .da-map-chip.miss i{color:var(--warn,#b7791f)}
   /* ── drag-and-drop affordance (drop a CSV/Excel anywhere on the panel) ── */
   #dataanalysis.da-drag, .da-drag{position:relative}
   .da-drag::after{content:"⤓ ここにCSV/Excelをドロップして取り込み";
@@ -398,6 +410,8 @@ export function mountDataAnalysis(el, opts = {}) {
   setupDropZone();
   let bundle = null;
   let lastFile = null;   // remember the upload so it can be ingested into the model
+  let masterFile = null; // optional 商品マスタ (入数/名前/ABC enrichment)
+  let lastImport = null; // last ingest result (mapping/summary) for the 確認 panel
   const toast = opts.toast || (() => {});
   const getProject = opts.getProject || (() => null);
 
@@ -448,8 +462,25 @@ export function mountDataAnalysis(el, opts = {}) {
         ? `<div class="da-ingest">
              <div class="da-ingest-t">「${esc(lastFile.name)}」を読み込みました。
                <b>このデータでシミュレーションしますか？</b>
-               <span class="da-ingest-sub">出荷明細をオーダーとして取り込み、きいて分析・物量シミュ・実行に反映します。</span></div>
+               <span class="da-ingest-sub">出荷明細をオーダーとして取り込み、きいて分析・物量シミュ・実行に反映します。
+               <br>商品マスタ（任意）を足すと <b>入数(CS入数)</b> が反映され、ケース/パレット/坪数の精度が上がります。
+               <span data-master-name style="color:var(--accent)">${masterFile ? `商品マスタ: ${esc(masterFile.name)}` : ''}</span></span></div>
+             <input type="file" data-da-master accept=".csv,.xlsx,.xls,.json" hidden />
+             <button class="da-btn" data-act="master">＋ 商品マスタ（任意）</button>
              <button class="da-btn primary" data-act="ingest">このデータでシミュレーション（取り込む）→</button>
+           </div>`
+        : '') +
+      (lastImport && lastImport.mapping
+        ? `<div class="da-map">
+             <div class="da-map-h">取込項目の紐付け（自動）</div>
+             <div class="da-map-rows">${lastImport.mapping.map((mp) =>
+               `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
+                  <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}
+             </div>${(lastImport.item_mapping || []).length
+               ? `<div class="da-map-h" style="margin-top:6px">商品マスタの紐付け</div>
+                  <div class="da-map-rows">${lastImport.item_mapping.map((mp) =>
+                    `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
+                       <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}</div>` : ''}
            </div>`
         : '') +
       (b
@@ -516,6 +547,14 @@ export function mountDataAnalysis(el, opts = {}) {
     if (fileInput) fileInput.onchange = () => analyzeFile(fileInput.files[0]);
     const ingest = root.querySelector('[data-act="ingest"]');
     if (ingest) ingest.onclick = () => ingestFile();
+    const masterBtn = root.querySelector('[data-act="master"]');
+    const masterInput = root.querySelector('[data-da-master]');
+    if (masterBtn && masterInput) masterBtn.onclick = () => masterInput.click();
+    if (masterInput) masterInput.onchange = () => {
+      masterFile = masterInput.files[0] || null;
+      const lab = root.querySelector('[data-master-name]');
+      if (lab) lab.textContent = masterFile ? `商品マスタ: ${masterFile.name}` : '';
+    };
   }
 
   // Analyze an uploaded shipments file (describe it) and remember it so the user
@@ -543,11 +582,14 @@ export function mountDataAnalysis(el, opts = {}) {
     try {
       const fd = new FormData();
       fd.append('shipments', f);
+      if (masterFile) fd.append('items', masterFile);    // optional 商品マスタ
       const r = await getJSON(`/api/projects/${encodeURIComponent(proj)}/import/shipments`,
         { method: 'POST', body: fd });
       if (!r || !r.ok) { toast((r && r.message) || '取り込める明細がありませんでした。', 'error'); }
       else {
         toast(r.message || '取り込みました。', 'ok');
+        lastImport = r;          // remember the mapping so render() can show it
+        render(bundle);          // re-render to surface the 紐付け確認 panel
         // Refresh provenance / 実データ% / readiness, then show the BI on real data.
         document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: { nav: 'bianalytics' } }));
       }

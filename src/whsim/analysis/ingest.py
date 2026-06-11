@@ -140,9 +140,38 @@ def build_orders(df: pd.DataFrame) -> tuple[list[Order], list[Item], dict]:
     return orders, items, summary
 
 
-def ingest_shipments(proj, df: pd.DataFrame) -> dict:
-    """Thin I/O: build orders from a shipments frame, write them into the project
-    model (replacing outbound orders + merging referenced SKUs), and mark the
+def item_master(df: pd.DataFrame | None) -> dict[str, dict]:
+    """商品マスタ frame → {sku: {name?, case_qty?, abc_class?}} (cleaned). Empty on
+    None/empty. case_qty is coerced to a positive int; ABC normalised to A/B/C.
+    Tolerant: bad rows are skipped, never fatal."""
+    out: dict[str, dict] = {}
+    if df is None or df.empty or "sku" not in df.columns:
+        return out
+    for r in df.itertuples(index=False):
+        sku = str(getattr(r, "sku", "") or "").strip()
+        if not sku or sku.lower() in ("nan", "none"):
+            continue
+        rec: dict = {}
+        nm = str(getattr(r, "name", "") or "").strip()
+        if nm and nm.lower() not in ("nan", "none"):
+            rec["name"] = nm
+        cq = getattr(r, "case_qty", None)
+        try:
+            cqi = int(float(cq))
+            if cqi > 0:
+                rec["case_qty"] = cqi
+        except (TypeError, ValueError):
+            pass
+        abc = str(getattr(r, "abc_class", "") or "").strip().upper()
+        if abc in ("A", "B", "C"):
+            rec["abc_class"] = abc
+        out[sku] = rec
+    return out
+
+
+def ingest_shipments(proj, df: pd.DataFrame, items_df: pd.DataFrame | None = None) -> dict:
+    """Thin I/O: build orders from a shipments frame (and OPTIONALLY enrich SKUs
+    from a 商品マスタ frame), write them into the project model, and mark the
     relevant provenance subtrees IMPORTED. Returns a summary dict for the UI."""
     from whsim.provenance import Source
 
@@ -151,20 +180,40 @@ def ingest_shipments(proj, df: pd.DataFrame) -> dict:
         return {"ok": False, "summary": summary,
                 "message": "取り込める出荷明細がありませんでした（SKU・数量・日付の列をご確認ください）。"}
 
+    master = item_master(items_df)            # {} when no master supplied
+
     model = proj.load_model()
     model.orders.outbound = orders
-    # Merge SKUs we don't already know about (keep any existing item attributes).
-    known = {it.sku for it in model.items}
-    model.items.extend(it for it in items if it.sku not in known)
+    # Merge SKUs we don't already know about, applying any 商品マスタ attributes.
+    known = {it.sku: it for it in model.items}
+    enriched = 0
+    new_skus = 0
+    for it in items:
+        m = master.get(it.sku)
+        if m:                                  # apply 入数/名前/ABC from the master
+            for attr, val in m.items():
+                setattr(it, attr, val)
+            enriched += 1
+        if it.sku in known:
+            if m:                              # update an existing item's attributes
+                for attr, val in m.items():
+                    setattr(known[it.sku], attr, val)
+        else:
+            model.items.append(it)
+            new_skus += 1
     proj.save_model(model)
+    summary["enriched"] = enriched
+    summary["master_skus"] = len(master)
 
     prov = proj.load_provenance()
     prov.mark("orders", Source.IMPORTED)
-    if any(it.sku not in known for it in items):
+    if new_skus or enriched:
         prov.mark("items", Source.IMPORTED)
     proj.save_provenance(prov)
 
+    msg = (f"{summary['orders']:,}件のオーダー（{summary['lines']:,}明細・"
+           f"{summary['skus']:,}SKU）を取り込みました。")
+    if enriched:
+        msg += f" 商品マスタで{enriched:,}SKUに入数等を反映。"
     return {"ok": True, "summary": summary,
-            "provenance_summary": prov.summary(),
-            "message": (f"{summary['orders']:,}件のオーダー（{summary['lines']:,}明細・"
-                        f"{summary['skus']:,}SKU）を取り込みました。")}
+            "provenance_summary": prov.summary(), "message": msg}
