@@ -386,6 +386,7 @@ export function mountBI(el, opts = {}) {
     root.innerHTML = `
       <section class="bi-pane">
         <div class="bi-h"><h3>物量シミュ</h3><span class="sub">取込→集計→仮値で派生</span>
+          ${(vol.working_days || 1) > 1 ? `<span class="bi-badge">稼動日 ${fmt(vol.working_days)}日の平均</span>` : ''}
           <span class="bi-badge" style="margin-left:auto">${esc(vol.engine || 'DuckDB')}</span></div>
         ${baseGrid}
         ${deriveCard}

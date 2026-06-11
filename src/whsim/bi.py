@@ -84,17 +84,30 @@ def base_volumes(model: WarehouseModel) -> dict:
     avg_cq = float(avg_cq or 1.0)
     in_cases = (in_pieces / avg_cq) if avg_cq else 0.0
 
+    # 稼動日カレンダ (物量分析ツール Default): a day with even 1pcs of movement is
+    # a working day. The /日 figures are TRUE daily averages over those days —
+    # without this a multi-day import showed the period TOTAL labelled "/日".
+    out_days = max(1, len({int((o.arrival_s or 0.0) // 86400)
+                           for o in model.orders.outbound})) if rows else 1
+    in_days = max(1, len({int((o.arrival_s or 0.0) // 86400)
+                          for o in (model.orders.inbound or [])})) \
+        if (model.orders.inbound and not in_estimated) else out_days
+    if in_estimated:
+        in_days = out_days  # estimated inbound tracks the outbound calendar
+
     return {
         "engine": f"DuckDB {duckdb.__version__}",
         "avg_case_qty": round(avg_cq, 2),
-        "out_lines": round(float(out_lines or 0), 1),
-        "out_pieces": round(float(out_pieces or 0), 1),
-        "out_orders": round(float(out_orders or 0), 1),
-        "out_cases": round(float(out_cases or 0), 1),
-        "in_pieces": round(float(in_pieces), 1),
-        "in_cases": round(float(in_cases), 1),
+        "out_lines": round(float(out_lines or 0) / out_days, 1),
+        "out_pieces": round(float(out_pieces or 0) / out_days, 1),
+        "out_orders": round(float(out_orders or 0) / out_days, 1),
+        "out_cases": round(float(out_cases or 0) / out_days, 1),
+        "in_pieces": round(float(in_pieces) / in_days, 1),
+        "in_cases": round(float(in_cases) / in_days, 1),
         "in_estimated": in_estimated,
         "out_estimated": out_estimated,
+        "working_days": out_days,
+        "in_working_days": in_days,
     }
 
 
