@@ -66,6 +66,9 @@ export function mountWorkCompare(el, opts = {}) {
   let ro = null;
   let data = null;
   let running = false;
+  // The analytic recommendation handed over from ③設計「生産性試算」(pickrate).
+  // We highlight it and, after the DES run, reconcile 解析推奨 vs DES推奨.
+  let analyticPick = null;   // {id, label}
   function disposeChart() { if (chart) { try { chart.dispose(); } catch (_) { /* noop */ } chart = null; } }
 
   async function run() {
@@ -104,12 +107,26 @@ export function mountWorkCompare(el, opts = {}) {
     const d = data || {};
     const methods = d.methods || [];
     if (!methods.length) {
-      root.innerHTML = headHtml() + '<div class="wc-empty">「▶ 4方式を比較実行」を押すと、各方式を実行して比較します。</div>';
+      const ap = analyticPick
+        ? `<div class="wc-rec">解析（生産性試算）の推奨は <b>${esc(analyticPick.label)}</b>。`
+          + `「▶ 4方式を比較実行」でDESを回し、移動/仕分け以外（混雑・待ち）も含めて裏取りします。</div>`
+        : '';
+      root.innerHTML = headHtml() + ap + '<div class="wc-empty">「▶ 4方式を比較実行」を押すと、各方式を実行して比較します。</div>';
       wireHead(); return;
     }
     const rec = d.recommend || {};
     const recRow = (m) => (m.id === rec.id);
+    // baton reconciliation: did the heavyweight DES agree with the fast analytic?
+    let reconcile = '';
+    if (analyticPick && rec.id) {
+      const agree = analyticPick.id === rec.id;
+      const desName = (methods.find((m) => m.id === rec.id) || {}).label || rec.name || rec.id;
+      reconcile = `<div class="wc-rec" style="border-left-color:${agree ? 'var(--accent)' : 'var(--warn,#f5b05a)'}">`
+        + `解析（生産性試算）の推奨：<b>${esc(analyticPick.label)}</b> → DES検証の推奨：<b>${esc(desName)}</b>`
+        + `　<b>${agree ? '✓ 一致（裏取りOK）' : '⚠ 不一致 — 移動/仕分け以外（混雑・待ち）が効いています'}</b></div>`;
+    }
     root.innerHTML = headHtml()
+      + reconcile
       + (rec.name ? `<div class="wc-rec">注文プロファイルからの推奨：<b>${esc(rec.name)}</b> — ${esc(rec.reason || '')}</div>` : '')
       + '<div class="wc-ec" data-ec></div>'
       + '<table class="wc-tbl"><thead><tr>'
@@ -119,8 +136,10 @@ export function mountWorkCompare(el, opts = {}) {
         const k = m.kpis; const dl = m.delta || {};
         const dcost = m.id === d.baseline_id ? '<span class="wc-note">基準</span>'
           : `<span class="${dl.cost_per_order <= 0 ? 'wc-d-up' : 'wc-d-dn'}">${pctStr(dl.cost_per_order)}</span>`;
+        const apTag = (analyticPick && analyticPick.id === m.id)
+          ? ' <span class="wc-note" style="color:var(--accent);font-weight:700">解析推奨</span>' : '';
         return `<tr class="${recRow(m) ? 'rec' : ''}">`
-          + `<td><span class="wc-sw" style="background:${COLORS[m.id] || '#888'}"></span>${esc(m.label)}</td>`
+          + `<td><span class="wc-sw" style="background:${COLORS[m.id] || '#888'}"></span>${esc(m.label)}${apTag}</td>`
           + `<td class="num">${m.currency || '¥'}${fmt(k.cost_per_order, 1)} ${dcost}</td>`
           + `<td class="num">${fmt(k.throughput_per_hr, 0)}</td>`
           + `<td class="num">${fmt(k.headcount)}名</td>`
@@ -209,6 +228,13 @@ export function mountWorkCompare(el, opts = {}) {
 
   return {
     refresh() { /* keep last result across revisits */ },
+    // baton from ③設計「生産性試算」: highlight that method and, if not yet run,
+    // auto-start the DES comparison so 解析→DES is one click.
+    setAnalyticPick(pick) {
+      analyticPick = pick && pick.id ? pick : null;
+      if (analyticPick && !data && !running) { run(); return; }
+      render();
+    },
     dispose() {
       document.removeEventListener('themechange', onTheme);
       if (ro) { ro.disconnect(); ro = null; }

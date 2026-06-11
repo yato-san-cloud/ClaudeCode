@@ -20,8 +20,10 @@ const PHASES = [
   // MapMaker距離 — the SLC-style "step ②" that picks オーダー/マルチ/トータル
   // before any heavyweight DES run.
   { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'timetable', 'pickrate', 'cost'] },
-  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d'] },
-  { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'workcompare', 'compare', 'export'] },
+  // ④検証 = DESで裏取りするレーン: KPI判定・2D/3D・作業方法比較(DES)。生産性試算
+  // (③設計の解析・爆速)で当てた方式を、ここで重厚なDESで精密に検証する位置づけ。
+  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d', 'workcompare'] },
+  { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'compare', 'export'] },
 ];
 
 // Cross-cutting views: available in every phase, pinned separately (own lane).
@@ -55,7 +57,7 @@ const VIEW_DESC = {
   view2d: '動きの2Dアニメ＋混雑ヒート',
   view3d: '3Dで設備・人・搬送を可視化',
   viewpng: '提案PNG（①課題→⑤裏付け）',
-  workcompare: 'オーダー/マルチ/ゾーン/種まきを実行比較（移動 vs 仕分け）',
+  workcompare: 'DESで4方式を裏取り（生産性試算の解析推奨を検証）',
   compare: '現行 vs 代替案の比較（投資回収）',
   export: '提案書(PPTX/PDF)を書き出す',
   chat: 'OCTA（横断アシスタント）',

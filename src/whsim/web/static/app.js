@@ -1169,11 +1169,11 @@ function switchView(view) {
 const VIEW_PHASE = {
   overview: 'intake',
   // ②分析 analysis home: 物量サマリ / 対話分析 / 基礎物量 (volume what-if).
-  dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze',
-  design: 'design', storage: 'design', timetable: 'design', materialflow: 'design',
-  analysis: 'validate', view2d: 'validate', view3d: 'validate',
+  dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze', materialflow: 'analyze',
+  design: 'design', storage: 'design', timetable: 'design',
+  analysis: 'validate', view2d: 'validate', view3d: 'validate', workcompare: 'validate',
   cost: 'design', pickrate: 'design',
-  viewpng: 'propose', workcompare: 'propose', compare: 'propose', export: 'propose',
+  viewpng: 'propose', compare: 'propose', export: 'propose',
 };
 
 // Show the phase-goal + next-step banner; for run-gated phases without a run
@@ -1369,6 +1369,14 @@ document.addEventListener('whsim:apply-run', (e) => {
 document.addEventListener('whsim:nav', (e) => {
   const view = e && e.detail && e.detail.view;
   if (typeof view === 'string' && view) switchView(view);
+});
+
+// Baton: ③設計「生産性試算」(解析) → ④検証「作業方法比較」(DES). Carry the
+// analytic recommendation so the DES view highlights it + reconciles 解析↔DES.
+document.addEventListener('whsim:workcompare-focus', (e) => {
+  const pick = e && e.detail;
+  switchView('workcompare');            // mounts the view if needed
+  if (S.workcompare && S.workcompare.setAnalyticPick) S.workcompare.setAnalyticPick(pick);
 });
 
 // A module imported/changed the model on disk (e.g. the 物量サマリ ETL ingested a

@@ -163,7 +163,8 @@ export function mountPickrate(el, opts = {}) {
       </div>
       ${data.has_layout ? '' : '<div class="pr-empty">保管エリア(棚)がまだ無いので床全面で概算しています。③設計でレイアウトを作るとより正確になります。</div>'}
       <div class="pr-knobs">${knobs}
-        <button class="pr-btn primary" data-act="adopt">推奨方式で設計→</button>
+        <button class="pr-btn" data-act="adopt">推奨方式で設計→</button>
+        <button class="pr-btn primary" data-act="verify">DESで裏取り→</button>
       </div>
       <div class="pr-verdict">${esc(data.verdict)}</div>
       <div class="pr-chart" data-chart></div>
@@ -193,6 +194,18 @@ export function mountPickrate(el, opts = {}) {
     });
     const adopt = root.querySelector('[data-act=adopt]');
     if (adopt) adopt.addEventListener('click', () => applyRecommended());
+    const verify = root.querySelector('[data-act=verify]');
+    if (verify) verify.addEventListener('click', () => verifyWithDES());
+  }
+
+  // baton to ④検証「作業方法比較」: hand the analytic recommendation over so the
+  // DES comparison highlights it and reconciles 解析推奨 vs DES推奨.
+  function verifyWithDES() {
+    if (!data) return;
+    const rec = (data.methods || []).find((m) => m.id === data.recommend_id);
+    if (!rec) return;
+    document.dispatchEvent(new CustomEvent('whsim:workcompare-focus',
+      { detail: { id: rec.id, label: rec.label } }));
   }
 
   // adopt the recommended method into the pick stage's work axes (POST /apply),
