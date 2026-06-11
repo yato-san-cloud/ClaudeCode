@@ -1,4 +1,4 @@
-// bianalytics.js — きいて分析ビュー. A ThoughtSpot-style "ask in words → chart"
+// bianalytics.js — 対話分析ビュー. A ThoughtSpot-style "ask in words → chart"
 // surface over the already-aggregated analysis endpoint, plus auto-insight cards
 // and three commercial-grade ECharts visualisations:
 //   ・ABCパレート  : bar (rank-coloured) + cumulative line on a second axis, with
@@ -1264,7 +1264,7 @@ export function mountBIAnalytics(el, opts = {}) {
       <div class="fact">${c.fact}</div>
       <div class="imp">${esc(c.imp)}</div>
       <div class="bia-drill">
-        <a data-nav="bi" role="link" tabindex="0">物量シミュで見る →</a>
+        <a data-nav="bi" role="link" tabindex="0">基礎物量で見る →</a>
         <a data-nav="timetable" role="link" tabindex="0">人員設計へ →</a>
       </div>
       <div class="go">→ 該当チャートへ</div>
@@ -1356,7 +1356,7 @@ export function mountBIAnalytics(el, opts = {}) {
     } catch (e) {
       loadErr = (e && e.message) ? e.message : String(e);
       render();
-      toast('きいて分析の読み込みに失敗', 'error');
+      toast('対話分析の読み込みに失敗', 'error');
     }
   }
 

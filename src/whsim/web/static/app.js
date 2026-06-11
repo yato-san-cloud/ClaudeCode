@@ -1155,7 +1155,7 @@ function switchView(view) {
 // viewId → phase id (mirrors journey.js PHASES). Cross-cutting views map to null.
 const VIEW_PHASE = {
   overview: 'intake',
-  // ②分析 analysis home: 物量サマリ / きいて分析 / 物量シミュ (volume what-if).
+  // ②分析 analysis home: 物量サマリ / 対話分析 / 基礎物量 (volume what-if).
   dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze',
   design: 'design', storage: 'design', timetable: 'design', materialflow: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate',
@@ -1187,7 +1187,7 @@ function mountBIAnalyticsView() {
   } else { S.bianalytics.refresh(); }
 }
 
-// Mount the 物量シミュ split view (ETL→material-flow); refresh on revisit.
+// Mount the 基礎物量 split view (ETL→material-flow); refresh on revisit.
 function mountBIView() {
   if (!S.bi) {
     S.bi = mountBI($('bi'), {
@@ -1336,7 +1336,7 @@ document.addEventListener('whsim:apply-run', (e) => {
 });
 
 // Cross-view drill navigation: a module asks the shell to switch views
-// (e.g. きいて分析 "物量シミュで見る →" / "人員設計へ →").
+// (e.g. 対話分析 "基礎物量で見る →" / "人員設計へ →").
 document.addEventListener('whsim:nav', (e) => {
   const view = e && e.detail && e.detail.view;
   if (typeof view === 'string' && view) switchView(view);
@@ -1344,7 +1344,7 @@ document.addEventListener('whsim:nav', (e) => {
 
 // A module imported/changed the model on disk (e.g. the 物量サマリ ETL ingested a
 // shipments CSV into orders). Re-open the project to refresh provenance / 実データ%
-// / readiness, then optionally navigate (e.g. to きいて分析 to see real demand).
+// / readiness, then optionally navigate (e.g. to 対話分析 to see real demand).
 document.addEventListener('whsim:model-changed', async (e) => {
   if (!S.project) return;
   await openProject(S.project);

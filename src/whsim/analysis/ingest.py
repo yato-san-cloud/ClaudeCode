@@ -1,7 +1,7 @@
 """Shipments → model outbound orders (the ETL that feeds the simulator).
 
 The analysis suite (`report.run_all`) only *describes* an uploaded file; nothing
-wrote it back into the project model, so the BI views (きいて分析 / 物量シミュ) and
+wrote it back into the project model, so the BI views (対話分析 / 基礎物量) and
 the SimPy run still ran on template demand. This bridges that gap: a tidy
 shipments frame (already column-mapped via ``analysis.data_io``) becomes
 ``WarehouseModel.orders.outbound`` plus the SKUs it references.

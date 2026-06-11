@@ -11,7 +11,7 @@ import * as echarts from 'echarts';
 
 // Badge tints are HTML inline styles, so theme tokens (CSS vars) resolve fine.
 const SRC = { data: { t: '実データ', c: '#2ee6a0' }, manual: { t: '手入力', c: 'var(--ink-tertiary,#8195a8)' },
-              generated: { t: '生成', c: '#f5b05a' }, bi: { t: '物量シミュ', c: '#34e3ff' },
+              generated: { t: '生成', c: '#f5b05a' }, bi: { t: '基礎物量', c: '#34e3ff' },
               none: { t: '未入力', c: '#8195a8' } };
 // Per-process node colours in the sankey, keyed by 工程セクション.
 const SECTION_HEX = { 入荷: '#5B9BD5', 出荷: '#16C0DE' };
@@ -250,7 +250,7 @@ export function mountMaterialFlow(el, opts = {}) {
         <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
         <button class="mf-btn" data-act="upload">出荷データから取込</button>
         <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
-        <button class="mf-btn" data-act="frombi">物量シミュの基礎物量を取込</button>
+        <button class="mf-btn" data-act="frombi">基礎物量を取込</button>
         <button class="mf-btn" data-act="generate">不足を生成</button>
         <span class="mf-recalc" data-mf-recalc aria-live="polite">再計算中…</span>
         <button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>
@@ -387,16 +387,16 @@ export function mountMaterialFlow(el, opts = {}) {
     });
   }
 
-  // 物量シミュ (②分析) で保存した 仮値派生の基礎物量 (bi.json → from-bi) を工程
+  // 基礎物量 (②分析) で保存した 仮値派生の基礎物量 (bi.json → from-bi) を工程
   // カードに流し込む — the BI→マテリアルフロー bridge. Untouched processes keep
-  // their current value; pulled ones are badged 物量シミュ.
+  // their current value; pulled ones are badged 基礎物量.
   async function fromBI() {
     const name = getProject();
     if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
     try {
       const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/timetable/from-bi`);
       if (!r || !r.available || !r.volumes) {
-        toast('物量シミュの基礎物量がまだありません。②分析→物量シミュで「基礎物量を保存」してください。', 'info');
+        toast('基礎物量がまだありません。②分析→基礎物量で「基礎物量を保存」してください。', 'info');
         return;
       }
       let n = 0;
@@ -405,7 +405,7 @@ export function mountMaterialFlow(el, opts = {}) {
         if (v != null && v > 0) { vol[p.id] = Math.round(v); src[p.id] = 'bi'; n += 1; }
       }
       render();
-      toast(`物量シミュの基礎物量を ${n} 工程に反映しました。`, 'ok');
+      toast(`基礎物量を ${n} 工程に反映しました。`, 'ok');
     } catch (e) {
       toast('取込に失敗: ' + (e && e.message ? e.message : e), 'error');
     }

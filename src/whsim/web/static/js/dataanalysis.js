@@ -1,5 +1,5 @@
 // dataanalysis.js — 物量サマリタブ: WMS 実データ分析 (3PL エンジン統合のフロント)。
-// ②分析の着地点（分析ホーム）: 事実チップ＋「きいて分析」「物量シミュ」へのドリルを先頭に表示.
+// ②分析の着地点（分析ホーム）: 事実チップ＋「対話分析」「基礎物量」へのドリルを先頭に表示.
 // サンプル or アップロード → /api/analysis/* → KPI・インサイト・チャートを描画.
 // チャートは ECharts (市販BI級): 物量推移(エリア+dataZoom)・ABCパレート(棒+累積%)・
 // 曜日別ピーク(棒)・時間帯ピーク(棒)・時間帯別必要人員(エリア). 自己完結 (テーマは
@@ -365,7 +365,7 @@ function staffingCard(s) {
 
 // ②分析 landing header (分析ホーム): a slim strip of fact chips derived from the
 // already-fetched bundle (「—」 when absent) + drill links to the sibling ② views
-// (きいて分析 / 物量シミュ) via the shell's `whsim:nav` CustomEvent. Pure render;
+// (対話分析 / 基礎物量) via the shell's `whsim:nav` CustomEvent. Pure render;
 // links are wired in wire().
 function homeHeader(b) {
   const k = (b && b.kpis) || null;
@@ -385,8 +385,8 @@ function homeHeader(b) {
     <span class="da-home-t">分析ホーム</span>
     ${chips.map(([l, v]) => `<span class="da-home-chip"><i>${l}</i><b>${v}</b></span>`).join('')}
     <span class="da-home-links">
-      <button type="button" class="da-home-link" data-nav="bianalytics">きいて分析 →</button>
-      <button type="button" class="da-home-link" data-nav="bi">物量シミュ →</button>
+      <button type="button" class="da-home-link" data-nav="bianalytics">対話分析 →</button>
+      <button type="button" class="da-home-link" data-nav="bi">基礎物量 →</button>
     </span>
   </div>`;
 }
@@ -462,7 +462,7 @@ export function mountDataAnalysis(el, opts = {}) {
         ? `<div class="da-ingest">
              <div class="da-ingest-t">「${esc(lastFile.name)}」を読み込みました。
                <b>このデータでシミュレーションしますか？</b>
-               <span class="da-ingest-sub">出荷明細をオーダーとして取り込み、きいて分析・物量シミュ・実行に反映します。
+               <span class="da-ingest-sub">出荷明細をオーダーとして取り込み、対話分析・基礎物量・実行に反映します。
                <br>商品マスタ（任意）を足すと <b>入数(CS入数)</b> が反映され、ケース/パレット/坪数の精度が上がります。
                <span data-master-name style="color:var(--accent)">${masterFile ? `商品マスタ: ${esc(masterFile.name)}` : ''}</span></span></div>
              <input type="file" data-da-master accept=".csv,.xlsx,.xls,.json" hidden />
@@ -570,8 +570,8 @@ export function mountDataAnalysis(el, opts = {}) {
   }
 
   // ETL: push the uploaded shipments into the project's outbound orders, so the
-  // BI (きいて分析) and the SimPy run use the REAL demand. Then refresh + jump to
-  // きいて分析 so the effect is immediate.
+  // BI (対話分析) and the SimPy run use the REAL demand. Then refresh + jump to
+  // 対話分析 so the effect is immediate.
   async function ingestFile() {
     const f = lastFile;
     const proj = getProject();

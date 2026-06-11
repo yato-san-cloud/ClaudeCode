@@ -1,4 +1,4 @@
-// bi.js — 物量シミュ (volume what-if): split-screen ETL→material-flow. Left: base volumes aggregated
+// bi.js — 基礎物量 (volume what-if): split-screen ETL→material-flow. Left: base volumes aggregated
 // in DuckDB (server) + a provisional 仮値 derivation (ケース→パレット). Right: the
 // material-flow (物量→人時) that updates live as the 仮値 sliders move, drawn with
 // ECharts (horizontal bar by 工程, coloured by 入荷/出荷 section, with the 平常/ピーク
@@ -115,7 +115,7 @@ function injectStyle() {
   .bi-retry:hover{background:var(--accent-hover)}
   .bi-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   @media (prefers-reduced-motion: reduce){ .bi-retry{transition:none} }
-  /* drill-context focus: gently emphasize the control the きいて分析 sent us to */
+  /* drill-context focus: gently emphasize the control the 対話分析 sent us to */
   .bi-focus{box-shadow:0 0 0 2px var(--accent);border-radius:var(--r-md);
     transition:box-shadow var(--dur-2) var(--ease-out)}
   @media (prefers-reduced-motion: reduce){ .bi-bar i,.bi-proc,.bi-focus{transition:none} }
@@ -144,7 +144,7 @@ export function mountBI(el, opts = {}) {
   injectStyle();
   const getProject = opts.getProject || (() => null);
   const toast = opts.toast || (() => {});
-  // Optional drill-context: the きいて分析 view navigates here and may pass a focus
+  // Optional drill-context: the 対話分析 view navigates here and may pass a focus
   // hint (e.g. {peak:true} or {abc:'A'}). app.js wires opts.getFocus; refresh()
   // can also take an explicit focus. Fully backward-compatible: no focus = today.
   const getFocus = typeof opts.getFocus === 'function' ? opts.getFocus : (() => null);
@@ -407,7 +407,7 @@ export function mountBI(el, opts = {}) {
 
     root.innerHTML = `
       <section class="bi-pane">
-        <div class="bi-h"><h3>物量シミュ</h3><span class="sub">取込→集計→仮値で派生</span>
+        <div class="bi-h"><h3>基礎物量</h3><span class="sub">取込→集計→仮値で派生</span>
           ${(vol.working_days || 1) > 1 ? `<span class="bi-badge">稼動日 ${fmt(vol.working_days)}日の平均</span>` : ''}
           <span class="bi-badge" style="margin-left:auto">${esc(vol.engine || 'DuckDB')}</span></div>
         ${baseGrid}
@@ -436,7 +436,7 @@ export function mountBI(el, opts = {}) {
 
   // Resolve a focus hint (explicit pending one wins, else opts.getFocus()) and,
   // if present, gently highlight + scroll the relevant control into view. Used
-  // by the きいて分析 drill-down; a no-op when no focus is provided.
+  // by the 対話分析 drill-down; a no-op when no focus is provided.
   function applyFocus() {
     const focus = pendingFocus || getFocus() || null;
     pendingFocus = null;
@@ -713,13 +713,13 @@ export function mountBI(el, opts = {}) {
       vol = await r.json();
       loadErr = null;
       render();
-    } catch (e) { loadErr = e && e.message ? e.message : String(e); render(); toast('物量シミュの読み込みに失敗', 'error'); }
+    } catch (e) { loadErr = e && e.message ? e.message : String(e); render(); toast('基礎物量の読み込みに失敗', 'error'); }
   }
 
   load();
   return {
     // refresh() works as before; pass a focus hint (e.g. {peak:true}) to honour
-    // a きいて分析 drill-down once the data finishes loading.
+    // a 対話分析 drill-down once the data finishes loading.
     refresh(focus) { if (focus) pendingFocus = focus; loadErr = null; vol = null; render(); load(); },
     dispose() {
       disposeChart();
