@@ -195,10 +195,25 @@ def place_equipment(model: WarehouseModel, estimate: dict) -> dict:
     x1, y1 = zone.x + zone.w - margin, zone.y + zone.h - margin
     usable_w = max(0.0, x1 - x0)
 
+    # 2層レイアウト (ピック面/バック在庫) + アイル向き: lay the PICK-face equipment
+    # (high-frequency, small bins) near the OUTPUT (pack station), and the BULK
+    # reserve (pallet/nestainer/asrs) at the far end — so fast movers sit short of
+    # the dispatch. Rows face the output side, so the pick aisle opens toward it.
+    station = model.resources.stations[0] if model.resources.stations else None
+    out_y = station.y if station else (zone.y + zone.h)   # output reference (y)
+    near_top = out_y < (zone.y + zone.h / 2)              # output is on the top side?
+    # PICK-face rack types first (near output); bulk last. Within each, racktypes
+    # ORDER is already pick→bulk-ish, so a stable key by tier suffices.
+    _PICK_FACE = {"flow", "medium", "light", "hanger", "mobile"}
+    methods = sorted(methods, key=lambda mm: 0 if mm["rack_type"] in _PICK_FACE else 1)
+    facing = "up" if near_top else "down"   # pick face opens toward the output
+
     shelves: list[ShelfArea] = []
     placed = 0
     unplaced = 0
-    cy = y0                      # row cursor (top → bottom)
+    # Row cursor marches AWAY from the output: from the output edge inward, so the
+    # first (pick-face) rows land nearest the dispatch.
+    cy = y0 if near_top else (y1)
     seq = 0
     for m in methods:
         rt = racktypes.get(m["rack_type"])
@@ -213,7 +228,10 @@ def place_equipment(model: WarehouseModel, estimate: dict) -> dict:
             continue
         row_no = 0
         while todo > 0:
-            if cy + depth > y1:          # zone is full — report the shortfall
+            # Row top-edge y for this run (the cursor is the leading edge that
+            # marches away from the output; for bottom-output we place upward).
+            ry = cy if near_top else (cy - depth)
+            if ry < y0 or ry + depth > y1:   # zone is full — report the shortfall
                 unplaced += todo
                 break
             n = min(per_row, todo)
@@ -223,14 +241,15 @@ def place_equipment(model: WarehouseModel, estimate: dict) -> dict:
             shelves.append(ShelfArea(
                 id=f"auto-{m['rack_type']}-{seq}",
                 name=f"{rt.get('label', m['rack_type'])}{row_no:02d}",
-                x=round(x0, 2), y=round(cy, 2),
+                x=round(x0, 2), y=round(ry, 2),
                 w=round(run_w * n, 2), h=round(depth, 2),
-                rack_type=m["rack_type"], facing="down",
+                rack_type=m["rack_type"], facing=facing,
             ))
             placed += n
             todo -= n
-            cy += depth + aisle          # next row below, behind the pick aisle
-        cy += 0.5                        # small break between equipment groups
+            step = depth + aisle
+            cy += step if near_top else -step   # march inward from the output edge
+        cy += 0.5 if near_top else -0.5         # small break between groups
 
     zone.shelves = shelves               # explicit REPLACE of this zone's shelves
     return {"placed": placed, "unplaced": unplaced,
