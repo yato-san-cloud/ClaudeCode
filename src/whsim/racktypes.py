@@ -13,24 +13,35 @@ from __future__ import annotations
 # bay   = length of one storage position along the rack run (m)
 # depth  = rack depth across the run (m)
 # levels = vertical levels (informational / capacity scaling)
+# capacity = representative per-cell (間口) capacity, in PIECES
+# bays_per_unit = bays in one purchasable rack unit (台/基) — cells/台 = bays×levels
+# unit_price = 1台あたり設備単価(円), life_months = 償却月数 (設備月額 = unit_price/life)
+# (unit economics feed whsim.storage 保管設備の試算; JP-3PL ballpark defaults aligned
+#  with the LOGISTEED 設備費用算出ステップ deck — all overridable via params.)
 RACK_TYPES: dict[str, dict] = {
     "light":     {"label": "軽量棚",          "bay": 0.9, "depth": 0.45, "levels": 5,
-                  "capacity": 30,   "color": "#7fb0f2",
+                  "capacity": 30,   "color": "#7fb0f2", "bays_per_unit": 3,
+                  "unit_price": 12000, "life_months": 60,
                   "desc": "小物・ピース。手前ピッキング向き。"},
     "medium":    {"label": "中量棚",          "bay": 1.2, "depth": 0.60, "levels": 4,
-                  "capacity": 120,  "color": "#2ee6a0",
+                  "capacity": 120,  "color": "#2ee6a0", "bays_per_unit": 3,
+                  "unit_price": 20000, "life_months": 60,
                   "desc": "ケース・中量品の定番。"},
     "pallet":    {"label": "パレットラック",   "bay": 1.1, "depth": 1.10, "levels": 4,
-                  "capacity": 800,  "color": "#f5b05a",
+                  "capacity": 800,  "color": "#f5b05a", "bays_per_unit": 2,
+                  "unit_price": 35000, "life_months": 84,
                   "desc": "パレット保管。フォークリフト前提。"},
     "nestainer": {"label": "ネステナー",       "bay": 1.1, "depth": 1.40, "levels": 3,
-                  "capacity": 600,  "color": "#9b6bff",
+                  "capacity": 600,  "color": "#9b6bff", "bays_per_unit": 1,
+                  "unit_price": 20000, "life_months": 84,
                   "desc": "ネステナー段積み。可搬・レイアウト自由。"},
     "flow":      {"label": "フローラック",     "bay": 1.0, "depth": 1.50, "levels": 3,
-                  "capacity": 200,  "color": "#34e3ff",
+                  "capacity": 200,  "color": "#34e3ff", "bays_per_unit": 3,
+                  "unit_price": 45000, "life_months": 60,
                   "desc": "流動棚。先入先出のピッキング。"},
     "asrs":      {"label": "自動倉庫(AS/RS)",  "bay": 0.8, "depth": 1.20, "levels": 12,
-                  "capacity": 2000, "color": "#5cebff",
+                  "capacity": 2000, "color": "#5cebff", "bays_per_unit": 1,
+                  "unit_price": 600000, "life_months": 120,
                   "desc": "高層自動倉庫。クレーン入出庫。"},
 }
 ORDER = ["light", "medium", "pallet", "nestainer", "flow", "asrs"]

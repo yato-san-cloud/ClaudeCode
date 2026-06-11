@@ -130,6 +130,19 @@ async def api_import_shipments(name: str, shipments: UploadFile):
     return ingest.ingest_shipments(_open(name), mapped)
 
 
+@router.get("/api/projects/{name}/storage")
+def api_storage(name: str, stock_days: float | None = None, tsubo_rate: float | None = None,
+                aisle_factor: float | None = None, bulk_cases: int | None = None,
+                office_tsubo: float | None = None):
+    """保管設備の試算: 物量→必要保管機器(間口/台数/坪)→保管費。Query params override
+    the 試算 defaults (在庫日数・坪単価・通路率・bulk閾値・事務所坪)."""
+    from whsim import storage
+    params = {"stock_days": stock_days, "tsubo_rate": tsubo_rate,
+              "aisle_factor": aisle_factor, "bulk_cases": bulk_cases,
+              "office_tsubo": office_tsubo}
+    return storage.estimate_storage(_open(name).load_model(), params)
+
+
 @router.get("/api/projects/{name}/analysis")
 def api_analysis(name: str):
     """Analysis-dashboard payload (the "分析" tab).
