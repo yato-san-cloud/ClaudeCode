@@ -475,11 +475,27 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
             "currency": cur,
         }
 
+    # (c) 生産性の内訳 (要素作業分解): picker presence = 移動 + 手扱い + 手待ち.
+    # Only present for runs whose kpis carry the breakdown (older runs degrade).
+    walk_s, handle_s, idle_s = g("picker_walk_s"), g("picker_handle_s"), g("picker_idle_s")
+    prod_total = walk_s + handle_s + idle_s
+    prod_chart = None
+    if prod_total > 0:
+        prod_chart = {
+            "per_hr": round(g("orders_per_picker_hr"), 1),   # 件/人時
+            "parts": [
+                {"key": "walk", "label": "移動", "share": round(walk_s / prod_total, 3)},
+                {"key": "handle", "label": "手扱い", "share": round(handle_s / prod_total, 3)},
+                {"key": "idle", "label": "手待ち", "share": round(idle_s / prod_total, 3)},
+            ],
+        }
+
     return {
         "name": model.meta.name,
         "source": source,
         "verdict": metrics.get("verdict"),
         "insights": insights,
         "kpis": {"hero": hero[:4], "groups": groups},
-        "charts": {"stages": stages_chart, "cost": cost_chart},
+        "charts": {"stages": stages_chart, "cost": cost_chart,
+                   "productivity": prod_chart},
     }

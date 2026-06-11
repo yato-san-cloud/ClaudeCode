@@ -168,6 +168,10 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "staging_capacity": res.staging_capacity,
         "walk_total_m": sum(dists),
         "walk_per_order_m": statistics.fmean(dists) if dists else 0.0,
+        # 生産性の内訳 (要素作業分解): picker time = 移動 + 手扱い + 手待ち。
+        # 移動 = pick trip distance ÷ 歩行速度; 手扱い = busy − 移動 (ピック+仕分+荷渡し);
+        # 手待ち = 在席時間 − busy。エンジン変更なしでイベントログから純粋に導出。
+        **_picker_breakdown(res, model, picker_busy, completed),
         "on_time_rate": on_time / completed if completed else 1.0,
         "headcount": headcount,
         "labour_cost_per_order": labour_cost / completed if completed else 0.0,
@@ -180,6 +184,27 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "capex_total": c["capex_total"],
         "labour_rate_per_hr": rate,
         "currency": c["currency"],
+    }
+
+
+def _picker_breakdown(res: RunResult, model: WarehouseModel | None,
+                      picker_busy: float, completed: int) -> dict:
+    """要素作業分解 (the 生産性Sim essence): split picker presence time into
+    移動 / 手扱い / 手待ち from the event log, plus orders per picker-hour.
+    Pure over existing events — pick_done carries busy + trip dist."""
+    speed = max((model.process.walk_speed_mps if model else 1.2) or 1.2, 0.1)
+    trip_m = sum(e.get("dist", 0.0) for e in res.events if e["event"] == "pick_done")
+    walk_s = trip_m / speed
+    handle_s = max(0.0, picker_busy - walk_s)
+    presence_s = res.n_pickers * res.duration_s
+    idle_s = max(0.0, presence_s - picker_busy)
+    picker_hours = max(presence_s / 3600.0, 1e-9)
+    return {
+        "picker_walk_s": walk_s,
+        "picker_handle_s": handle_s,
+        "picker_idle_s": idle_s,
+        "picker_presence_s": presence_s,
+        "orders_per_picker_hr": completed / picker_hours,
     }
 
 

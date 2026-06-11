@@ -832,16 +832,71 @@ function buildStageTable(labels, values, peakLabel) {
   return wrap;
 }
 
+// 生産性の内訳 (要素作業分解): a horizontal stacked bar of ピッカー在席時間
+// (移動/手扱い/手待ち) + the headline 件/人時, with the per-hour minute split —
+// the 生産性Sim reading (要素作業量→要素作業時間→生産性) over the real DES log.
+const PROD_PART_COLOR = {
+  walk: 'var(--warn,#f5b05a)', handle: 'var(--accent,#16C0DE)',
+  idle: 'var(--line-strong,rgba(120,140,170,.45))',
+};
+function buildProductivityCard(prod) {
+  const parts = (prod.parts || []).filter((p) => p.share > 0);
+  if (!parts.length) return null;
+  const card = el('div', { class: 'chart-card' });
+  card.appendChild(el('div', { class: 'chart-title' }, '生産性の内訳（ピッカー1人・1時間あたり）'));
+  const mins = (sh) => Math.round(sh * 60);
+  const split = parts.map((p) => `${p.label}${mins(p.share)}分`).join('＋');
+  card.appendChild(el('div', { class: 'chart-sub' },
+    `${prod.per_hr || 0} 件/人時 ＝ 在席60分のうち ${split}`));
+  // stacked bar (flexbox; theme-aware via CSS vars, no SVG needed)
+  const bar = el('div', {
+    style: 'display:flex;height:26px;border-radius:8px;overflow:hidden;margin:8px 0 4px',
+    role: 'img',
+    'aria-label': `ピッカー時間の内訳。${parts.map((p) => `${p.label} ${Math.round(p.share * 100)}%`).join('、')}。`,
+  });
+  for (const p of parts) {
+    bar.appendChild(el('div', {
+      style: `flex:0 0 ${(p.share * 100).toFixed(1)}%;background:${PROD_PART_COLOR[p.key] || '#888'}`,
+      title: `${p.label} ${(p.share * 100).toFixed(0)}%`,
+    }));
+  }
+  card.appendChild(bar);
+  const legend = el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--ink-secondary)' });
+  for (const p of parts) {
+    const item = el('span', { style: 'display:inline-flex;align-items:center;gap:5px' });
+    item.appendChild(el('span', {
+      style: `width:10px;height:10px;border-radius:2px;display:inline-block;background:${PROD_PART_COLOR[p.key] || '#888'}`,
+    }));
+    item.appendChild(document.createTextNode(`${p.label} ${(p.share * 100).toFixed(0)}%`));
+    legend.appendChild(item);
+  }
+  card.appendChild(legend);
+  // The actionable reading: walking share is the layout/slotting lever.
+  const walk = parts.find((p) => p.key === 'walk');
+  if (walk && walk.share >= 0.35) {
+    card.appendChild(el('div', { class: 'chart-sub', style: 'margin-top:6px' },
+      `移動が${Math.round(walk.share * 100)}%を占めています。A品の出荷口寄せ・通路見直しで詰められる比率です。`));
+  }
+  return card;
+}
+
 function buildChartsSection(charts, currency) {
   const stages = charts.stages || {};
   const cost = charts.cost || null;
+  const prod = charts.productivity || null;
   const hasStages = Array.isArray(stages.labels) && stages.labels.length;
   const hasCost = cost && Array.isArray(cost.labels) && cost.labels.length;
-  if (!hasStages && !hasCost) return null;
+  const hasProd = prod && Array.isArray(prod.parts) && prod.parts.length;
+  if (!hasStages && !hasCost && !hasProd) return null;
 
   const sec = el('section', { class: 'an-section' });
   sec.appendChild(el('h2', { class: 'an-section-title' }, '物量の動き / コスト'));
   const grid = el('div', { class: 'chart-grid' });
+
+  if (hasProd) {
+    const card = buildProductivityCard(prod);
+    if (card) grid.appendChild(card);
+  }
 
   if (hasStages) {
     // Stacked-area composition (mock core) built from the REAL per-stage
