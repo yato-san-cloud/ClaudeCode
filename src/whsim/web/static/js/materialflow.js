@@ -81,11 +81,34 @@ function injectStyle() {
   .mf-empty-title{font-weight:700;color:var(--ink-primary,#16202e);font-size:var(--fs-section,15px)}
   .mf-empty-body{color:var(--ink-secondary,#52677c);font-size:var(--fs-sm,13px);max-width:48ch}
   @media(prefers-reduced-motion:reduce){.mf-recalc{transition:none}}
+  .mf-chain-wrap{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));border-radius:13px;padding:11px 14px}
+  .mf-chain-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--ink-primary,#16202e);margin-bottom:9px}
+  .mf-chain-sub{font-size:11px;font-weight:500;color:var(--ink-tertiary,#8195a8)}
+  .mf-chain-badge{margin-left:auto;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px}
+  .mf-chain-badge.ok{color:#0a7d3d;background:rgba(29,185,84,.13)}
+  .mf-chain-badge.bad{color:#c0341a;background:rgba(227,64,28,.12)}
+  .mf-chain{display:flex;align-items:stretch;gap:5px;flex-wrap:wrap}
+  .mf-cnode{flex:1 1 96px;min-width:88px;border:1.5px solid var(--line,rgba(120,140,170,.25));border-radius:10px;
+    padding:8px 9px;display:flex;flex-direction:column;gap:3px;background:var(--bg-app,#fff)}
+  .mf-cnode.bad{border-color:#e3401c;background:rgba(227,64,28,.05)}
+  .mf-cn-stage{font-size:12.5px;font-weight:700;color:var(--ink-primary,#16202e)}
+  .mf-cn-area{font-size:11px;color:var(--ink-secondary,#52677c)}
+  .mf-cnode.bad .mf-cn-area{color:#c0341a;font-weight:600}
+  .mf-cn-method{align-self:flex-start;font-size:10px;font-weight:700;color:#fff;padding:1px 7px;border-radius:999px;margin-top:1px}
+  .mf-carrow{display:flex;align-items:center;color:var(--ink-faint,#aab);font-size:16px;flex:0 0 auto}
+  .mf-chain-empty{font-size:12px;color:var(--ink-tertiary,#8195a8);padding:4px 0}
+  @media(max-width:900px){.mf-carrow{display:none}}
   `;
   document.head.appendChild(s);
 }
 
 const fmt = (n) => (n == null ? '—' : Math.round(Number(n)).toLocaleString());
+
+// 作業方法バッジの色 + ゾーン種別の和名（designerと同じ語彙）。
+const METHOD_C = { manual: '#9aa4b0', agv: '#1f78b4', conveyor: '#33a02c', asrs: '#6a3d9a' };
+const METHOD_T = { manual: '人手', agv: 'AGV', conveyor: 'コンベア', asrs: '自動倉庫' };
+const ZTYPE_T = { receiving: '入荷', storage: '保管', picking: 'ピッキング',
+                  packing: '梱包', shipping: '出荷', staging: '一時保管', office: '事務' };
 
 export function mountMaterialFlow(el, opts = {}) {
   injectStyle();
@@ -99,6 +122,9 @@ export function mountMaterialFlow(el, opts = {}) {
   let flow = [];                 // [{id, section, unit, productivity, driver, depends}]
   const vol = {};                // {id: number}
   const src = {};                // {id: 'data'|'manual'|'generated'|'none'}
+  // Live 工程→エリア chain from the designer's spatial flow (process.stages).
+  // Reflected in real time via the `whsim:flow-changed` bus + an initial fetch.
+  let stages = [];               // [{id,label,method,zone_type,area_ok,area_warn}]
 
   // ── sankey ECharts instance + theme/resize plumbing ──────────────────
   let sankey = null;
@@ -117,6 +143,41 @@ export function mountMaterialFlow(el, opts = {}) {
   }
 
   function manHours(p) { return (vol[p.id] || 0) / Math.max(1, p.productivity); }
+
+  // 工程→エリア chain (mirrors the designer's spatial flow). Each node shows the
+  // 工程, its assigned エリア種別, and 作業方法; broken legs (未割当/種別不一致)
+  // read red so a design error is visible HERE too, not just in the editor.
+  function chainHtml() {
+    if (!stages.length) {
+      return `<div class="mf-chain-wrap"><div class="mf-chain-h">工程→エリア</div>`
+        + `<div class="mf-chain-empty">③設計「レイアウト」のフロータブで工程にエリアを割り当てると、ここに連鎖が表示されます。</div></div>`;
+    }
+    const issues = stages.filter((s) => !s.area_ok).length;
+    const nodes = stages.map((s, i) => {
+      const mc = METHOD_C[s.method] || '#9aa4b0';
+      const area = s.zone_type ? (ZTYPE_T[s.zone_type] || s.zone_type) : '未割当';
+      const bad = !s.area_ok;
+      const node = `<div class="mf-cnode${bad ? ' bad' : ''}" title="${bad ? (s.area_warn || '') : ''}">
+        <div class="mf-cn-stage">${s.label}</div>
+        <div class="mf-cn-area">${bad ? '⚠ ' : ''}${area}</div>
+        <span class="mf-cn-method" style="background:${mc}">${METHOD_T[s.method] || s.method}</span>
+      </div>`;
+      return node + (i < stages.length - 1 ? '<div class="mf-carrow">→</div>' : '');
+    }).join('');
+    const badge = issues
+      ? `<span class="mf-chain-badge bad">⚠ エリア連鎖 ${issues}件の問題</span>`
+      : `<span class="mf-chain-badge ok">✓ エリア連鎖OK</span>`;
+    return `<div class="mf-chain-wrap"><div class="mf-chain-h">工程→エリア <span class="mf-chain-sub">（③設計のフローと同期）</span>${badge}</div>`
+      + `<div class="mf-chain">${nodes}</div></div>`;
+  }
+
+  // Re-render only the chain strip in place (live bus updates shouldn't disturb
+  // the sankey canvas / input focus). Falls back to a full render if absent.
+  function renderChain() {
+    const host = root.querySelector('[data-mf-chain]');
+    if (host) { host.innerHTML = chainHtml(); return; }
+    if (flow.length) render();
+  }
 
   function setBusy(on) {
     const pill = root.querySelector('[data-mf-recalc]');
@@ -256,6 +317,7 @@ export function mountMaterialFlow(el, opts = {}) {
         <button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>
        </div>
        <span class="mf-hint">工程ごとの荷役物量（1日平均）。データから取込・不足は手入力/生成し、人員配置へ。</span>
+       <div data-mf-chain>${chainHtml()}</div>
        <div class="mf-kpis">
          <div class="mf-kpi"><div class="l">総工数</div><div class="v"><span data-kpi="totalMH">${totalMH.toFixed(1)}</span> <small>人時/日</small></div></div>
          <div class="mf-kpi"><div class="l">入力済み工程</div><div class="v"><span data-kpi="filled">${filled}</span> <small>/ ${flow.length}</small></div></div>
@@ -416,6 +478,42 @@ export function mountMaterialFlow(el, opts = {}) {
   const onTheme = () => { if (sankey) updateSankey(); };
   document.addEventListener('themechange', onTheme);
 
+  // Live link: the designer broadcasts its 工程→エリア state on every flow edit.
+  function applyStages(next) {
+    stages = Array.isArray(next) ? next : [];
+    renderChain();
+  }
+  const onFlow = (e) => applyStages(e && e.detail && e.detail.stages);
+  document.addEventListener('whsim:flow-changed', onFlow);
+
+  // Initial 工程→エリア from the saved model, so the chain shows even before the
+  // designer is opened this session (live edits then refine it).
+  async function loadStagesFromModel() {
+    const name = getProject();
+    if (!name) return;
+    try {
+      const m = await getJSON(`/api/projects/${encodeURIComponent(name)}/full`);
+      const mm = m.model || m;
+      const proc = (mm && mm.process) || {};
+      const byId = {}; (proc.stages || []).forEach((s) => { byId[s.id] = s; });
+      const zById = {}; ((mm.layout || {}).zones || []).forEach((z) => { zById[z.id] = z; });
+      const order = [];
+      const seen = new Set();
+      for (const id of (proc.flow || [])) { if (byId[id] && !seen.has(id)) { order.push(byId[id]); seen.add(id); } }
+      for (const s of (proc.stages || [])) { if (!seen.has(s.id)) order.push(s); }
+      const STAGE_OK = { receive: ['receiving'], putaway: ['storage', 'staging'],
+        pick: ['storage', 'picking'], pack: ['packing'], ship: ['shipping', 'staging'] };
+      applyStages(order.map((s) => {
+        const z = s.zone ? zById[s.zone] : null;
+        const exp = STAGE_OK[s.id];
+        const ok = !!z && (!exp || exp.includes(z.type));
+        return { id: s.id, label: s.label || s.id, method: s.method || 'manual',
+          zone: s.zone || null, zone_type: z ? z.type : null,
+          area_ok: ok, area_warn: !z ? '未割当' : (!ok ? '種別不一致' : null) };
+      }));
+    } catch (_e) { /* no model yet: the empty-state hint stays */ }
+  }
+
   (async () => {
     try {
       const seed = await getJSON('/api/materialflow/seed');
@@ -425,16 +523,20 @@ export function mountMaterialFlow(el, opts = {}) {
       toast('工程フローの取得に失敗しました: ' + e.message, 'error');
     }
     render();
+    loadStagesFromModel();
   })();
 
   return {
     dispose() {
       document.removeEventListener('themechange', onTheme);
+      document.removeEventListener('whsim:flow-changed', onFlow);
       disposeSankey();
       if (ro) { ro.disconnect(); ro = null; }
       window.removeEventListener('resize', resizeSankey);
       el.innerHTML = '';
     },
-    refresh() {},
+    // re-pull the saved 工程→エリア (used when the project changes / on revisit).
+    refresh() { loadStagesFromModel(); },
+    setStages: applyStages,
   };
 }

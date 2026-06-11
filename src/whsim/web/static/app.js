@@ -997,7 +997,7 @@ function mountDataAnalysisView() {
 }
 
 function mountMaterialFlowView() {
-  if (S.materialflow) return;
+  if (S.materialflow) { S.materialflow.refresh(); return; }
   S.materialflow = mountMaterialFlow($('materialflow'), {
     toast: (msg, kind) => toast(msg, kind),
     getProject: () => S.project,

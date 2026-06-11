@@ -3936,6 +3936,10 @@ export class Designer {
 
   // ---- flow floor canvas: zones + directed arrows along the flow -----------
   _drawFlowCanvas() {
+    // Broadcast the live 工程→エリア state so the マテリアルフロー view reflects
+    // spatial-flow edits in real time (before any save). Deduped by snapshot so
+    // the per-frame redraw doesn't spam the bus.
+    this._emitFlowChanged();
     if (!this.ctx) return;
     const ctx = this.ctx, { w, h, sc } = this._view;
     const P = this.pal;
@@ -4048,6 +4052,25 @@ export class Designer {
         this._flowStatus.textContent = `「${ZONE_JP[hit.type] || hit.type}」にはまだ工程が割り当てられていません。「床図でフロー配置」で割り当ててください。`;
       }
     }
+  }
+
+  // Snapshot the process flow (id/label/zone+zone-type/method) and dispatch it
+  // for any live listener (マテリアルフロー). Deduped: only emits on change.
+  _emitFlowChanged() {
+    const order = this._orderedStages();
+    const stages = order.map((st) => {
+      const z = st.zone ? this._zoneById(st.zone) : null;
+      const area = this._stageAreaStatus(st);
+      return {
+        id: st.id, label: st.label || st.id, method: st.method || 'manual',
+        zone: st.zone || null, zone_type: z ? z.type : null,
+        area_ok: area.ok, area_warn: area.warn,
+      };
+    });
+    const snap = JSON.stringify(stages);
+    if (snap === this._flowSnap) return;
+    this._flowSnap = snap;
+    document.dispatchEvent(new CustomEvent('whsim:flow-changed', { detail: { stages } }));
   }
 
   // ---- flow side panel: the workflow strip (synced) + method panel ---------
