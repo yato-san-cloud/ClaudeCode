@@ -45,8 +45,21 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   parametric rack params (or authored MapMaker-style shelves) into the concrete
   `locations` grid, propagating shelf names to location names and re-pegging SKUs.
 - `storage.py` — 保管設備の試算 (demand → 保管方法 → 間口/台数/坪数; cost is 参考) +
-  `place_equipment` authors the sized units into the storage zone (`POST
-  /storage/apply-layout`); surfaced as the ③設計「保管設計」 view (`js/storage.js`).
+  `place_equipment` authors the sized units into the storage zone (ピック面/バック
+  2層・アイル向き; `POST /storage/apply-layout`); ③設計「保管設計」 (`js/storage.js`).
+- `cost.py` — 解析的原価積み上げ (LOGISTEED 試算フロー 6費目; no sim, 爆速). Labour
+  uses the **3-tier productivity**: 実測採用値(settings.productivity_overrides) >
+  物流形態ベンチマーク(settings.benchmark_productivity) > エンジン既定. ⑤提案前の
+  ③設計「原価試算」 (`js/cost.js`, GET /cost). Same 3-tier in `analysis/staffing.py`
+  `resolve_productivity` so the 人員タイムチャート honours it too.
+- `benchmarks.py` — 生産性ベンチマークライブラリ (物流形態別 想定生産性プリセット;
+  the company's 集合知の箱, seeds replaceable). GET /api/benchmarks, POST
+  /benchmark/{id}/apply. The 想定 tier of the productivity stack.
+- `workmethod.py` `METHOD_PRESETS` (都度/マルチ/ゾーン/種まき = 5軸の各点) +
+  `recommend`; `POST /workmethod/compare` runs all 4 (move-vs-sort trade-off) →
+  ⑤提案「作業方法比較」 (`js/workcompare.js`: 散布図＋KPI表＋推奨＋採用).
+- 生産性フィードバック: `kpis.measured_productivity` (実測) → ④検証で 想定vs実測 を
+  並べ「実測を採用」→ settings.productivity_overrides → cost/timetable に波及.
 - `analysis/ingest.py` — ETL: uploaded shipments CSV → `model.orders.outbound`
   (`POST /import/shipments`); real calendar weekday/hour survive via `arrival_s`.
 - `bi.py` `derive_volumes` — 仮値 荷姿変換 (パレット/オリコン/カゴ台車); the BI→
