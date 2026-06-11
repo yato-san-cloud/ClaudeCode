@@ -33,6 +33,14 @@ const AGV_COLOR = {
 // Height (m) at which AGV boxes ride, centered on their thin body.
 const AGV_Y = 0.2;
 
+// Agent state → Japanese label for the click-to-select tooltip. Covers both the
+// worker STATE_COLOR keys and the AGV_COLOR action keys; unknown states fall back
+// to the raw string so the card is always informative.
+const SEL_STATE_LABEL = {
+  idle: '待機', travel: '移動', carry: '搬送', pick: 'ピック', pack: '梱包',
+  inspect: '検品', pickup: '積込', dropoff: '荷下し', charge: '充電',
+};
+
 // --- Storage-equipment dimensions, mirrored from src/whsim/racktypes.py -------
 // One source of truth lives in Python (RACK_TYPES); this is its JS twin so the
 // 3D bay/depth/level numbers match the materialised location grid + the 2D PNG.
@@ -223,6 +231,7 @@ export class Scene3D {
     this._belts = [];         // animated conveyor belt mats { mat, speed }
     this._beltSpeed = 1;      // global multiplier (0 = static, e.g. reduced-motion)
     this._fps = null;         // fps monitor / auto-degrade state or null
+    this._sel = null;         // agent selection state { ring, tip, ... } or null
     this._clock = new THREE.Clock(); // delta-time source for belt flow
 
     const meta = this.replay.meta || {};
@@ -300,6 +309,9 @@ export class Scene3D {
     // Controls hint + scene legend (DOM overlay) — tells the salesperson what
     // they're looking at and how to move the camera. Pure DOM, no render change.
     this._buildInfoOverlay();
+    // Click-to-select interactivity: a floor ring marker + a live DOM tooltip,
+    // driven by a raycaster on the canvas. Additive; cleaned up in dispose().
+    this._buildSelection();
     // Gentle one-shot intro camera move (skipped under reduced-motion).
     this._startIntro();
 
@@ -1590,10 +1602,12 @@ export class Scene3D {
       this.scene.add(g);
       // `mesh` proxy = the group (its .position is the floor anchor) so shadow /
       // glow followers keep working. Extra refs drive the pick reach + carry tote.
-      this._workers.push({
+      const rec = {
         mesh: g, vestMat, armPivot, tote, keyframes: wk.keyframes || [],
-        glow: 0, reach: 0, faceYaw: 0, idx: this._workers.length,
-      });
+        glow: 0, reach: 0, faceYaw: 0, idx: this._workers.length, kind: 'worker',
+      };
+      g.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
+      this._workers.push(rec);
     }
   }
 
@@ -1695,7 +1709,9 @@ export class Scene3D {
       const dome = new THREE.Mesh(domeGeom, domeMat);
       dome.position.set(0, 0.2, -0.5);
       mesh.add(dome);
-      this._agvs.push({ mesh, keyframes: a.keyframes || [], mat, tote, dome, domeMat, glow: 0 });
+      const rec = { mesh, keyframes: a.keyframes || [], mat, tote, dome, domeMat, glow: 0, kind: 'agv', idx: this._agvs.length };
+      mesh.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
+      this._agvs.push(rec);
     }
   }
 
@@ -1756,9 +1772,12 @@ export class Scene3D {
       g.add(carriage);
       _enableShadows(g);
       this.scene.add(g);
-      this._forklifts.push({
+      const rec = {
         group: g, keyframes: f.keyframes || [], yaw: 0, carriage, load, lift: 0,
-      });
+        kind: 'forklift', idx: this._forklifts.length,
+      };
+      g.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
+      this._forklifts.push(rec);
     }
   }
 
@@ -2467,6 +2486,211 @@ export class Scene3D {
     this._info = { root };
   }
 
+  // -- Click-to-select interactivity ----------------------------------------
+  // Lets the user click any moving agent (worker / AGV / forklift) to SELECT it.
+  // A bright cyan floor ring tracks the selection every frame, a small DOM card
+  // (`.v3d-seltip`, child of the container, pointer-events:none) shows its role /
+  // state / (x,z) in metres, and an optional soft follow-camera eases the orbit
+  // target toward it. Everything here is additive and torn down in dispose().
+  _buildSelection() {
+    this._sel = null;
+    // Nothing to select against → skip the whole feature (no listener, no DOM).
+    const any = this._workers.length || this._agvs.length || this._forklifts.length;
+    if (!any) return;
+
+    // Container must be a positioning context for the absolute tooltip child
+    // (the HUD/info overlay likely already ensured this; harmless to repeat).
+    try {
+      const cs = window.getComputedStyle(this.container);
+      if (cs && cs.position === 'static') this.container.style.position = 'relative';
+    } catch (_e) { /* ignore */ }
+
+    // Floor ring marker — additive cyan torus laid flat, repositioned each frame
+    // under the selected agent. Hidden until something is selected.
+    const ringG = new THREE.RingGeometry(0.55, 0.78, 40);
+    this._geometries.push(ringG);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: GLOW_CYAN, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    this._materials.push(ringMat);
+    const ring = new THREE.Mesh(ringG, ringMat);
+    ring.rotation.x = -Math.PI / 2; // lay flat on the floor
+    ring.position.y = 0.03;
+    ring.renderOrder = 6;           // draw over the floor/zones
+    ring.visible = false;
+    this.scene.add(ring);
+
+    // Live DOM info card — mirrors the HUD/info card styling (dark translucent,
+    // cyan accent). pointer-events:none so it never eats canvas drags.
+    const tip = document.createElement('div');
+    tip.className = 'v3d-seltip';
+    tip.setAttribute('data-v3d-sel', '1');
+    tip.style.cssText = [
+      'position:absolute', 'left:0', 'top:0', 'z-index:6',
+      'transform:translate(-50%,calc(-100% - 14px))',
+      'min-width:120px', 'max-width:200px', 'padding:6px 9px', 'border-radius:8px',
+      'background:rgba(15,20,29,0.82)', 'backdrop-filter:blur(4px)',
+      'color:#e6edf3', 'font:11px/1.4 system-ui,-apple-system,sans-serif',
+      'pointer-events:none', 'box-shadow:0 2px 10px rgba(0,0,0,0.4)',
+      'border:1px solid rgba(0,184,212,0.45)', 'white-space:nowrap', 'display:none',
+    ].join(';');
+    const tipRole = document.createElement('div');
+    tipRole.style.cssText = 'color:#00d4f0;font-weight:600;margin-bottom:2px';
+    const tipState = document.createElement('div');
+    tipState.style.cssText = 'color:#cdd6e0';
+    const tipPos = document.createElement('div');
+    tipPos.style.cssText = 'color:#8b98a8;font-size:10px;margin-top:1px';
+    const tipHint = document.createElement('div');
+    tipHint.style.cssText = 'color:#566273;font-size:9px;margin-top:3px';
+    tipHint.textContent = 'ダブルクリックで追従';
+    tip.appendChild(tipRole); tip.appendChild(tipState); tip.appendChild(tipPos);
+    tip.appendChild(tipHint);
+    this.container.appendChild(tip);
+
+    // Raycaster + pointer state. We record the down position so a click that is
+    // really a camera-drag does not trigger a (de)selection.
+    this._sel = {
+      ring, ringMat, tip, tipRole, tipState, tipPos,
+      ref: null, follow: false,
+      raycaster: new THREE.Raycaster(),
+      ndc: new THREE.Vector2(),
+      proj: new THREE.Vector3(),
+      downX: 0, downY: 0, downT: 0,
+    };
+
+    const el = this.renderer.domElement;
+    this._onSelDown = (e) => {
+      this._sel.downX = e.clientX; this._sel.downY = e.clientY;
+      this._sel.downT = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    };
+    this._onSelUp = (e) => {
+      const s = this._sel;
+      if (!s) return;
+      // Treat as a click only if the pointer barely moved (else it was a drag).
+      const dx = e.clientX - s.downX, dy = e.clientY - s.downY;
+      if (dx * dx + dy * dy > 36) return; // >6px → camera drag, ignore
+      const hit = this._pickAgent(e);
+      if (hit) this._selectAgent(hit);
+      else this._deselect();
+    };
+    // Double-click toggles the soft follow-camera on the current selection.
+    this._onSelDbl = () => {
+      const s = this._sel;
+      if (s && s.ref) { s.follow = !s.follow; this._refreshSelTip(); }
+    };
+    el.addEventListener('pointerdown', this._onSelDown);
+    el.addEventListener('pointerup', this._onSelUp);
+    el.addEventListener('dblclick', this._onSelDbl);
+  }
+
+  // Raycast the pointer against the agent meshes and return the nearest agent
+  // record (walking up parents to the tagged mesh/group), or null on empty space.
+  _pickAgent(e) {
+    const s = this._sel;
+    if (!s) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    s.ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    s.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    s.raycaster.setFromCamera(s.ndc, this.camera);
+    // Targets: worker groups + AGV meshes + forklift groups (recursive).
+    const targets = [];
+    for (const w of this._workers) targets.push(w.mesh);
+    for (const a of this._agvs) targets.push(a.mesh);
+    for (const f of this._forklifts) targets.push(f.group);
+    if (!targets.length) return null;
+    const hits = s.raycaster.intersectObjects(targets, true);
+    for (const h of hits) {
+      // Walk up from the hit child to the object tagged with the agent record.
+      let o = h.object;
+      while (o) {
+        if (o.userData && o.userData.agentRef) return o.userData.agentRef;
+        o = o.parent;
+      }
+    }
+    return null;
+  }
+
+  // Make `ref` the selected agent: show the ring, reveal the tooltip.
+  _selectAgent(ref) {
+    const s = this._sel;
+    if (!s) return;
+    s.ref = ref;
+    s.ring.visible = true;
+    s.tip.style.display = 'block';
+    this._refreshSelTip();
+  }
+
+  // Clear the selection: hide the ring + tooltip and drop follow.
+  _deselect() {
+    const s = this._sel;
+    if (!s) return;
+    s.ref = null;
+    s.follow = false;
+    s.ring.visible = false;
+    s.tip.style.display = 'none';
+  }
+
+  // Role label for a selected agent record.
+  _selRole(ref) {
+    if (ref.kind === 'agv') return 'AGV';
+    if (ref.kind === 'forklift') return 'フォークリフト';
+    return 'ピッカー（人）';
+  }
+
+  // Refresh the static parts of the tooltip (role + follow hint). The state/pos
+  // lines are refreshed every frame in _updateSelection.
+  _refreshSelTip() {
+    const s = this._sel;
+    if (!s || !s.ref) return;
+    const n = (s.ref.idx != null ? s.ref.idx + 1 : '');
+    s.tipRole.textContent = this._selRole(s.ref) + (n !== '' ? ' #' + n : '');
+    s.tip.style.borderColor = s.follow ? 'rgba(0,212,240,0.85)' : 'rgba(0,184,212,0.45)';
+  }
+
+  // Per-frame: track the ring under the selected agent, project its world
+  // position to screen for the tooltip, refresh the state/pos readout, and
+  // gently ease the orbit target toward it when follow is on.
+  _updateSelection(t, dt) {
+    const s = this._sel;
+    if (!s || !s.ref) return;
+    const ref = s.ref;
+    const obj = ref.mesh || ref.group;
+    if (!obj) return;
+    const px = obj.position.x, pz = obj.position.z;
+    // Ring tracks the floor anchor.
+    s.ring.position.set(px, 0.03, pz);
+    // Gentle pulse so the marker reads as "live" without being gaudy.
+    const pulse = 1 + 0.06 * Math.sin(this._clock.elapsedTime * 4);
+    s.ring.scale.set(pulse, pulse, 1);
+
+    // State/pos readout from the same keyframe sampler the per-frame updates use.
+    const sample = sampleKeyframes(ref.keyframes, t);
+    const label = SEL_STATE_LABEL[sample.state] || sample.state || '–';
+    s.tipState.textContent = '状態: ' + label;
+    s.tipPos.textContent = `位置: ${px.toFixed(1)}, ${pz.toFixed(1)} m`;
+
+    // Project the agent's head-height world position to screen pixels.
+    s.proj.set(px, 1.6, pz).project(this.camera);
+    const rect = this.renderer.domElement;
+    const w = rect.clientWidth, h = rect.clientHeight;
+    const sx = (s.proj.x * 0.5 + 0.5) * w;
+    const sy = (-s.proj.y * 0.5 + 0.5) * h;
+    // Hide the card when the agent is behind the camera (z>1) or off-canvas.
+    const onScreen = s.proj.z < 1 && sx >= -40 && sx <= w + 40 && sy >= -40 && sy <= h + 40;
+    s.tip.style.display = onScreen ? 'block' : 'none';
+    if (onScreen) { s.tip.style.left = sx + 'px'; s.tip.style.top = sy + 'px'; }
+
+    // Soft follow-camera: ease controls.target toward the agent without snapping,
+    // so OrbitControls stays fully usable (the user can still drag/zoom freely).
+    if (s.follow && this.controls) {
+      const k = 1 - Math.exp(-(dt > 0 ? dt : 0.016) * 2.0);
+      this.controls.target.x += (px - this.controls.target.x) * k;
+      this.controls.target.z += (pz - this.controls.target.z) * k;
+    }
+  }
+
   // -- Live productivity HUD (DOM overlay) ----------------------------------
   // Only built when replay.series exists & is non-empty. A small absolutely-
   // positioned panel inside the container with a sparkline (canvas 2D) and live
@@ -2831,6 +3055,7 @@ export class Scene3D {
     this._updateContactShadows(); // keep blob shadows under moving agents
     this._updateGlowHalos();      // additive cyan activity halos (pseudo-bloom)
     this._updateBottleneck();     // pulse the bottleneck spotlight (if any)
+    this._updateSelection(t, dt); // track ring/tooltip under the selected agent
     this._updateHud(t);           // sync DOM productivity overlay (if present)
     this._monitorFps(dt);         // auto-degrade if frame time gets heavy
     this.controls.update();
@@ -2915,6 +3140,25 @@ export class Scene3D {
       this._info.root.parentNode.removeChild(this._info.root);
     }
     this._info = null;
+    // Tear down click-to-select: detach canvas listeners, drop the floor ring
+    // from the scene (its geom/mat are tracked in _geometries/_materials and
+    // freed below), and remove the DOM tooltip card. Then null the state.
+    if (this._sel) {
+      const el = this.renderer && this.renderer.domElement;
+      if (el) {
+        if (this._onSelDown) el.removeEventListener('pointerdown', this._onSelDown);
+        if (this._onSelUp) el.removeEventListener('pointerup', this._onSelUp);
+        if (this._onSelDbl) el.removeEventListener('dblclick', this._onSelDbl);
+      }
+      if (this._sel.ring) this.scene.remove(this._sel.ring);
+      if (this._sel.tip && this._sel.tip.parentNode) {
+        this._sel.tip.parentNode.removeChild(this._sel.tip);
+      }
+    }
+    this._sel = null;
+    this._onSelDown = null;
+    this._onSelUp = null;
+    this._onSelDbl = null;
     // Remove contact-shadow sprites (their materials are tracked in _materials,
     // the shared blob texture in _textures — both freed below).
     for (const s of this._shadowSprites) {
