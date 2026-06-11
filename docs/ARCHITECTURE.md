@@ -64,7 +64,8 @@
 - シェル：`app.js`（bootstrap・`switchView`・2Dキャンバス・mount配線）。抽出済：`state.js`（共有`S`シングルトン）・`imports.js`（取込ハンドラ）・`projectmenu.js`。共有：`util.js`（`$`/`api`/`esc`）・`constants.js`（ラベル/色マップ）。
 - 動線：`journey.js`（5フェーズ stepper）・`phasehint.js`・`overview.js`（①取込ホーム＋取込/基本条件）・`onboarding.js`。
 - 編集/3D：`designer.js`（ファサード）→`designer/{core,constants,geometry}.js`（ライブラリ&ホットバー型エディタ：配置/フロー/動線の3タブ。配置＝常設オブジェクトライブラリ（棚9種/ゾーン/マテハン設備/躯体のアイコンカード、クリック装備 or 床へD&D、実寸ゴースト、数字1-9はMapMaker互換）＋CAD流の信頼感（1m/5mグリッド・ステータスバー・エッジスナップ・Shift直交壁＋長さ表示・W×D表示・ドアは躯体エッジへ投影）＋統一選択/インスペクタ。動線＝経路ネットワーク自動生成：`POST /api/routes/network`（ステートレス、エンジンと同じ `engine.graph.AisleGraph` で壁・棚を迂回）で通路網表示・A→B計測・工程フロー動線の一括生成、手描きはフォールバック）・`view3d.js`（three.js・rack_type別リアル形状・人型ピッカー・pick発光・ホバー/追従/選択）。
-- 分析/BI：`bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**ECharts**描画＝`vendor/echarts`、テーマ追従・toolbox・dispose）・`analysis.js`（KPI・判定）・`storage.js`（③設計「保管設計」：試算つまみ＋レイアウト配置CTA）。
+- 分析/BI：`bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**ECharts**描画＝`vendor/echarts`、テーマ追従・toolbox・dispose）・`analysis.js`（KPI・判定）・`storage.js`（③設計「保管設計」：試算つまみ＋レイアウト配置CTA）・`pickrate.js`（③設計「生産性試算」：解析的な動作時間で移動vs仕分け散布図＋推奨、GET /pickrate）。`materialflow.js` は②分析に在籍（基礎物量＝物量作成）。
+- ジャーニー写像（SLC壁打ち）：①基礎物量(②分析: materialflow/bi)→②単機能生産性sim(③設計: pickrate=解析・動作時間)→③DES(④検証)。マテリアルフローの工程→エリアは `whsim:flow-changed` でdesigner↔materialflowをライブ同期。designerフロータブの「工程フローからエリアを配置」が工程連鎖を図面へ落とし込む（フロー順に左→右でゾーン自動配置＋割当）。
 - **基礎物量チェーン**（②分析→③設計の背骨）：`bi.js` 仮値→`bi/apply`保存→`from-bi`→`whsim:load-timetable`（タイムチャート）；`materialflow.js` は「物量シミュの基礎物量を取込」で同じ from-bi を取り込む。モデル変更後は `whsim:model-changed` イベントで再オープン＋遷移。
 - その他：`compare.js` `export.js` `timetable.js`(+`timetable_solver.js`) `settings.js` `notes.js` `cody.js`(+`chat.js`)。
 

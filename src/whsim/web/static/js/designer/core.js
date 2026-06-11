@@ -3872,6 +3872,11 @@ export class Designer {
       this._renderFlow();
     });
     if (this.flowMode) flowBtn.style.cssText += ';background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;';
+    // "落とし込む": author the physical エリア for every 工程 (in flow order) and
+    // bind them — the process chain (decided in ②分析) dropped onto the drawing.
+    const genBtn = this._btn(bar, '工程フローからエリアを配置', () => this._layoutAreasFromFlow());
+    genBtn.className = 'primary';
+    genBtn.title = '入荷→格納→…→出荷の各工程エリアを、フロー順に床へ自動配置して割り当てます';
     // reset all zone bindings (back to "always runnable" unbound state)
     this._btn(bar, 'ゾーン割当をリセット', () => {
       this.model.process.stages.forEach((st) => { st.zone = null; });
@@ -4051,6 +4056,63 @@ export class Designer {
       if (!st && this._flowStatus) {
         this._flowStatus.textContent = `「${ZONE_JP[hit.type] || hit.type}」にはまだ工程が割り当てられていません。「床図でフロー配置」で割り当ててください。`;
       }
+    }
+  }
+
+  // 落とし込む: turn the (fixed) process chain into physical エリア on the floor.
+  // Each 工程 gets a zone of its canonical type, tiled left→right in flow order
+  // (材料の流れ＝図面の左から右), proportional to the floor width; each stage is
+  // bound to its new zone. Existing 棚 in a reused storage zone are preserved.
+  _layoutAreasFromFlow() {
+    const order = this._orderedStages();
+    if (!order.length) return;
+    // canonical zone type per stage id (first of the allowed set).
+    const TYPE = { receive: 'receiving', putaway: 'storage', pick: 'storage',
+      pack: 'packing', ship: 'shipping' };
+    // collapse consecutive stages that share a zone type (格納+ピッキングは同じ
+    // 保管エリアを共有) into one physical lane so we don't draw two 保管 boxes.
+    const lanes = [];
+    for (const st of order) {
+      const t = TYPE[st.id] || 'staging';
+      const last = lanes[lanes.length - 1];
+      if (last && last.type === t) last.stages.push(st);
+      else lanes.push({ type: t, stages: [st] });
+    }
+    this._pushUndo();
+    const round2 = (v) => Math.round(v * 100) / 100;
+    const b = this.model.layout.bounds;
+    const margin = Math.min(2, b.width * 0.03, b.depth * 0.06);
+    const gap = Math.min(1.5, b.width * 0.02);
+    const usableW = b.width - margin * 2 - gap * (lanes.length - 1);
+    const laneW = Math.max(2, usableW / lanes.length);
+    const y = margin, h = Math.max(2, b.depth - margin * 2);
+    let x = margin;
+    // reuse an existing zone of the same type when possible (keep its 棚); else
+    // create one. Zones we don't touch are left intact.
+    const pool = {};
+    for (const z of this.model.layout.zones) { (pool[z.type] = pool[z.type] || []).push(z); }
+    const used = new Set();
+    for (const lane of lanes) {
+      let z = (pool[lane.type] || []).find((q) => !used.has(q.id));
+      if (z) {
+        used.add(z.id);
+        Object.assign(z, { x: round2(x), y: round2(y), w: round2(laneW), h: round2(h) });
+      } else {
+        z = { id: uid('zone'), type: lane.type, x: round2(x), y: round2(y),
+          w: round2(laneW), h: round2(h), color: ZONE_DEFAULT_COLOR[lane.type] || null,
+          rack: null, shelves: [] };
+        this.model.layout.zones.push(z);
+      }
+      for (const st of lane.stages) st.zone = z.id;
+      if (lane.type === 'storage') this.shelfZoneId = z.id;
+      x += laneW + gap;
+    }
+    this.flowMode = false;
+    this.flowCursor = order.length;
+    this._fitCanvas();
+    this._renderFlow();
+    if (this._flowStatus) {
+      this._flowStatus.textContent = `工程フローから ${lanes.length} エリアを配置し、全工程に割り当てました。`;
     }
   }
 

@@ -230,6 +230,24 @@ def api_cost(name: str, labor_cost_per_hour: float | None = None,
     return cost.estimate_cost(_open(name).load_model(), params)
 
 
+@router.get("/api/projects/{name}/pickrate")
+def api_pickrate(name: str, walk_speed_mps: float | None = None,
+                 handle_s_per_line: float | None = None,
+                 sort_s_per_line: float | None = None,
+                 lines_per_order: float | None = None,
+                 labour_cost_per_hour: float | None = None,
+                 working_hours_per_day: float | None = None):
+    """生産性試算: 解析的(動作時間)なピッキング生産性を全作業方式について算出。
+    MapMaker距離(レイアウト幾何)×動作時間で、オーダー/マルチ/トータルを DES なしで
+    即比較する SLC 流のステップ②。Query params override the motion-time standards."""
+    from whsim import pickrate
+    params = {"walk_speed_mps": walk_speed_mps, "handle_s_per_line": handle_s_per_line,
+              "sort_s_per_line": sort_s_per_line, "lines_per_order": lines_per_order,
+              "labour_cost_per_hour": labour_cost_per_hour,
+              "working_hours_per_day": working_hours_per_day}
+    return pickrate.estimate_pickrate(_open(name).load_model(), params)
+
+
 @router.get("/api/benchmarks")
 def api_benchmarks():
     """生産性ベンチマークライブラリ: 物流形態別の想定生産性プリセット一覧。"""

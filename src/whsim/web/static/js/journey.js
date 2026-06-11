@@ -12,9 +12,14 @@ import { esc } from './util.js';
 const PHASES = [
   { id: 'intake', no: '①', title: '取込', goal: '案件を作り顧客データを取り込む', views: ['overview'] },
   // ②分析 is the single "analysis home": 物量サマリ (facts) lands first, 対話分析
-  // (ask/drill) and 基礎物量 (仮値 what-if volume calculator) drill deeper.
-  { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics', 'bi'] },
-  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'timetable', 'materialflow', 'cost'] },
+  // (ask/drill), 基礎物量 (仮値 what-if volume calculator), then マテリアルフロー
+  // (荷役物量の工程フロー = the "step ①: 基礎物量" deliverable — volume creation
+  // belongs to 分析, not 設計; the chain it defines then drops into the drawing).
+  { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics', 'bi', 'materialflow'] },
+  // ③設計 adds 生産性試算 (pickrate): analytic motion-time productivity from the
+  // MapMaker距離 — the SLC-style "step ②" that picks オーダー/マルチ/トータル
+  // before any heavyweight DES run.
+  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'timetable', 'pickrate', 'cost'] },
   { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d'] },
   { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'workcompare', 'compare', 'export'] },
 ];
@@ -29,7 +34,7 @@ const CROSS = [
 const VIEW_LABEL = {
   overview: '概要', dataanalysis: '物量サマリ', bianalytics: '対話分析', bi: '基礎物量', design: 'レイアウト',
   storage: '保管設計', materialflow: 'マテリアルフロー', timetable: '人員タイムチャート', analysis: 'KPI・判定',
-  view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', workcompare: '作業方法比較', compare: 'シナリオ比較',
+  pickrate: '生産性試算', view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', workcompare: '作業方法比較', compare: 'シナリオ比較',
   export: 'エクスポート', chat: 'OCTA', notes: '知見',
 };
 
@@ -43,7 +48,8 @@ const VIEW_DESC = {
   design: 'レイアウト・ゾーン・棚を配置/編集',
   storage: '物量から必要保管設備・坪数を試算→配置',
   timetable: '工程別の必要人員を時間帯で配置',
-  materialflow: '工程フローの荷役物量（→人員配置）',
+  materialflow: '工程フローの荷役物量（基礎物量・→人員配置）',
+  pickrate: 'MapMaker距離×動作時間で生産性を解析（オーダー/マルチ/トータル）',
   cost: '解析的に6費目を積み上げ（実行不要・爆速）',
   analysis: '捌けるかの判定・KPI・改善提案',
   view2d: '動きの2Dアニメ＋混雑ヒート',

@@ -56,8 +56,13 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   the company's 集合知の箱, seeds replaceable). GET /api/benchmarks, POST
   /benchmark/{id}/apply. The 想定 tier of the productivity stack.
 - `workmethod.py` `METHOD_PRESETS` (都度/マルチ/ゾーン/種まき = 5軸の各点) +
-  `recommend`; `POST /workmethod/compare` runs all 4 (move-vs-sort trade-off) →
-  ⑤提案「作業方法比較」 (`js/workcompare.js`: 散布図＋KPI表＋推奨＋採用).
+  `recommend`; `POST /workmethod/compare` runs all 4 via DES (move-vs-sort
+  trade-off) → ⑤提案「作業方法比較」 (`js/workcompare.js`: 散布図＋KPI表＋推奨＋採用).
+- `pickrate.py` — 生産性試算: 解析的(動作時間)ピッキング生産性. 各作業方式を
+  tour≈0.75·√(picks·面積)+2·搬出距離 の動作時間モデルで即算出 (no sim, 爆速).
+  SLC流ステップ②: レイアウト幾何(MapMaker距離)×動作時間で オーダー/マルチ/トータル
+  を DES 前に当てる. GET /pickrate → ③設計「生産性試算」 (`js/pickrate.js`:
+  移動vs仕分け散布図＋KPI表＋推奨＋採用). 重厚なDESは④検証で裏取り.
 - 生産性フィードバック: `kpis.measured_productivity` (実測) → ④検証で 想定vs実測 を
   並べ「実測を採用」→ settings.productivity_overrides → cost/timetable に波及.
 - `analysis/ingest.py` — ETL: uploaded shipments CSV → `model.orders.outbound`
