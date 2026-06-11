@@ -14,6 +14,7 @@ import { mountBI } from './js/bi.js';
 import { mountBIAnalytics } from './js/bianalytics.js';
 import { mountPhaseHint } from './js/phasehint.js';
 import { mountTimetable } from './js/timetable.js';
+import { mountStorage } from './js/storage.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
 import { mountNotes } from './js/notes.js';
@@ -1103,6 +1104,7 @@ function switchView(view) {
     (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
       || view === 'bi' || view === 'bianalytics' || view === 'design'
+      || view === 'storage'
       || view === 'viewpng')  // ⑤提案 carries its own ③検証 strip (pstoryKpis)
       ? 'none' : '';
   // ④検証: in the 2D/3D replay views the verdict + KPIs read as the page HERO
@@ -1136,6 +1138,7 @@ function switchView(view) {
   if (view === 'materialflow') mountMaterialFlowView();
   if (view === 'notes') mountNotesView();
   if (view === 'timetable') mountTimetableView();
+  if (view === 'storage') mountStorageView();
   if (view === 'overview') mountOverviewView();
   if (view === 'bi') mountBIView();
   if (view === 'bianalytics') mountBIAnalyticsView();
@@ -1151,7 +1154,7 @@ const VIEW_PHASE = {
   overview: 'intake',
   // ②分析 analysis home: 物量サマリ / きいて分析 / 物量シミュ (volume what-if).
   dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze',
-  design: 'design', timetable: 'design', materialflow: 'design',
+  design: 'design', storage: 'design', timetable: 'design', materialflow: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate',
   viewpng: 'propose', compare: 'propose', export: 'propose',
 };
@@ -1244,6 +1247,14 @@ async function fetchLayoutFor(name) {
     return f && f.layout ? { bounds: f.layout.bounds, zones: f.layout.zones } : null;
   } catch (_e) { return null; }
 }
+function mountStorageView() {
+  if (S.storage) { S.storage.refresh(); return; }
+  S.storage = mountStorage($('storage'), {
+    getProject: () => S.project,
+    toast: (m, k) => toast(m, k),
+  });
+}
+
 function mountTimetableView() {
   if (S.timetable) {
     S.timetable.resize();
