@@ -72,10 +72,14 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - `render/anim2d.py` — server-side animated 2D replay GIF (no browser needed).
 - `web/` — FastAPI backend + single-page frontend (`static/`). `js/view3d.js` (three.js
   replay — realistic per-`rack_type` geometry, human pickers, pick-event glow) and
-  `js/designer.js` (MapMaker-style free shelf editor: placement/edge-snap/control-points/
-  pan-zoom/undo + 棚一括生成 + 面積オート生成 + a storage-equipment palette) are mounted by
-  `app.js`. Shared frontend helpers live in `js/util.js` (`$`/`api`/`esc`) and
-  `js/constants.js` (label/colour maps). three.js is vendored under `static/vendor/`.
+  `js/designer.js` (library-&-hotbar layout editor: 3 tabs 配置/フロー/動線. The 配置 tab
+  has a persistent object LIBRARY — 棚9種/ゾーン/マテハン設備/躯体 as icon cards; click-to-arm
+  or drag-onto-floor, ghost preview at real footprint, digits 1-9 MapMaker-compatible.
+  CAD trust: 1m/5m grid, status bar, edge-snap, Shift-ortho walls with live lengths,
+  W×D readouts, doors projected onto the envelope; unified select + object inspector,
+  棚一括生成 / 面積オート生成, undo) are mounted by `app.js`. Shared frontend helpers
+  live in `js/util.js` (`$`/`api`/`esc`) and `js/constants.js` (label/colour maps).
+  three.js is vendored under `static/vendor/`.
   The UI is a phase-driven journey (取込→分析→設計→検証→提案) rather than flat tabs:
   `js/journey.js` renders the 5-phase stepper + sub-tabs and drives view selection
   (`switchView` keeps it in sync), `js/overview.js` is the ①取込 landing dashboard

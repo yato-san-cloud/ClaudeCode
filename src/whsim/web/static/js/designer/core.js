@@ -1660,10 +1660,12 @@ export class Designer {
       }
     } else if (brush.kind === 'door') {
       const p = DOOR_PALETTE.find((q) => q.type === brush.key) || DOOR_PALETTE[0];
-      const mx = snap(hov.mx), my = snap(hov.my);
-      this._drawDoor({ type: p.type, x: mx, y: my, w: p.type === 'dock' ? 3 : p.type === 'shutter' ? 4 : 1 }, false);
+      // the ghost previews the SNAPPED position (on the envelope), so what you
+      // see is exactly what a click will produce.
+      const pos = this._snapDoorPos(hov.mx, hov.my);
+      this._drawDoor({ type: p.type, x: pos.x, y: pos.y, w: p.type === 'dock' ? 3 : p.type === 'shutter' ? 4 : 1 }, false);
       ctx.globalAlpha = 1;
-      this._label(this._X(mx), this._Y(my) - 14, DOOR_JP[p.type] || 'ドア');
+      this._label(this._X(pos.x), this._Y(pos.y) - 14, DOOR_JP[p.type] || 'ドア');
     } else if (brush.kind === 'wall') {
       this._drawPolyGhost(this.wallDraft, this.pal.draft, true);
     }
@@ -2186,7 +2188,10 @@ export class Designer {
       this._pushUndo();
       const pal = DOOR_PALETTE.find((x) => x.type === b.key) || DOOR_PALETTE[0];
       const w = pal.type === 'dock' ? 3 : pal.type === 'shutter' ? 4 : 1;
-      const d = { id: uid('door'), type: pal.type, x: mx, y: my, w };
+      // doors live ON the building envelope: project onto the nearest bounds
+      // edge / wall segment (a door floating mid-floor is always a mistake).
+      const pos = this._snapDoorPos(mxRaw, myRaw);
+      const d = { id: uid('door'), type: pal.type, x: pos.x, y: pos.y, w };
       this.model.layout.doors.push(d);
       this.selected = { kind: 'door', id: d.id };
       this._renderSide(); this._drawCanvas(); this._updateStatus();
@@ -2944,8 +2949,9 @@ export class Designer {
     } else if (this.drag.mode === 'moveDoor') {
       const o = this.model.layout.doors.find((q) => q.id === this.drag.id);
       if (!o) return;
-      o.x = clamp(snap(this._mx(px)), 0, b.width);
-      o.y = clamp(snap(this._my(py)), 0, b.depth);
+      // dragged doors stay on the envelope too (project, don't free-place).
+      const pos = this._snapDoorPos(this._mx(px), this._my(py));
+      o.x = pos.x; o.y = pos.y;
     }
     this._drawCanvas();
     this._updateStatus();
@@ -3128,6 +3134,33 @@ export class Designer {
   }
 
   // --- building tool: walls (polyline) + doors (markers) ---
+  // Project a world point onto the building envelope: the nearest point on any
+  // wall segment or bounds edge. Doors always sit ON a wall/edge (MapMaker
+  // discipline) — free placement mid-floor reads as an error, snap reads as CAD.
+  _snapDoorPos(mx, my) {
+    const b = this.model.layout.bounds;
+    const segs = [];
+    // 4 bounds edges
+    segs.push([[0, 0], [b.width, 0]], [[0, b.depth], [b.width, b.depth]],
+              [[0, 0], [0, b.depth]], [[b.width, 0], [b.width, b.depth]]);
+    for (const w of this.model.layout.walls || []) {
+      const pts = w.points || [];
+      for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
+    }
+    let best = null, bestD = Infinity;
+    for (const [[ax, ay], [bx, by]] of segs) {
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 ? ((mx - ax) * dx + (my - ay) * dy) / len2 : 0;
+      t = clamp(t, 0, 1);
+      const qx = ax + t * dx, qy = ay + t * dy;
+      const d = Math.hypot(mx - qx, my - qy);
+      if (d < bestD) { bestD = d; best = { x: qx, y: qy }; }
+    }
+    if (!best) return { x: snap(mx), y: snap(my) };
+    return { x: Math.round(best.x * 100) / 100, y: Math.round(best.y * 100) / 100 };
+  }
+
   _wallHit(px, py) {
     for (let i = this.model.layout.walls.length - 1; i >= 0; i--) {
       const w = this.model.layout.walls[i];
@@ -3152,10 +3185,16 @@ export class Designer {
 
   _finishWall() {
     if (this.wallDraft && this.wallDraft.length >= 2) {
-      this._pushUndo();
-      const w = { id: uid('wall'), points: this.wallDraft.slice(), thickness: 0.3 };
-      this.model.layout.walls.push(w);
-      this.selected = { kind: 'wall', id: w.id };
+      // drop consecutive duplicate vertices (the finishing dblclick re-adds the
+      // last point) so saved walls carry no degenerate zero-length segments.
+      const pts = this.wallDraft.filter((p, i, a) =>
+        i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 1e-6);
+      if (pts.length >= 2) {
+        this._pushUndo();
+        const w = { id: uid('wall'), points: pts, thickness: 0.3 };
+        this.model.layout.walls.push(w);
+        this.selected = { kind: 'wall', id: w.id };
+      }
     }
     this.wallDraft = null;
     this._renderSide(); this._drawCanvas();
