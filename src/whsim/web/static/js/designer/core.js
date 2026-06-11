@@ -28,7 +28,7 @@ import {
   DOOR_PALETTE, DOOR_JP, METHOD_OPTS, METHOD_COLOR, PICK_STRATS,
   WORK_AXES, DEFAULT_WORK, MOVER_OPTS, MOVER_JP, MOVER_SPEED, MOVER_COLOR,
   HANDLE, MIN_M, SNAP_PX, SHELF_MIN_M, CP_HALF, CONTROL_POINTS, SHELFGEN_FACES,
-  LIBRARY_DIGITS,
+  LIBRARY_DIGITS, EQUIP_ZONE_RULES, STAGE_ZONE_TYPES,
 } from './constants.js';
 import { resolvePalette, clone, clamp, snap, uid, hexA } from './geometry.js';
 
@@ -1855,6 +1855,9 @@ export class Designer {
     const b = this.model.layout.bounds;
     const inside = hov.mx >= 0 && hov.mx <= b.width && hov.my >= 0 && hov.my <= b.depth;
     if (!inside && brush.kind !== 'wall') return;
+    // live area-semantics feedback: an invalid spot draws the ghost in the
+    // warning colour with the reason, BEFORE the user clicks into an error.
+    const chk = this._placeCheck(brush, hov.mx, hov.my);
     ctx.save();
     ctx.globalAlpha = 0.55;
     if (brush.kind === 'rack' && !brush.area) {
@@ -1868,11 +1871,14 @@ export class Designer {
         if (sy != null) y = sy; else if (sy2 != null) y = sy2 - rt.depth;
       }
       x = clamp(x, 0, b.width - rt.bay); y = clamp(y, 0, b.depth - rt.depth);
-      ctx.fillStyle = hexA(rt.color, 0.4); ctx.strokeStyle = rt.color; ctx.lineWidth = 1.6;
+      const col = chk.ok ? rt.color : this.pal.draft;
+      ctx.fillStyle = hexA(col[0] === '#' ? col : '#e31a1c', 0.4);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6;
       ctx.fillRect(this._X(x), this._Y(y + rt.depth), rt.bay * sc, rt.depth * sc);
       ctx.strokeRect(this._X(x), this._Y(y + rt.depth), rt.bay * sc, rt.depth * sc);
       ctx.globalAlpha = 1;
-      this._label(this._X(x + rt.bay / 2), this._Y(y + rt.depth) - 9, `${rt.label} ${rt.bay}×${rt.depth}m`);
+      this._label(this._X(x + rt.bay / 2), this._Y(y + rt.depth) - 9,
+        chk.ok ? `${rt.label} ${rt.bay}×${rt.depth}m` : `⚠ ${chk.reason}`);
     } else if (brush.kind === 'rack' && brush.area) {
       // area brush: crosshair hint only (the rectangle appears on drag).
       ctx.strokeStyle = this.pal.draft; ctx.lineWidth = 1;
@@ -1901,8 +1907,16 @@ export class Designer {
         const mx = snap(hov.mx), my = snap(hov.my);
         if (p.key === 'station') this._drawStationGlyph({ x: mx, y: my }, false, true);
         else this._drawEquipGlyph({ type: p.key, x: mx, y: my, count: '' }, false, true);
+        if (!chk.ok) {
+          // warning ring over the ghost: this spot rejects this equipment.
+          ctx.globalAlpha = 0.9;
+          ctx.strokeStyle = this.pal.draft; ctx.lineWidth = 2;
+          const rPx = (Math.max(p.w || 1.2, p.d || 0.9) / 2) * sc + 8;
+          ctx.beginPath(); ctx.arc(this._X(mx), this._Y(my), Math.max(rPx, 16), 0, 7); ctx.stroke();
+        }
         ctx.globalAlpha = 1;
-        this._label(this._X(mx), this._Y(my) - (Math.max(p.d || 1, 0.8) / 2) * sc - 9, `${p.label} ${p.w}×${p.d}m`);
+        this._label(this._X(mx), this._Y(my) - (Math.max(p.d || 1, 0.8) / 2) * sc - 9,
+          chk.ok ? `${p.label} ${p.w}×${p.d}m` : `⚠ ${chk.reason}`);
       } else if (p) {
         // conveyor: rubber segment from the draft's last vertex to the cursor.
         this._drawPolyGhost(this.conveyorDraft, p.color);
@@ -2432,6 +2446,15 @@ export class Designer {
   _stampAt(b, mxRaw, myRaw) {
     const bounds = this.model.layout.bounds;
     const mx = snap(clamp(mxRaw, 0, bounds.width)), my = snap(clamp(myRaw, 0, bounds.depth));
+    // area-semantics gate: a 梱包台 in the 保管エリア (etc.) is a design error.
+    const chk = this._placeCheck(b, mxRaw, myRaw);
+    if (!chk.ok) {
+      if (this._layoutStatus) {
+        this._layoutStatus.style.color = 'var(--bad)';
+        this._layoutStatus.textContent = chk.reason;
+      }
+      return;
+    }
     if (b.kind === 'zone') { this._placeZone(b.key, mxRaw, myRaw); return; }
     if (b.kind === 'door') {
       this._pushUndo();
@@ -2475,6 +2498,14 @@ export class Designer {
 
   // One rack unit (bay×depth, facing down) centered at the point, edge-snapped.
   _stampRackUnit(mxRaw, myRaw) {
+    const chk = this._placeCheck({ kind: 'rack' }, mxRaw, myRaw);
+    if (!chk.ok) {
+      if (this._layoutStatus) {
+        this._layoutStatus.style.color = 'var(--bad)';
+        this._layoutStatus.textContent = chk.reason;
+      }
+      return;
+    }
     const rt = RACK_TYPES[this.shelfType] || RACK_TYPES.medium;
     const zone = this._zoneForShelfAt(mxRaw, myRaw);
     if (!zone) return;
@@ -2499,6 +2530,42 @@ export class Designer {
     zone.shelves.push(sh);
     this._warnOverlap([sh], zone);
     this._renderSide(); this._repaint(); this._updateStatus();
+  }
+
+  // Top-most zone containing the point (zones later in the list draw on top).
+  _zoneAt(mx, my) {
+    const zs = this.model.layout.zones || [];
+    for (let i = zs.length - 1; i >= 0; i--) {
+      const z = zs[i];
+      if (mx >= z.x && mx <= z.x + z.w && my >= z.y && my <= z.y + z.h) return z;
+    }
+    return null;
+  }
+
+  // Area-semantics check for a placement (whole-warehouse design discipline):
+  // fixed equipment belongs to an area whose 工程 can use it — 梱包台 in the
+  // 保管エリア is a design error, 棚 outside a 保管エリア likewise. Bare floor
+  // (no zone under the cursor) stays free. Returns {ok, reason}.
+  _placeCheck(b, mx, my) {
+    if (!b || b.kind === 'select' || b.kind === 'wall' || b.kind === 'door' || b.kind === 'zone') {
+      return { ok: true, reason: null };
+    }
+    const zone = this._zoneAt(mx, my);
+    if (b.kind === 'rack') {
+      if (zone && zone.type !== 'storage') {
+        return { ok: false,
+          reason: `棚は保管エリアに配置します（ここは${ZONE_JP[zone.type] || zone.type}エリア）` };
+      }
+      return { ok: true, reason: null };
+    }
+    if (b.kind === 'equip') {
+      const rule = EQUIP_ZONE_RULES[b.key];
+      if (rule && zone && !rule.allow.includes(zone.type)) {
+        return { ok: false,
+          reason: `${rule.jp}（ここは${ZONE_JP[zone.type] || zone.type}エリア）` };
+      }
+    }
+    return { ok: true, reason: null };
   }
 
   // Storage zone receiving a shelf at (mx,my): the zone under the cursor, else
@@ -2827,6 +2894,14 @@ export class Designer {
       // Minecraft-style block laying. A real drag draws corner-to-corner.
       if (r - l < SHELF_MIN_M && btm - t < SHELF_MIN_M) {
         this._stampRackUnit(d.x0, d.y0);
+        return;
+      }
+      const chk = this._placeCheck({ kind: 'rack' }, (l + r) / 2, (t + btm) / 2);
+      if (!chk.ok) {
+        if (this._layoutStatus) {
+          this._layoutStatus.style.color = 'var(--bad)';
+          this._layoutStatus.textContent = chk.reason;
+        }
         return;
       }
       const zone = this._zoneForShelfAt((l + r) / 2, (t + btm) / 2);
@@ -3976,6 +4051,20 @@ export class Designer {
   }
 
   // ---- flow side panel: the workflow strip (synced) + method panel ---------
+  // Area-chain status for one stage: is it bound to a zone whose TYPE can host
+  // the 工程 (AnyLogic-style area semantics)? Returns {ok, warn} for the list.
+  _stageAreaStatus(st) {
+    const expected = STAGE_ZONE_TYPES[st.id];
+    const z = st.zone ? this._zoneById(st.zone) : null;
+    if (!z) return { ok: false, warn: '未割当 — 床図でエリアを割り当ててください' };
+    if (expected && !expected.includes(z.type)) {
+      const want = expected.map((t) => ZONE_JP[t] || t).join('・');
+      return { ok: false,
+        warn: `種別不一致 — ${st.label || st.id}は${want}エリアへ（現在: ${ZONE_JP[z.type] || z.type}）` };
+    }
+    return { ok: true, warn: null };
+  }
+
   _renderFlowSide() {
     const s = this.side; if (!s) return;
     s.innerHTML = '';
@@ -3983,20 +4072,35 @@ export class Designer {
     this._note(s, '工程をクリックすると作業方法を設定できます。床図のゾーンと同じデータを表示しています。');
 
     const order = this._orderedStages();
+    // エリア連鎖サマリ: 入庫→仮置き→保管→…が正しい種別のエリアで繋がっているか。
+    const issues = order.map((st) => this._stageAreaStatus(st)).filter((r) => !r.ok);
+    const chain = this._div(s, 'padding:7px 10px;border-radius:var(--r-md);margin:8px 0 4px;font-size:12px;'
+      + (issues.length
+        ? 'border:1px solid var(--bad);background:rgba(227,64,28,0.08);color:var(--ink-primary);'
+        : 'border:1px solid var(--ok, #1db954);background:rgba(29,185,84,0.08);color:var(--ink-primary);'));
+    chain.textContent = issues.length
+      ? `⚠ エリア連鎖に${issues.length}件の問題（下の工程の警告を確認）`
+      : '✓ エリア連鎖OK — 全工程が正しい種別のエリアに繋がっています';
+
     const strip = this._div(s, 'display:flex;flex-direction:column;gap:0;margin:8px 0 14px;');
     order.forEach((st, i) => {
       const open = this.flowMethodStage === st.id;
+      const area = this._stageAreaStatus(st);
       const box = this._div(strip, `display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-radius:var(--r-md);cursor:pointer;border:2px solid ${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};background:${open ? hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.28) : hexA(METHOD_COLOR[st.method] || 'var(--ink-tertiary)', 0.1)};`);
       this._on(box, 'click', () => {
         this.flowMethodStage = (this.flowMethodStage === st.id) ? null : st.id;
         this._renderFlowSide(); this._drawFlowCanvas();
       });
-      const lblWrap = this._div(box, 'display:flex;flex-direction:column;gap:2px;');
+      const lblWrap = this._div(box, 'display:flex;flex-direction:column;gap:2px;min-width:0;');
       const lbl = this._div(lblWrap, 'font-weight:700;font-size:14px;');
       lbl.textContent = `${i + 1}. ${st.label || st.id}`;
       const zname = this._div(lblWrap, 'font-size:11px;color:var(--ink-secondary);');
       const z = st.zone ? this._zoneById(st.zone) : null;
       zname.textContent = z ? `場所: ${ZONE_JP[z.type] || z.type}` : '場所: 未割当';
+      if (!area.ok) {
+        const warn = this._div(lblWrap, 'font-size:11px;color:var(--bad);line-height:1.4;');
+        warn.textContent = `⚠ ${area.warn}`;
+      }
       const badge = this._div(box, `font-size:11px;color:#fff;background:${METHOD_COLOR[st.method] || 'var(--ink-tertiary)'};padding:2px 7px;border-radius:var(--r-pill);white-space:nowrap;`);
       badge.textContent = (METHOD_OPTS.find((o) => o.value === st.method) || {}).label || st.method;
       // arrow connector

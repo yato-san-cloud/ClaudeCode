@@ -202,3 +202,30 @@ export const LIBRARY_DIGITS = [
   { digit: 8, kind: 'equip', key: 'asrs' },
   { digit: 9, kind: 'door', key: 'dock' },
 ];
+
+// ---- Whole-warehouse design discipline (AnyLogic-style area semantics) ------
+// Equipment ↔ zone-type compatibility. The simulator designs the WHOLE flow
+// (入庫→仮置き→保管→梱包→出荷), so fixed equipment must sit in an area whose
+// process can actually use it — a 梱包台 inside the 保管エリア is a design
+// error, not a preference. `allow` lists the zone types the item may sit IN;
+// bare floor (no zone under the cursor) is always allowed. Transport movers
+// (AGV / conveyor) roam the whole floor and carry no entry here.
+export const EQUIP_ZONE_RULES = {
+  station:   { allow: ['packing', 'shipping', 'staging'],
+               jp: '梱包台は梱包・出荷・一時保管エリアに置きます' },
+  asrs:      { allow: ['storage'],
+               jp: '自動倉庫(AS/RS)は保管エリアに置きます' },
+  robot_arm: { allow: ['packing', 'picking', 'receiving', 'shipping'],
+               jp: 'ロボットアームは作業系エリア（梱包/ピッキング/入出荷）に置きます' },
+  crane:     { allow: ['receiving', 'shipping', 'storage'],
+               jp: 'クレーンは入出荷・保管エリアに置きます' },
+};
+// Stage ↔ expected zone types: the area-chain contract the flow tab validates
+// (each 工程 must be bound to an area of a type that can host it).
+export const STAGE_ZONE_TYPES = {
+  receive: ['receiving'],
+  putaway: ['storage', 'staging'],
+  pick:    ['storage', 'picking'],
+  pack:    ['packing'],
+  ship:    ['shipping', 'staging'],
+};
