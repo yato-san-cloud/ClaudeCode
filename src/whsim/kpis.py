@@ -156,6 +156,7 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "n_inspectors": n_insp,
         "n_agvs": res.n_agvs,
         "sort_utilization": sort_util,
+        "sort_busy_s": sort_busy,   # 種まき仕分けの総busy秒 (作業方法比較の y軸)
         "sort_wait_mean_s": statistics.fmean(sort_waits) if sort_waits else 0.0,
         "n_put_wall": res.n_put_wall,
         "consolidation": res.consolidation,

@@ -158,3 +158,32 @@ def recommend(model: WarehouseModel) -> Recommendation:
         "（急なオーダーにも即応）。軸を動かして比較してみてください。"
     )
     return Recommendation(work, method_name(work), reason)
+
+
+# --- 作業方法の比較プリセット (deep-research: 4 points in the 5-axis space) -----
+# Each preset is one named picking method = a point in the WorkMethod axis space.
+# wave is a separate toggle layered on a preset (release="wave"), not a 5th preset.
+METHOD_PRESETS: list[dict] = [
+    {"id": "discrete", "label": "都度（摘み取り）",
+     "desc": "1オーダーずつ。仕分けゼロ・注文完全性◎・移動最大。",
+     "work": {"orders_per_trip": 1, "zoning": "none",
+              "consolidation": "pick", "release": "continuous"}},
+    {"id": "multi", "label": "マルチオーダー（バッチ/カート）",
+     "desc": "複数オーダーを1巡でまとめ採り。移動を大幅削減、仕分けはカート上。",
+     "work": {"orders_per_trip": 8, "zoning": "none",
+              "consolidation": "pick", "release": "continuous"}},
+    {"id": "zone", "label": "ゾーン（並列）",
+     "desc": "エリア分担で並列ピック。移動・混雑減、後段で統合。",
+     "work": {"orders_per_trip": 4, "zoning": "parallel",
+              "consolidation": "pick", "release": "continuous"}},
+    {"id": "total", "label": "種まき（トータル）",
+     "desc": "総量を一掃き採取→出荷先へ後仕分け。移動最小・仕分け最大。",
+     "work": {"orders_per_trip": 16, "zoning": "none",
+              "consolidation": "sort", "release": "continuous"}},
+]
+
+
+def pick_stage_index(model: WarehouseModel) -> int:
+    """Index of the ピッキング stage (by id), robust to reordered flows."""
+    return next((i for i, s in enumerate(model.process.stages)
+                 if s.id == "pick"), min(2, len(model.process.stages) - 1))

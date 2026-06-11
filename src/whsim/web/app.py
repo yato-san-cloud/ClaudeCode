@@ -205,6 +205,78 @@ async def api_run_scenarios(name: str, payload: dict | None = None):
         _exit_run()
 
 
+def _run_workmethods_blocking(name: str, proj: Project, payload: dict) -> dict:
+    """作業方法比較: run the 4 picking-method presets (都度/マルチ/ゾーン/種まき) as
+    edits to the ピッキング stage's 5-axis work design, and return a side-by-side
+    comparison + travel-vs-sort metrics + a profile-based recommendation. The
+    analytic-first → DES-validate spine: recommend a method, then prove it."""
+    from whsim import workmethod
+    from whsim.engine.scenarios import run_scenario
+    from whsim.schema.model import Scenario
+    base = proj.load_model()
+    pidx = workmethod.pick_stage_index(base)
+    reps = max(1, int(payload.get("reps", 3)))  # 4 methods × reps; keep responsive
+
+    methods = []
+    for preset in workmethod.METHOD_PRESETS:
+        sc = Scenario(name=preset["label"], description=preset.get("desc", ""),
+                      edits={f"process.stages.{pidx}.work": dict(preset["work"])})
+        _res, m = run_scenario(base, sc, reps=reps)
+        completed = max(1.0, float(m.get("orders_completed", 0)) or 1.0)
+        methods.append({
+            "id": preset["id"], "label": preset["label"], "desc": preset.get("desc", ""),
+            "kpis": {
+                "throughput_per_hr": m.get("throughput_per_hr", 0),
+                "cost_per_order": m.get("total_cost_per_order", 0),
+                "headcount": m.get("headcount", 0),
+                "picker_utilization": m.get("picker_utilization", 0),
+                "walk_per_order_m": m.get("walk_per_order_m", 0),
+                "completion_rate": m.get("completion_rate", 0),
+                "on_time_rate": m.get("on_time_rate", 0),
+                "monthly_cost": m.get("monthly_cost", 0),
+            },
+            "travel_per_order_m": round(float(m.get("walk_per_order_m", 0) or 0), 1),
+            "sort_per_order_s": round(float(m.get("sort_busy_s", 0) or 0) / completed, 1),
+            "currency": m.get("currency", "¥"),
+        })
+
+    # Deltas vs the 都度 (discrete) baseline = methods[0].
+    base_k = methods[0]["kpis"]
+
+    def _pct(cur, ref):
+        return round((cur - ref) / ref, 3) if ref else 0.0
+    for mth in methods:
+        k = mth["kpis"]
+        mth["delta"] = {
+            "cost_per_order": _pct(k["cost_per_order"], base_k["cost_per_order"]),
+            "throughput_per_hr": _pct(k["throughput_per_hr"], base_k["throughput_per_hr"]),
+            "travel": _pct(mth["travel_per_order_m"], methods[0]["travel_per_order_m"]),
+        }
+
+    # Profile-based recommendation, mapped to the nearest preset.
+    rec = workmethod.recommend(base)
+    w = rec.work
+    rec_id = ("total" if w.consolidation == "sort"
+              else "zone" if w.zoning == "parallel"
+              else "multi" if w.orders_per_trip > 1 else "discrete")
+    return {
+        "methods": methods, "baseline_id": "discrete",
+        "recommend": {"id": rec_id, "name": rec.name, "reason": rec.reason},
+        "reps": reps,
+    }
+
+
+@app.post("/api/projects/{name}/workmethod/compare")
+async def api_workmethod_compare(name: str, payload: dict | None = None):
+    """作業方法（オーダー/マルチ/ゾーン/種まき）の比較を実行して返す。"""
+    proj = _open(name)
+    _enter_run()
+    try:
+        return await run_in_threadpool(_run_workmethods_blocking, name, proj, payload or {})
+    finally:
+        _exit_run()
+
+
 # ---- routers ----------------------------------------------------------------
 # Concern-grouped APIRouter modules, mounted with byte-identical paths.
 app.include_router(misc_routes.router)
