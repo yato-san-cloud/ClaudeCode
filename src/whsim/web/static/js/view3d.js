@@ -527,6 +527,9 @@ export class Scene3D {
         case 'flow':      this._buildFlowRack(bays); break;
         case 'asrs':      this._buildAsrsRack(bays); break;
         case 'nestainer': this._buildNestainer(bays); break;
+        case 'hanger':    this._buildHangerRack(bays); break;
+        case 'mezzanine': this._buildMezzanine(bays); break;
+        case 'mobile':    this._buildMobileRack(bays); break;
         case 'light':
         case 'medium':
         default:          this._buildShelving(bays, rt); break;
@@ -785,6 +788,139 @@ export class Scene3D {
     this._instancePieces(loadG, loadMat, bays, stacks, (j, bay) => {
       this._bayLocal(s, bay, 0, stackH * j + stackH * 0.5, 0);
       s.scale.set(bay.bw * 0.86, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // ハンガーラック (hanger rack, apparel): end posts + a top rail with garments
+  // hanging from it — narrow ABC-tinted slabs at varied drops, reading instantly
+  // as 吊るし保管. 3 instanced pieces (posts / rail / garments).
+  _buildHangerRack(bays) {
+    const dims = RACK_DIMS.hanger;
+    const H = dims.h, depth = dims.depth;
+    const s = this._scratch();
+    const postG = new THREE.BoxGeometry(0.07, H, 0.07);
+    const railG = new THREE.BoxGeometry(1, 0.06, 0.06);
+    const garmG = new THREE.BoxGeometry(1, H * 0.5, depth * 0.45);
+    this._geometries.push(postG, railG, garmG);
+    const steelMat = this._rackMat({ color: RACK_STEEL, roughness: 0.5, metalness: 0.6 });
+    const garmMat = this._rackMat({ color: 0xffffff, roughness: 0.9, metalness: 0.0,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.05 }, true);
+    // End posts (2 per bay, at the bay edges).
+    this._instancePieces(postG, steelMat, bays, 2, (j, bay) => {
+      const sgn = j ? 0.5 : -0.5;
+      this._bayLocal(s, bay, sgn * (bay.bw - 0.07), H / 2, 0);
+      return s;
+    });
+    // Top rail spanning the bay.
+    this._instancePieces(railG, steelMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, H * 0.93, 0);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    // Hanging garments: 4 per bay, spread along the rail, alternating drop so the
+    // rack silhouette reads as clothes on hangers (not boxes).
+    this._instancePieces(garmG, garmMat, bays, 4, (j, bay) => {
+      const fx = (j + 0.5) / 4 - 0.5;             // -0.375 .. 0.375 along the bay
+      const drop = (j % 2) ? 0.62 : 0.66;          // slight stagger
+      this._bayLocal(s, bay, fx * bay.bw, H * drop, 0);
+      s.scale.set(bay.bw * 0.2, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // メザニン (mezzanine): columns + a mid-height deck slab with an edge railing,
+  // ABC-tinted goods on BOTH the floor and the deck — the 床面積を倍化 story in
+  // one glance. 4 instanced pieces (columns / deck / railing / goods×2levels).
+  _buildMezzanine(bays) {
+    const dims = RACK_DIMS.mezzanine;
+    const H = dims.h, depth = dims.depth;
+    const deckY = H * 0.52;
+    const s = this._scratch();
+    const colG = new THREE.BoxGeometry(0.14, deckY, 0.14);
+    const deckG = new THREE.BoxGeometry(1, 0.12, depth);
+    const railG = new THREE.BoxGeometry(1, 0.55, 0.05);
+    const goodsG = new THREE.BoxGeometry(1, H * 0.30, depth * 0.7);
+    this._geometries.push(colG, deckG, railG, goodsG);
+    const steelMat = this._rackMat({ color: RACK_STEEL, roughness: 0.55, metalness: 0.55 });
+    const deckMat = this._rackMat({ color: 0x8a939e, roughness: 0.75, metalness: 0.3 });
+    const goodsMat = this._rackMat({ color: 0xffffff, roughness: 0.84, metalness: 0.04,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.06 }, true);
+    // 4 support columns per bay (corners, under the deck).
+    this._instancePieces(colG, steelMat, bays, 4, (j, bay) => {
+      const sgnX = (j & 1) ? 0.5 : -0.5, sgnZ = (j & 2) ? 0.5 : -0.5;
+      this._bayLocal(s, bay, sgnX * (bay.bw - 0.14), deckY / 2, sgnZ * (depth - 0.14));
+      return s;
+    });
+    // Deck slab.
+    this._instancePieces(deckG, deckMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, deckY, 0);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    // Edge railing on the pick-face (+Z) side of the deck.
+    this._instancePieces(railG, steelMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, deckY + 0.34, depth * 0.48);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    // Goods on the floor (below the deck) and on the deck.
+    this._instancePieces(goodsG, goodsMat, bays, 2, (j, bay) => {
+      const y = j ? deckY + 0.06 + H * 0.15 : H * 0.15;
+      this._bayLocal(s, bay, 0, y, 0);
+      s.scale.set(bay.bw * 0.8, 1, 1);
+      return s;
+    }, true);
+  }
+
+  // 移動ラック (mobile rack): a standard shelving body riding a dark base
+  // carriage on floor rails that extend cross-aisle — the 通路を共有して保管効率
+  // 最大 story. 5 instanced pieces (rails / carriage / frame / boards / goods).
+  _buildMobileRack(bays) {
+    const dims = RACK_DIMS.mobile;
+    const H = dims.h, tiers = dims.levels, depth = dims.depth;
+    const bodyH = H - 0.24;
+    const tierH = bodyH / tiers;
+    const s = this._scratch();
+    const railG = new THREE.BoxGeometry(0.08, 0.05, depth * 2.6);
+    const carrG = new THREE.BoxGeometry(1, 0.2, depth * 1.12);
+    const frameG = new THREE.BoxGeometry(1, bodyH, depth);
+    const boardG = new THREE.BoxGeometry(1, 0.04, depth * 0.96);
+    const goodsG = new THREE.BoxGeometry(1, tierH * 0.58, depth * 0.78);
+    this._geometries.push(railG, carrG, frameG, boardG, goodsG);
+    const railMat = this._rackMat({ color: 0x2c333c, roughness: 0.45, metalness: 0.7 });
+    const carrMat = this._rackMat({ color: 0x3a424d, roughness: 0.5, metalness: 0.6 });
+    const frameMat = this._rackMat({ color: RACK_STEEL, roughness: 0.6, metalness: 0.45,
+      transparent: true, opacity: 0.3 });
+    const boardMat = this._rackMat({ color: RACK_BOARD, roughness: 0.7, metalness: 0.3 });
+    const goodsMat = this._rackMat({ color: 0xffffff, roughness: 0.82, metalness: 0.05,
+      emissive: new THREE.Color(0x111111), emissiveIntensity: 0.06 }, true);
+    // Floor rails (2 per bay) running cross-aisle so the carriages read as sliding.
+    this._instancePieces(railG, railMat, bays, 2, (j, bay) => {
+      const sgn = j ? 0.32 : -0.32;
+      this._bayLocal(s, bay, sgn * bay.bw, 0.03, 0);
+      return s;
+    });
+    // Base carriage under the shelving body.
+    this._instancePieces(carrG, carrMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, 0.12, 0);
+      s.scale.set(bay.bw * 0.98, 1, 1);
+      return s;
+    });
+    // Shelving body (frame cage + boards + ABC goods), lifted onto the carriage.
+    this._instancePieces(frameG, frameMat, bays, 1, (j, bay) => {
+      this._bayLocal(s, bay, 0, 0.24 + bodyH / 2, 0);
+      s.scale.set(bay.bw, 1, 1);
+      return s;
+    });
+    this._instancePieces(boardG, boardMat, bays, tiers, (j, bay) => {
+      this._bayLocal(s, bay, 0, 0.24 + tierH * j + 0.02, 0);
+      s.scale.set(bay.bw * 0.96, 1, 1);
+      return s;
+    });
+    this._instancePieces(goodsG, goodsMat, bays, tiers, (j, bay) => {
+      this._bayLocal(s, bay, 0, 0.24 + tierH * (j + 0.5), 0);
+      s.scale.set(bay.bw * 0.8, 1, 1);
       return s;
     }, true);
   }
