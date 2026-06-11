@@ -360,6 +360,16 @@ class Settings(BaseModel):
     working_hours_per_day: float = 8.0    # a work-day's length (one shift)
     working_days_per_month: float = 22.0  # operating days per month
     agv_cost_per_month: float = 80000.0   # ¥/month per AGV (lease + power + maint.)
+    # --- 原価積み上げ (LOGISTEED 試算フロー 6費目) unit prices. All defaulted so a
+    # template is always costable; the speculative categories default to 0 so the
+    # build-up never INVENTS delivery/system/overhead cost — the user opts in via
+    # the 原価試算 settings screen. ---
+    forklift_cost_per_hour: float = 1600.0   # ¥/人時 フォークP社員 (deck p27)
+    fixed_labor_per_month: float = 0.0       # 管理者など固定人件費 ¥/月 (opt-in)
+    tsubo_rate_per_month: float = 4300.0     # 保管坪単価 ¥/坪/月 (deck p51)
+    delivery_cost_per_cage: float = 0.0      # 輸配送 ¥/カゴ台車 (opt-in)
+    system_cost_per_month: float = 0.0       # 情報システム費 ¥/月 (opt-in)
+    overhead_rate: float = 0.0               # 運営費率 (作業+保管+輸配送+IT の比率; opt-in)
 
 
 class Scenario(BaseModel):

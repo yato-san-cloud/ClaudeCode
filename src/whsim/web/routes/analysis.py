@@ -200,6 +200,33 @@ def api_storage_apply(name: str, payload: dict | None = None):
                         + (f"（{placed['unplaced']}台は入りきりません）" if placed["unplaced"] else "。"))}
 
 
+@router.get("/api/projects/{name}/cost")
+def api_cost(name: str, labor_cost_per_hour: float | None = None,
+             fixed_labor_per_month: float | None = None,
+             tsubo_rate_per_month: float | None = None,
+             delivery_cost_per_cage: float | None = None,
+             system_cost_per_month: float | None = None,
+             overhead_rate: float | None = None,
+             working_days_per_month: float | None = None,
+             nonworking: str | None = None):
+    """原価試算: analytic 6費目 build-up (no sim). Query params override Settings
+    unit prices live (so the 原価試算 screen feels instant); persistence is via
+    PUT /settings. Returns the per-category breakdown with formulas."""
+    from whsim import cost
+    params = {k: v for k, v in {
+        "labor_cost_per_hour": labor_cost_per_hour,
+        "fixed_labor_per_month": fixed_labor_per_month,
+        "tsubo_rate_per_month": tsubo_rate_per_month,
+        "delivery_cost_per_cage": delivery_cost_per_cage,
+        "system_cost_per_month": system_cost_per_month,
+        "overhead_rate": overhead_rate,
+        "working_days_per_month": working_days_per_month,
+    }.items() if v is not None}
+    if nonworking:
+        params["nonworking"] = nonworking
+    return cost.estimate_cost(_open(name).load_model(), params)
+
+
 @router.get("/api/projects/{name}/analysis")
 def api_analysis(name: str):
     """Analysis-dashboard payload (the "分析" tab).

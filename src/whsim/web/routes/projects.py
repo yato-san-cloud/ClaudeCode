@@ -244,6 +244,9 @@ def api_apply(name: str, payload: dict):
 _SETTINGS_NUMERIC = (
     "labor_cost_per_hour", "working_hours_per_day",
     "working_days_per_month", "agv_cost_per_month",
+    # 原価積み上げ unit prices (原価試算 screen).
+    "forklift_cost_per_hour", "fixed_labor_per_month", "tsubo_rate_per_month",
+    "delivery_cost_per_cage", "system_cost_per_month", "overhead_rate",
 )
 
 
