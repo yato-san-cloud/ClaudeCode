@@ -32,6 +32,8 @@ const OV_CSS = `
 .ov-meter span{display:block;height:100%;background:var(--accent);
   border-radius:var(--r-pill);transition:width var(--dur-3) var(--ease-out)}
 .ov-chips{display:flex;flex-wrap:wrap;gap:6px}
+.ov-prov-legend{display:flex;gap:6px;margin:2px 0 6px;opacity:.9}
+.ov-prov-legend .ov-chip{font-size:9.5px;padding:1px 7px}
 .ov-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
   padding:3px 9px;border-radius:var(--r-pill);border:1px solid var(--line-soft);
   background:var(--bg-sunken);color:var(--ink-secondary)}
@@ -212,14 +214,21 @@ export function mountOverview(el, opts = {}) {
     const items = checklist(d);
 
     const pct = Math.max(0, Math.min(100, d.realPct));
+    const TIP = { real: '顧客から取り込んだ／確認済みの実データ', gen: '実データから自動生成・推計した値',
+      prov: 'テンプレートの仮値（まだ未確認）' };
     const chips = Object.keys(SUBTREE_JP).map((k) => {
       const v = d.sub[k];
       const cls = (v === 'imported' || v === 'interview') ? 'real'
         : v === 'generated' ? 'gen' : 'prov';
       const t = (v === 'imported' || v === 'interview') ? '実データ'
         : v === 'generated' ? '生成' : '仮値';
-      return `<span class="ov-chip ${cls}">${SUBTREE_JP[k]}<i>${t}</i></span>`;
+      return `<span class="ov-chip ${cls}" title="${esc(SUBTREE_JP[k])}：${esc(TIP[cls])}">${SUBTREE_JP[k]}<i>${t}</i></span>`;
     }).join('');
+    // Inline legend so the chip colours are self-explanatory (recognition).
+    const provLegend = '<div class="ov-prov-legend" aria-hidden="true">'
+      + '<span class="ov-chip real">実データ</span>'
+      + '<span class="ov-chip gen">生成</span>'
+      + '<span class="ov-chip prov">仮値</span></div>';
 
     const listHtml = items.map((it) => {
       const cta = it.ok ? ''
@@ -250,6 +259,7 @@ export function mountOverview(el, opts = {}) {
          <div class="ov-prov" title="${esc(d.summary)}" aria-live="polite">
            <div class="ov-prov-pct">実データ <b>${pct}%</b></div>
            <div class="ov-meter"><span style="width:${pct}%"></span></div>
+           ${provLegend}
            <div class="ov-chips">${chips}</div>
          </div>
        </div>

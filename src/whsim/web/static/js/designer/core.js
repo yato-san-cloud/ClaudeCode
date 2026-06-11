@@ -191,7 +191,7 @@ export class Designer {
       + '<b>キーボード</b><br>選択を削除: <b>Delete</b> / 複製(棚): <b>D</b> / 取消: <b>Esc</b><br>'
       + '棚種別を選ぶ(棚モード): <b>1〜6</b><br>'
       + '元に戻す: <b>Ctrl/⌘+Z</b> / やり直す: <b>Ctrl/⌘+Shift+Z</b></div>'
-      + '<div style="margin-top:8px;color:var(--ink-tertiary);">変更は「適用（保存）」を押すまでサーバーに保存されません。</div>';
+      + '<div style="margin-top:8px;color:var(--ink-tertiary);">変更は「レイアウトを保存」を押すまでサーバーに保存されません。</div>';
     const close = document.createElement('button');
     close.textContent = '閉じる';
     close.style.cssText = 'margin-top:10px;padding:5px 10px;border:1px solid var(--line-hair);border-radius:var(--r-sm);background:var(--bg-app);color:var(--ink-primary);cursor:pointer;font-size:12px;';
@@ -410,7 +410,7 @@ export class Designer {
       flow: '工程の順序と作業方法、各工程の場所（ゾーン）を設定',
       route: '作業員・フォークリフトの動線を作図し距離/時間を確認',
     };
-    for (const [key, label] of [['layout', 'レイアウト'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー'], ['route', '動線']]) {
+    for (const [key, label] of [['layout', 'ゾーン/棚'], ['equip', '設備'], ['building', '躯体'], ['flow', 'フロー'], ['route', '動線']]) {
       const b = document.createElement('button');
       b.textContent = label;
       b.title = TOOL_TIP[key] || label;
@@ -445,7 +445,8 @@ export class Designer {
     this._refreshUndoBtns();
     const save = document.createElement('button');
     save.className = 'primary';
-    save.textContent = '適用（保存）';
+    save.textContent = 'レイアウトを保存';
+    save.title = 'レイアウト・ゾーン・棚・工程・人員の変更をサーバーに保存します';
     save.style.fontWeight = '700';
     this._on(save, 'click', () => this._save());
     bar.appendChild(save);
