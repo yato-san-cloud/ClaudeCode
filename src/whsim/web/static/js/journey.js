@@ -16,7 +16,7 @@ const PHASES = [
   { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics', 'bi'] },
   { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'timetable', 'materialflow', 'cost'] },
   { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d'] },
-  { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'compare', 'export'] },
+  { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'workcompare', 'compare', 'export'] },
 ];
 
 // Cross-cutting views: available in every phase, pinned separately (own lane).
@@ -29,7 +29,7 @@ const CROSS = [
 const VIEW_LABEL = {
   overview: '概要', dataanalysis: '物量サマリ', bianalytics: '対話分析', bi: '基礎物量', design: 'レイアウト',
   storage: '保管設計', materialflow: 'マテリアルフロー', timetable: '人員タイムチャート', analysis: 'KPI・判定',
-  view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', compare: 'シナリオ比較',
+  view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', workcompare: '作業方法比較', compare: 'シナリオ比較',
   export: 'エクスポート', chat: 'OCTA', notes: '知見',
 };
 
@@ -49,6 +49,7 @@ const VIEW_DESC = {
   view2d: '動きの2Dアニメ＋混雑ヒート',
   view3d: '3Dで設備・人・搬送を可視化',
   viewpng: '提案PNG（①課題→⑤裏付け）',
+  workcompare: 'オーダー/マルチ/ゾーン/種まきを実行比較（移動 vs 仕分け）',
   compare: '現行 vs 代替案の比較（投資回収）',
   export: '提案書(PPTX/PDF)を書き出す',
   chat: 'OCTA（横断アシスタント）',
