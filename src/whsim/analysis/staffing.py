@@ -131,14 +131,34 @@ def flow_seed() -> list[dict]:
     ]
 
 
-def scenario_from_volumes(volumes_by_process: dict) -> dict:
+def resolve_productivity(model, process_id: str, default: float) -> float:
+    """生産性の3層 (cost と同じ): 実測採用値(override) > 物流形態ベンチマーク(想定) >
+    エンジン既定. `model` may be None (→ default)."""
+    if model is None:
+        return float(default)
+    try:
+        ov = (getattr(model.settings, "productivity_overrides", {}) or {}).get(process_id)
+        if ov:
+            return float(ov)
+        bp = (getattr(model.settings, "benchmark_productivity", {}) or {}).get(process_id)
+        if bp:
+            return float(bp)
+    except Exception:  # noqa: BLE001 — settings may be absent; fall back
+        pass
+    return float(default)
+
+
+def scenario_from_volumes(volumes_by_process: dict, model=None) -> dict:
     """Build a generic timetable-solver payload from explicit per-process 荷役物量.
 
     `volumes_by_process` maps a process id (入荷検品/格納/…/出荷) to a daily volume.
-    Schema matches whsim.timetable.solve / timetable_solver.js."""
+    Productivities use the 3-tier (実測採用値 > 物流形態ベンチマーク > 既定) when a
+    `model` is given, so the 想定→実測 swap and the 物流形態 benchmark flow into the
+    人員タイムチャート too. Schema matches whsim.timetable.solve / timetable_solver.js."""
     processes, productivity, volumes = [], {}, {}
     for p in GENERIC_PROCESSES:
         vk = f"{p['id']}_物量"
+        prod = resolve_productivity(model, p["id"], p["prod"])
         processes.append({
             "id": p["id"], "section": p["section"], "worker_type": "PT",
             "default_時間帯": _BAND.get(p["section"], ["09:00", "21:00"]),
@@ -146,7 +166,7 @@ def scenario_from_volumes(volumes_by_process: dict) -> dict:
             "volume_unit": p["unit"].split("/")[0], "配置方式": "dynamic",
             "固定人数": 0, "依存": _DEPS.get(p["id"], []),
         })
-        productivity[p["id"]] = {"篁採用値": p["prod"], "単位": p["unit"],
+        productivity[p["id"]] = {"篁採用値": prod, "単位": p["unit"],
                                  "fixed_hours": False}
         volumes[vk] = int(round(float(volumes_by_process.get(p["id"], 0) or 0)))
     scenario = {"物量": volumes,

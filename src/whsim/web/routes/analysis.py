@@ -49,11 +49,14 @@ def api_timetable_from_bi(name: str):
     BI derivation has been applied yet."""
     from whsim import bi
     from whsim.analysis import staffing
-    vols = staffing.volumes_from_bi(bi.load_bi_config(_open(name)))
+    proj = _open(name)
+    vols = staffing.volumes_from_bi(bi.load_bi_config(proj))
     if vols is None:
         return {"available": False}
+    # Pass the model so the timetable productivities honour the 3-tier
+    # (実測採用値 > 物流形態ベンチマーク > 既定) — adopted 実測 flows here too.
     return {"available": True, "volumes": vols,
-            "scenario": staffing.scenario_from_volumes(vols)}
+            "scenario": staffing.scenario_from_volumes(vols, proj.load_model())}
 
 
 @router.get("/api/analysis/sample")
