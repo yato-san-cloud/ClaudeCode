@@ -517,12 +517,18 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
     except Exception:  # noqa: BLE001
         overrides = {}
     bench = {p["id"]: p for p in GENERIC_PROCESSES}
+    bench_prod = {}
+    try:
+        bench_prod = getattr(model.settings, "benchmark_productivity", {}) or {}
+    except Exception:  # noqa: BLE001
+        bench_prod = {}
     prod_compare = []
     for pid, meas in measured.items():
         b = bench.get(pid)
         if not b or not meas:
             continue
-        benchmark = float(b["prod"])
+        # 想定 = 物流形態ベンチマーク (if applied) else エンジン既定.
+        benchmark = float(bench_prod.get(pid, b["prod"]))
         gap = (meas - benchmark) / benchmark if benchmark else 0.0
         prod_compare.append({
             "process": pid, "unit": b["unit"],

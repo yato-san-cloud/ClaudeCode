@@ -38,12 +38,16 @@ def _labor_lines(model: WarehouseModel, vol: dict, days: float, rate: float):
     (settings.productivity_overrides[process]) supersedes the benchmark prod when
     present — the 想定→実測 swap. Returns (lines, total_mh_day, monthly_yen)."""
     overrides = getattr(model.settings, "productivity_overrides", {}) or {}
+    bench = getattr(model.settings, "benchmark_productivity", {}) or {}
     lines = []
     total_mh = 0.0
     for p in GENERIC_PROCESSES:
         v = float(vol.get(_DRIVER_VOL.get(p["driver"], ""), 0.0) or 0.0)
+        # 3-tier: 実測採用値(override) > 物流形態ベンチマーク(想定) > エンジン既定.
         ov = overrides.get(p["id"])
-        prod = max(1.0, float(ov)) if ov else max(1.0, float(p["prod"]))
+        bp = bench.get(p["id"])
+        base = ov if ov else (bp if bp else p["prod"])
+        prod = max(1.0, float(base))
         mh = v / prod                      # 人時/日
         if mh <= 0:
             continue

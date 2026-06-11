@@ -39,6 +39,8 @@ function injectStyle() {
   .co-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .co-head h2{font-size:var(--fs-title,17px);margin:0}
   .co-head .sub{font-size:var(--fs-sm,12.5px);color:var(--ink-secondary)}
+  .co-bench{margin-left:auto;font:inherit;font-size:12px;padding:6px 10px;border-radius:8px;
+    border:1px solid var(--line-strong,rgba(120,140,170,.4));background:var(--bg-app);color:var(--ink-primary)}
   .co-hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
   .co-card{padding:12px 16px;border:1px solid var(--line-hair);border-radius:12px;background:var(--bg-sunken)}
   .co-card.hero{border-left:4px solid var(--accent);background:var(--accent-tint,rgba(22,192,222,.06))}
@@ -91,6 +93,8 @@ export function mountCost(el, opts = {}) {
   const knob = {};
   FIELDS.forEach((f) => { knob[f.key] = f.def; });
   let seeded = false;       // pull saved settings once to seed the inputs
+  let benchmarks = [];      // 物流形態ライブラリ (一覧, fetched once)
+  let curBench = '';        // applied benchmark id
 
   function disposeChart() { if (chart) { try { chart.dispose(); } catch (_) { /* noop */ } chart = null; } }
 
@@ -102,7 +106,30 @@ export function mountCost(el, opts = {}) {
     try {
       const s = await api(`/api/projects/${encodeURIComponent(name)}/settings`);
       FIELDS.forEach((f) => { if (s && s[f.key] != null) knob[f.key] = Number(s[f.key]); });
+      curBench = (s && s.benchmark_id) || '';
     } catch (_e) { /* defaults are fine */ }
+    try {
+      const r = await api('/api/benchmarks');
+      benchmarks = (r && r.benchmarks) || [];
+    } catch (_e) { benchmarks = []; }
+  }
+
+  // Apply a 物流形態プリセット (想定生産性＋計画値) then refetch the cost.
+  async function applyBench(bid) {
+    const name = getProject();
+    if (!name || !bid) { curBench = ''; load(); return; }
+    try {
+      const r = await api(`/api/projects/${encodeURIComponent(name)}/benchmark/${encodeURIComponent(bid)}/apply`,
+        { method: 'POST' });
+      if (r && r.ok) {
+        curBench = bid;
+        if (r.planning && r.planning.tsubo_rate_per_month != null) {
+          knob.tsubo_rate_per_month = Number(r.planning.tsubo_rate_per_month);
+        }
+        toast(r.message || 'ベンチマークを適用しました。', 'ok');
+      }
+    } catch (e) { toast('適用に失敗: ' + (e && e.message ? e.message : e), 'error'); }
+    load();
   }
 
   async function load() {
@@ -140,10 +167,14 @@ export function mountCost(el, opts = {}) {
     disposeChart();
     const d = data || {};
     const cats = d.categories || [];
+    const benchOpts = ['<option value="">物流形態テンプレ（想定生産性）…</option>']
+      .concat(benchmarks.map((bm) => `<option value="${esc(bm.id)}"${bm.id === curBench ? ' selected' : ''}>`
+        + `${esc(bm.label)}${bm.seed ? '（seed）' : ''}</option>`)).join('');
     root.innerHTML = `
       <div class="co-head"><h2>原価試算（試算フロー 6費目）</h2>
         <span class="sub">物量 → 工数 → 原価を解析的に積み上げ（爆速・実行不要）。
-        ${d.working_days ? `稼働日 ${fmt(d.working_days)}日` : ''}</span></div>
+        ${d.working_days ? `稼働日 ${fmt(d.working_days)}日` : ''}</span>
+        <select class="co-bench" data-bench aria-label="物流形態ベンチマーク">${benchOpts}</select></div>
       <div class="co-hero">
         <div class="co-card hero"><div class="l">月間コスト（合計）</div>
           <div class="v">${yen(d.total_yen_month)}</div><div class="d">解析的見積り</div></div>
@@ -204,6 +235,8 @@ export function mountCost(el, opts = {}) {
     if (reset) reset.onclick = () => { FIELDS.forEach((f) => { knob[f.key] = f.def; }); load(); };
     const save = root.querySelector('[data-save]');
     if (save) save.onclick = () => persist(save);
+    const bench = root.querySelector('[data-bench]');
+    if (bench) bench.onchange = () => applyBench(bench.value);
   }
 
   // Persist the 単価 to the project settings (so KPIs/proposal use them too).

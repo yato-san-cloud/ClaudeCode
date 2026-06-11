@@ -370,10 +370,12 @@ class Settings(BaseModel):
     delivery_cost_per_cage: float = 0.0      # 輸配送 ¥/カゴ台車 (opt-in)
     system_cost_per_month: float = 0.0       # 情報システム費 ¥/月 (opt-in)
     overhead_rate: float = 0.0               # 運営費率 (作業+保管+輸配送+IT の比率; opt-in)
-    # 生産性フィードバック: per-process 実測採用値 (process_id → rate in その工程の単位).
-    # When present, overrides the analytic benchmark (staffing.GENERIC_PROCESSES) in
-    # the 原価試算 labour build-up — the 想定→実測 swap. Empty = use the benchmark.
+    # 生産性の3層: 実測採用値(override) > 物流形態ベンチマーク(想定) > エンジン既定.
+    # productivity_overrides = 実測採用値 (想定→実測 swap; empty = no adoption).
     productivity_overrides: dict[str, float] = Field(default_factory=dict)
+    # benchmark_productivity = 物流形態別の想定生産性 (whsim.benchmarks で適用).
+    benchmark_productivity: dict[str, float] = Field(default_factory=dict)
+    benchmark_id: str = ""                   # which 物流形態プリセットを適用したか
 
 
 class Scenario(BaseModel):

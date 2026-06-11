@@ -227,6 +227,32 @@ def api_cost(name: str, labor_cost_per_hour: float | None = None,
     return cost.estimate_cost(_open(name).load_model(), params)
 
 
+@router.get("/api/benchmarks")
+def api_benchmarks():
+    """生産性ベンチマークライブラリ: 物流形態別の想定生産性プリセット一覧。"""
+    from whsim import benchmarks
+    return {"benchmarks": benchmarks.catalog()}
+
+
+@router.post("/api/projects/{name}/benchmark/{bid}/apply")
+def api_benchmark_apply(name: str, bid: str):
+    """物流形態プリセットを適用: 想定生産性→settings.benchmark_productivity、
+    坪単価等の計画値→settings。荷姿の計画値は応答で返し、クライアントが基礎物量に
+    seed する。原価/タイムチャート/想定vs実測の"想定"がこのベンチマークに切替わる。"""
+    from whsim import benchmarks
+    from whsim.provenance import Source
+    proj = _open(name)
+    model = proj.load_model()
+    res = benchmarks.apply(model, bid)
+    if not res.get("ok"):
+        return res
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("settings", Source.INTERVIEW)
+    proj.save_provenance(prov)
+    return res
+
+
 @router.get("/api/projects/{name}/analysis")
 def api_analysis(name: str):
     """Analysis-dashboard payload (the "分析" tab).
