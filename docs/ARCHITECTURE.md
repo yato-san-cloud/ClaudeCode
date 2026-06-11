@@ -52,7 +52,7 @@
 - ※ `design`/`slotting`/`datagen` は小モジュール群。将来 `design/` パッケージへ統合候補。
 
 ### 分析 / BI（2系統）
-- `bi.py`（DuckDB **物量集計**＋`derive_volumes` 仮値派生：パレット/オリコン/カゴ台車の荷姿変換。`bi/apply`→`bi.json`→`timetable/from-bi` が **BI→タイムチャートの橋**）/ `analysis/`（WMSデータ分析：`analyses` `insights` `staffing` `data_io` `report` `sample` ＋ `ingest.py`＝出荷CSV→model.orders の **ETL**、`POST /import/shipments`）/ `analytic.py`（M/M/c oracle）/ `kpis.py`（イベント→KPI＋日本語verdict）/ `timetable.py`（人員タイムチャート、**JSミラー parity test 有り**）/ `workmethod.py`。
+- `bi.py`（DuckDB **物量集計**：`base_volumes(model, nonworking)` は稼働日で日平均化＝**稼働日カレンダ**（非稼働曜日の物量を稼働日へ振分け）＋`derive_volumes` 仮値派生：パレット/オリコン/カゴ台車の荷姿変換。`bi/apply`→`bi.json`→`timetable/from-bi` が **BI→タイムチャートの橋**）/ `analysis/`（WMSデータ分析：`analyses` `insights` `staffing` `data_io`〔`ITEM_FIELDS`含む〕 `report` `sample` ＋ `ingest.py`＝出荷CSV→model.orders の **ETL**＋`item_master`〔商品マスタ→入数/名前/ABC〕、`POST /import/shipments`〔mapping 返却〕）/ `analytic.py`（M/M/c oracle）/ `kpis.py`（イベント→KPI＋日本語verdict＋`_picker_breakdown` 要素作業分解）/ `timetable.py`（人員タイムチャート、**JSミラー parity test 有り**）/ `workmethod.py`。
 
 ### レンダ
 - `render/`：`replay.py`（**replay契約**）/ `png2d.py` / `shelves.py`（ロケ→棚ラン；authored shelf は1棚=1ラン、name/facing/cell sku-qty 付き）/ `anim2d.py` / `fonts.py` / `heatmap.py`。
