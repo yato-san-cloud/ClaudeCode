@@ -72,6 +72,14 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   移動vs仕分け散布図＋KPI表＋推奨＋採用). 重厚なDESは④検証で裏取り.
 - 生産性フィードバック: `kpis.measured_productivity` (実測) → ④検証で 想定vs実測 を
   並べ「実測を採用」→ settings.productivity_overrides → cost/timetable に波及.
+- `scorecard.py` — 採点表レール: 設計の従属変数6行(判定/人員/原価/生産性/坪数/連鎖)を
+  既存純関数(analytic/cost/pickrate/storage)の合成＋連鎖チェックで解析的に即算出.
+  `GET /scorecard`(保存モデル) と `POST /scorecard`(編集中セクション上書き=ドラッグ中も
+  ライブ再計算). never-blocks. `scenariostore.py` — 名前付きシナリオ(設計スナップ＋採点表)を
+  `projects/<name>/scenarios/` に凍結, GET/POST/DELETE /scenarios. → 右常設ドック
+  `js/scorecard.js`(Claude Code風 折畳/分割, ②③④表示・①⑤非表示, ③はdesignerと非重複で
+  細ストリップ収縮, 比較=なし/最後の実行(DES)/保存シナリオ で▲▼デルタ). designerは
+  `whsim:design-dirty`に編集中セクションを載せて発火→app.jsが250msデバウンスでライブPOST.
 - `analysis/ingest.py` — ETL: uploaded shipments CSV → `model.orders.outbound`
   (`POST /import/shipments`); real calendar weekday/hour survive via `arrival_s`.
 - `bi.py` `derive_volumes` — 仮値 荷姿変換 (パレット/オリコン/カゴ台車); the BI→
