@@ -156,12 +156,49 @@ function computeDelta(metric, baseVal, altVal) {
   return { dir, text };
 }
 
+// ---- self-injected styles ---------------------------------------------------
+// The empty-state explainer card is owned by this module (compare.js is a
+// self-contained module; styles.css is off-limits for this workstream), so its
+// chrome is injected once here using theme tokens for light/dark parity.
+
+const STYLE_ID = 'compare-injected-style';
+function ensureInjectedStyle() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent =
+    '.compare-empty-card{max-width:560px;margin:8px auto;padding:var(--sp-6,24px);' +
+    'background:var(--bg-card,var(--bg-app,#fff));border:1px solid var(--line-hair,rgba(55,53,47,.16));' +
+    'border-radius:var(--r-md,12px);text-align:center;box-shadow:0 1px 2px rgba(33,28,23,.04)}' +
+    '.compare-empty-card .ce-icon{font-size:30px;line-height:1;margin-bottom:var(--sp-3,12px)}' +
+    '.compare-empty-card .ce-title{font-size:var(--fs-md,16px);font-weight:700;' +
+    'color:var(--ink-primary,var(--ink,#1f2733));margin:0 0 var(--sp-2,8px)}' +
+    '.compare-empty-card .ce-desc{font-size:var(--fs-sm,13.5px);line-height:1.7;' +
+    'color:var(--ink-secondary,var(--muted,#6b7785));margin:0 0 var(--sp-3,12px)}' +
+    '.compare-empty-card .ce-steps{display:flex;gap:var(--sp-2,8px);justify-content:center;' +
+    'flex-wrap:wrap;margin:0 0 var(--sp-5,20px);padding:0;list-style:none}' +
+    '.compare-empty-card .ce-steps li{font-size:var(--fs-xs,12px);font-weight:600;' +
+    'color:var(--ink-secondary,var(--muted,#6b7785));background:var(--bg-sunken,rgba(55,53,47,.05));' +
+    'border:1px solid var(--line-hair,rgba(55,53,47,.12));border-radius:999px;padding:4px 12px}' +
+    '.compare-empty-card .ce-cta{font:inherit;font-size:var(--fs-sm,14px);font-weight:700;' +
+    'cursor:pointer;padding:10px 22px;border-radius:var(--r-sm,8px);border:1px solid transparent;' +
+    'background:var(--accent,#f4647a);color:var(--ink-onAccent,#fff);transition:filter .15s ease}' +
+    '.compare-empty-card .ce-cta:hover{filter:brightness(1.06)}' +
+    '.compare-empty-card .ce-cta:disabled{opacity:.55;cursor:default}' +
+    '.compare-empty-card .ce-cta:focus-visible{outline:2px solid var(--line-focus,var(--accent));outline-offset:2px}' +
+    '.compare-empty-card .ce-time{display:block;margin-top:var(--sp-3,12px);' +
+    'font-size:var(--fs-xs,12px);color:var(--ink-tertiary,var(--muted,#6b7785))}';
+  (document.head || document.documentElement).appendChild(style);
+}
+
 // ---- view -------------------------------------------------------------------
 
 export class CompareView {
   constructor(container, data) {
     this.container = container;
     this.root = null;
+    ensureInjectedStyle();
     this.setData(data);
   }
 
@@ -205,12 +242,7 @@ export class CompareView {
     root.style.color = 'var(--ink, #1f2733)';
 
     if (!scenarios.length) {
-      const empty = document.createElement('p');
-      empty.className = 'compare-empty';
-      empty.style.color = 'var(--muted, #6b7785)';
-      empty.style.padding = '16px';
-      empty.textContent = '比較するシナリオがありません。';
-      root.appendChild(empty);
+      root.appendChild(this._buildEmpty());
       this.container.appendChild(root);
       this.root = root;
       return;
@@ -267,6 +299,58 @@ export class CompareView {
 
     this.container.appendChild(root);
     this.root = root;
+  }
+
+  // Pre-run empty state: an explainer card describing what 「シナリオを比較」
+  // does (3 scenarios, side-by-side cost/headcount/throughput) so a salesperson
+  // facing a blank panel knows the next step (Nielsen: visibility of system
+  // status). The CTA reuses the existing #runScenariosBtn so the full run flow
+  // (busy state, status text, skeleton) stays in one place; if that button is
+  // absent we degrade to text only.
+  _buildEmpty() {
+    const card = document.createElement('div');
+    card.className = 'compare-empty';
+    card.appendChild(this._emptyChild('div', 'ce-icon', '⚖️', true));
+    card.classList.add('compare-empty-card');
+
+    card.appendChild(this._emptyChild('h3', 'ce-title', 'シナリオ比較はまだ実行されていません'));
+    card.appendChild(this._emptyChild(
+      'p', 'ce-desc',
+      '「シナリオを比較」を押すと、現行・ピーク日・AGV導入の3シナリオを' +
+      '重厚なDES（離散事象シミュレーション）で実行し、原価・必要人員・処理能力を' +
+      '横並びで比較します。'));
+
+    const steps = document.createElement('ul');
+    steps.className = 'ce-steps';
+    ['現行', 'ピーク日', 'AGV導入'].forEach((t) => {
+      const li = document.createElement('li');
+      li.textContent = t;
+      steps.appendChild(li);
+    });
+    card.appendChild(steps);
+
+    const cta = document.createElement('button');
+    cta.type = 'button';
+    cta.className = 'ce-cta';
+    cta.textContent = 'シナリオを比較';
+    cta.addEventListener('click', () => {
+      const runBtn = document.getElementById('runScenariosBtn');
+      if (runBtn && !runBtn.disabled) {
+        runBtn.click();
+      }
+    });
+    card.appendChild(cta);
+
+    card.appendChild(this._emptyChild('span', 'ce-time', '所要時間の目安：数十秒'));
+    return card;
+  }
+
+  _emptyChild(tag, cls, text, ariaHidden) {
+    const el = document.createElement(tag);
+    el.className = cls;
+    el.textContent = text;
+    if (ariaHidden) el.setAttribute('aria-hidden', 'true');
+    return el;
   }
 
   _buildTable(scenarios) {
@@ -417,5 +501,66 @@ export class CompareView {
     }
     this.root = null;
     this.container = null;
+  }
+}
+
+// ---- pre-run empty-state auto-mount ----------------------------------------
+// app.js only constructs a CompareView *after* a run; before that the #compare
+// panel opens onto a blank #compareView (no explanation of what the tab does —
+// the B1 finding). Since app.js is owned by another workstream, compare.js
+// self-mounts the explainer card whenever the compare panel becomes visible and
+// nothing has rendered into #compareView yet. As soon as a real run mounts its
+// `.compare-view` table, this leaves the container untouched (and the run flow's
+// `innerHTML = ''` cleanly removes any leftover empty card first).
+function ensureEmptyState() {
+  if (typeof document === 'undefined') return;
+  const host = document.getElementById('compareView');
+  if (!host) return;
+  // A populated view (table or our own card) — nothing to do.
+  if (host.querySelector('.compare-view') || host.querySelector('.skeleton-block')) return;
+  if (host.children.length) return;
+  ensureInjectedStyle();
+  const root = document.createElement('div');
+  root.className = 'compare-view';
+  root.style.fontFamily = 'inherit';
+  root.style.color = 'var(--ink, #1f2733)';
+  // Reuse the same builder by borrowing it off the prototype (no instance state
+  // needed for the static empty card).
+  root.appendChild(CompareView.prototype._buildEmpty.call({ _emptyChild: emptyChild }));
+  host.appendChild(root);
+}
+
+// Standalone twin of CompareView#_emptyChild for the prototype-borrowed builder.
+function emptyChild(tag, cls, text, ariaHidden) {
+  const el = document.createElement(tag);
+  el.className = cls;
+  el.textContent = text;
+  if (ariaHidden) el.setAttribute('aria-hidden', 'true');
+  return el;
+}
+
+if (typeof document !== 'undefined') {
+  const panel = () => document.getElementById('compare');
+  const tick = () => {
+    const p = panel();
+    if (p && !p.hidden) ensureEmptyState();
+  };
+  const start = () => {
+    const p = panel();
+    if (!p) return;
+    // React to the panel's `hidden` toggling (view switches) + any DOM churn
+    // inside #compareView (run flow clearing/mounting).
+    try {
+      const obs = new MutationObserver(tick);
+      obs.observe(p, { attributes: true, attributeFilter: ['hidden'] });
+      const host = document.getElementById('compareView');
+      if (host) obs.observe(host, { childList: true });
+    } catch (_e) { /* observers unavailable — initial tick still applies */ }
+    tick();
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
   }
 }

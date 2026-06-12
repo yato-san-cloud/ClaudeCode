@@ -209,6 +209,37 @@ const INACTIVITY_MS = 60000;  // idle -> sleeping after ~60s of silence
 const SUCCESS_IDLE_MS = 2500; // success -> idle after ~2.5s
 const BUBBLE_FADE_MS = 220;   // must track the .cody-bubble CSS transition
 
+// ---- anti-overlap (companion only) ----------------------------------------
+// OCTA floats bottom-right; some views park important content there too (the
+// bottom KPI bar, the right-edge scorecard rail, chart legends). To keep the
+// mascot from covering readable values we (a) offer a user minimize toggle,
+// persisted, and (b) auto-retreat to the bottom-left whenever OCTA's rectangle
+// would intersect any of these "keep-clear" elements.
+const MIN_KEY = "whsim-octa-min";       // "1" = user minimized
+const EVADE_PAD = 8;                    // px gap required around keep-clear rects
+const EVADE_SELECTORS = [
+  "#kpiBar",          // bottom KPI bar (④検証 etc.)
+  ".sc-rail",         // right-edge scorecard rail
+  ".compare-thumbs",  // ⑤比較 proposal-PNG thumbnails
+  "[data-octa-keep-clear]", // opt-in hook for any future bottom-right content
+];
+
+function readMinimized() {
+  try { return localStorage.getItem(MIN_KEY) === "1"; } catch (_e) { return false; }
+}
+function writeMinimized(on) {
+  try {
+    if (on) localStorage.setItem(MIN_KEY, "1");
+    else localStorage.removeItem(MIN_KEY);
+  } catch (_e) { /* storage blocked — in-memory state still applies */ }
+}
+
+// Do two rects (DOMRect-like) overlap, allowing a `pad` gap?
+function rectsOverlap(a, b, pad) {
+  return !(a.right + pad <= b.left || a.left - pad >= b.right ||
+           a.bottom + pad <= b.top || a.top - pad >= b.bottom);
+}
+
 // Strip SMIL <animate>/<animateTransform> — CSS reduced-motion can't disable SMIL.
 const stripAnimate = (m) => m.replace(/<animate(Transform)?\b[^>]*\/?>(?:[^<]*<\/animate(Transform)?>)?/g, "");
 
@@ -292,6 +323,20 @@ export function mountCody(targetEl, opts = {}) {
   svg.innerHTML = BODY_INNER + `<g class="cody-face"></g>`;
   figure.appendChild(svg);
 
+  // Minimize toggle: shrinks OCTA into a small puck in the corner; while
+  // minimized OCTA never covers content. State persists across views/sessions.
+  // Hidden on the non-floating (inline) mount, where there's nothing to avoid.
+  let minBtn = null;
+  if (companion) {
+    minBtn = document.createElement("button");
+    minBtn.className = "cody-min-toggle";
+    minBtn.type = "button";
+    minBtn.title = "OCTAを最小化";
+    minBtn.setAttribute("aria-label", "OCTAを最小化");
+    minBtn.textContent = "—";
+    figure.appendChild(minBtn);
+  }
+
   root.appendChild(bubble);
   root.appendChild(figure);
   target.appendChild(root);
@@ -304,8 +349,67 @@ export function mountCody(targetEl, opts = {}) {
   let autoIdleTimer = null;
   let bubbleTimer = null;
   let destroyed = false;
+  let minimized = companion && readMinimized();
+  let evading = false;        // currently retreated due to a collision
+  let evadeRaf = 0;           // pending rAF for a recompute
 
   function clearTimer(t) { if (t) clearTimeout(t); return null; }
+
+  // ---- anti-overlap: minimize + auto-retreat (companion only) ----
+  // Recompute whether OCTA's rectangle would cover any keep-clear element; if
+  // so, add `.cody-evade` to shift it to the bottom-left. Minimizing always
+  // clears the evade state (a minimized puck is small enough not to cover
+  // values, and the user asked for it out of the way).
+  function applyMinimized() {
+    root.classList.toggle("cody-min", minimized);
+    if (minBtn) {
+      const label = minimized ? "OCTAを表示" : "OCTAを最小化";
+      minBtn.title = label;
+      minBtn.setAttribute("aria-label", label);
+      minBtn.textContent = minimized ? "▢" : "—";
+    }
+  }
+  function setMinimized(on) {
+    minimized = !!on;
+    writeMinimized(minimized);
+    applyMinimized();
+    recomputeEvade();
+  }
+  function recomputeEvade() {
+    if (!companion || destroyed) return;
+    // Minimized OCTA is a small corner puck — it doesn't need to flee.
+    if (minimized) {
+      if (evading) { evading = false; root.classList.remove("cody-evade"); }
+      return;
+    }
+    // Measure with evade temporarily off so the test reflects OCTA's *home*
+    // rect, avoiding a flip-flop where retreating frees the corner and OCTA
+    // immediately returns into the same content.
+    const wasEvading = evading;
+    if (wasEvading) root.classList.remove("cody-evade");
+    const me = figure.getBoundingClientRect();
+    let hit = false;
+    for (const sel of EVADE_SELECTORS) {
+      const nodes = document.querySelectorAll(sel);
+      for (const n of nodes) {
+        if (n === root || root.contains(n)) continue;
+        const r = n.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;       // hidden element
+        // Only the bottom-right region matters (where OCTA lives).
+        if (rectsOverlap(me, r, EVADE_PAD)) { hit = true; break; }
+      }
+      if (hit) break;
+    }
+    evading = hit;
+    root.classList.toggle("cody-evade", evading);
+  }
+  function scheduleEvade() {
+    if (evadeRaf || destroyed) return;
+    evadeRaf = requestAnimationFrame(() => {
+      evadeRaf = 0;
+      recomputeEvade();
+    });
+  }
 
   function armInactivity() {
     inactivityTimer = clearTimer(inactivityTimer);
@@ -376,14 +480,45 @@ export function mountCody(targetEl, opts = {}) {
   }
 
   function hide() { root.classList.add("cody-hidden"); return controller; }
-  function show() { root.classList.remove("cody-hidden"); return controller; }
+  function show() { root.classList.remove("cody-hidden"); scheduleEvade(); return controller; }
+
+  // ---- anti-overlap wiring (companion only) ----
+  const onMinToggle = (e) => {
+    // Don't let the click bubble to the figure (which opens chat).
+    e.stopPropagation();
+    setMinimized(!minimized);
+  };
+  const onViewportChange = () => scheduleEvade();
+  let evadeObserver = null;
+  if (companion) {
+    if (minBtn) minBtn.addEventListener("click", onMinToggle);
+    window.addEventListener("resize", onViewportChange, { passive: true });
+    window.addEventListener("scroll", onViewportChange, { passive: true, capture: true });
+    // Layout shifts (view switches, KPI bar appearing, rail expand/collapse)
+    // change which keep-clear elements exist. Observe the document body and
+    // recompute on the next frame; cheap because recompute is rAF-throttled.
+    try {
+      evadeObserver = new MutationObserver(() => scheduleEvade());
+      evadeObserver.observe(document.body, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ["class", "style", "hidden"],
+      });
+    } catch (_e) { evadeObserver = null; }
+  }
 
   function destroy() {
     destroyed = true;
     inactivityTimer = clearTimer(inactivityTimer);
     autoIdleTimer = clearTimer(autoIdleTimer);
     bubbleTimer = clearTimer(bubbleTimer);
+    if (evadeRaf) { cancelAnimationFrame(evadeRaf); evadeRaf = 0; }
     closeBtn.removeEventListener("click", onClose);
+    if (minBtn) minBtn.removeEventListener("click", onMinToggle);
+    if (companion) {
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, { capture: true });
+    }
+    if (evadeObserver) { evadeObserver.disconnect(); evadeObserver = null; }
     if (root.parentNode) root.parentNode.removeChild(root);
     if (window.whsimCody === controller) {
       try { delete window.whsimCody; } catch (_e) { window.whsimCody = undefined; }
@@ -393,13 +528,16 @@ export function mountCody(targetEl, opts = {}) {
   const controller = {
     el: root,
     get mood() { return currentMood; },
-    setMood, say, hide, show, destroy,
+    get minimized() { return minimized; },
+    setMinimized, setMood, say, hide, show, destroy,
   };
 
   // ---- init ----
   applyMood(opts.mood && FACES[opts.mood] ? opts.mood : "idle");
+  applyMinimized();
   armInactivity();
   if (opts.greet) showBubble(DEFAULT_LINES.curious);
+  if (companion) scheduleEvade();
 
   window.whsimCody = controller;
   return controller;
