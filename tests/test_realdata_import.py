@@ -1,7 +1,6 @@
 """実データ取込の堅牢化 — native .rmpm / WMS Excel(タイトル行・合計行・.xls) / DXF."""
 from pathlib import Path
 
-import pandas as pd
 from fastapi.testclient import TestClient
 
 from whsim import rmpm
@@ -35,7 +34,7 @@ def test_native_rmpm_matches_json_oracle():
 
 
 def test_native_rmpm_via_endpoint(tmp_path):
-    r = client.post("/api/projects", json={"name": "rmpmnat", "template": "ecommerce_small"})
+    client.post("/api/projects", json={"name": "rmpmnat", "template": "ecommerce_small"})
     try:
         native = (REF / "(LW)最終版レイアウト_Rev2.rmpm").read_bytes()
         res = client.post("/api/projects/rmpmnat/import-rmpm",

@@ -32,10 +32,12 @@ def test_scenario_freezes_unsaved_sections_without_persisting():
     try:
         full = client.get("/api/projects/scnB/full").json()
         model = full.get("model", full)
-        s = dict(model.get("settings", {})); s["labor_cost_per_hour"] = 4000
+        s = dict(model.get("settings", {}))
+        s["labor_cost_per_hour"] = 4000
         hi = client.post("/api/projects/scnB/scenarios",
                          json={"label": "高単価", "sections": {"settings": s}}).json()
-        s2 = dict(s); s2["labor_cost_per_hour"] = 1000
+        s2 = dict(s)
+        s2["labor_cost_per_hour"] = 1000
         lo = client.post("/api/projects/scnB/scenarios",
                          json={"label": "低単価", "sections": {"settings": s2}}).json()
         cost_hi = next(r for r in hi["scorecard"]["rows"] if r["id"] == "cost")["per_order"]
