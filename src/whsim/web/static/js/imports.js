@@ -15,6 +15,15 @@
 import { S } from './state.js';
 import { $, api, esc } from './util.js';
 import { hist } from './history.js';
+import { forkliftBusy } from './progress.js';
+
+// Replace the plain "…中…" line in the hub footer with a forklift-shuttle busy
+// strip so the wait reads as 「処理してる感」. The success/error path overwrites
+// #importLog (innerHTML), so the strip is cleared automatically.
+function busyLog(label) {
+  const host = $('importLog');
+  if (host) forkliftBusy(label, host);
+}
 
 // Shell helpers that remain in app.js, injected at boot. Defaults are no-ops so a
 // missing wire-up fails loud (via the empty-project guards) rather than crashing.
@@ -49,7 +58,7 @@ const noProject = (cat) => {
 export async function uploadZip(file) {
   if (!S.project) { noProject('layout'); return; }
   const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = '取り込み中…';
+  busyLog('ZIPを取り込み中…');
   mark('layout', null, `${file.name} を取り込み中…`);
   try {
     const r = await api(`/api/projects/${S.project}/import`, { method: 'POST', body: fd });
@@ -74,7 +83,7 @@ export async function uploadZip(file) {
 export async function uploadDistances(file) {
   if (!S.project) { noProject('layout'); return; }
   const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = '棚間距離を取込中…';
+  busyLog('棚間距離を取込中…');
   mark('layout', null, `${file.name} を取込中…`);
   try {
     const r = await api(`/api/projects/${S.project}/import-distances`, { method: 'POST', body: fd });
@@ -93,7 +102,7 @@ export async function uploadDistances(file) {
 export async function uploadMapcsv(file) {
   if (!S.project) { noProject('layout'); return; }
   const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = 'MapMaker地図を解析中…';
+  busyLog('MapMaker地図を解析中…');
   mark('layout', null, `${file.name} を解析中…`);
   try {
     const r = await api(`/api/projects/${S.project}/import-mapcsv`, { method: 'POST', body: fd });
@@ -117,7 +126,7 @@ export async function uploadMapcsv(file) {
 export async function uploadRmpm(file) {
   if (!S.project) { noProject('layout'); return; }
   const fd = new FormData(); fd.append('file', file);
-  $('importLog').textContent = 'MapMakerレイアウトを解析中…';
+  busyLog('MapMakerレイアウトを解析中…');
   mark('layout', null, `${file.name} を解析中…`);
   try {
     const r = await api(`/api/projects/${S.project}/import-rmpm`, { method: 'POST', body: fd });
@@ -146,7 +155,7 @@ export async function uploadShipments(file, itemsFile = null) {
   const fd = new FormData();
   fd.append('shipments', file);
   if (itemsFile) fd.append('items', itemsFile);
-  $('importLog').textContent = '出荷実績を取込中…';
+  busyLog('出荷実績を取込中…');
   mark('actual', null, `${file.name} を取込中…`);
   try {
     const r = await api(`/api/projects/${S.project}/import/shipments`, { method: 'POST', body: fd });
@@ -194,7 +203,7 @@ async function doTableImport(mapping) {
   const fd = new FormData(); fd.append('file', _tableFile);
   let url = `/api/projects/${S.project}/import-table?kind=${_tableKind}`;
   if (mapping) url += '&mapping=' + encodeURIComponent(JSON.stringify(mapping));
-  $('importLog').textContent = '取込中…';
+  busyLog('取込中…');
   mark(cat, null, `${_tableFile.name} を取込中…`);
   try {
     const r = await api(url, { method: 'POST', body: fd });

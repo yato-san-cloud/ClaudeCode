@@ -86,6 +86,7 @@ def run_once(
     model: WarehouseModel,
     seed: int | None = None,
     replay_window_s: float | None = None,
+    progress=None,
 ) -> RunResult:
     model = representative_day(model)
     rng = random.Random(model.simulation.random_seed if seed is None else seed)
@@ -127,7 +128,22 @@ def run_once(
             env.process(packer_agent(world, pk, world.pack_xy[i % len(world.pack_xy)]))
     env.process(order_source(world, rng))
 
-    env.run(until=model.simulation.duration_s)
+    duration = model.simulation.duration_s
+    if progress is not None:
+        # Step the sim clock in fixed chunks so a caller can report the *honest*
+        # progress (倉庫の1日が何時まで進んだか). ``env.run(until=t)`` processes
+        # every event with time ≤ t then stops, so running it for an increasing
+        # series of t is event-for-event identical to one full run — purely a
+        # reporting hook, zero behaviour change when ``progress`` is None.
+        steps = 50
+        for k in range(1, steps + 1):
+            env.run(until=duration * k / steps)
+            try:
+                progress(env.now, duration)
+            except Exception:  # noqa: BLE001 — a reporting hiccup never fails a run
+                pass
+    else:
+        env.run(until=duration)
     return RunResult(
         events=world.events, heat=world.heat,
         n_pickers=world.n_pickers, n_packers=world.n_packers,
@@ -159,17 +175,22 @@ def _cost_inputs(model: WarehouseModel) -> dict:
 
 
 def run_replications(
-    model: WarehouseModel, reps: int | None = None
+    model: WarehouseModel, reps: int | None = None, progress=None
 ) -> tuple[list[RunResult], np.ndarray]:
     """Monte-Carlo: run N replications with distinct seeds (different stochastic
     order sequences), average the heat grid. Only the first rep records the replay
-    trajectory (the others exist purely to quantify variability)."""
+    trajectory (the others exist purely to quantify variability).
+
+    ``progress(rep, reps, sim_now, sim_duration)`` (optional) is called as the
+    sim clock advances within each replication, so a UI can show the *honest*
+    progress + ETA. Default None ⇒ no chunking, identical to before."""
     reps = max(1, reps if reps is not None else model.simulation.replications)
     results: list[RunResult] = []
     heat_sum: np.ndarray | None = None
     for r in range(reps):
+        cb = (lambda now, dur, _r=r: progress(_r, reps, now, dur)) if progress else None
         res = run_once(model, seed=model.simulation.random_seed + r,
-                       replay_window_s=None if r == 0 else 0.0)
+                       replay_window_s=None if r == 0 else 0.0, progress=cb)
         results.append(res)
         heat_sum = res.heat.copy() if heat_sum is None else heat_sum + res.heat
     assert heat_sum is not None

@@ -22,6 +22,7 @@ import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
 import { mountNotes } from './js/notes.js';
 import { mountScorecard } from './js/scorecard.js';
+import { startRunProgress } from './js/progress.js';
 import { $, api, esc } from './js/util.js';
 import { S } from './js/state.js';
 import { initImports } from './js/imports.js';
@@ -287,6 +288,8 @@ async function doRun() {
   if (!S.project) throw new Error('先にプロジェクトを作ってね。');
   if (S.running) throw new Error('いまシミュレーション中だよ。終わるまで少し待ってね。');
   S.running = true;
+  // honest sim-clock progress overlay (倉庫の1日が進む + ETA). polls the server.
+  const prog = startRunProgress({ getProject: () => S.project });
   try {
     const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
     S.hasRun = true;
@@ -308,6 +311,7 @@ async function doRun() {
     return r;
   } finally {
     S.running = false;
+    prog.stop();
   }
 }
 async function runSim() {
@@ -435,6 +439,8 @@ async function doRunScenarios() {
   if (!S.project) throw new Error('先にプロジェクトを作ってね。');
   if (S.running) throw new Error('いま実行中だよ。終わるまで少し待ってね。');
   S.running = true;
+  const prog = startRunProgress({ getProject: () => S.project,
+    title: '3シナリオを比較実行中…', sub: '現行・ピーク日・AGV導入をそれぞれDESで回します。' });
   try {
     const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
     if (S.compare) S.compare.dispose();
@@ -443,6 +449,7 @@ async function doRunScenarios() {
     return data;
   } finally {
     S.running = false;
+    prog.stop();
   }
 }
 async function runScenarios() {

@@ -100,6 +100,10 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   棚一括生成 / 面積オート生成, undo) are mounted by `app.js`. Shared frontend helpers
   live in `js/util.js` (`$`/`api`/`esc`) and `js/constants.js` (label/colour maps).
   three.js is vendored under `static/vendor/`.
+  `js/progress.js` — 待ち表現: ▶実行/作業方法比較/シナリオ比較は SimPyの
+  シミュ内時計(`GET /run/progress` を300msポーリング)を本物の進捗バー＋ETAにし、
+  フォークリフトが荷物を運びながら走る(`startRunProgress`); 取込など短い同期処理は
+  フォークリフト往復の不確定インジケータ(`forkliftBusy`)。
   The UI is a phase-driven journey (取込→分析→設計→検証→提案) rather than flat tabs:
   `js/journey.js` renders the 5-phase stepper + sub-tabs and drives view selection
   (`switchView` keeps it in sync), `js/overview.js` is the ①取込 landing dashboard

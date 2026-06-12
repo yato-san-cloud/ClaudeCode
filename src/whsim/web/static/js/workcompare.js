@@ -6,6 +6,7 @@
 // 「この方式で設計」で選んだ方式をモデルのピッキング工程に反映。EN comments / JA UI.
 import { esc, api } from './util.js';
 import * as echarts from 'echarts';
+import { startRunProgress } from './progress.js';
 
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -77,6 +78,8 @@ export function mountWorkCompare(el, opts = {}) {
     if (running) return;
     running = true;
     renderRunning();
+    const prog = startRunProgress({ getProject: () => name,
+      title: '4方式をDESで比較実行中…', sub: '都度・マルチ・ゾーン・種まきをそれぞれ回して移動vs仕分けを実測します。' });
     try {
       data = await api(`/api/projects/${encodeURIComponent(name)}/workmethod/compare`, { method: 'POST' });
       render();
@@ -84,7 +87,7 @@ export function mountWorkCompare(el, opts = {}) {
       data = null;
       root.innerHTML = headHtml() + `<div class="wc-empty">比較の実行に失敗しました：${esc(e && e.message ? e.message : e)}</div>`;
       wireHead();
-    } finally { running = false; }
+    } finally { running = false; prog.stop(); }
   }
 
   function headHtml() {

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import time as _time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -93,7 +94,48 @@ def _exit_run() -> None:
     _inflight_runs = max(0, _inflight_runs - 1)
 
 
-def _run_blocking(proj: Project) -> dict:
+# ---- live run progress (honest sim-clock + ETA) ----------------------------
+# The run executes in a worker thread; it writes its progress here and the
+# frontend polls GET /run/progress/{name}. Keyed by project so concurrent runs
+# don't clobber each other. The sim clock (倉庫の1日が何時まで進んだか) is the
+# real signal — not a fake bar — so the ETA is trustworthy.
+_RUN_PROGRESS: dict[str, dict] = {}
+
+
+def _progress_reporter(name: str, kind: str = "run", total_jobs: int = 1):
+    """Build a callback that records run progress under ``name``. ``kind`` lets
+    multi-job runs (作業方法比較=4, シナリオ比較=3) report which job they're on."""
+    _RUN_PROGRESS[name] = {"active": True, "kind": kind, "started": _time.time(),
+                           "rep": 0, "reps": 1, "frac": 0.0, "job": 0,
+                           "total_jobs": total_jobs}
+
+    def report(rep, reps, sim_now, sim_duration, job: int = 0):
+        st = _RUN_PROGRESS.get(name)
+        if not st:
+            return
+        rep_frac = (sim_now / sim_duration) if sim_duration else 1.0
+        # overall fraction across reps (and jobs, if any)
+        within = (rep + rep_frac) / max(1, reps)
+        st.update(rep=rep + 1, reps=reps, sim_now=sim_now, sim_duration=sim_duration,
+                  frac=(job + within) / max(1, total_jobs), job=job)
+    return report
+
+
+def _clear_progress(name: str) -> None:
+    _RUN_PROGRESS.pop(name, None)
+
+
+@app.get("/api/projects/{name}/run/progress")
+def api_run_progress(name: str):
+    """Live progress of an in-flight run (honest sim-clock fraction + elapsed →
+    the frontend computes ETA). ``{active: false}`` when nothing is running."""
+    st = _RUN_PROGRESS.get(name)
+    if not st:
+        return {"active": False}
+    return {**st, "elapsed_s": round(_time.time() - st["started"], 2)}
+
+
+def _run_blocking(proj: Project, name: str | None = None) -> dict:
     """The CPU-bound heart of a run (SimPy + KPIs + render + disk writes).
 
     Pulled out so the endpoint can hand it to a worker thread via
@@ -101,7 +143,8 @@ def _run_blocking(proj: Project) -> dict:
     execute on the event loop, or the whole server stalls for its duration."""
     model = proj.load_model()
     # Monte-Carlo: many stochastic order sequences; rep 0 carries the replay.
-    results, heat = run_replications(model, reps=MONTE_CARLO_REPS)
+    reporter = _progress_reporter(name) if name else None
+    results, heat = run_replications(model, reps=MONTE_CARLO_REPS, progress=reporter)
     res = results[0]
     metrics = kpi_mod.compute(results, model)
     est = analytic.estimate(model)
@@ -132,9 +175,10 @@ async def api_run(name: str):
     # many heavy runs are in flight so a burst can't exhaust the thread pool.
     _enter_run()
     try:
-        return await run_in_threadpool(_run_blocking, proj)
+        return await run_in_threadpool(_run_blocking, proj, name)
     finally:
         _exit_run()
+        _clear_progress(name)
 
 
 def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
@@ -167,9 +211,12 @@ def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
     cmp_dir.mkdir(parents=True, exist_ok=True)
     prov = proj.load_provenance().summary()
 
+    reporter = _progress_reporter(name, kind="scenarios", total_jobs=max(1, len(scenarios)))
     results = []
     for i, sc in enumerate(scenarios):
+        reporter(0, 1, 0.0, 1.0, job=i)          # シナリオ i 開始 (frac=i/N)
         res, metrics = run_scenario(base, sc, reps=6)
+        reporter(0, 1, 1.0, 1.0, job=i)          # シナリオ i 完了 (frac=(i+1)/N)
         model_i = apply_scenario(base, sc)
         render_png(model_i, res.heat, metrics, prov, cmp_dir / f"s{i}.png")
         results.append({"name": sc.name, "description": sc.description,
@@ -203,6 +250,7 @@ async def api_run_scenarios(name: str, payload: dict | None = None):
         return await run_in_threadpool(_run_scenarios_blocking, name, proj, payload or {})
     finally:
         _exit_run()
+        _clear_progress(name)
 
 
 def _run_workmethods_blocking(name: str, proj: Project, payload: dict) -> dict:
@@ -217,11 +265,15 @@ def _run_workmethods_blocking(name: str, proj: Project, payload: dict) -> dict:
     pidx = workmethod.pick_stage_index(base)
     reps = max(1, int(payload.get("reps", 3)))  # 4 methods × reps; keep responsive
 
+    reporter = _progress_reporter(name, kind="workmethods",
+                                  total_jobs=max(1, len(workmethod.METHOD_PRESETS)))
     methods = []
-    for preset in workmethod.METHOD_PRESETS:
+    for i, preset in enumerate(workmethod.METHOD_PRESETS):
+        reporter(0, 1, 0.0, 1.0, job=i)          # 方式 i 開始
         sc = Scenario(name=preset["label"], description=preset.get("desc", ""),
                       edits={f"process.stages.{pidx}.work": dict(preset["work"])})
         _res, m = run_scenario(base, sc, reps=reps)
+        reporter(0, 1, 1.0, 1.0, job=i)          # 方式 i 完了
         completed = max(1.0, float(m.get("orders_completed", 0)) or 1.0)
         methods.append({
             "id": preset["id"], "label": preset["label"], "desc": preset.get("desc", ""),
@@ -275,6 +327,7 @@ async def api_workmethod_compare(name: str, payload: dict | None = None):
         return await run_in_threadpool(_run_workmethods_blocking, name, proj, payload or {})
     finally:
         _exit_run()
+        _clear_progress(name)
 
 
 # ---- routers ----------------------------------------------------------------
