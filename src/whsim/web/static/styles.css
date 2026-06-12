@@ -2088,3 +2088,262 @@ html[data-theme="dark"] body::after{
   background:radial-gradient(ellipse 60% 45% at 50% -8%, rgba(47,123,255,.10), transparent 70%);
 }
 @media (prefers-reduced-motion: reduce){ html[data-theme="dark"] body::before{ background-attachment:initial; } }
+
+/* =============================================================================
+   BUTTON VISUAL HIERARCHY — Primary / Secondary / Tertiary (3層の視覚階層)
+   -----------------------------------------------------------------------------
+   Problem: each JS module injects its own button CSS (injectStyle(), loaded
+   AFTER this stylesheet), and nearly all of them paint buttons in the accent
+   cyan — so the screen's main CTA and its detail/utility buttons read the same
+   and the user gets no guidance on "what to press next".
+
+   This section re-weights every module button into 3 tiers WITHOUT touching
+   markup — selectors only. Because injected <style> tags win ties (they come
+   later in the cascade), every override below carries the host panel's #id to
+   out-specify the module rules; no !important is needed anywhere.
+
+   Tier contract (all theme-token driven → works in light AND dark):
+     1. PRIMARY   accent fill + bold + dark-on-accent ink. ONE per screen:
+                  the journey-forward CTA (取込ハブ「データを分析する→」,
+                  生産性試算「DESで裏取り→」, MF「タイムチャートで人員配置→」,
+                  「▶ 4方式を比較実行」, designer「レイアウトを保存」 …).
+     2. SECONDARY accent OUTLINE only, transparent at rest, accent-tint on
+                  hover. Supporting/functional actions (「推奨方式で設計→」,
+                  「基礎物量を取込」, 「単価を保存」, phase-banner CTA …).
+     3. TERTIARY  neutral ghost: ink hairline border, secondary ink, no accent.
+                  Utilities & details (「サンプル物量を取込」「不足を生成」,
+                  checklist row CTAs, optional uploads …).
+   DANGER stays on the --bad ramp (audited: designer 削除 buttons, .proj-menu
+   .danger-item, .chat-clear, .nb-x — all already use --bad tokens; .nb-x hover
+   is harmonised below).
+
+   Contrast notes (WCAG AA): --ink-onAccent on --accent = 7.58:1 (light) /
+   10.69:1 (dark). The legacy `color:#fff` on cyan was ~2.2:1 — fixed here at
+   the base class. Secondary text uses --accent-ink (4.9:1 light, ~13:1 dark).
+   ============================================================================= */
+
+/* ---- Tier 1 · PRIMARY (accent fill) ---------------------------------------- */
+button.primary,                       /* base: createBtn / settingsSave / coach-next / designer 保存 … */
+.chat-send,                           /* chat composer send */
+#materialflow .mf-btn.primary,        /* タイムチャートで人員配置 → / サンプル物量で始める(空状態) */
+#dataanalysis .da-btn.primary,        /* このデータでシミュレーション→ / ▶ サンプルで試す */
+#pickrate .pr-btn.primary,            /* DESで裏取り → */
+#workcompare .wc-run,                 /* ▶ 4方式を比較実行 — promoted (has no .primary class) */
+#bi .bi-apply-btn,                    /* 基礎物量を保存 → タイムチャートへ */
+#storage .st-apply-btn,               /* この設備をレイアウトに配置 → */
+#overview .ov-next-btn,               /* 次にやること card CTA (データを分析する→ …) */
+.pstory-btn.primary {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--ink-onAccent);
+  font-weight: var(--fw-bold);
+  box-shadow: var(--sh-sm);
+}
+button.primary:hover:not(:disabled),
+.chat-send:hover:not(:disabled),
+#materialflow .mf-btn.primary:hover:not(:disabled),
+#dataanalysis .da-btn.primary:hover:not(:disabled),
+#pickrate .pr-btn.primary:hover:not(:disabled),
+#workcompare .wc-run:hover:not(:disabled),
+#bi .bi-apply-btn:hover:not(:disabled),
+#storage .st-apply-btn:hover:not(:disabled),
+#overview .ov-next-btn:hover:not(:disabled),
+.pstory-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--ink-onAccent);
+  filter: none;                       /* cancel module brightness() hovers */
+}
+button.primary:active:not(:disabled),
+.chat-send:active:not(:disabled),
+#materialflow .mf-btn.primary:active:not(:disabled),
+#dataanalysis .da-btn.primary:active:not(:disabled),
+#pickrate .pr-btn.primary:active:not(:disabled),
+#workcompare .wc-run:active:not(:disabled),
+#bi .bi-apply-btn:active:not(:disabled),
+#storage .st-apply-btn:active:not(:disabled),
+#overview .ov-next-btn:active:not(:disabled),
+.pstory-btn.primary:active:not(:disabled) {
+  background: var(--accent-press);
+  border-color: var(--accent-press);
+}
+button.primary:focus-visible,
+.chat-send:focus-visible,
+#materialflow .mf-btn.primary:focus-visible,
+#dataanalysis .da-btn.primary:focus-visible,
+#pickrate .pr-btn.primary:focus-visible,
+#workcompare .wc-run:focus-visible,
+#bi .bi-apply-btn:focus-visible,
+#storage .st-apply-btn:focus-visible,
+#overview .ov-next-btn:focus-visible,
+.pstory-btn.primary:focus-visible {
+  outline: 2px solid var(--line-focus);
+  outline-offset: 2px;
+  box-shadow: var(--sh-sm);
+}
+button.primary:disabled,
+.chat-send:disabled,
+#materialflow .mf-btn.primary:disabled,
+#dataanalysis .da-btn.primary:disabled,
+#pickrate .pr-btn.primary:disabled,
+#workcompare .wc-run:disabled,
+#bi .bi-apply-btn:disabled,
+#storage .st-apply-btn:disabled,
+#overview .ov-next-btn:disabled,
+.pstory-btn.primary:disabled {
+  background: var(--bg-active);
+  border-color: transparent;
+  color: var(--ink-tertiary);
+  box-shadow: none;
+}
+/* designer: the injected `.designer-root button.primary:hover` sets
+   color:--bg-app (white in light mode → fails AA on cyan); re-pin the ink. */
+#design.designer-root button.primary:not(:disabled):hover {
+  color: var(--ink-onAccent);
+  filter: none;
+}
+
+/* ---- Tier 2 · SECONDARY (accent outline, fill on hover only) --------------- */
+#phaseHint .ph-cta,                            /* phase banner CTA — demoted so the in-view primary stays the 1 CTA */
+#dataanalysis .da-btn:not(.primary),           /* 出荷データを取り込む / タイムチャートで人員配置を見る → */
+#pickrate .pr-btn:not(.primary),               /* 推奨方式で設計 → */
+#workcompare .wc-adopt,                        /* この方式で設計 → */
+#cost .co-save,                                /* 💾 単価を保存 */
+#notes .nb-post,                               /* 知見を投稿 */
+.c-apply,                                      /* 分析 callout 適用して再実行 */
+.pstory-btn:not(.primary),                     /* ⑤提案 on-screen sub-CTAs */
+#design.designer-root > div:last-of-type button.primary {  /* designer フッタ「実行する→」(保存が主CTA) */
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--accent-ink);
+  font-weight: var(--fw-semibold);
+  box-shadow: none;
+}
+#phaseHint .ph-cta:hover:not(:disabled),
+#dataanalysis .da-btn:not(.primary):hover:not(:disabled),
+#pickrate .pr-btn:not(.primary):hover:not(:disabled),
+#workcompare .wc-adopt:hover:not(:disabled),
+#cost .co-save:hover:not(:disabled),
+#notes .nb-post:hover:not(:disabled),
+.c-apply:hover:not(:disabled),
+.pstory-btn:not(.primary):hover:not(:disabled),
+#design.designer-root > div:last-of-type button.primary:hover:not(:disabled) {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  filter: none;
+}
+#phaseHint .ph-cta:active:not(:disabled),
+#dataanalysis .da-btn:not(.primary):active:not(:disabled),
+#pickrate .pr-btn:not(.primary):active:not(:disabled),
+#workcompare .wc-adopt:active:not(:disabled),
+#cost .co-save:active:not(:disabled),
+#notes .nb-post:active:not(:disabled),
+.c-apply:active:not(:disabled),
+.pstory-btn:not(.primary):active:not(:disabled),
+#design.designer-root > div:last-of-type button.primary:active:not(:disabled) {
+  background: var(--accent-tint-2);
+}
+#phaseHint .ph-cta:focus-visible,
+#dataanalysis .da-btn:not(.primary):focus-visible,
+#pickrate .pr-btn:not(.primary):focus-visible,
+#workcompare .wc-adopt:focus-visible,
+#cost .co-save:focus-visible,
+#notes .nb-post:focus-visible,
+.c-apply:focus-visible,
+.pstory-btn:not(.primary):focus-visible,
+#design.designer-root > div:last-of-type button.primary:focus-visible {
+  outline: 2px solid var(--line-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+#phaseHint .ph-cta:disabled,
+#dataanalysis .da-btn:not(.primary):disabled,
+#pickrate .pr-btn:not(.primary):disabled,
+#workcompare .wc-adopt:disabled,
+#cost .co-save:disabled,
+#notes .nb-post:disabled,
+.c-apply:disabled,
+.pstory-btn:not(.primary):disabled,
+#design.designer-root > div:last-of-type button.primary:disabled {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--ink-tertiary);
+  box-shadow: none;
+}
+/* dataanalysis: once the ingest banner is on screen, IT is the next step —
+   demote the hero 「▶ サンプルで試す」 to secondary (progressive: needs :has). */
+#dataanalysis .da-bar:has(+ .da-ingest) .da-btn.primary {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--accent-ink);
+  font-weight: var(--fw-semibold);
+  box-shadow: none;
+}
+#dataanalysis .da-bar:has(+ .da-ingest) .da-btn.primary:hover:not(:disabled) {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ---- Tier 3 · TERTIARY (neutral ghost — no accent at rest) ----------------- */
+#materialflow .mf-btn:not(.primary),               /* サンプル物量を取込 / 出荷データから取込 / 不足を生成 */
+#overview .ov-cta:not(.ov-empty-sample),           /* checklist row CTAs (取り込む→ / 不足データを生成 …) */
+#dataanalysis .da-ingest .da-btn[data-act="master"] {  /* ＋ 商品マスタ（任意） */
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-secondary);
+  font-weight: var(--fw-medium);
+  box-shadow: none;
+}
+#materialflow .mf-btn:not(.primary):hover:not(:disabled),
+#overview .ov-cta:not(.ov-empty-sample):hover:not(:disabled),
+#dataanalysis .da-ingest .da-btn[data-act="master"]:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--line-strong);
+  color: var(--ink-primary);
+  filter: none;
+}
+#materialflow .mf-btn:not(.primary):active:not(:disabled),
+#overview .ov-cta:not(.ov-empty-sample):active:not(:disabled),
+#dataanalysis .da-ingest .da-btn[data-act="master"]:active:not(:disabled) {
+  background: var(--bg-active);
+}
+#materialflow .mf-btn:not(.primary):focus-visible,
+#overview .ov-cta:not(.ov-empty-sample):focus-visible,
+#dataanalysis .da-ingest .da-btn[data-act="master"]:focus-visible {
+  outline: 2px solid var(--line-focus);
+  outline-offset: 2px;
+}
+#materialflow .mf-btn:not(.primary):disabled,
+#overview .ov-cta:not(.ov-empty-sample):disabled,
+#dataanalysis .da-ingest .da-btn[data-act="master"]:disabled {
+  background: transparent;
+  border-color: var(--line-hair);
+  color: var(--ink-faint);
+}
+
+/* ---- Tier 2 re-elevation (must follow the tertiary block: same specificity,
+        later-wins) — MF「基礎物量を取込」 is a functional bridge, not a utility. */
+#materialflow .mf-btn[data-act="frombi"] {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--accent-ink);
+  font-weight: var(--fw-semibold);
+}
+#materialflow .mf-btn[data-act="frombi"]:hover:not(:disabled) {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  filter: none;
+}
+#materialflow .mf-btn[data-act="frombi"]:active:not(:disabled) {
+  background: var(--accent-tint-2);
+}
+
+/* ---- DANGER harmonisation (kept on the --bad ramp) -------------------------- */
+#notes .nb-x:hover {
+  background: var(--bad-tint);
+  color: var(--bad-ink);
+  opacity: 1;
+}
