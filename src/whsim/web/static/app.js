@@ -21,6 +21,7 @@ import { mountWorkCompare } from './js/workcompare.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
 import { mountNotes } from './js/notes.js';
+import { mountScorecard } from './js/scorecard.js';
 import { $, api, esc } from './js/util.js';
 import {
   ZONE_JP, EQUIP_JP, ABC_COLOR, STATE_COLOR, RACK_COLOR, AGV_COLOR,
@@ -697,6 +698,7 @@ async function openProject(name) {
   if (S.view === 'design') mountDesigner();
   if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
   if (S.view === 'overview') mountOverviewView();  // refresh ①取込 dashboard live
+  refreshScorecard();  // re-score for the (re)opened project
 }
 
 async function mountDesigner() {
@@ -723,6 +725,7 @@ async function mountDesigner() {
       $('status').textContent = '設計を保存しました。「実行」で検証できます。';
       hist.log('💾', '設計を保存しました', 'design', 'design');
       await openProjectQuiet();  // refresh headline values after re-materialise
+      refreshScorecard();        // re-score the saved design
       return r;
     },
     // Slot the loaded inventory onto the created locations (velocity/ABC).
@@ -813,6 +816,7 @@ async function doRun() {
     renderProposalStory();
     if (S.export) S.export.refresh();
     if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
+    refreshScorecard();  // run done → the rail can now show 解析 vs DES deltas
     return r;
   } finally {
     S.running = false;
@@ -1160,6 +1164,13 @@ function switchView(view) {
   // whatever drove the view change (journey click, Cody, or programmatic).
   if (S.journey) S.journey.setActive(view);
   updatePhaseHint(view);
+  // 採点表レール: tell the dock which view/phase we're on (it shows on ②③④, hides
+  // on ①⑤, and auto-collapses to the strip in ③設計 so the designer keeps the
+  // right side). setPhase refetches the scorecard when entering a rail phase.
+  if (S.scorecard) {
+    S.scorecard.setView(view);
+    S.scorecard.setPhase(VIEW_PHASE[view] || null);
+  }
 }
 
 // viewId → phase id (mirrors journey.js PHASES). Cross-cutting views map to null.
@@ -1172,6 +1183,16 @@ const VIEW_PHASE = {
   cost: 'design', pickrate: 'design',
   viewpng: 'propose', compare: 'propose', export: 'propose',
 };
+
+// 採点表レール recompute: coalesce the trigger fan-in (openProject /
+// model-changed / designer save / doRun / design-dirty / phase entry) into one
+// debounced GET /scorecard so a burst of edits costs one analytic recompute.
+let _scRefreshTimer = 0;
+function refreshScorecard() {
+  if (!S.scorecard) return;
+  clearTimeout(_scRefreshTimer);
+  _scRefreshTimer = setTimeout(() => { if (S.scorecard) S.scorecard.refresh(); }, 250);
+}
 
 // Show the phase-goal + next-step banner; for run-gated phases without a run
 // (and analyze without data / intake without a project) surface the empty state.
@@ -1395,6 +1416,11 @@ document.addEventListener('whsim:model-changed', async (e) => {
   if (typeof dest === 'string' && dest) switchView(dest);
 });
 
+// Lightweight "the design changed under the cursor" signal (the designer may
+// emit it on every edit). The 採点表レール re-scores analytically; it's debounced,
+// so a burst of edits costs one recompute. Safe if never fired.
+document.addEventListener('whsim:design-dirty', () => { refreshScorecard(); });
+
 // 物量サマリタブ → タイムチャート: place the day from the measured volumes.
 document.addEventListener('whsim:load-timetable', (e) => {
   const scenario = e && e.detail && e.detail.scenario;
@@ -1543,6 +1569,25 @@ function initUI() {
   // Sync the initial highlight with the default landing view (Cody home).
   S.journey.setActive(S.view);
   updatePhaseHint(S.view);
+
+  // 採点表レール: the persistent right dock that scores the design analytically on
+  // ②③④. It reserves its own footprint on `.main` (no overlap with the designer),
+  // and its footer ▶ runs the same DES path as the header button.
+  S.scorecard = mountScorecard({
+    getProject: () => S.project,
+    onRun: () => runSim(),
+    onNav: (v) => switchView(v),
+    // When the reserved width changes (toggle/resize), refit the active canvas/
+    // designer so they reflow into the new work area on the next frame.
+    onReserve: () => requestAnimationFrame(() => {
+      fitCanvas();
+      if (S.designer) S.designer.resize();
+      if (S.scene3d) S.scene3d.resize();
+    }),
+  });
+  // Reflect the initial view/phase so the dock shows/hides correctly on load.
+  S.scorecard.setView(S.view);
+  S.scorecard.setPhase(VIEW_PHASE[S.view] || null);
 
   // project management menu
   $('projMenuBtn').onclick = (e) => {

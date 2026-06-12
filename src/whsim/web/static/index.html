@@ -213,6 +213,12 @@
     </main>
   </div>
 
+  <!-- 採点表レール (Scorecard Rail): persistent right dock mounted by app.js via
+       js/scorecard.js. This is the host anchor; the rail is a fixed-position
+       <aside> appended here (it reserves its own footprint on .main, so the
+       .layout/.main grid is untouched). Hidden until a rail phase (②③④). -->
+  <div id="scorecardDock"></div>
+
   <div id="toastHost" class="toast-host" role="region" aria-label="通知" aria-live="polite" aria-atomic="false"></div>
 
   <script type="importmap">
