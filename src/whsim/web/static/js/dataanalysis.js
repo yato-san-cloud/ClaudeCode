@@ -501,9 +501,41 @@ export function mountDataAnalysis(el, opts = {}) {
              ${staffingCard(b.staffing)}
            </div>`
         : `<div class="da-empty"><b>WMSデータを分析</b>
-             <div>「サンプルで試す」ですぐ確認、または出荷データを取り込んでください。</div></div>`);
+             <div>「サンプルで試す」ですぐ確認、または出荷データを取り込んでください。</div>
+             <div data-da-projhint></div></div>`);
     wire();
     mountAllCharts(b);
+    hintProjectData();
+  }
+
+  // The 物量サマリ analyses a *file*; a project that ALREADY carries imported
+  // orders looks confusingly "empty" here. Detect that case and point at the
+  // project-data views (対話分析/基礎物量) so nobody re-uploads what's already in.
+  async function hintProjectData() {
+    const slot = root.querySelector('[data-da-projhint]');
+    const proj = getProject();
+    if (!slot || !proj) return;
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(proj)}/bi/volumes`);
+      if (!r.ok) return;
+      const v = await r.json();
+      const orders = Number(v && (v.out_orders ?? (v.totals && v.totals.out_orders))) || 0;
+      if (!orders) return;
+      slot.innerHTML =
+        `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--accent);border-radius:10px;
+                     background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:12.5px;max-width:52ch;">
+           このプロジェクトには<b>取込済みの実データ</b>があります（この画面はファイル単体の分析用）。
+           プロジェクトのデータは
+           <a href="#" data-nav="bianalytics" style="color:var(--accent);font-weight:700">対話分析</a> ・
+           <a href="#" data-nav="bi" style="color:var(--accent);font-weight:700">基礎物量</a> で確認できます。
+         </div>`;
+      slot.querySelectorAll('[data-nav]').forEach((a) => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view: a.dataset.nav } }));
+        });
+      });
+    } catch (_e) { /* hint only — stay silent */ }
   }
 
   // `makePromise` is a thunk so the same fetch can be re-invoked by 再試行.
