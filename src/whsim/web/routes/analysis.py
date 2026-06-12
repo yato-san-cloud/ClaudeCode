@@ -318,6 +318,32 @@ def api_scorecard(name: str):
     return scorecard.build_scorecard(model, run_metrics)
 
 
+@router.get("/api/projects/{name}/scenarios")
+def api_scenarios_list(name: str):
+    """採点表レール Stage2: 保存済みシナリオ（名前つき設計スナップショット＋採点表）
+    の一覧。各シナリオは保存時の scorecard を含むので、レールは現在値との
+    デルタを round-trip なしで描ける。Tolerant: 壊れた1件は飛ばす。"""
+    from whsim import scenariostore
+    return {"scenarios": scenariostore.list_scenarios(_open(name))}
+
+
+@router.post("/api/projects/{name}/scenarios")
+def api_scenarios_save(name: str, payload: dict | None = None):
+    """現在の設計（or 編集中セクション）を名前つきシナリオとして凍結保存。
+    本文: {label, sections?}。sections があれば未保存の編集案をそのまま凍結する
+    （ライブ採点と同じ overlay）。保存したシナリオのヘッダ（採点表込み）を返す。"""
+    from whsim import scenariostore
+    p = payload or {}
+    label = str(p.get("label") or "").strip() or "シナリオ"
+    return scenariostore.save_scenario(_open(name), label, p.get("sections"))
+
+
+@router.delete("/api/projects/{name}/scenarios/{sid}")
+def api_scenarios_delete(name: str, sid: str):
+    from whsim import scenariostore
+    return {"ok": scenariostore.delete_scenario(_open(name), sid)}
+
+
 @router.post("/api/projects/{name}/scorecard")
 def api_scorecard_live(name: str, payload: dict | None = None):
     """採点表レール (LIVE): same as GET, but score an *unsaved* in-memory model.

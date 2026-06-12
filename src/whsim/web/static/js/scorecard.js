@@ -80,6 +80,10 @@ function injectStyle() {
   .sc-cmp select{flex:1;min-width:0;background:var(--bg-app,#fff);color:var(--ink-primary,#16202e);
     border:1px solid var(--line,rgba(120,140,170,.25));border-radius:7px;padding:5px 7px;font:inherit;font-size:12px}
   .sc-cmp select:focus{outline:none;border-color:var(--accent,#16C0DE)}
+  .sc-save{flex:0 0 auto;background:transparent;border:1px solid color-mix(in srgb,var(--accent,#16C0DE) 60%,transparent);
+    color:var(--accent,#16C0DE);border-radius:7px;padding:4px 8px;font:inherit;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .sc-save:hover{background:color-mix(in srgb,var(--accent,#16C0DE) 14%,transparent)}
+  .sc-save:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:1px}
   /* rows */
   .sc-body{flex:1;min-height:0;overflow-y:auto;padding:9px 10px;display:flex;flex-direction:column;gap:7px}
   .sc-body::-webkit-scrollbar{width:7px}
@@ -152,17 +156,18 @@ function stripValue(row) {
 }
 
 // Format a signed delta with the right polarity colour. `goodWhenDown` flips the
-// sense (cost/headcount: less = good; productivity: more = good).
-function deltaChip(cur, ref, goodWhenDown, fmt) {
+// sense (cost/headcount: less = good; productivity: more = good). `refLabel` names
+// the comparison target (最後の実行 or a saved scenario) in the tooltip.
+function deltaChip(cur, ref, goodWhenDown, fmt, refLabel) {
   if (cur == null || ref == null || !isFinite(cur) || !isFinite(ref)) return '';
   const d = cur - ref;
   const eps = Math.max(1e-9, Math.abs(ref) * 0.005);
-  if (Math.abs(d) <= eps) return `<span class="sc-delta flat" title="実行と同等">＝</span>`;
+  if (Math.abs(d) <= eps) return `<span class="sc-delta flat" title="${esc((refLabel || '比較') + 'と同等')}">＝</span>`;
   const up = d > 0;
   const good = goodWhenDown ? !up : up;
   const arrow = up ? '▲' : '▼';
   const txt = fmt ? fmt(Math.abs(d)) : Math.abs(d).toFixed(1);
-  const title = `最後の実行(DES)比 ${up ? '+' : '−'}${txt}`;
+  const title = `${refLabel || '比較'}比 ${up ? '+' : '−'}${txt}`;
   return `<span class="sc-delta ${good ? 'good' : 'bad'}" title="${esc(title)}">${arrow}${txt}</span>`;
 }
 
@@ -188,7 +193,9 @@ export function mountScorecard(opts = {}) {
   let lastFetched = null;     // Date of last successful fetch
   let phase = null;           // current phase id (intake/analyze/design/validate/propose)
   let designerCollapse = false;   // forced strip in ③設計 (designer owns the right)
-  let compareRun = false;     // scenario compare = 「最後の実行(DES)」
+  // Compare target for the ▲▼ deltas: 'none' / 'run' (最後のDES) / <scenario id>.
+  let compareSel = 'none';
+  let scenarios = [];         // saved named-scenario headers (each carries its scorecard)
   let busy = false;
 
   // Whether the rail should be visible for the current phase.
@@ -266,14 +273,23 @@ export function mountScorecard(opts = {}) {
         <button class="sc-ibtn" data-sc="hide" title="レールを隠す" aria-label="レールを隠す" data-sc-hide>✕</button>
       </div>`;
 
-    const cmpDisabled = !run.exists;
+    const runDisabled = !run.exists;
+    // ensure the selected compare target still exists (a deleted scenario falls back)
+    if (compareSel !== 'none' && compareSel !== 'run'
+        && !scenarios.some((s) => s.id === compareSel)) compareSel = 'none';
+    if (compareSel === 'run' && runDisabled) compareSel = 'none';
+    const scenOpts = scenarios.map((s) =>
+      `<option value="${esc(s.id)}"${compareSel === s.id ? ' selected' : ''}>${esc(s.label)}</option>`).join('');
     const cmpHtml =
       `<div class="sc-cmp">
         <label for="sc-cmp-sel">比較:</label>
         <select id="sc-cmp-sel" data-sc="compare">
-          <option value="none"${compareRun ? '' : ' selected'}>なし</option>
-          <option value="run"${compareRun ? ' selected' : ''}${cmpDisabled ? ' disabled' : ''}>最後の実行(DES)</option>
+          <option value="none"${compareSel === 'none' ? ' selected' : ''}>なし</option>
+          <option value="run"${compareSel === 'run' ? ' selected' : ''}${runDisabled ? ' disabled' : ''}>最後の実行(DES)</option>
+          ${scenarios.length ? `<optgroup label="保存シナリオ">${scenOpts}</optgroup>` : ''}
         </select>
+        <button class="sc-save" data-sc="save-scenario" title="現在の設計を名前を付けて保存"
+                aria-label="現在をシナリオとして保存">＋保存</button>
       </div>`;
 
     let bodyHtml;
@@ -282,7 +298,7 @@ export function mountScorecard(opts = {}) {
     } else if (!rows.length) {
       bodyHtml = `<div class="sc-msg">まだ採点できる設計がありません。<br>プロジェクトを開いて設計を始めてください。</div>`;
     } else {
-      bodyHtml = rows.map((r) => rowHtml(r, run)).join('');
+      bodyHtml = rows.map((r) => rowHtml(r)).join('');
     }
 
     const footHtml =
@@ -301,11 +317,10 @@ export function mountScorecard(opts = {}) {
     applyChrome();
   }
 
-  function rowHtml(r, run) {
+  function rowHtml(r) {
     const tone = TONE[r.tone] || TONE.neutral;
     const unit = r.unit ? `<small>${esc(r.unit)}</small>` : '';
-    let delta = '';
-    if (compareRun && run && run.exists) delta = deltaFor(r, run);
+    const delta = deltaFor(r);
     const ic = ROW_ICON[r.id] || '•';
     return `<button class="sc-row" data-view="${esc(r.view || '')}" style="--sc-tone:${tone}"
               title="${esc((r.label || '') + (r.sub ? ' — ' + r.sub : ''))}">
@@ -317,21 +332,43 @@ export function mountScorecard(opts = {}) {
     </button>`;
   }
 
-  // Compute the ▲▼ chip for a row vs the last DES run, where a run value exists.
-  function deltaFor(r, run) {
-    if (r.id === 'cost' && r.per_order != null && run.cost_per_order != null) {
-      return deltaChip(r.per_order, run.cost_per_order, true, (d) => '¥' + Math.round(d));
+  // Resolve the current compare target into comparable reference numbers, or null.
+  // 'run' → the last DES run (measured); a scenario id → that snapshot's analytic
+  // scorecard (saved at freeze time).
+  function compareRef() {
+    if (compareSel === 'run') {
+      const run = data && data.run;
+      if (!run || !run.exists) return null;
+      const mp = run.measured_productivity || {};
+      const vals = Object.values(mp).filter((x) => isFinite(x));
+      const prod = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      return { label: '最後の実行(DES)', cost: run.cost_per_order, head: run.headcount, prod };
     }
-    if (r.id === 'headcount' && r.num != null && run.headcount != null) {
-      return deltaChip(r.num, run.headcount, true, (d) => d.toFixed(1) + '人');
+    if (compareSel !== 'none') {
+      const sc = scenarios.find((s) => s.id === compareSel);
+      if (!sc || !sc.scorecard) return null;
+      const by = {}; (sc.scorecard.rows || []).forEach((row) => { by[row.id] = row; });
+      return {
+        label: sc.label,
+        cost: by.cost && by.cost.per_order, head: by.headcount && by.headcount.num,
+        prod: by.productivity && by.productivity.num,
+      };
     }
-    if (r.id === 'productivity' && r.num != null && run.measured_productivity) {
-      // Compare the analytic 行/h against the mean measured productivity.
-      const vals = Object.values(run.measured_productivity).filter((x) => isFinite(x));
-      if (vals.length) {
-        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-        return deltaChip(r.num, mean, false, (d) => Math.round(d) + '');
-      }
+    return null;
+  }
+
+  // Compute the ▲▼ chip for a row vs the selected compare target (run or scenario).
+  function deltaFor(r) {
+    const ref = compareRef();
+    if (!ref) return '';
+    if (r.id === 'cost' && r.per_order != null && ref.cost != null) {
+      return deltaChip(r.per_order, ref.cost, true, (d) => '¥' + Math.round(d), ref.label);
+    }
+    if (r.id === 'headcount' && r.num != null && ref.head != null) {
+      return deltaChip(r.num, ref.head, true, (d) => d.toFixed(1) + '人', ref.label);
+    }
+    if (r.id === 'productivity' && r.num != null && ref.prod != null) {
+      return deltaChip(r.num, ref.prod, false, (d) => Math.round(d) + '', ref.label);
     }
     return '';
   }
@@ -356,8 +393,8 @@ export function mountScorecard(opts = {}) {
       if (!r.ok) throw new Error(String(r.status));
       data = await r.json();
       lastFetched = new Date();
-      // A run-less payload invalidates the run comparison choice.
-      if (!(data.run && data.run.exists)) compareRun = false;
+      // A run-less payload invalidates a 'run' comparison choice.
+      if (compareSel === 'run' && !(data.run && data.run.exists)) compareSel = 'none';
     } catch (_e) {
       // never-blocks: keep the last good data; show a soft note if we have none.
       if (!data) data = { rows: [], run: { exists: false }, source: '' };
@@ -365,6 +402,34 @@ export function mountScorecard(opts = {}) {
       busy = false;
       render();
     }
+  }
+
+  // Saved named scenarios (each carries its frozen scorecard for the compare).
+  async function fetchScenarios() {
+    const name = getProject();
+    if (!name) { scenarios = []; return; }
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/scenarios`,
+        { headers: { Accept: 'application/json' } });
+      if (r.ok) scenarios = (await r.json()).scenarios || [];
+    } catch (_e) { /* keep last list; never block */ }
+  }
+
+  // Freeze the current design as a named scenario, then offer to compare to it.
+  async function saveScenario() {
+    const name = getProject();
+    if (!name) return;
+    const label = (window.prompt('シナリオ名（例: 現行 / AGV導入案）', '現行案') || '').trim();
+    if (!label) return;
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/scenarios`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label }) });
+      if (r.ok) {
+        await fetchScenarios();
+        render();
+      }
+    } catch (_e) { /* never block */ }
   }
 
   // ── interaction ───────────────────────────────────────────────────────────
@@ -389,12 +454,14 @@ export function mountScorecard(opts = {}) {
       if (opts.onHide) opts.onHide();
     } else if (a === 'run') {
       onRun();
+    } else if (a === 'save-scenario') {
+      saveScenario();
     }
   });
   rail.addEventListener('change', (e) => {
     const sel = e.target.closest('[data-sc="compare"]');
     if (!sel) return;
-    compareRun = sel.value === 'run';
+    compareSel = sel.value;
     render();
   });
 
@@ -437,7 +504,7 @@ export function mountScorecard(opts = {}) {
 
   return {
     // Re-fetch the scorecard from the SAVED model (app.js debounces the fan-in).
-    refresh: () => fetchScorecard(),
+    refresh: () => { fetchScenarios(); fetchScorecard(); },
     // Live re-score from the designer's UNSAVED edit sections (drag → rail moves).
     refreshLive: (sections) => { if (visibleForPhase()) fetchScorecard(sections); },
     // Phase entry: show/hide the rail; (re)fetch when entering a rail phase.
@@ -445,7 +512,7 @@ export function mountScorecard(opts = {}) {
       const was = phase;
       phase = p;
       applyChrome();
-      if (visibleForPhase() && p !== was) fetchScorecard();
+      if (visibleForPhase() && p !== was) { fetchScenarios(); fetchScorecard(); }
       else render();
     },
     // View entry: ③設計(designer) forces the thin strip so the editor keeps the
