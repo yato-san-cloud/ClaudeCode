@@ -295,3 +295,24 @@ def api_analysis(name: str):
         metrics = analytic.estimate(model)
         source = "estimate"
     return _analysis_payload(model, metrics, source)
+
+
+@router.get("/api/projects/{name}/scorecard")
+def api_scorecard(name: str):
+    """採点表レール: the design's dependent variables (判定/人員/原価/生産性/坪数/
+    連鎖) recomputed analytically (no DES, 爆速) on every edit. Composes the
+    existing pure estimators into the fixed 6-row payload the right-dock rail
+    renders, plus a `run` block (the last DES run's headline numbers) for its
+    解析値 vs 実測 delta. Honours 'never blocks': a bare model returns 200 with
+    all 6 rows (value="—" where there is no data); no run → run.exists=false."""
+    from whsim import scorecard
+    proj = _open(name)
+    model = proj.load_model()
+    run_metrics = None
+    rd = proj.latest_run_dir()
+    if rd is not None and (rd / "kpis.json").is_file():
+        try:
+            run_metrics = json.loads((rd / "kpis.json").read_text("utf-8"))
+        except Exception:  # noqa: BLE001 — a corrupt run never wedges the rail
+            run_metrics = None
+    return scorecard.build_scorecard(model, run_metrics)
