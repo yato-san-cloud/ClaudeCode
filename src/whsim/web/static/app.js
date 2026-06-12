@@ -1419,7 +1419,20 @@ document.addEventListener('whsim:model-changed', async (e) => {
 // Lightweight "the design changed under the cursor" signal (the designer may
 // emit it on every edit). The 採点表レール re-scores analytically; it's debounced,
 // so a burst of edits costs one recompute. Safe if never fired.
-document.addEventListener('whsim:design-dirty', () => { refreshScorecard(); });
+// Live re-score: the designer emits its UNSAVED edit sections on every edit, so
+// the rail's dependent variables move WHILE dragging — no save round-trip. Falls
+// back to the saved-model GET when no sections ride along.
+let _scLiveTimer = 0;
+document.addEventListener('whsim:design-dirty', (e) => {
+  const sections = e && e.detail && e.detail.sections;
+  if (!S.scorecard) return;
+  clearTimeout(_scLiveTimer);
+  _scLiveTimer = setTimeout(() => {
+    if (!S.scorecard) return;
+    if (sections) S.scorecard.refreshLive(sections);
+    else S.scorecard.refresh();
+  }, 250);
+});
 
 // 物量サマリタブ → タイムチャート: place the day from the measured volumes.
 document.addEventListener('whsim:load-timetable', (e) => {

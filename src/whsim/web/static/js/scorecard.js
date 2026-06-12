@@ -337,14 +337,22 @@ export function mountScorecard(opts = {}) {
   }
 
   // ── data ────────────────────────────────────────────────────────────────
-  async function fetchScorecard() {
+  // `sections` (optional) = the designer's UNSAVED edit sections
+  // ({layout,resources,process,routes,settings}). When present we POST them so the
+  // rail scores the in-memory model — the dependent variables move WHILE you drag
+  // a shelf, no save round-trip. Without sections we GET the saved model.
+  async function fetchScorecard(sections) {
     const name = getProject();
     if (!name) { data = null; render(); return; }
     busy = true;
     if (!data) render();   // first load shows the spinner; later loads update silently
     try {
-      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/scorecard`,
-        { headers: { Accept: 'application/json' } });
+      const url = `/api/projects/${encodeURIComponent(name)}/scorecard`;
+      const opt = sections
+        ? { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(sections) }
+        : { headers: { Accept: 'application/json' } };
+      const r = await fetch(url, opt);
       if (!r.ok) throw new Error(String(r.status));
       data = await r.json();
       lastFetched = new Date();
@@ -428,8 +436,10 @@ export function mountScorecard(opts = {}) {
   applyChrome();
 
   return {
-    // Re-fetch the scorecard (app.js debounces the trigger fan-in).
-    refresh: fetchScorecard,
+    // Re-fetch the scorecard from the SAVED model (app.js debounces the fan-in).
+    refresh: () => fetchScorecard(),
+    // Live re-score from the designer's UNSAVED edit sections (drag → rail moves).
+    refreshLive: (sections) => { if (visibleForPhase()) fetchScorecard(sections); },
     // Phase entry: show/hide the rail; (re)fetch when entering a rail phase.
     setPhase(p) {
       const was = phase;

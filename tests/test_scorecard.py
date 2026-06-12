@@ -263,3 +263,44 @@ def test_scorecard_endpoint_with_run(monkeypatch):
         assert captured["run_metrics"]["headcount"] == 5.0
     finally:
         client.delete("/api/projects/sc_run")
+
+
+def test_post_scorecard_scores_unsaved_edits():
+    """POST /scorecard overlays in-memory edit sections onto the saved model and
+    scores THEM (the live drag path) without persisting."""
+    from fastapi.testclient import TestClient
+    from whsim.web.app import app
+    c = TestClient(app)
+    c.post("/api/projects", json={"name": "sclive", "template": "ecommerce_small"})
+    try:
+        base = c.get("/api/projects/sclive/scorecard").json()
+        chain_before = next(r for r in base["rows"] if r["id"] == "chain")
+        # send process stages with every zone unbound → 連鎖 must read worse,
+        # WITHOUT touching the saved model.
+        full = c.get("/api/projects/sclive/full").json()
+        model = full.get("model", full)
+        proc = model["process"]
+        for s in proc.get("stages", []):
+            s["zone"] = None
+        live = c.post("/api/projects/sclive/scorecard", json={"process": proc}).json()
+        chain_live = next(r for r in live["rows"] if r["id"] == "chain")
+        assert chain_live["tone"] == "warn"        # unbound stages → warning
+        # saved model is untouched: a fresh GET still equals the baseline chain.
+        again = c.get("/api/projects/sclive/scorecard").json()
+        chain_again = next(r for r in again["rows"] if r["id"] == "chain")
+        assert chain_again == chain_before
+    finally:
+        c.delete("/api/projects/sclive")
+
+
+def test_post_scorecard_tolerates_garbage_sections():
+    from fastapi.testclient import TestClient
+    from whsim.web.app import app
+    c = TestClient(app)
+    c.post("/api/projects", json={"name": "scgarb", "template": "ecommerce_small"})
+    try:
+        r = c.post("/api/projects/scgarb/scorecard", json={"layout": "not-a-layout", "process": 42})
+        assert r.status_code == 200
+        assert len(r.json()["rows"]) == 6     # fell back to saved model, never 500
+    finally:
+        c.delete("/api/projects/scgarb")

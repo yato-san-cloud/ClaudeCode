@@ -316,3 +316,36 @@ def api_scorecard(name: str):
         except Exception:  # noqa: BLE001 — a corrupt run never wedges the rail
             run_metrics = None
     return scorecard.build_scorecard(model, run_metrics)
+
+
+@router.post("/api/projects/{name}/scorecard")
+def api_scorecard_live(name: str, payload: dict | None = None):
+    """採点表レール (LIVE): same as GET, but score an *unsaved* in-memory model.
+
+    The designer emits `whsim:design-dirty` with its current edit sections
+    ({layout, resources, process, routes, settings}); the rail POSTs them here so
+    the dependent variables move WHILE you drag a shelf — no save round-trip. The
+    body sections are overlaid onto the saved model dict, re-validated, and scored.
+    Tolerant: a missing/invalid section falls back to the saved model so the rail
+    never wedges ('never blocks'). The run block still comes from the last DES run.
+    """
+    from whsim import scorecard
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    md = proj.load_model().model_dump()
+    for key in ("layout", "resources", "process", "routes", "settings"):
+        val = (payload or {}).get(key)
+        if val is not None:
+            md[key] = val
+    try:
+        model = WarehouseModel.model_validate(md)
+    except Exception:  # noqa: BLE001 — bad edit sections → score the saved model
+        model = proj.load_model()
+    run_metrics = None
+    rd = proj.latest_run_dir()
+    if rd is not None and (rd / "kpis.json").is_file():
+        try:
+            run_metrics = json.loads((rd / "kpis.json").read_text("utf-8"))
+        except Exception:  # noqa: BLE001 — a corrupt run never wedges the rail
+            run_metrics = None
+    return scorecard.build_scorecard(model, run_metrics)

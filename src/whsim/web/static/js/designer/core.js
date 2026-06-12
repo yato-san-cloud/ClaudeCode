@@ -938,11 +938,15 @@ export class Designer {
     if (!this.drag) return;
     const mode = this.drag.mode;
     if (mode === 'pan') { this.drag = null; return; }
-    if (mode === 'shelfCreate') { this._shelfCreateCommit(); this.drag = null; this.snapLine = null; this._renderSide(); this._repaint(); return; }
+    // a real mutation just ended (create / move / resize) — re-score the rail
+    // with the FINAL geometry (the drag-start _pushUndo only saw the old state).
+    const mutated = mode !== 'pan';
+    if (mode === 'shelfCreate') { this._shelfCreateCommit(); this.drag = null; this.snapLine = null; this._renderSide(); this._repaint(); if (mutated) this._emitDirty(); return; }
     if (mode === 'shelfMove' || mode === 'shelfResize') {
-      this.snapLine = null; this.drag = null; this._renderSide(); this._repaint(); this._updateStatus(); return;
+      this.snapLine = null; this.drag = null; this._renderSide(); this._repaint(); this._updateStatus(); this._emitDirty(); return;
     }
     this.drag = null; this._renderSide(); this._updateStatus();
+    if (mutated) this._emitDirty();
   }
 
   _onDbl(e) {
@@ -995,6 +999,23 @@ export class Designer {
     if (this._undoStack.length > 50) this._undoStack.shift();
     this._redoStack = [];
     this._refreshUndoBtns();
+    this._emitDirty();
+  }
+
+  // Broadcast the live (UNSAVED) edit sections so the 採点表レール re-scores while
+  // you edit — drag a shelf and 原価/人員/坪数 move, no save needed. Deduped by a
+  // snapshot hash so a per-frame drag doesn't spam the bus (app.js also debounces).
+  _emitDirty() {
+    const sections = {
+      layout: clone(this.model.layout),
+      resources: clone(this.model.resources),
+      process: clone(this.model.process),
+      routes: clone(this.model.routes),
+    };
+    const sig = JSON.stringify(sections);
+    if (sig === this._dirtySig) return;
+    this._dirtySig = sig;
+    document.dispatchEvent(new CustomEvent('whsim:design-dirty', { detail: { sections } }));
   }
   _applySnapshot(snap) {
     this.model.layout = clone(snap.layout);
@@ -1009,6 +1030,7 @@ export class Designer {
     this.conveyorDraft = this.wallDraft = this.routeDraft = null;
     this._renderTool();
     this._refreshUndoBtns();
+    this._emitDirty();   // undo/redo changed the model → re-score the rail
   }
   _undo() {
     if (!this._undoStack || !this._undoStack.length) return;
