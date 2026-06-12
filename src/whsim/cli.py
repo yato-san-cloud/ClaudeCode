@@ -161,7 +161,7 @@ def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
 
     Pass --reload for development: the server auto-restarts on code edits and
     sends no-cache headers, so a plain browser refresh (F5) always shows the
-    latest -- no manual restart or hard-reload. See dev.bat / dev.sh for a
+    latest -- no manual restart or hard-reload. See start.bat for a
     one-command setup that also auto-pulls the branch.
     """
     import os
