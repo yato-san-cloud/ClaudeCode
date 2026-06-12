@@ -135,16 +135,42 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
     # any other read/parse error is reported as a warning in an empty layout.
     if not path.exists():
         raise FileNotFoundError(str(path))
-    try:
-        doc = ezdxf.readfile(str(path))
-    except Exception as exc:  # noqa: BLE001 - tolerant: never crash the caller
+
+    def _empty_result(msg: str) -> dict:
         return {
             "bounds": {"width": 0.0, "depth": 0.0},
             "walls": [],
             "zones": [],
-            "warnings": [f"DXF を読み込めませんでした: {exc}"],
+            "warnings": [msg],
             "stats": {"entities": 0, "walls": 0, "scale": 1.0, "units": "unknown"},
         }
+
+    # A ".dxf" that is actually a DWG (binary AutoCAD save) is a common
+    # real-world mix-up — detect the AC10xx magic and say exactly what to do.
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(6)
+    except OSError:
+        head = b""
+    if head[:4] == b"AC10":      # DWG version magic: AC1009..AC1032
+        return _empty_result(
+            "このファイルは DWG（AutoCADバイナリ形式）のようです。CADで"
+            "「DXF形式（R2010以降推奨）」に書き出してから取り込んでください。")
+
+    try:
+        doc = ezdxf.readfile(str(path))
+    except Exception:  # noqa: BLE001 — try the salvage path before giving up
+        # ezdxf.recover tolerates malformed/legacy files the strict reader
+        # rejects (real customer DXFs are rarely pristine).
+        try:
+            from ezdxf import recover
+            doc, auditor = recover.readfile(str(path))
+            if auditor.has_errors:
+                warnings.append(
+                    f"DXF に {len(auditor.errors)} 件の構造エラーがあり、修復して"
+                    "読み込みました。寸法を設計タブでご確認ください。")
+        except Exception as exc2:  # noqa: BLE001 - tolerant: never crash the caller
+            return _empty_result(f"DXF を読み込めませんでした: {exc2}")
 
     scale, units = _detect_scale(doc, warnings)
     msp = doc.modelspace()

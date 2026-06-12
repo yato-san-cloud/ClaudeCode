@@ -40,12 +40,99 @@ def _num(v) -> float | None:
     return f if f == f else None
 
 
+# Java Object Serialization Stream magic (0xACED). A file starting with these
+# bytes is MapMaker's NATIVE save (a serialized WorldMapMultiFloor), not the
+# JSON export — real users drag the native file, so we parse it directly.
+_JAVA_MAGIC = b"\xac\xed"
+
+
+def _jfields(inst) -> dict:
+    """{field name: value} for a javaobj JavaInstance, merged across the class
+    hierarchy. Tolerant: anything without field_data yields {}."""
+    out: dict = {}
+    for _cls, fmap in (getattr(inst, "field_data", None) or {}).items():
+        for jf, val in fmap.items():
+            out[getattr(jf, "name", str(jf))] = val
+    return out
+
+
+def _native_to_doc(data: bytes) -> dict:
+    """Parse a NATIVE .rmpm (Java-serialized WorldMapMultiFloor) into the same
+    floors-dict shape as the JSON export, so ONE mapping path serves both.
+
+    Mirrors reference/mapmaker's RmpmExport.java: per object the bounds come
+    from the ``tl``/``br`` Coord fields, the type from the class simple name,
+    and a FreeShelfObject's rack address from ``shelf.name``. Unrecognised
+    objects are kept typed so the downstream mapper counts/skips them
+    ("never blocks")."""
+    try:
+        import javaobj.v2 as javaobj
+    except ImportError as e:  # pragma: no cover — ships in pyproject deps
+        raise ValueError(
+            "ネイティブ .rmpm の読込には javaobj-py3 が必要です。"
+            "`pip install javaobj-py3`（start.bat の再実行でも更新されます）するか、"
+            "MapMaker の JSON エクスポート（.rmpm.json）をご利用ください。") from e
+    try:
+        top = javaobj.loads(data)
+    except Exception as e:  # noqa: BLE001 — corrupt stream → friendly error
+        raise ValueError(f".rmpm（Java直列化）として解釈できませんでした: {e}") from e
+
+    exts = _jfields(top).get("WorldMapExtensionList")
+    floors: list[dict] = []
+    for ext in list(exts) if exts is not None else []:
+        fe = _jfields(ext)
+        wm = fe.get("worldMap")
+        if wm is None:
+            continue
+        fw = _jfields(wm)
+        tl, br = _jfields(fw.get("tl")), _jfields(fw.get("br"))
+        objects: list[dict] = []
+        for o in list(fw.get("objects") or []):
+            cls = getattr(getattr(o, "classdesc", None), "name", "") or ""
+            fo = _jfields(o)
+            otl, obr = _jfields(fo.get("tl")), _jfields(fo.get("br"))
+            if "x" not in otl or "x" not in obr:
+                continue
+            rec: dict = {
+                "type": cls.rsplit(".", 1)[-1],
+                "id": fo.get("id"),
+                "x": otl.get("x"), "y": otl.get("y"),
+                "w": (obr.get("x") or 0) - (otl.get("x") or 0),
+                "h": (obr.get("y") or 0) - (otl.get("y") or 0),
+            }
+            # FreeShelfObject carries its rack address on shelf.name; other
+            # named objects (e.g. StairsObject) keep a plain `name` field.
+            shelf = fo.get("shelf")
+            name = (_jfields(shelf).get("name") if shelf is not None
+                    else fo.get("name"))
+            if name is not None:
+                rec["name"] = str(name)
+            objects.append(rec)
+        floors.append({
+            "name": str(fe.get("name") or f"Floor{len(floors) + 1}"),
+            "bounds": {"left": tl.get("x", 0.0), "top": tl.get("y", 0.0),
+                       "right": br.get("x", 0.0), "bottom": br.get("y", 0.0)},
+            "view": {"centerX": fe.get("centerX"), "centerY": fe.get("centerY"),
+                     "zoom": fe.get("zoomLevel")},
+            "objects": objects,
+        })
+    if not floors:
+        raise ValueError(".rmpm にフロアが見つかりませんでした（WorldMapExtensionList が空）。")
+    return {"source": "native-rmpm", "unit": "mm",
+            "axes": "x-right, y-down, origin top-left", "floors": floors}
+
+
 def import_rmpm_bytes(data: bytes) -> dict:
     warnings: list[str] = []
-    try:
-        doc = json.loads(data.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise ValueError(f"JSON として読めません: {e}") from e
+    if data[:2] == _JAVA_MAGIC:
+        # NATIVE save — parse the Java stream directly; no JSON export needed.
+        doc = _native_to_doc(data)
+        warnings.append("ネイティブ .rmpm（Java保存形式）を直接読み込みました。")
+    else:
+        try:
+            doc = json.loads(data.decode("utf-8-sig"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError(f"JSON として読めません: {e}") from e
 
     floors = doc.get("floors") if isinstance(doc, dict) else None
     if not (isinstance(floors, list) and floors):

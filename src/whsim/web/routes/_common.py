@@ -20,7 +20,10 @@ from whsim.provenance import Source  # re-exported for routers
 # Monte-Carlo replications behind every web run (variability is shown, not configured).
 MONTE_CARLO_REPS = 10
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB hard cap on any single upload
+# 100 MB hard cap on any single upload: real customers' monthly WMS extracts
+# (出荷実績 1ヶ月分の Excel/CSV) regularly exceed the old 25 MB and were being
+# rejected at the door. The chunked reader keeps memory bounded either way.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 __all__ = [
     "Source",

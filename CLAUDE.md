@@ -23,10 +23,17 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - `importer.py` — tolerant ZIP→subtree merge; broken/non-JSON files are skipped,
   never fatal; partial import is fine.
 - `mapcsv.py` / `rmpm.py` — tolerant MapMaker importers (Hitachi WorldMap Map CSV /
-  native `.rmpm.json`); shelves keep their MapMaker name (→ slottable location names),
-  walls/stations mapped, mm→m. `racktypes.py` — 9 storage-equipment presets (incl.
-  メザニン/移動ラック/ハンガー) with unit economics, served at `/api/racktypes` and
-  mirrored into the JS editor/3D (keep in parity).
+  `.rmpm.json` export / **NATIVE `.rmpm`** = Java serialization, parsed via
+  javaobj-py3 and validated byte-equal against the JSON-export oracle); shelves
+  keep their MapMaker name (→ slottable location names), walls/stations mapped,
+  mm→m. `racktypes.py` — 9 storage-equipment presets (incl. メザニン/移動ラック/
+  ハンガー) with unit economics, served at `/api/racktypes` and mirrored into the
+  JS editor/3D (keep in parity).
+- `analysis/data_io.py` — real-WMS-grade table loading: header-row auto-detect
+  (タイトル行/メタ行 skip), 合計/小計 row drop, header NFKC fold so 半角カナ
+  (商品ｺｰﾄﾞ/出荷ﾊﾞﾗ数) auto-map, ragged-CSV salvage, legacy `.xls` via xlrd
+  (in deps). `cad.py` rejects DWG-mis-saved-as-DXF with a how-to-fix message and
+  salvages malformed DXF via ezdxf.recover.
 - `provenance.py` — tracks each subtree's source (imported/interview/provisional);
   surfaced in output as "N% your data". First-class, not bookkeeping.
 - `project.py` — persists workspace under `projects/<name>/` (gitignored runtime

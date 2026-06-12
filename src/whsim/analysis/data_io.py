@@ -21,7 +21,7 @@ class FieldSpec:
 SHIPMENT_FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("date", "出荷日", ("出荷日", "date", "ship", "日付")),
     FieldSpec("sku", "SKU", ("sku", "品番", "商品コード", "コード")),
-    FieldSpec("qty", "出荷数量", ("出荷数", "数量", "qty", "quantity", "個数", "ピース")),
+    FieldSpec("qty", "出荷数量", ("出荷数", "バラ数", "数量", "qty", "quantity", "個数", "ピース")),
     FieldSpec("timestamp", "出荷日時", ("日時", "datetime", "timestamp", "時刻"), required=False),
     FieldSpec("partner", "取引先", ("取引先", "顧客", "得意先", "customer", "partner"), required=False),
     FieldSpec("order_id", "受注番号 (PS)", ("受注", "オーダー", "伝票", "order", "ピッキング", "ps"), required=False),
@@ -63,32 +63,182 @@ def _read_csv_resilient(buf: bytes, **kwargs) -> pd.DataFrame:
 
 
 def list_excel_sheets(buf: bytes) -> list[str]:
-    return pd.ExcelFile(BytesIO(buf), engine="openpyxl").sheet_names
+    # try the modern engine first, then legacy .xls (BIFF) — callers only have
+    # bytes, so we sniff by engine rather than by filename.
+    try:
+        return pd.ExcelFile(BytesIO(buf), engine="openpyxl").sheet_names
+    except Exception:  # noqa: BLE001 — fall through to xlrd
+        return pd.ExcelFile(BytesIO(buf), engine="xlrd").sheet_names
+
+
+# ---- real-world WMS export hardening ----------------------------------------
+# Real exports (基幹システム/WMSの生帳票) routinely carry: title/meta rows above
+# the header, newlines・全角スペース inside header cells, fully-empty padding
+# rows/columns, and trailing 合計/小計 rows. All of that silently breaks the
+# column auto-mapping (headers become "Unnamed: N") or inflates quantities, so
+# load_table normalises tolerantly — same philosophy as the importers: best
+# effort, never fatal.
+
+_TOTAL_ROW_PAT = ("合計", "総計", "小計", "総合計", "total")
+
+
+def _clean_header(v) -> str:
+    """One header cell → a clean string ('' for NaN/None)."""
+    if v is None or (isinstance(v, float) and v != v):
+        return ""
+    s = str(v).replace("　", " ").replace("\n", " ").replace("\r", " ")
+    return " ".join(s.split()).strip()
+
+
+def _header_suspicious(df: pd.DataFrame) -> bool:
+    """True when the naive read clearly did NOT land on the header row."""
+    if df.empty or len(df.columns) == 0:
+        return True
+    # a 1-column "table" is almost always a title line swallowing a ragged CSV
+    # (タイトル行が1フィールドで、データ行は3フィールド…のような実帳票).
+    if len(df.columns) == 1 and len(df) > 0:
+        return True
+    cols = [str(c) for c in df.columns]
+    bad = sum(1 for c in cols
+              if c.startswith("Unnamed") or c.strip() == "" or c == "nan")
+    return bad >= max(1, int(len(cols) * 0.3))
+
+
+def _read_csv_ragged(buf: bytes) -> pd.DataFrame | None:
+    """Header-less raw scan of a possibly RAGGED csv (rows with differing field
+    counts crash pandas' C parser). Uses the csv module directly, pads every
+    row to the widest, decodes with the same encoding ladder. None on failure."""
+    import csv as _csv
+    from io import StringIO
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "cp932"):
+        try:
+            text = buf.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return None
+    try:
+        rows = [r for r in _csv.reader(StringIO(text))]
+    except _csv.Error:
+        return None
+    rows = [r for r in rows if any(str(c).strip() for c in r)]
+    if not rows:
+        return None
+    width = max(len(r) for r in rows)
+    padded = [r + [None] * (width - len(r)) for r in rows]
+    return pd.DataFrame(padded)
+
+
+def _best_header_row(raw: pd.DataFrame, max_scan: int = 25) -> int | None:
+    """Find the most header-looking row in a header-less frame.
+
+    Scores each candidate by: cell fill ratio, text-ness (headers are labels,
+    not numbers), uniqueness, and how data-filled the rows below are. Returns
+    None when nothing scores like a header (caller keeps the naive read)."""
+    best, best_score = None, 0.0
+    n = min(max_scan, len(raw))
+    for i in range(n):
+        row = raw.iloc[i]
+        labels = [_clean_header(v) for v in row]
+        filled = [s for s in labels if s]
+        if len(filled) < 2:
+            continue
+        fill = len(filled) / max(1, len(labels))
+        texty = sum(1 for s in filled if not s.replace(".", "", 1).replace("-", "", 1).isdigit()) / len(filled)
+        uniq = len(set(filled)) / len(filled)
+        below = raw.iloc[i + 1: i + 6]
+        below_fill = float(below.notna().mean().mean()) if len(below) else 0.0
+        score = fill * 0.35 + texty * 0.3 + uniq * 0.2 + below_fill * 0.15
+        if score > best_score:
+            best, best_score = i, score
+    return best if best_score >= 0.6 else None
+
+
+def _normalise_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Clean headers, drop empty padding rows/cols and trailing 合計 rows."""
+    # header cells: strip newlines / 全角スペース; de-duplicate blanks.
+    seen: dict[str, int] = {}
+    cols = []
+    for c in df.columns:
+        s = _clean_header(c) or "col"
+        if s in seen:
+            seen[s] += 1
+            s = f"{s}.{seen[s]}"
+        else:
+            seen[s] = 0
+        cols.append(s)
+    df = df.copy()
+    df.columns = cols
+    df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+    # trailing summary rows: a leading-column cell that *is* 合計/小計 etc.
+    if len(df) and len(df.columns):
+        first = df.iloc[:, 0].astype(str).str.strip().str.lower()
+        is_total = first.isin([t.lower() for t in _TOTAL_ROW_PAT])
+        if is_total.any():
+            df = df[~is_total]
+    return df.reset_index(drop=True)
 
 
 def load_table(file_bytes: bytes, filename: str, sheet: str | None = None) -> pd.DataFrame:
-    """Load a CSV or Excel file by filename extension."""
+    """Load a CSV or Excel file by filename extension, tolerant of real-world
+    WMS exports (title rows above the header / 合計 rows / messy header cells)."""
     name = filename.lower()
     if name.endswith((".xlsx", ".xls")):
         engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
-        return pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0, engine=engine)
-    return _read_csv_resilient(file_bytes)
+        try:
+            df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0, engine=engine)
+        except ImportError as e:
+            raise ValueError(
+                "旧形式の .xls を読むには xlrd が必要です（pip install xlrd、"
+                "または start.bat を再実行して依存を更新）。Excel で .xlsx として"
+                "保存し直す方法でも取り込めます。") from e
+        if _header_suspicious(df):
+            raw = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0,
+                                engine=engine, header=None)
+            hdr = _best_header_row(raw)
+            if hdr is not None:
+                df = raw.iloc[hdr + 1:].reset_index(drop=True)
+                df.columns = list(raw.iloc[hdr])
+        return _normalise_table(df)
+    try:
+        df = _read_csv_resilient(file_bytes)
+    except Exception:  # noqa: BLE001 — ragged csv: fall through to the raw scan
+        df = pd.DataFrame()
+    if _header_suspicious(df):
+        raw = _read_csv_ragged(file_bytes)
+        if raw is not None:
+            hdr = _best_header_row(raw)
+            if hdr is not None:
+                df = raw.iloc[hdr + 1:].reset_index(drop=True)
+                df.columns = list(raw.iloc[hdr])
+    return _normalise_table(df)
+
+
+def _fold(s) -> str:
+    """Matching key for a header/hint: NFKC (半角カナ→全角, 全角英数→半角),
+    lower-cased, whitespace stripped. Real WMS exports write 商品ｺｰﾄﾞ /
+    出荷ﾊﾞﾗ数 in half-width katakana — without folding, the auto-mapping
+    silently misses them."""
+    import unicodedata
+    return "".join(unicodedata.normalize("NFKC", str(s)).lower().split())
 
 
 def guess_column(columns: Iterable[str], hints: Iterable[str], exclude: Iterable[str] = ()) -> str | None:
     cols = [c for c in columns if c not in set(exclude)]
-    lower = {c: str(c).lower() for c in cols}
+    folded = {c: _fold(c) for c in cols}
     # Pass 1: exact match.
     for hint in hints:
-        h = hint.lower()
+        h = _fold(hint)
         for c in cols:
-            if h == lower[c]:
+            if h == folded[c]:
                 return c
     # Pass 2: substring match.
     for hint in hints:
-        h = hint.lower()
+        h = _fold(hint)
         for c in cols:
-            if h in lower[c]:
+            if h in folded[c]:
                 return c
     return None
 
