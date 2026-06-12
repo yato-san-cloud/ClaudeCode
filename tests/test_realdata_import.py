@@ -104,3 +104,17 @@ def test_dwg_disguised_as_dxf_gets_friendly_message(tmp_path):
     res = cad.import_dxf(p)
     assert any("DWG" in w for w in res["warnings"])
     assert res["stats"]["walls"] == 0
+
+
+def test_legacy_xls_through_inbound_endpoint():
+    client.post("/api/projects", json={"name": "xlsep", "template": "ecommerce_small"})
+    try:
+        buf = (FIX / "inbound_legacy.xls").read_bytes()
+        r = client.post("/api/projects/xlsep/import-table?kind=inbound",
+                        files={"file": ("00102_202507.xls", buf, "application/vnd.ms-excel")})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["counts"]["inbound_lines"] == 60
+        assert d["mapping"]["sku"]["column"] == "商品ｺｰﾄﾞ"   # 半角カナ auto-map
+    finally:
+        client.delete("/api/projects/xlsep")
