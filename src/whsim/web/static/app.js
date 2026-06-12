@@ -26,10 +26,8 @@ import {
   ZONE_JP, EQUIP_JP, ABC_COLOR, STATE_COLOR, RACK_COLOR, AGV_COLOR,
 } from './js/constants.js';
 import { S } from './js/state.js';
-import {
-  initImports, uploadZip, uploadDistances, uploadMapcsv, uploadRmpm,
-  uploadTable, generateMissing, uploadCad,
-} from './js/imports.js';
+import { initImports } from './js/imports.js';
+import { mountHistory, hist } from './js/history.js';
 import {
   initProjectMenu, closeProjMenu, openProjMenu, projDuplicate, projRename, projDelete,
 } from './js/projectmenu.js';
@@ -652,11 +650,24 @@ async function doCreate(name, template) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, template }),
   });
+  // Record the creation (and pre-mark the project as "opened" so the openProject
+  // call below doesn't add a redundant 「開きました」 row right after it).
+  _lastOpened = name;
+  hist.setProject(name);
+  hist.log('✨', `プロジェクト「${name}」を作成しました`, 'overview', 'project');
   await refreshProjects(name);
   await openProject(name);
 }
+// Last project the 操作履歴 saw an open for — openProject() is also called as an
+// internal refresh (after every import/apply), so only a genuine switch logs.
+let _lastOpened = null;
 async function openProject(name) {
   S.project = name;
+  hist.setProject(name);
+  if (name && name !== _lastOpened) {
+    _lastOpened = name;
+    hist.log('📂', `プロジェクト「${name}」を開きました`, 'overview', 'project');
+  }
   const m = await api(`/api/projects/${name}/model`);
   renderHeadline(m.headline_fields, m.headline_values);
   $('provenance').textContent = m.provenance_summary;
@@ -710,6 +721,7 @@ async function mountDesigner() {
       });
       $('provenance').textContent = r.provenance_summary;
       $('status').textContent = '設計を保存しました。「実行」で検証できます。';
+      hist.log('💾', '設計を保存しました', 'design', 'design');
       await openProjectQuiet();  // refresh headline values after re-materialise
       return r;
     },
@@ -776,6 +788,7 @@ async function applyHeadline() {
   $('provenance').textContent = r.provenance_summary;
   $('status').textContent = 'キー項目を反映しました。';
   toast('キー項目を反映しました。', 'ok');
+  hist.log('🔢', 'キー項目を反映しました', 'overview', 'base');
 }
 // Core run flow, shared by the sidebar button and the Cody chat. Throws on
 // failure (callers decide how to surface it); returns the run payload.
@@ -788,6 +801,13 @@ async function doRun() {
     S.hasRun = true;
     refreshReadiness();
     renderKpis(r.kpis);
+    // 操作履歴: one row per completed run, carrying the one-line verdict.
+    const k = r.kpis || {};
+    const vd = k.verdict ? String(k.verdict) : '';
+    hist.log(k.can_handle_demand === false ? '⚠️' : '✅',
+      'シミュレーション完了'
+      + (vd ? ' — ' + (vd.length > 64 ? vd.slice(0, 64) + '…' : vd) : ''),
+      'analysis', 'run');
     await loadReplay();
     $('pngImg').src = `/api/projects/${S.project}/png?ts=${Date.now()}`;
     renderProposalStory();
@@ -1026,36 +1046,13 @@ function refreshReadiness() {
   // duplicated this (project/data/run chips) and was removed.
   if (S.journey) S.journey.refresh();
   if (S.view) updatePhaseHint(S.view);
-  // The ①取込 setup cards (import / key figures) only make sense once a project
-  // exists; keep their visibility in lockstep with the readiness state.
-  syncOverviewSetup();
-}
-// Show the ①取込 in-panel setup block (import + key figures) only when a project
-// exists. These controls used to live in the left sidebar; they now sit in the
-// ①取込 body so guidance and action are in the same place.
-function syncOverviewSetup() {
-  const setup = $('overviewSetup');
-  if (setup) setup.hidden = !S.project;
-}
-// Move the data-import and key-figure cards out of the sidebar and into the ①取込
-// panel body. appendChild relocates the LIVE nodes, so the ID-based event wiring
-// set up in initUI() travels with them (handlers bind to the node, not its
-// position in the tree). Idempotent: skips cards already in place.
-function relocateSetupCards() {
-  const setup = $('overviewSetup');
-  if (!setup) return;
-  ['importCard', 'keyfigCard'].forEach((id) => {
-    const card = $(id);
-    if (card && card.parentNode !== setup) setup.appendChild(card);
-  });
-  syncOverviewSetup();
 }
 
 // ---- import ----------------------------------------------------------------
-// The ①取込 upload handlers (uploadZip/Cad/Distances/Mapcsv/Rmpm/Table +
-// generateMissing) moved verbatim to ./js/imports.js; they are imported above and
-// wired to their shell deps via initImports() in main(). The DOM-id event wiring
-// for them stays in initUI() (unchanged).
+// The ①取込 upload handlers (uploadZip/Cad/Distances/Mapcsv/Rmpm/Table/Shipments
+// + generateMissing) live in ./js/imports.js, wired to their shell deps via
+// initImports() in main(). Their UI (drop zones / pickers / per-card status) is
+// the ①取込 hub rendered by ./js/overview.js, which imports them directly.
 
 // ---- theme (light/dark, manual toggle, persisted) -------------------------
 function applyTheme(theme) {
@@ -1135,7 +1132,7 @@ function switchView(view) {
   const gatedPhase = VIEW_PHASE[view];
   if ((gatedPhase === 'validate' || gatedPhase === 'propose') && !S.hasRun) {
     cody('curious', S.project
-      ? 'この結果はシミュレーション実行後に表示されるよ。③設計の「シミュレーション実行」か、左の「▶ シミュレーション実行」を押してね。'
+      ? 'この結果はシミュレーション実行後に表示されるよ。③設計の「実行する」か、ヘッダ右上の「▶ 実行」を押してね。'
       : 'まずプロジェクトを作って実行しよう。結果はそのあとここに出るよ。');
   }
   // The chat view embeds Cody in the thread; hide the floating companion there
@@ -1228,7 +1225,6 @@ function mountOverviewView() {
   } else {
     S.overview.refresh();
   }
-  syncOverviewSetup();
 }
 
 // Build + open the bundled sample project (POST /api/projects/sample). Shared by
@@ -1276,7 +1272,14 @@ function mountCostView() {
   if (S.cost) { S.cost.refresh(); return; }
   S.cost = mountCost($('cost'), {
     getProject: () => S.project,
-    toast: (m, k) => toast(m, k),
+    // Mirror benchmark applications into the 操作履歴 at this seam (cost.js owns
+    // the apply flow but reports success only through its injected toast).
+    toast: (m, k) => {
+      toast(m, k);
+      if (k === 'ok' && typeof m === 'string' && m.includes('ベンチマーク')) {
+        hist.log('📐', m, 'cost', 'bench');
+      }
+    },
   });
 }
 
@@ -1361,6 +1364,9 @@ async function applyAndRun(edits) {
 }
 document.addEventListener('whsim:apply-run', (e) => {
   const edits = e && e.detail && e.detail.edits;
+  // No edits (e.g. the designer's 「実行する →」 CTA dispatches an empty detail):
+  // a plain run, identical to the header ▶ 実行 button.
+  if (!edits || typeof edits !== 'object' || !Object.keys(edits).length) { runSim(); return; }
   applyAndRun(edits);
 });
 
@@ -1414,6 +1420,12 @@ document.addEventListener('themechange', () => {
 document.addEventListener('whsim:toast', (e) => {
   const d = (e && e.detail) || {};
   if (d.msg) toast(d.msg, d.kind || 'info');
+  // 生産性フィードバックの実測採用 (analysis.js) surfaces only through this toast
+  // bus — mirror the adoption into the 操作履歴 at the shell seam we own.
+  if (d.kind === 'ok' && typeof d.msg === 'string'
+      && (d.msg.includes('実測値を原価に採用') || d.msg.includes('想定値に戻しました'))) {
+    hist.log('📊', d.msg, 'analysis', 'prod');
+  }
 });
 
 // ---- project management menu (duplicate / rename / delete) -----------------
@@ -1429,6 +1441,8 @@ function clearProjectState() {
   S.replay = null;
   S.hasRun = false;
   S.hasData = false;
+  _lastOpened = null;
+  hist.setProject(null);
   refreshReadiness();
   if (S.settings && S.settings.clear) S.settings.clear();
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
@@ -1566,36 +1580,8 @@ function initUI() {
   };
   $('speed').onchange = (e) => { S.speed = parseFloat(e.target.value); };
 
-  // dropzone
-  const dz = $('dropzone'), fi = $('fileInput');
-  dz.onclick = () => fi.click();
-  fi.onchange = () => fi.files[0] && uploadZip(fi.files[0]);
-  $('cadBtn').onclick = () => $('cadInput').click();
-  $('cadInput').onchange = () => $('cadInput').files[0] && uploadCad($('cadInput').files[0]);
-  $('distBtn').onclick = () => $('distInput').click();
-  $('distInput').onchange = () => $('distInput').files[0] && uploadDistances($('distInput').files[0]);
-  $('mapcsvBtn').onclick = () => $('mapcsvInput').click();
-  $('mapcsvInput').onchange = () => $('mapcsvInput').files[0] && uploadMapcsv($('mapcsvInput').files[0]);
-  $('rmpmBtn').onclick = () => $('rmpmInput').click();
-  $('rmpmInput').onchange = () => $('rmpmInput').files[0] && uploadRmpm($('rmpmInput').files[0]);
-  $('genMissingBtn').onclick = generateMissing;
-  $('tableBtn').onclick = () => $('tableInput').click();
-  $('tableInput').onchange = () => $('tableInput').files[0] && uploadTable($('tableInput').files[0]);
-  ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => {
-    e.preventDefault(); dz.classList.add('drag');
-  }));
-  ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => {
-    e.preventDefault(); dz.classList.remove('drag');
-  }));
-  dz.addEventListener('drop', e => {
-    const f = e.dataTransfer.files[0];
-    if (!f) return;
-    if (!f.name.toLowerCase().endsWith('.zip')) {
-      $('importLog').textContent = 'ZIP ファイルをドロップしてください。';
-      return;
-    }
-    uploadZip(f);
-  });
+  // Import drop zones / file pickers are owned by the ①取込 hub (overview.js),
+  // which wires the persistent hidden inputs in #ihubAssets directly.
 
   // Coalesce resize bursts (window drag / orientation) into one rAF-aligned
   // pass so we don't thrash canvas + WebGL + designer layout 20×/sec.
@@ -1610,10 +1596,8 @@ function initUI() {
     });
   });
   $('playBtn').disabled = true; $('scrub').disabled = true; // until a run exists
-  // ①取込 landing: relocate the import + key-figure cards from the sidebar into
-  // the ①取込 body (one screen for guidance + action). Default view is the
-  // overview, which uses neither the replay transport nor the KPI footer.
-  relocateSetupCards();
+  // Default view is the ①取込 hub, which uses neither the replay transport nor
+  // the KPI footer.
   document.querySelector('.transport').style.display = 'none';
   $('kpiBar').style.display = 'none';
   refreshReadiness();
@@ -1630,6 +1614,8 @@ function initUI() {
   refreshPalette();
   initUI();
   initSidebar();
+  // Sidebar 操作履歴 card: per-project activity feed (localStorage-backed).
+  S.history = mountHistory($('historyList'), { switchTo: (v) => switchView(v) });
   S.cody = mountCody(document.body, { mood: 'idle' });
   // Default view is the chat home, which embeds Cody in the thread — keep the
   // floating companion hidden there (switchView toggles it on other views).

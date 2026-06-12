@@ -29,8 +29,12 @@
     </div>
     <div class="header-tools">
       <span id="versionBadge" class="version-badge" hidden></span>
-      <div class="provenance" id="provenance">— your data</div>
-      <button id="themeToggle" type="button" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
+      <div class="provenance" id="provenance"
+           style="max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;line-height:1.9">— your data</div>
+      <button id="runBtn" class="primary" disabled style="white-space:nowrap"
+              title="シミュレーションを実行（③設計の「実行する」と同じ）"
+              aria-label="シミュレーションを実行">▶ 実行</button>
+      <button id="themeToggle" type="button" style="white-space:nowrap" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
     </div>
   </header>
 
@@ -58,53 +62,10 @@
         </div>
       </section>
 
-      <section class="card" id="importCard">
-        <h2>顧客データ取り込み <small>任意</small></h2>
-        <div id="dropzone" class="dropzone">
-          <strong>ZIP をドラッグ&ドロップ</strong>
-          <span>商品マスタ / 出荷 / 入荷 …（足りない分は仮値で補完）</span>
-          <input type="file" id="fileInput" accept=".zip" hidden />
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="cadBtn" style="flex:1">CAD図面(DXF)を取込</button>
-          <input type="file" id="cadInput" accept=".dxf" hidden />
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="distBtn" style="flex:1">棚間距離(CSV/JSON)を取込</button>
-          <input type="file" id="distInput" accept=".csv,.json" hidden />
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="mapcsvBtn" style="flex:1">MapMaker地図(CSV)を取込</button>
-          <input type="file" id="mapcsvInput" accept=".csv" hidden />
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="rmpmBtn" style="flex:1">MapMakerレイアウト(.rmpm)を取込</button>
-          <input type="file" id="rmpmInput" accept=".json,.rmpm" hidden />
-        </div>
-        <div class="row" style="margin-top:8px">
-          <select id="tableKind" aria-label="取込種別" style="flex:0 0 auto">
-            <option value="shipments">出荷</option>
-            <option value="inbound">入荷</option>
-            <option value="master">商品マスタ</option>
-          </select>
-          <button id="tableBtn" style="flex:1">表データ(CSV/Excel)を取込</button>
-          <input type="file" id="tableInput" accept=".csv,.xlsx,.xls,.json" hidden />
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="genMissingBtn" style="flex:1" title="不足している商品マスタ・ピック頻度・在庫を実データから生成">不足データを生成</button>
-        </div>
-        <div id="importLog" class="log"></div>
-      </section>
-
-      <section class="card" id="keyfigCard">
-        <h2>キー項目</h2>
-        <div id="headline" class="headline"></div>
-        <button id="applyBtn">反映</button>
-      </section>
-
-      <section class="card">
-        <button id="runBtn" class="primary big" disabled>▶ シミュレーション実行</button>
+      <section class="card" id="historyCard">
+        <h2>操作履歴</h2>
         <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div id="historyList"></div>
       </section>
 
       <section class="card settings-card">
@@ -174,8 +135,23 @@
         <div id="phaseHint"></div>
         <div id="overview" class="panel active" role="tabpanel" tabindex="0">
           <div id="overviewDash"></div>
-          <div id="overviewSetup" class="ov-setup" hidden>
-            <div class="ov-setup-h">データ取込・基本条件</div>
+          <!-- Persistent ①取込 assets: hidden file inputs + the key-figure body +
+               the detailed import log. The hub (overview.js) ADOPTS #keyfigBody /
+               #importLog into its cards (live nodes move, ID wiring survives)
+               and parks them back here before any rebuild. -->
+          <div id="ihubAssets" hidden>
+            <input type="file" id="fileInput" accept=".zip" hidden />
+            <input type="file" id="cadInput" accept=".dxf" hidden />
+            <input type="file" id="distInput" accept=".csv,.json" hidden />
+            <input type="file" id="mapcsvInput" accept=".csv" hidden />
+            <input type="file" id="rmpmInput" accept=".rmpm,.json" hidden />
+            <input type="file" id="tableInput" accept=".csv,.xlsx,.xls,.json" hidden />
+            <input type="file" id="itemsInput" accept=".csv,.xlsx,.xls,.json" hidden />
+            <div id="keyfigBody">
+              <div id="headline" class="headline"></div>
+              <button id="applyBtn">反映</button>
+            </div>
+            <div id="importLog" class="log"></div>
           </div>
         </div>
         <div id="bi" class="panel" role="tabpanel" tabindex="0" hidden></div>
