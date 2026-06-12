@@ -24,10 +24,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
-REM First run only: install the parts it needs (takes a few minutes).
-python -c "import fastapi, uvicorn" 1>nul 2>nul
+REM Install / UPDATE dependencies. We check every runtime dep that isn't part of
+REM the base scientific stack, so when a new feature adds one (e.g. javaobj-py3
+REM for native .rmpm, xlrd for legacy .xls) an existing install picks it up on the
+REM next launch instead of erroring at import time. `pip install -e` is fast when
+REM everything is already satisfied.
+python -c "import fastapi, uvicorn, javaobj, xlrd, openpyxl, ezdxf, pptx, reportlab" 1>nul 2>nul
 if errorlevel 1 (
-  echo First-time setup: installing dependencies ^(a few minutes^)...
+  echo Installing / updating dependencies ^(first run takes a few minutes^)...
   echo.
   python -m pip install -e ".[web,docs]"
 )
