@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# One-command dev loop (macOS/Linux): auto-pull the current branch + auto-reloading
-# server. Keep the browser open and just press F5 -- pull / restart / cache are all
-# handled. Ctrl+C stops both the server and the auto-sync.
+# DEVELOPER loop (macOS/Linux). Normal Windows users: use start.bat instead --
+# it installs dependencies and opens the browser for you. This script assumes
+# `whsim` is already pip-installed and only does auto-pull + auto-reloading server.
+#
+# One-command dev loop: auto-pull the current branch + auto-reloading server. Keep
+# the browser open and just press F5 -- pull / restart / cache are all handled.
+# Ctrl+C stops both the server and the auto-sync.
 #
 # WARNING: the auto-sync HARD-RESETS the working tree to origin/<branch> every 15s,
 # so pushes appear with no manual `git pull`. Do not hand-edit tracked files while

@@ -1,4 +1,14 @@
 @echo off
+REM ============================================================================
+REM  whsim launcher -- THIS IS THE ONE. Just double-click start.bat.
+REM  It updates the code, installs/updates Python deps, opens the browser, and
+REM  keeps pulling the latest while it runs. No git or Python knowledge needed.
+REM
+REM  (dev.bat / dev.sh are developer-only loops that skip the dep install and
+REM   assume the toolchain is already set up -- normal users want THIS file.
+REM   scripts\autosync.bat is an internal helper called from here; don't run it
+REM   directly.)
+REM ============================================================================
 setlocal
 cd /d "%~dp0"
 title whsim
