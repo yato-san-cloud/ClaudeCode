@@ -109,6 +109,43 @@ def api_racktypes():
     return racktypes.catalog()
 
 
+@router.get("/api/racktypes/vertical")
+def api_racktypes_vertical(lift: float | None = None, reach: float | None = None):
+    """Per-rack vertical pick-time preview for the two 段(level) knobs.
+
+    For each rack-type id, returns its label, mover (manual/forklift/crane),
+    per-level shelf pitch (m), and the extra ``vertical_pick_s`` at every level
+    (1..levels) for the given lift speed / manual reach penalty. Omitted params
+    fall back to the model defaults (process.lift_speed_mps / manual_reach_s_per_m),
+    so the 保管設計 preview matches what the engine will charge. Stateless,
+    never blocks (bad numbers are clamped by the underlying pure functions)."""
+    from whsim import racktypes
+    from whsim.schema.model import Process
+    defaults = Process()
+    lift_mps = defaults.lift_speed_mps if lift is None else float(lift)
+    reach_s = defaults.manual_reach_s_per_m if reach is None else float(reach)
+    rows = []
+    for rid in racktypes.ORDER:
+        preset = racktypes.RACK_TYPES[rid]
+        levels = int(preset.get("levels", 1))
+        rows.append({
+            "id": rid,
+            "label": preset["label"],
+            "color": preset["color"],
+            "mover": racktypes.mover(rid),
+            "levels": levels,
+            "pitch_m": racktypes._LEVEL_H.get(rid, 0.0),
+            "vertical_s": [
+                round(racktypes.vertical_pick_s(rid, lvl, lift_mps, reach_s), 2)
+                for lvl in range(1, levels + 1)
+            ],
+        })
+    return {"lift_speed_mps": lift_mps, "manual_reach_s_per_m": reach_s,
+            "defaults": {"lift_speed_mps": defaults.lift_speed_mps,
+                         "manual_reach_s_per_m": defaults.manual_reach_s_per_m},
+            "rack_types": rows}
+
+
 @router.post("/api/cody/chat")
 def api_cody_chat(payload: dict):
     """Cody mascot chat: turn a Japanese message into a reply + intent.
