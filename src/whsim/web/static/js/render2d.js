@@ -74,6 +74,35 @@ function interp(keyframes, t) {
   return [k0[1] + (k1[1] - k0[1]) * f, k0[2] + (k1[2] - k0[2]) * f, k0[3]];
 }
 
+// Read the upper-段 (level) meta off the keyframe segment the playhead `t` sits
+// in. A `pick` keyframe at a level above the ground carries a 5th element:
+//   { lv:int(1=ground), by:"manual"|"forklift"|"crane", h:pick-face metres, ... }
+// Level-1 picks are 4-tuples (no meta). Returns the meta object ONLY while the
+// active segment is a pick AND lv>1; otherwise null, so ground picks draw
+// nothing new. Mirrors interp's segment search (binary, allocation-free on the
+// hot path) and honours a tail-keyframe pick (matching interp's last-state hold).
+function pickMeta(keyframes, t) {
+  if (!keyframes || !keyframes.length) return null;
+  let kf;
+  const last = keyframes[keyframes.length - 1];
+  if (t >= last[0]) kf = last;
+  else if (t <= keyframes[0][0]) return null;   // pre-roll is idle in interp()
+  else {
+    let lo = 0, hi = keyframes.length - 1;
+    while (lo + 1 < hi) { const m = (lo + hi) >> 1; (keyframes[m][0] <= t ? lo = m : hi = m); }
+    kf = keyframes[lo];
+  }
+  if (kf[3] !== 'pick' || kf.length < 5) return null;
+  const meta = kf[4];
+  return (meta && meta.lv > 1) ? meta : null;
+}
+
+// Upper-段 pick cue colours, keyed by how the reach is performed (`meta.by`).
+// 2D is top-down and can't show real height, so these read as "going up": amber
+// for an unaided 手作業 reach, orange/red for a フォークリフト lift, cyan for a
+// クレーン/自動倉庫. Unknown movers fall back to amber.
+const LEVEL_BY_COLOR = { manual: '#f5b05a', forklift: '#ff5a78', crane: '#34e3ff' };
+
 // ---- 2D canvas -------------------------------------------------------------
 const canvas = $('canvas2d');
 const ctx = canvas.getContext('2d');
@@ -244,9 +273,16 @@ export function draw2d() {
   // unknown role, so older replays render identically.
   for (const wk of rep.workers) {
     const [x, y, st] = interp(wk.keyframes, S.t);
+    const px = X(x), py = Y(y);
     ctx.fillStyle = STATE_COLOR[st] || '#999';
     ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.7;
-    agentGlyph(X(x), Y(y), wk.role, 6);
+    agentGlyph(px, py, wk.role, 6);
+    // Upper-段 reach cue: when this picker's current keyframe is a pick at a
+    // level above the ground, the 2D (top-down) view can't show the height, so
+    // we drop a small "going up" badge + lift gauge beside the agent. Null on a
+    // ground pick / non-pick → nothing drawn (unchanged for those frames).
+    const lm = (st === 'pick') ? pickMeta(wk.keyframes, S.t) : null;
+    if (lm) drawLevelCue(px, py, lm, rep);
   }
   // V3 viewport extras (additive; each guarded so absent data = legacy render):
   // staging fill-ring + bottleneck ⚠ marker + bottom-left legend.
@@ -374,6 +410,85 @@ function agentGlyph(cx, cy, role, r) {
     ctx.arc(cx, cy, r, 0, TAU);
   }
   ctx.fill(); ctx.stroke();
+}
+
+// Per-replay max 段, cached on the rep object (lazy, computed once) so the lift
+// gauge can scale by lv/maxLevel when a pick-face height isn't a useful bound.
+// Cheap: scans pick keyframes only on the first cue of a run, then memoised.
+function replayMaxLevel(rep) {
+  if (rep._maxLv != null) return rep._maxLv;
+  let mx = 1;
+  for (const wk of (rep.workers || [])) {
+    for (const kf of (wk.keyframes || [])) {
+      if (kf.length >= 5 && kf[3] === 'pick' && kf[4] && kf[4].lv > mx) mx = kf[4].lv;
+    }
+  }
+  rep._maxLv = mx;
+  return mx;
+}
+
+// Upper-段 pick cue: drawn beside a picker (cx,cy) only while it is reaching an
+// upper level. Two parts, kept small + unobtrusive so ground picks (which draw
+// nothing) stay the visual baseline:
+//   1) a vertical "lift gauge" — a short track with a fill that rises UPWARD in
+//      proportion to the pick-face height `h` (clamped), or to lv/maxLevel when
+//      `h` is absent, so it literally reads as "reaching up";
+//   2) a "段{lv}" badge, colour-coded by `meta.by` (手作業=amber / フォーク=red /
+//      クレーン=cyan), pinned just above the agent.
+// A subtle pulse (only while playing) animates the fill so the reach feels live.
+function drawLevelCue(cx, cy, meta, rep) {
+  const col = LEVEL_BY_COLOR[meta.by] || LEVEL_BY_COLOR.manual;
+  // Fill fraction: prefer real height (≈6 m caps a high pallet rack), else level
+  // ratio. Floor at 0.18 so even 段2 reads as a clearly raised bar.
+  let frac = (typeof meta.h === 'number' && meta.h > 0)
+    ? meta.h / 6
+    : (meta.lv - 1) / Math.max(replayMaxLevel(rep) - 1, 1);
+  frac = Math.max(0.18, Math.min(1, frac));
+  // Gentle "rising" pulse while actively playing (a reach in progress); static
+  // when paused. Cheap sine; restores everything it touches.
+  const pulse = S.playing ? 0.8 + 0.2 * (0.5 + 0.5 * Math.sin(performance.now() / 240)) : 1;
+
+  const a0 = ctx.globalAlpha;
+  const gx = cx + 10, gBot = cy + 7, gTop = cy - 9, gH = gBot - gTop, gW = 3.2;
+  ctx.save();
+  // Gauge track (faint) + upward fill (level colour).
+  ctx.globalAlpha = a0 * 0.45;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(gx - 0.6, gTop - 0.6, gW + 1.2, gH + 1.2);   // thin contrast backing
+  ctx.globalAlpha = a0 * 0.30;
+  ctx.fillStyle = col;
+  ctx.fillRect(gx, gTop, gW, gH);                            // empty track
+  const fillH = gH * frac * pulse;
+  ctx.globalAlpha = a0;
+  ctx.fillStyle = col;
+  ctx.fillRect(gx, gBot - fillH, gW, fillH);                // fill rises from the floor
+  // Tiny up-arrow cap so the direction reads even at a glance.
+  ctx.beginPath();
+  ctx.moveTo(gx + gW / 2, gTop - 3.4);
+  ctx.lineTo(gx + gW + 0.4, gTop + 0.6);
+  ctx.lineTo(gx - 0.4, gTop + 0.6);
+  ctx.closePath(); ctx.fill();
+
+  // "段{lv}" badge above the agent — pill backing + level-colour text.
+  const label = `段${meta.lv}`;
+  ctx.font = '700 9px "Space Mono", ui-monospace, monospace';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(label).width;
+  const bx = cx + 7, by = cy - 16, bw = tw + 8, bh = 12;
+  ctx.globalAlpha = a0 * 0.82;
+  ctx.fillStyle = 'rgba(8,12,20,0.85)';
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by - bh / 2, bw, bh, 3); ctx.fill(); }
+  else ctx.fillRect(bx, by - bh / 2, bw, bh);
+  ctx.globalAlpha = a0;
+  ctx.strokeStyle = col; ctx.lineWidth = 0.8;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by - bh / 2, bw, bh, 3); ctx.stroke(); }
+  else ctx.strokeRect(bx, by - bh / 2, bw, bh);
+  ctx.fillStyle = col;
+  ctx.fillText(label, bx + 4, by + 0.5);
+
+  ctx.restore();
+  ctx.globalAlpha = a0; ctx.lineWidth = 1;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
 
 // 仮置きバッファ充満リング (Mini Metro): a perimeter arc over the staging box
