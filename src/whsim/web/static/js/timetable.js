@@ -441,15 +441,27 @@ export function mountTimetable(targetEl, opts = {}) {
 
   // Per-hour headcount table (process rows × hour columns) + total row. Plain DOM
   // table (no canvas) so it always prints/scrolls and the curve change is legible.
+  // Each process row leads with its 物量 + 生産性 (the two analytic drivers of the
+  // headcount) so the planner reads the WHY at a glance; those two cells are jump
+  // links to the screen that owns the value (物量→マテリアルフロー, 生産性→生産性試算).
   function renderSolverCurve(r) {
     const hours = r.hours || [];
-    let html = '<div class="tt-section-title">時間帯別 必要人員（工程 × 時、解析ソルバー）</div>';
-    html += '<div class="tt-matrix-scroll"><table class="tt-table"><thead><tr><th class="tt-rowhead">工程</th>';
+    let html = '<div class="tt-section-title">時間帯別 必要人員（工程 × 時、解析ソルバー）'
+      + '<span class="tt-curve-hint">物量・生産性の数値をクリックすると設定画面へ移動します</span></div>';
+    html += '<div class="tt-matrix-scroll"><table class="tt-table"><thead><tr><th class="tt-rowhead">工程</th>'
+      + '<th class="tt-num-h">物量/日</th><th class="tt-num-h">生産性</th>';
     for (const h of hours) html += `<th class="tt-time">${h}時</th>`;
     html += '<th class="tt-total">人時</th><th class="tt-total">終</th></tr></thead><tbody>';
     for (const p of r.processes) {
       const color = SECTION_COLOR[p.section] || 'var(--ink-tertiary,#8195a8)';
+      const baseUnit = String(p.unit || '').replace('/h', '');     // 行/h → 行
+      const volTxt = `${r1(p.daily_volume).toLocaleString()}${baseUnit ? ` ${esc(baseUnit)}` : ''}`;
+      const prodTxt = `${r1(p.productivity).toLocaleString()} ${esc(p.unit || '')}`;
       html += `<tr><th class="tt-rowhead"><i class="tt-dot" style="background:${esc(color)}"></i>${esc(p.id)}</th>`;
+      html += `<td class="tt-num tt-jump" data-jump="materialflow" data-proc="${esc(p.id)}"`
+        + ` title="${esc(p.id)} の物量（${esc(p.driver || '')}）— クリックでマテリアルフローへ">${volTxt}</td>`;
+      html += `<td class="tt-num tt-jump" data-jump="pickrate" data-proc="${esc(p.id)}"`
+        + ` title="${esc(p.id)} の採用生産性（3段: 実測>想定>既定）— クリックで生産性試算へ">${prodTxt}</td>`;
       for (let i = 0; i < hours.length; i++) {
         const n = p.headcount_by_hour[i] || 0;
         html += `<td class="tt-cell n${Math.min(8, n)}">${n || ''}</td>`;
@@ -457,7 +469,7 @@ export function mountTimetable(targetEl, opts = {}) {
       const fin = p.feasible ? `${p.finish_hour}時` : '✕';
       html += `<td class="tt-total">${r1(p.man_hours)}</td><td class="tt-total${p.feasible ? '' : ' bad'}">${esc(fin)}</td></tr>`;
     }
-    html += '<tr class="tt-grandtotal"><th class="tt-rowhead">時刻総人数</th>';
+    html += '<tr class="tt-grandtotal"><th class="tt-rowhead">時刻総人数</th><td class="tt-num"></td><td class="tt-num"></td>';
     for (const n of (r.total_headcount_by_hour || [])) {
       const over = r.cap && n > r.cap;
       html += `<td class="tt-cell${over ? ' tt-cell-cursor' : ''}">${n || ''}</td>`;
@@ -465,6 +477,10 @@ export function mountTimetable(targetEl, opts = {}) {
     html += `<td class="tt-total">${r1(r.total_man_hours)}</td><td class="tt-total">${r.makespan_hour}時</td></tr>`;
     html += '</tbody></table></div>';
     elSolverCurve.innerHTML = html;
+    elSolverCurve.querySelectorAll('.tt-jump').forEach((cell) => {
+      cell.onclick = () => document.dispatchEvent(
+        new CustomEvent('whsim:nav', { detail: { view: cell.dataset.jump, process: cell.dataset.proc } }));
+    });
   }
 
   // Zero-scenario state: don't throw or render a blank tab — explain + give a CTA.
@@ -475,7 +491,7 @@ export function mountTimetable(targetEl, opts = {}) {
     box.appendChild(el('div', 'tt-empty-body',
       'マテリアルフローで荷役物量を作成し「タイムチャートで人員配置 →」を押すと、ここに配置計画が表示されます。'));
     const cta = el('button', 'tt-btn', 'マテリアルフローへ');
-    cta.onclick = () => document.dispatchEvent(new CustomEvent('whsim:goto', { detail: { view: 'materialflow' } }));
+    cta.onclick = () => document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view: 'materialflow' } }));
     box.appendChild(cta);
     root.appendChild(box);
     // Even with no work-band scenario, the analytic solver can staff straight

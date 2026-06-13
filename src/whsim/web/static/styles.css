@@ -1941,6 +1941,15 @@ button.is-busy { cursor: progress; opacity: .85; }
 .tt-subtotal th, .tt-subtotal td { background: var(--bg-hover); font-weight: 600; }
 .tt-grandtotal th, .tt-grandtotal td { background: var(--accent-tint); color: var(--accent-ink); font-weight: 700; }
 .tt-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+/* 物量・生産性 columns: the two analytic drivers, surfaced next to each process so
+   the planner reads the WHY at a glance; jump cells link to the owning screen. */
+.tt-num-h { background: var(--panel-2); color: var(--muted); font-weight: 600; min-width: 64px; }
+.tt-num { color: var(--ink); font-variant-numeric: tabular-nums; text-align: right !important;
+  min-width: 64px; padding-right: 6px !important; }
+.tt-jump { cursor: pointer; color: var(--accent-ink, var(--accent)); text-decoration: underline;
+  text-decoration-style: dotted; text-underline-offset: 2px; }
+.tt-jump:hover { background: var(--accent-tint); }
+.tt-curve-hint { margin-left: 8px; font-size: 10.5px; font-weight: 400; color: var(--muted); }
 
 /* parameter panel */
 .tt-params { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 12px 12px; }

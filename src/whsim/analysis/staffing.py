@@ -569,6 +569,7 @@ def solve_staffing(
             "id": pid,
             "section": p["section"],
             "unit": p["unit"],
+            "driver": p["driver"],
             "productivity": round(prod[pid], 1),
             "daily_volume": round(target, 1),
             "required_man_hours": round(req_hours[pid], 2),
