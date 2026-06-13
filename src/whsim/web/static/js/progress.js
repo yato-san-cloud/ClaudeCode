@@ -50,6 +50,19 @@ function injectStyle() {
   .rp-pips{display:flex;gap:4px}
   .rp-pip{width:13px;height:5px;border-radius:3px;background:var(--bg-sunken,rgba(120,140,170,.25))}
   .rp-pip.on{background:var(--accent,#16C0DE)}
+  /* phase tag (準備中/実行中/集計中) so the bar is never silently stuck at 0% */
+  .rp-phase{font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;
+    background:var(--accent-tint,rgba(22,192,222,.16));color:var(--accent-ink,#16C0DE);
+    margin-left:auto}
+  /* 中止 (cancel/escape) button */
+  .rp-cancel{margin-top:16px;width:100%;padding:9px 14px;border-radius:10px;
+    border:1px solid var(--line-strong,rgba(120,140,170,.3));background:transparent;
+    color:var(--ink-secondary,#b6c6d4);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;
+    transition:border-color .12s ease,color .12s ease,background .12s ease}
+  .rp-cancel:hover{border-color:var(--bad,#FF5A78);color:var(--bad,#FF5A78);
+    background:color-mix(in srgb,var(--bad,#FF5A78) 8%,transparent)}
+  .rp-cancel:disabled{opacity:.5;cursor:default}
+  .rp-cancel:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:2px}
   /* indeterminate inline strip (imports / analysis) */
   .rp-busy{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-secondary,#52677c)}
   .rp-busy-track{position:relative;flex:1;min-width:70px;height:16px;border-radius:8px;overflow:hidden;
@@ -81,7 +94,9 @@ function fmtEta(sec) {
 }
 
 // ── (1) DES run progress overlay (server-polled, honest ETA) ────────────────
-// opts: { getProject, title?, sub?, jobs?(=total DES jobs for multi-runs) }
+// opts: { getProject, title?, sub?, jobs?(=total DES jobs for multi-runs),
+//         onCancel?() — when set, a 「✕ 中止」 button (and the Esc key) call it;
+//         the caller POSTs /run/cancel and resolves its run as cancelled. }
 export function startRunProgress(opts = {}) {
   injectStyle();
   const getProject = opts.getProject || (() => null);
@@ -96,6 +111,19 @@ export function startRunProgress(opts = {}) {
   let lastFrac = 0;
   let timer = 0;
   let stopped = false;
+  let cancelling = false;
+  const canCancel = typeof opts.onCancel === 'function';
+
+  function doCancel() {
+    if (!canCancel || cancelling || stopped) return;
+    cancelling = true;
+    const btn = ov.querySelector('.rp-cancel');
+    if (btn) { btn.disabled = true; btn.textContent = '中止しています…'; }
+    const ph = ov.querySelector('.rp-phase'); if (ph) ph.textContent = '中止中';
+    try { opts.onCancel(); } catch (_e) { /* caller handles the POST result */ }
+  }
+  const onKey = (e) => { if (e.key === 'Escape') doCancel(); };
+  if (canCancel) document.addEventListener('keydown', onKey);
 
   function paint(p) {
     const frac = Math.max(lastFrac, Math.min(1, p.frac || 0));   // monotone
@@ -115,9 +143,11 @@ export function startRunProgress(opts = {}) {
     const jobLine = jobs > 1
       ? `<span>方式 ${(p.job || 0) + 1} / ${jobs}</span>`
       : `<span class="rp-pips" title="レプリケーション ${rep}/${reps}">🔁 ${pips}</span>`;
+    const phase = cancelling ? '中止中' : (p.phase || '');
     ov.innerHTML =
       `<div class="rp-card">
-        <div class="rp-h"><span class="rp-spin">🏭</span>${esc(opts.title || '倉庫の1日をシミュレーション中…')}</div>
+        <div class="rp-h"><span class="rp-spin">🏭</span>${esc(opts.title || '倉庫の1日をシミュレーション中…')}
+          ${phase ? `<span class="rp-phase">${esc(phase)}</span>` : ''}</div>
         <div class="rp-sub">${esc(opts.sub || '重厚な離散事象シミュレーションで、捌けるか・原価・人員を実測します。')}</div>
         <div class="rp-clockrow"><span>🕐 シミュ内時刻</span><span class="rp-clock">${workdayClock(frac)}</span><span>17:00</span></div>
         <div class="rp-track">
@@ -126,7 +156,10 @@ export function startRunProgress(opts = {}) {
           <div class="rp-flag">🏁</div>
         </div>
         <div class="rp-meta">${jobLine}<span><span>${pct}%</span> ・ <span class="rp-eta">⏱ あと ${fmtEta(eta)}</span></span></div>
+        ${canCancel ? `<button type="button" class="rp-cancel"${cancelling ? ' disabled' : ''}>${cancelling ? '中止しています…' : '✕ 中止（Esc）'}</button>` : ''}
       </div>`;
+    const cb = ov.querySelector('.rp-cancel');
+    if (cb && !cancelling) cb.onclick = doCancel;
   }
 
   paint({ frac: 0, elapsed_s: 0 });   // immediate feedback before first poll
@@ -149,9 +182,16 @@ export function startRunProgress(opts = {}) {
   timer = setTimeout(poll, 250);
 
   return {
-    stop() {
+    stop(how = 'done') {
+      if (stopped) return;   // idempotent: callers may stop() in finally after a cancel
       stopped = true;
       clearTimeout(timer);
+      if (canCancel) document.removeEventListener('keydown', onKey);
+      if (how === 'cancelled') {
+        // Calm exit on 中止 — no 100% flourish (it didn't finish).
+        ov.remove();
+        return;
+      }
       // brief 100% flourish so it never just vanishes mid-bar
       paint({ frac: 1, elapsed_s: 0 });
       ov.querySelector('.rp-eta') && (ov.querySelector('.rp-eta').textContent = '✓ 完了');

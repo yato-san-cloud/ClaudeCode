@@ -79,9 +79,16 @@ export function mountWorkCompare(el, opts = {}) {
     running = true;
     renderRunning();
     const prog = startRunProgress({ getProject: () => name,
+      onCancel: () => api(`/api/projects/${encodeURIComponent(name)}/run/cancel`, { method: 'POST' }).catch(() => {}),
       title: '4方式をDESで比較実行中…', sub: '都度・マルチ・ゾーン・種まきをそれぞれ回して移動vs仕分けを実測します。' });
     try {
       data = await api(`/api/projects/${encodeURIComponent(name)}/workmethod/compare`, { method: 'POST' });
+      if (data && data.cancelled) {
+        prog.stop('cancelled');
+        root.innerHTML = headHtml() + '<div class="wc-empty">比較を中止しました。</div>';
+        wireHead();
+        return;
+      }
       render();
     } catch (e) {
       data = null;

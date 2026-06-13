@@ -284,14 +284,22 @@ async function applyHeadline() {
 }
 // Core run flow, shared by the sidebar button and the Cody chat. Throws on
 // failure (callers decide how to surface it); returns the run payload.
+// Best-effort 中止: flag the in-flight run server-side. The /run POST then
+// returns {cancelled:true} promptly (the engine aborts between sim-chunks).
+function cancelRun(name) {
+  return api(`/api/projects/${name}/run/cancel`, { method: 'POST' }).catch(() => {});
+}
+
 async function doRun() {
   if (!S.project) throw new Error('先にプロジェクトを作ってね。');
   if (S.running) throw new Error('いまシミュレーション中だよ。終わるまで少し待ってね。');
   S.running = true;
   // honest sim-clock progress overlay (倉庫の1日が進む + ETA). polls the server.
-  const prog = startRunProgress({ getProject: () => S.project });
+  const proj = S.project;
+  const prog = startRunProgress({ getProject: () => proj, onCancel: () => cancelRun(proj) });
   try {
     const r = await api(`/api/projects/${S.project}/run`, { method: 'POST' });
+    if (r && r.cancelled) { prog.stop('cancelled'); return r; }  // 中止: skip render
     S.hasRun = true;
     refreshReadiness();
     renderKpis(r.kpis);
@@ -321,6 +329,12 @@ async function runSim() {
   cody('thinking', 'シミュレーション中…動きを最後まで追ってるよ。');
   try {
     const r = await doRun();
+    if (r && r.cancelled) {
+      $('status').textContent = '中止しました。';
+      toast('シミュレーションを中止しました。', 'info');
+      cody('neutral', '中止したよ。設定を変えて、いつでもまた実行できる。');
+      return;
+    }
     $('status').textContent = `完了（${r.run}）。`;
     cody('success', '完了！「分析」タブに指摘と次の一手をまとめたよ。');
   } catch (e) {
@@ -439,10 +453,12 @@ async function doRunScenarios() {
   if (!S.project) throw new Error('先にプロジェクトを作ってね。');
   if (S.running) throw new Error('いま実行中だよ。終わるまで少し待ってね。');
   S.running = true;
-  const prog = startRunProgress({ getProject: () => S.project,
+  const proj = S.project;
+  const prog = startRunProgress({ getProject: () => proj, onCancel: () => cancelRun(proj),
     title: '3シナリオを比較実行中…', sub: '現行・ピーク日・AGV導入をそれぞれDESで回します。' });
   try {
     const data = await api(`/api/projects/${S.project}/run-scenarios`, { method: 'POST' });
+    if (data && data.cancelled) { prog.stop('cancelled'); return data; }
     if (S.compare) S.compare.dispose();
     $('compareView').innerHTML = '';  // clear any skeleton placeholder
     S.compare = new CompareView($('compareView'), data);
@@ -460,8 +476,14 @@ async function runScenarios() {
   $('compareView').innerHTML = '<div class="skeleton-block" aria-hidden="true"></div>'
     + '<div class="skeleton-block" aria-hidden="true"></div>';
   try {
-    await doRunScenarios();
-    $('compareStatus').textContent = '完了。';
+    const data = await doRunScenarios();
+    if (data && data.cancelled) {
+      $('compareStatus').textContent = '中止しました。';
+      $('compareView').innerHTML = '';
+      toast('シナリオ比較を中止しました。', 'info');
+    } else {
+      $('compareStatus').textContent = '完了。';
+    }
   } catch (e) {
     $('compareStatus').textContent = 'エラー: ' + e.message;
     $('compareView').innerHTML = '';
