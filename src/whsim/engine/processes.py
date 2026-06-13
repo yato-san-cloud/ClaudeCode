@@ -41,7 +41,14 @@ def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
 def _route_order(world: World, start, pts: list) -> list[int]:
     """Visiting order (indices into `pts`). Strategy shapes the route:
     discrete/batch/wave use nearest-neighbour; zone walks a strict S-shape by
-    aisle column (no backtracking), modelling disciplined zone/aisle picking."""
+    aisle column (no backtracking), modelling disciplined zone/aisle picking.
+
+    ADDITIVE: when ``world.routing_policy == "optimized"`` the greedy/NN seed is
+    improved with picktour 2-opt (shorter tours). This branch is opt-in only, so
+    the default path below is byte-identical to the legacy engine."""
+    if world.routing_policy == "optimized" and len(pts) > 2:
+        from whsim.picktour import optimize
+        return optimize(start, pts, world.dist)
     if world.pick_strategy == "zone" and pts:
         # rank by actual aisle column (distinct x positions), serpentine in y
         cols = sorted({round(p[0], 1) for p in pts})

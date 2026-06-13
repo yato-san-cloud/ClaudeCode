@@ -80,6 +80,169 @@ def api_replay(name: str):
     return JSONResponse(build_layout_replay(proj.load_model()))
 
 
+def _sku_xy_and_dist(model):
+    """Build the SKU->position map and a distance function matching the engine.
+
+    Mirrors ``engine.build``'s sku_xy resolution (item default_location, then any
+    SKU pinned on a location) and its distance resolution order: wall-aware graph
+    when walls/shelves exist, else Manhattan. Pure; no SimPy world needed."""
+    from whsim.engine.graph import AisleGraph
+    from whsim.engine.routing import manhattan
+
+    loc_by_id = model.location_by_id()
+    sku_xy: dict[str, tuple[float, float]] = {}
+    for it in model.items:
+        if it.default_location and it.default_location in loc_by_id:
+            loc = loc_by_id[it.default_location]
+            sku_xy[it.sku] = (loc.x, loc.y)
+    for loc in model.locations:
+        if loc.sku and loc.sku not in sku_xy:
+            sku_xy[loc.sku] = (loc.x, loc.y)
+
+    graph = AisleGraph.from_model(model)
+    if graph.enabled:
+        def dist(a, b):
+            return graph.distance(a, b)
+        return sku_xy, dist, True
+    return sku_xy, manhattan, False
+
+
+def _depot_xy(model) -> tuple[float, float]:
+    """Where a pick tour starts/returns: the first pack station, else floor mid."""
+    if model.resources.stations:
+        s = model.resources.stations[0]
+        return (float(s.x), float(s.y))
+    b = model.layout.bounds
+    return (b.width / 2.0, 0.0)
+
+
+def _order_pts(model, sku_xy):
+    """Per-order pick-point lists (skipping unplaced SKUs)."""
+    out = []
+    for o in model.orders.outbound:
+        pts = [sku_xy[ln.sku] for ln in o.lines if ln.sku in sku_xy]
+        if pts:
+            out.append(pts)
+    return out
+
+
+@router.get("/api/projects/{name}/pickseq")
+def api_pickseq(name: str):
+    """ピック順序最適化: compare tour length + estimated pick time for
+    naive(S-shape順) vs greedy(NN) vs optimized(2-opt) across the three pick
+    modes — order(都度) / multi-order(まとめ) / total(トータル).
+
+    Uses the same distance model the engine uses (wall-aware graph > Manhattan),
+    so the % distance/time reduction is consistent with a DES run but computed in
+    closed form (no simulation). never-blocks: an empty model returns has_data
+    false with zeroed methods rather than a 500."""
+    from whsim import picktour
+
+    proj = _open(name)
+    model = proj.load_model()
+    sku_xy, dist, wall_aware = _sku_xy_and_dist(model)
+    depot = _depot_xy(model)
+    orders_pts = _order_pts(model, sku_xy)
+
+    walk_speed = max(0.1, float(model.process.walk_speed_mps))
+    handle_s = 6.0  # seconds per pick line (motion-time default, mirrors pickrate)
+
+    # Pick modes group the orders into the batches a tour actually sweeps:
+    #   order       — one order per tour (都度)
+    #   multi-order — orders_per_trip orders fused into one tour (まとめ)
+    #   total       — the whole day fused, SKU-deduped (トータル)
+    work = model.process.effective_work()
+    batch = max(1, int(getattr(work, "orders_per_trip", 1)) or 1)
+    if batch <= 1:
+        batch = max(2, int(model.process.batch_size) or 4)
+
+    def chunks(seq, k):
+        return [seq[i:i + k] for i in range(0, len(seq), k)] or [[]]
+
+    mode_specs = [
+        ("order", "都度（1オーダー）", chunks(orders_pts, 1)),
+        ("multi", f"まとめ（{batch}オーダー）", chunks(orders_pts, batch)),
+        ("total", "トータル（一括）", [orders_pts] if orders_pts else [[]]),
+    ]
+
+    def tour_for_batch(batch_orders, method):
+        """(length, n_picks) for one consolidated batch under a method.
+        Total-pick dedups shared locations; order/multi keep every line."""
+        pts, route = picktour.consolidated_tour(
+            depot, batch_orders, dist,
+            optimize_tour=(method == "optimized"),
+        )
+        n_picks = sum(len(o) for o in batch_orders)
+        if not pts:
+            return 0.0, n_picks
+        if method == "naive":
+            route = picktour.naive_route(pts)
+        elif method == "greedy":
+            route = picktour.greedy_nn(depot, pts, dist)
+        length = picktour.route_length(depot, pts, route, dist)
+        return length, n_picks
+
+    methods = ("naive", "greedy", "optimized")
+    modes_out = []
+    has_data = bool(orders_pts)
+    for mid, mlabel, batches in mode_specs:
+        per_method = {}
+        for method in methods:
+            tot_len = 0.0
+            tot_picks = 0
+            for b in batches:
+                if not b:
+                    continue
+                length, n_picks = tour_for_batch(b, method)
+                tot_len += length
+                tot_picks += n_picks
+            # estimated pick time: travel (walk) + line handling.
+            est_time_s = tot_len / walk_speed + tot_picks * handle_s
+            per_method[method] = {
+                "length_m": round(tot_len, 1),
+                "time_s": round(est_time_s, 1),
+                "n_picks": tot_picks,
+            }
+        base = per_method["naive"]["length_m"] or 1.0
+        base_t = per_method["naive"]["time_s"] or 1.0
+        opt = per_method["optimized"]
+        modes_out.append({
+            "id": mid, "label": mlabel,
+            "methods": per_method,
+            "dist_reduction_pct": round((1.0 - opt["length_m"] / base) * 100.0, 1),
+            "time_reduction_pct": round((1.0 - opt["time_s"] / base_t) * 100.0, 1),
+        })
+
+    # Recommended mode = the largest optimized distance reduction over naive.
+    recommend = (max(modes_out, key=lambda m: m["dist_reduction_pct"])["id"]
+                 if has_data else "order")
+    best = next((m for m in modes_out if m["id"] == recommend), None)
+    headline = best["dist_reduction_pct"] if best else 0.0
+    mode_jp = {"order": "都度", "multi": "まとめ", "total": "トータル"}.get(recommend, "都度")
+    verdict = (
+        f"2-opt最適化で移動距離を最大 {headline:.0f}% 削減"
+        f"（{mode_jp}ピックが最も効果的）。"
+        if has_data else
+        "オーダー（出荷データ）を取込むと、ピック順序の最適化効果を試算します。"
+    )
+
+    return JSONResponse({
+        "has_data": has_data,
+        "n_orders": len(orders_pts),
+        "wall_aware": wall_aware,
+        "walk_speed_mps": walk_speed,
+        "handle_s_per_line": handle_s,
+        "methods": ["naive", "greedy", "optimized"],
+        "method_labels": {"naive": "ナイーブ（並び順）",
+                          "greedy": "貪欲（最近傍）",
+                          "optimized": "最適化（2-opt）"},
+        "modes": modes_out,
+        "recommend_mode": recommend,
+        "headline_reduction_pct": headline,
+        "verdict": verdict,
+    })
+
+
 @router.get("/api/projects/{name}/png")
 def api_png(name: str):
     proj = _open(name)

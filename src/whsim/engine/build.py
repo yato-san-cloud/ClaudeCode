@@ -72,6 +72,10 @@ class World:
     wave_interval_s: float = 1800.0
     sort_time_s: float = 6.0                # 種まき: put-wall seconds per line
     n_zones: int = 1                        # picking zones for C (spatial bands)
+    # Pick-sequence policy (ADDITIVE; default keeps the legacy greedy/S-shape).
+    # "default" = nearest-neighbour (discrete/batch/wave) or S-shape (zone);
+    # "optimized" = run picktour 2-opt over the greedy seed for shorter tours.
+    routing_policy: str = "default"
     graph: AisleGraph | None = None         # wall-aware routing (when walls exist)
     use_graph: bool = False
     dist_overrides: dict = field(default_factory=dict)  # (rounded xy pair) -> metres
@@ -143,10 +147,16 @@ def build(
     env: simpy.Environment | None = None,
     replay_window_s: float = 0.0,
     graph: AisleGraph | None = None,
+    routing_policy: str = "default",
 ) -> World:
     """``graph`` (optional) injects a pre-built routing graph so replications
     over the SAME layout share one graph (and its distance caches) instead of
-    rebuilding it per rep; ``None`` keeps the classic build-from-model path."""
+    rebuilding it per rep; ``None`` keeps the classic build-from-model path.
+
+    ``routing_policy`` is ADDITIVE and defaults to ``"default"`` (the legacy
+    greedy nearest-neighbour / zone S-shape). Pass ``"optimized"`` to route each
+    pick with picktour's 2-opt instead — strictly shorter tours, opt-in only, so
+    every existing run is byte-identical when left at the default."""
     env = env or simpy.Environment()
 
     workers = model.resources.workers
@@ -290,6 +300,7 @@ def build(
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),
+        routing_policy=routing_policy,
         zoning=zoning, consolidation=work.consolidation, release=work.release,
         wave_interval_s=max(work.wave_interval_s, 1.0),
         sort_time_s=max(model.process.sort_time_s, 0.0),
