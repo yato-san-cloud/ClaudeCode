@@ -696,10 +696,13 @@ function switchView(view) {
   if (view === 'bi') mountBIView();
   if (view === 'bianalytics') mountBIAnalyticsView();
   if (view === 'chat' && S.chat) S.chat.focus();
+  // Secondary in-view toggle (2D⇄3D / 判定⇄原価 / 作業方法⇄ピック順序).
+  renderViewToggle(view);
   // Keep the 5-phase stepper highlight + the per-phase hint banner in sync with
-  // whatever drove the view change (journey click, Cody, or programmatic).
-  if (S.journey) S.journey.setActive(view);
-  updatePhaseHint(view);
+  // whatever drove the view change. For a grouped MEMBER view (e.g. 原価/3D/
+  // ピック順序) highlight its HEAD sub-tab so the journey row stays coherent.
+  if (S.journey) S.journey.setActive(GROUP_HEAD[view] || view);
+  updatePhaseHint(GROUP_HEAD[view] || view);
   // 採点表レール: tell the dock which view/phase we're on (it shows on ②③④, hides
   // on ①⑤, and auto-collapses to the strip in ③設計 so the designer keeps the
   // right side). setPhase refetches the scorecard when entering a rail phase.
@@ -716,9 +719,39 @@ const VIEW_PHASE = {
   dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze', materialflow: 'analyze',
   design: 'design', storage: 'design', timetable: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate', workcompare: 'validate',
-  cost: 'design', pickrate: 'design', slotting: 'design', pickseq: 'design',
+  // 原価(cost) と ピック順序(pickseq) は ④検証 に集約（判定 / 作業方法比較 の中へ）。
+  cost: 'validate', pickseq: 'validate', pickrate: 'design', slotting: 'design',
   viewpng: 'propose', compare: 'propose', export: 'propose',
 };
+
+// In-view toggle groups: a "head" view (a journey sub-tab) hosts sibling member
+// views shown via the #viewToggle strip instead of separate top sub-tabs — so
+// 2D⇄3D, 判定⇄原価, 作業方法⇄ピック順序 each read as ONE tab with a switch.
+const VIEW_GROUPS = {
+  analysis: [{ id: 'analysis', label: 'KPI・判定' }, { id: 'cost', label: '原価' }],
+  view2d: [{ id: 'view2d', label: '2D' }, { id: 'view3d', label: '3D' }],
+  workcompare: [{ id: 'workcompare', label: '作業方法比較' }, { id: 'pickseq', label: 'ピック順序' }],
+};
+const GROUP_HEAD = {};   // member view id -> its group head view id
+for (const [head, members] of Object.entries(VIEW_GROUPS)) {
+  for (const m of members) GROUP_HEAD[m.id] = head;
+}
+
+// Render (or hide) the secondary in-view toggle for the active view's group.
+function renderViewToggle(view) {
+  const el = $('viewToggle');
+  if (!el) return;
+  const head = GROUP_HEAD[view] || view;
+  const members = VIEW_GROUPS[head];
+  if (!members) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.innerHTML = members.map((m) =>
+    `<button type="button" class="vt-btn${m.id === view ? ' is-on' : ''}" role="tab"`
+    + ` aria-selected="${m.id === view}" data-view="${m.id}">${esc(m.label)}</button>`).join('');
+  el.querySelectorAll('[data-view]').forEach((b) => {
+    b.onclick = () => { if (b.dataset.view !== S.view) switchView(b.dataset.view); };
+  });
+}
 
 // 採点表レール recompute: coalesce the trigger fan-in (openProject /
 // model-changed / designer save / doRun / design-dirty / phase entry) into one

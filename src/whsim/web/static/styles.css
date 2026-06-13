@@ -558,6 +558,40 @@ button.primary:disabled { background: var(--bg-active); border-color: transparen
   box-shadow: var(--sh-xs);
 }
 
+/* secondary in-view toggle (判定⇄原価 / 2D⇄3D / 作業方法⇄ピック順序) */
+.view-toggle {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-bottom: var(--sp-2);
+  padding: 3px;
+  background: var(--bg-sunken, rgba(120, 140, 170, 0.1));
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-pill, 999px);
+  width: max-content;
+}
+.view-toggle[hidden] { display: none; }
+.view-toggle .vt-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 16px;
+  border-radius: var(--r-pill, 999px);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-1, 0.12s) var(--ease-out, ease), color var(--dur-1, 0.12s) var(--ease-out, ease);
+}
+.view-toggle .vt-btn:hover { color: var(--ink-primary); }
+.view-toggle .vt-btn.is-on {
+  background: var(--accent);
+  color: var(--ink-onAccent);
+}
+.view-toggle .vt-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .view-toggle .vt-btn { transition: none; } }
+
 .panel {
   display: none;
   flex: 1;

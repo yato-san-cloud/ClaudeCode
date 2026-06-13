@@ -19,10 +19,10 @@ const PHASES = [
   // ③設計 adds 生産性試算 (pickrate): analytic motion-time productivity from the
   // MapMaker距離 — the SLC-style "step ②" that picks オーダー/マルチ/トータル
   // before any heavyweight DES run.
-  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'slotting', 'timetable', 'pickrate', 'pickseq', 'cost'] },
-  // ④検証 = DESで裏取りするレーン: KPI判定・2D/3D・作業方法比較(DES)。生産性試算
-  // (③設計の解析・爆速)で当てた方式を、ここで重厚なDESで精密に検証する位置づけ。
-  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'view3d', 'workcompare'] },
+  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'slotting', 'pickrate', 'timetable'] },
+  // ④検証 = DESで裏取りするレーン。原価は「判定」内、ピック順序は「作業方法比較」内、
+  // 2Dと3Dは1つの「ビュー」内トグルに集約（in-view toggle, app.js が #viewToggle で描画）。
+  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'workcompare'] },
   { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'compare', 'export'] },
 ];
 
@@ -36,7 +36,7 @@ const CROSS = [
 const VIEW_LABEL = {
   overview: '概要', dataanalysis: '物量サマリ', bianalytics: '対話分析', bi: '基礎物量', design: 'レイアウト',
   storage: '保管設計', materialflow: 'マテリアルフロー', timetable: '人員タイムチャート', analysis: 'KPI・判定',
-  pickrate: '生産性試算', slotting: '棚割り', pickseq: 'ピック順序', view2d: '2Dアニメ', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', workcompare: '作業方法比較', compare: 'シナリオ比較',
+  pickrate: '生産性試算', slotting: '棚割り', pickseq: 'ピック順序', view2d: '2D/3Dビュー', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', workcompare: '作業方法比較', compare: 'シナリオ比較',
   export: 'エクスポート', chat: 'OCTA', notes: '知見',
 };
 
@@ -55,11 +55,11 @@ const VIEW_DESC = {
   slotting: 'スロッティング最適化＋保管戦略（加重歩行距離を最小化）',
   pickseq: 'ピック順序を2-optで最適化（オーダー/マルチ/トータル比較）',
   cost: '解析的に6費目を積み上げ（実行不要・爆速）',
-  analysis: '捌けるかの判定・KPI・改善提案',
-  view2d: '動きの2Dアニメ＋混雑ヒート',
+  analysis: '捌けるかの判定・KPI・改善提案（原価もここ）',
+  view2d: '動きを2D/3Dで可視化（切替）＋混雑ヒート',
   view3d: '3Dで設備・人・搬送を可視化',
+  workcompare: 'DESで4方式を裏取り＋ピック順序の最適化',
   viewpng: '提案PNG（①課題→⑤裏付け）',
-  workcompare: 'DESで4方式を裏取り（生産性試算の解析推奨を検証）',
   compare: '現行 vs 代替案の比較（投資回収）',
   export: '提案書(PPTX/PDF)を書き出す',
   chat: 'OCTA（横断アシスタント）',

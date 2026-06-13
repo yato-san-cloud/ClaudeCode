@@ -137,6 +137,9 @@
 
       <div class="stage">
         <div id="phaseHint"></div>
+        <!-- Secondary in-view toggle for merged views (判定⇄原価 / 2D⇄3D /
+             作業方法⇄ピック順序). Populated by app.js when a grouped view is active. -->
+        <div id="viewToggle" class="view-toggle" role="tablist" aria-label="表示切替" hidden></div>
         <div id="overview" class="panel active" role="tabpanel" tabindex="0">
           <div id="overviewDash"></div>
           <!-- Persistent ①取込 assets: hidden file inputs + the key-figure body +
