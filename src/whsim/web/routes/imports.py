@@ -245,13 +245,19 @@ async def api_import_preview(name: str, file: UploadFile, kind: str = "shipments
     import json as _json
 
     import pandas as pd
+    from fastapi.concurrency import run_in_threadpool
 
     from whsim.analysis import data_io
     _open(name)  # validate the project exists (404 if not)
     data = await _read_upload(file)
     fields = getattr(data_io, _TABLE_FIELDS.get(kind, "SHIPMENT_FIELDS"))
+    # PREVIEW: read only the top rows (like a BI tool) — the dock just needs the
+    # header + a sample to map columns, NOT the whole month of data. Parse off the
+    # event loop so a big file can't stall the server.
+    PREVIEW_ROWS = 1000
     try:
-        df = data_io.load_table(data, file.filename)
+        df = await run_in_threadpool(
+            data_io.load_table, data, file.filename, None, PREVIEW_ROWS)
     except Exception as e:  # noqa: BLE001 — tolerant
         raise HTTPException(400, f"表を読み込めませんでした: {e}")
     mp = _json.loads(mapping) if mapping else data_io.initial_mapping(df, fields)
@@ -259,15 +265,19 @@ async def api_import_preview(name: str, file: UploadFile, kind: str = "shipments
     head = df.head(20)
     rows = [["" if pd.isna(v) else str(v) for v in row]
             for row in head.itertuples(index=False)]
+    sampled = len(df) >= PREVIEW_ROWS  # the file likely has more rows than we read
     return {
         "kind": kind,
         "filename": file.filename,
         "columns": [str(c) for c in df.columns],
         "mapping": {f.key: {"label": f.label, "required": f.required,
                             "column": mp.get(f.key)} for f in fields},
+        # counts are over the previewed sample only (件数 is a guide for mapping;
+        # the real totals are computed on commit, which reads the whole file).
         "counts": _preview_counts(std, kind),
+        "sampled": sampled,
         "preview": {"columns": [str(c) for c in df.columns], "rows": rows,
-                    "total_rows": int(len(df))},
+                    "preview_rows": int(len(df)), "sampled": sampled},
     }
 
 

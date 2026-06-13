@@ -38,7 +38,7 @@ def test_preview_is_read_only_with_counts_and_rows(client):
     # counts that WOULD result, computed without building orders
     assert j["counts"] == {"skus": 2, "units": 15, "lines": 3, "orders": 2}
     # a real data preview of the original columns
-    assert j["preview"]["total_rows"] == 3
+    assert j["preview"]["preview_rows"] == 3
     assert j["preview"]["rows"][0] == ["2025/09/01", "A", "5", "O1"]
     # nothing was committed
     assert client.get("/api/projects/pv/analysis/bundle").json().get("available") is False

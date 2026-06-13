@@ -193,16 +193,26 @@ def _excel_engine(name: str) -> str:
         return "openpyxl" if name.endswith(".xlsx") else "xlrd"
 
 
-def load_table(file_bytes: bytes, filename: str, sheet: str | None = None) -> pd.DataFrame:
+def load_table(file_bytes: bytes, filename: str, sheet: str | None = None,
+               nrows: int | None = None) -> pd.DataFrame:
     """Load a CSV or Excel file by filename extension, tolerant of real-world
-    WMS exports (title rows above the header / 合計 rows / messy header cells)."""
+    WMS exports (title rows above the header / 合計 rows / messy header cells).
+
+    ``nrows`` caps how many DATA rows are read — pass it for a fast PREVIEW (e.g.
+    the column-mapping dock only needs the header + a sample, not the whole month
+    of data). For CSV this genuinely stops the read early; for Excel it bounds the
+    parse/serialise work. None reads the whole file (the real import path)."""
     name = filename.lower()
     if name.endswith((".xlsx", ".xls")):
         # python-calamine (Rust) reads .xlsx/.xls ~10–40× faster than openpyxl on
         # month-scale WMS files; openpyxl/xlrd stay as the fallback if it is absent.
         engine = _excel_engine(name)
+        # When previewing we read header + nrows; the header may sit a few rows
+        # down (title/meta rows), so over-read a small buffer for detection.
+        rd = ({} if nrows is None else {"nrows": nrows})
+        rd_hdr = ({} if nrows is None else {"nrows": nrows + 20})
         try:
-            df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0, engine=engine)
+            df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0, engine=engine, **rd)
         except ImportError as e:
             raise ValueError(
                 "旧形式の .xls を読むには xlrd が必要です（pip install xlrd、"
@@ -210,14 +220,16 @@ def load_table(file_bytes: bytes, filename: str, sheet: str | None = None) -> pd
                 "保存し直す方法でも取り込めます。") from e
         if _header_suspicious(df):
             raw = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0,
-                                engine=engine, header=None)
+                                engine=engine, header=None, **rd_hdr)
             hdr = _best_header_row(raw)
             if hdr is not None:
                 df = raw.iloc[hdr + 1:].reset_index(drop=True)
                 df.columns = list(raw.iloc[hdr])
+                if nrows is not None:
+                    df = df.head(nrows)
         return _normalise_table(df)
     try:
-        df = _read_csv_resilient(file_bytes)
+        df = _read_csv_resilient(file_bytes, nrows=nrows)
     except Exception:  # noqa: BLE001 — ragged csv: fall through to the raw scan
         df = pd.DataFrame()
     if _header_suspicious(df):
@@ -227,6 +239,8 @@ def load_table(file_bytes: bytes, filename: str, sheet: str | None = None) -> pd
             if hdr is not None:
                 df = raw.iloc[hdr + 1:].reset_index(drop=True)
                 df.columns = list(raw.iloc[hdr])
+                if nrows is not None:
+                    df = df.head(nrows)
     return _normalise_table(df)
 
 

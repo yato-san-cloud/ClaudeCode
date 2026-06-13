@@ -281,8 +281,14 @@ function renderBody() {
   }).join('');
   const tbody = rows.map((r) =>
     `<tr>${r.map((v, i) => `<td class="${colF[cols[i]] ? 'mapped' : ''}">${esc(v)}</td>`).join('')}</tr>`).join('');
-  const more = data.preview && data.preview.total_rows > rows.length
-    ? `<div class="ipv-note" style="padding:6px 2px">先頭 ${rows.length} 行を表示（全 ${fmt(data.preview.total_rows)} 行）</div>` : '';
+  // Preview reads only the top rows (fast, like a BI tool) — say so honestly; the
+  // real totals are computed on 取込 (which reads the whole file).
+  const pv = data.preview || {};
+  const readN = pv.preview_rows != null ? pv.preview_rows : (pv.total_rows || rows.length);
+  const more = (data.sampled || pv.sampled)
+    ? `<div class="ipv-note" style="padding:6px 2px">先頭 ${fmt(readN)} 行のみ読み込んでプレビュー（マッピング用）。件数は概算で、実際の総数は取込時に算出します。</div>`
+    : (readN > rows.length
+      ? `<div class="ipv-note" style="padding:6px 2px">先頭 ${rows.length} 行を表示（全 ${fmt(readN)} 行）</div>` : '');
 
   els.body.innerHTML =
     `<div class="ipv-map-h">項目の紐付け（必要なら直してください。<b>*</b>は必須）</div>
