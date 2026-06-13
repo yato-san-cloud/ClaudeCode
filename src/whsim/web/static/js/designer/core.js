@@ -47,6 +47,7 @@ import { selectMethods } from './select.js';
 import { flowMethods } from './flow.js';
 import { routeMethods } from './route.js';
 import { sideMethods } from './side.js';
+import { sidePanelMethods } from './sidepanel.js';
 
 export class Designer {
   constructor(container, model, handlers) {
@@ -98,6 +99,10 @@ export class Designer {
     this._normalize(model);
     this._adoptModelView();        // honour imported view{centerX,centerY,zoom}
     this._buildShell();
+    // Docked side-table (保管設計・棚割り) inside the layout screen. Built after the
+    // shell so it can reserve body width; survives _renderTool (body-child rebuilds).
+    this._spInjectStyle();
+    this._buildSidePanel();
     this._bindWindow();
     this._bindKeys();
     this._bindTheme();
@@ -182,6 +187,7 @@ export class Designer {
   }
 
   dispose() {
+    this._spDispose();   // tear down hosted 保管設計/棚割り modules first
     for (const [el, type, fn] of this._listeners) el.removeEventListener(type, fn);
     this._listeners = [];
     if (this._raf) cancelAnimationFrame(this._raf);
@@ -486,6 +492,12 @@ export class Designer {
     bar.appendChild(this._saveMsg);
     c.appendChild(bar);
 
+    // Per-tool purpose hint (one line). フロー and 動線 look similar but are
+    // distinct concerns; this line keeps the difference visible at a glance.
+    this._toolHint = document.createElement('div');
+    this._toolHint.style.cssText = 'font-size:11.5px;color:var(--ink-tertiary);line-height:1.5;margin:-2px 0 0;';
+    c.appendChild(this._toolHint);
+
     // "編集はPC推奨" note (CSS shows it only ≤880px).
     const pcNote = document.createElement('div');
     pcNote.className = 'designer-pc-note';
@@ -547,6 +559,15 @@ export class Designer {
       b.style.cssText = active
         ? 'background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;'
         : '';
+    }
+    // one-line purpose hint per tool (フロー vs 動線 are distinct — see below).
+    if (this._toolHint) {
+      const HINT = {
+        place: '配置: 棚・設備・ゾーン・壁を床に置いて編集。右の「保管設計・棚割り」で什器算定と棚割りも調整できます。',
+        flow: 'フロー: 工程（入荷→格納→…→出荷）の順序・場所・作業方法を決める〈工程の設計〉。',
+        route: '動線: 作業員/フォークリフトの移動経路を引き、距離と所要時間を測る〈移動の計測〉。',
+      };
+      this._toolHint.textContent = HINT[key] || '';
     }
     this._renderTool();
   }
@@ -1314,4 +1335,5 @@ Object.assign(
   flowMethods,
   routeMethods,
   sideMethods,
+  sidePanelMethods,
 );
