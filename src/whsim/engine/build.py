@@ -142,7 +142,11 @@ def build(
     model: WarehouseModel,
     env: simpy.Environment | None = None,
     replay_window_s: float = 0.0,
+    graph: AisleGraph | None = None,
 ) -> World:
+    """``graph`` (optional) injects a pre-built routing graph so replications
+    over the SAME layout share one graph (and its distance caches) instead of
+    rebuilding it per rep; ``None`` keeps the classic build-from-model path."""
     env = env or simpy.Environment()
 
     workers = model.resources.workers
@@ -220,8 +224,10 @@ def build(
         for a, b in zip(cv.points, cv.points[1:]):
             conveyor_len += abs(a[0] - b[0]) + abs(a[1] - b[1])
         conveyor_speed_sum += cv.speed_mps
-    # Wall-aware routing graph (only meaningful when walls exist).
-    graph = AisleGraph.from_model(model)
+    # Wall-aware routing graph (only meaningful when walls exist). A caller may
+    # inject a pre-built one (shared across replications of the same layout).
+    if graph is None:
+        graph = AisleGraph.from_model(model)
     use_graph = graph.enabled
     # Resolve measured shelf-to-shelf distances to a fast xy-keyed override map.
     dist_overrides: dict = {}

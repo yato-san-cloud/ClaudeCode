@@ -27,7 +27,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 
 from whsim import analytic, kpis as kpi_mod
-from whsim.engine.run import run_replications
+from whsim.engine.run import RunCancelled, busiest_day_load, run_replications
 from whsim.project import Project
 from whsim.render.png2d import render as render_png
 from whsim.render.replay import build_replay
@@ -101,18 +101,33 @@ def _exit_run() -> None:
 # real signal — not a fake bar — so the ETA is trustworthy.
 _RUN_PROGRESS: dict[str, dict] = {}
 
+# Run phases surfaced to the overlay so the bar never sits silently at 0%:
+# 準備中 = building the world (graph/locations), 実行中 = the sim clock advancing,
+# 集計中 = KPI aggregation / replay assembly / PNG render after the last rep.
+_PHASE_JP = {"build": "準備中", "run": "実行中", "aggregate": "集計中"}
+
 
 def _progress_reporter(name: str, kind: str = "run", total_jobs: int = 1):
     """Build a callback that records run progress under ``name``. ``kind`` lets
-    multi-job runs (作業方法比較=4, シナリオ比較=3) report which job they're on."""
+    multi-job runs (作業方法比較=4, シナリオ比較=3) report which job they're on.
+
+    The callback is also the cancellation seam: POST /run/cancel flips the
+    entry's ``cancel`` flag and the next report raises :class:`RunCancelled`,
+    aborting the run between sim chunks / replications / jobs."""
     _RUN_PROGRESS[name] = {"active": True, "kind": kind, "started": _time.time(),
                            "rep": 0, "reps": 1, "frac": 0.0, "job": 0,
-                           "total_jobs": total_jobs}
+                           "total_jobs": total_jobs, "phase": _PHASE_JP["build"],
+                           "cancel": False}
 
-    def report(rep, reps, sim_now, sim_duration, job: int = 0):
+    def report(rep, reps, sim_now, sim_duration, job: int = 0, phase: str | None = None):
         st = _RUN_PROGRESS.get(name)
         if not st:
             return
+        if st.get("cancel"):
+            raise RunCancelled()
+        # Plain chunk reports mean the sim clock is advancing (実行中); explicit
+        # phase= calls mark the build/aggregate boundaries around it.
+        st["phase"] = _PHASE_JP.get(phase or "run", phase)
         rep_frac = (sim_now / sim_duration) if sim_duration else 1.0
         # overall fraction across reps (and jobs, if any)
         within = (rep + rep_frac) / max(1, reps)
@@ -135,6 +150,43 @@ def api_run_progress(name: str):
     return {**st, "elapsed_s": round(_time.time() - st["started"], 2)}
 
 
+@app.post("/api/projects/{name}/run/cancel")
+def api_run_cancel(name: str):
+    """中止: flag the project's in-flight run for cancellation. The run aborts at
+    its next progress report (between sim chunks / replications / jobs) and the
+    original /run request returns ``{cancelled: true}``. Calling this when
+    nothing is running is a harmless no-op."""
+    st = _RUN_PROGRESS.get(name)
+    if not st:
+        return {"ok": True, "active": False,
+                "message": "実行中のシミュレーションはありません。"}
+    st["cancel"] = True
+    return {"ok": True, "active": True, "message": "中止しています…"}
+
+
+# 大規模データへの正直な自動適応: above these busiest-day line counts the
+# Monte-Carlo replication count is clamped (and the result says so in Japanese)
+# so a month of real WMS data stays interactive instead of freezing the UI.
+# Tiers: (lines/day threshold, replications). Checked top-down.
+SCALE_REP_TIERS: list[tuple[int, int]] = [(48000, 1), (24000, 2), (8000, 5)]
+
+
+def _adaptive_reps(model, base_reps: int) -> tuple[int, str | None]:
+    """Clamp the replication count for very large demand days.
+
+    Returns ``(reps, note)`` where ``note`` is a user-facing Japanese sentence
+    when an adjustment was made (surfaced in the KPI payload), else ``None``.
+    Honest adaptation over silent degradation: the run still simulates every
+    order of the busiest day — only the Monte-Carlo repeat count shrinks."""
+    n_orders, n_lines = busiest_day_load(model)
+    for limit, reps in SCALE_REP_TIERS:
+        if n_lines > limit and reps < base_reps:
+            note = (f"大規模データ（ピーク日 {n_orders:,}オーダー / {n_lines:,}行）の"
+                    f"ため、モンテカルロ検証を{reps}回に自動調整しました。")
+            return reps, note
+    return base_reps, None
+
+
 def _run_blocking(proj: Project, name: str | None = None) -> dict:
     """The CPU-bound heart of a run (SimPy + KPIs + render + disk writes).
 
@@ -144,9 +196,16 @@ def _run_blocking(proj: Project, name: str | None = None) -> dict:
     model = proj.load_model()
     # Monte-Carlo: many stochastic order sequences; rep 0 carries the replay.
     reporter = _progress_reporter(name) if name else None
-    results, heat = run_replications(model, reps=MONTE_CARLO_REPS, progress=reporter)
+    reps, scale_note = _adaptive_reps(model, MONTE_CARLO_REPS)
+    results, heat = run_replications(model, reps=reps, progress=reporter)
+    if reporter:
+        # Post-processing phase (KPI/replay/PNG): keep the overlay honest while
+        # the bar sits at 100% — it reads 集計中, not a silent stall.
+        reporter(reps - 1, reps, 1.0, 1.0, phase="aggregate")
     res = results[0]
     metrics = kpi_mod.compute(results, model)
+    if scale_note:
+        metrics["scale_note"] = scale_note
     est = analytic.estimate(model)
 
     run_dir = proj.new_run_dir()
@@ -176,6 +235,10 @@ async def api_run(name: str):
     _enter_run()
     try:
         return await run_in_threadpool(_run_blocking, proj, name)
+    except RunCancelled:
+        # User pressed 中止: nothing was written (the run aborted before its
+        # artifacts), so the project is exactly as before — a clean no-op.
+        return {"cancelled": True, "message": "実行を中止しました。"}
     finally:
         _exit_run()
         _clear_progress(name)
@@ -212,16 +275,26 @@ def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
     prov = proj.load_provenance().summary()
 
     reporter = _progress_reporter(name, kind="scenarios", total_jobs=max(1, len(scenarios)))
+    reps, scale_note = _adaptive_reps(base, 6)
     results = []
-    for i, sc in enumerate(scenarios):
-        reporter(0, 1, 0.0, 1.0, job=i)          # シナリオ i 開始 (frac=i/N)
-        res, metrics = run_scenario(base, sc, reps=6)
-        reporter(0, 1, 1.0, 1.0, job=i)          # シナリオ i 完了 (frac=(i+1)/N)
-        model_i = apply_scenario(base, sc)
-        render_png(model_i, res.heat, metrics, prov, cmp_dir / f"s{i}.png")
-        results.append({"name": sc.name, "description": sc.description,
-                        "kpis": metrics,
-                        "png_url": f"/api/projects/{name}/compare-png/{cmp_id}/{i}"})
+    try:
+        for i, sc in enumerate(scenarios):
+            # Forward live within-scenario progress (and the cancellation seam)
+            # into the scenario's own replications, tagged with the job index.
+            def _cb(rep, n, now, dur, _i=i, **kw):
+                reporter(rep, n, now, dur, job=_i, **kw)
+            res, metrics = run_scenario(base, sc, reps=reps, progress=_cb)
+            model_i = apply_scenario(base, sc)
+            render_png(model_i, res.heat, metrics, prov, cmp_dir / f"s{i}.png")
+            results.append({"name": sc.name, "description": sc.description,
+                            "kpis": metrics,
+                            "png_url": f"/api/projects/{name}/compare-png/{cmp_id}/{i}"})
+    except RunCancelled:
+        # 中止: drop the partially-written compare dir so no half comparison
+        # ever becomes the project's "latest" — then surface the cancel.
+        import shutil
+        shutil.rmtree(cmp_dir, ignore_errors=True)
+        raise
 
     baseline = results[0]
     alternatives = results[1:]
@@ -229,6 +302,8 @@ def _run_scenarios_blocking(name: str, proj: Project, payload: dict) -> dict:
         pb = payback_months(baseline["kpis"], alt["kpis"])
         alt["kpis"]["payback_months"] = pb
     out = {"compare_id": cmp_id, "baseline": baseline, "alternatives": alternatives}
+    if scale_note:
+        out["scale_note"] = scale_note
     # Persist the comparison so the proposal export can include scenario tables
     # without re-running the (expensive) sweep. PNG urls are dropped to keep the
     # on-disk record self-contained.
@@ -248,6 +323,8 @@ async def api_run_scenarios(name: str, payload: dict | None = None):
     _enter_run()
     try:
         return await run_in_threadpool(_run_scenarios_blocking, name, proj, payload or {})
+    except RunCancelled:
+        return {"cancelled": True, "message": "シナリオ比較を中止しました。"}
     finally:
         _exit_run()
         _clear_progress(name)
@@ -264,16 +341,19 @@ def _run_workmethods_blocking(name: str, proj: Project, payload: dict) -> dict:
     base = proj.load_model()
     pidx = workmethod.pick_stage_index(base)
     reps = max(1, int(payload.get("reps", 3)))  # 4 methods × reps; keep responsive
+    reps, scale_note = _adaptive_reps(base, reps)
 
     reporter = _progress_reporter(name, kind="workmethods",
                                   total_jobs=max(1, len(workmethod.METHOD_PRESETS)))
     methods = []
     for i, preset in enumerate(workmethod.METHOD_PRESETS):
-        reporter(0, 1, 0.0, 1.0, job=i)          # 方式 i 開始
         sc = Scenario(name=preset["label"], description=preset.get("desc", ""),
                       edits={f"process.stages.{pidx}.work": dict(preset["work"])})
-        _res, m = run_scenario(base, sc, reps=reps)
-        reporter(0, 1, 1.0, 1.0, job=i)          # 方式 i 完了
+
+        # Live within-method progress + the prompt-cancel seam, tagged per job.
+        def _cb(rep, n, now, dur, _i=i, **kw):
+            reporter(rep, n, now, dur, job=_i, **kw)
+        _res, m = run_scenario(base, sc, reps=reps, progress=_cb)
         completed = max(1.0, float(m.get("orders_completed", 0)) or 1.0)
         methods.append({
             "id": preset["id"], "label": preset["label"], "desc": preset.get("desc", ""),
@@ -311,11 +391,14 @@ def _run_workmethods_blocking(name: str, proj: Project, payload: dict) -> dict:
     rec_id = ("total" if w.consolidation == "sort"
               else "zone" if w.zoning == "parallel"
               else "multi" if w.orders_per_trip > 1 else "discrete")
-    return {
+    out = {
         "methods": methods, "baseline_id": "discrete",
         "recommend": {"id": rec_id, "name": rec.name, "reason": rec.reason},
         "reps": reps,
     }
+    if scale_note:
+        out["scale_note"] = scale_note
+    return out
 
 
 @app.post("/api/projects/{name}/workmethod/compare")
@@ -325,6 +408,8 @@ async def api_workmethod_compare(name: str, payload: dict | None = None):
     _enter_run()
     try:
         return await run_in_threadpool(_run_workmethods_blocking, name, proj, payload or {})
+    except RunCancelled:
+        return {"cancelled": True, "message": "作業方法比較を中止しました。"}
     finally:
         _exit_run()
         _clear_progress(name)

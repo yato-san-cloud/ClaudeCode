@@ -9,6 +9,7 @@ import numpy as np
 import simpy
 
 from whsim.engine.build import Worker, build
+from whsim.engine.graph import AisleGraph
 from whsim.engine.processes import (
     agv_agent, forklift_agent, inspector_agent, order_source, packer_agent,
     picker_agent, putaway_source,
@@ -18,6 +19,29 @@ from whsim.schema.model import WarehouseModel
 # Keep the animated replay short enough to stay smooth in the browser, even when
 # the KPI run covers a full shift.
 DEFAULT_REPLAY_WINDOW_S = 900.0
+
+
+class RunCancelled(Exception):
+    """Raised *from a progress callback* to abort a run between sim chunks.
+
+    The escape hatch for long runs: a caller's ``progress`` callback (e.g. the
+    web layer's reporter, after the user pressed 中止) raises this and the run
+    stops promptly — between sim chunks, between replications, and between
+    scenario/workmethod jobs. It is the ONLY exception a progress callback can
+    use to influence a run; any other exception it raises is swallowed (a
+    reporting hiccup must never fail a simulation)."""
+
+
+def _report(progress, *args, **kw) -> None:
+    """Invoke a progress callback: cancellation propagates, hiccups don't."""
+    if progress is None:
+        return
+    try:
+        progress(*args, **kw)
+    except RunCancelled:
+        raise
+    except Exception:  # noqa: BLE001 — a reporting hiccup never fails a run
+        pass
 
 
 @dataclass
@@ -87,13 +111,19 @@ def run_once(
     seed: int | None = None,
     replay_window_s: float | None = None,
     progress=None,
+    graph: AisleGraph | None = None,
 ) -> RunResult:
+    # Phase report (and cancellation point) before the potentially heavy world
+    # build. Extra ``phase`` keyword calls are best-effort: a callback that only
+    # accepts the 4 positional chunk args simply misses them (TypeError is a
+    # swallowed reporting hiccup), so existing callers are unaffected.
+    _report(progress, 0.0, model.simulation.duration_s, phase="build")
     model = representative_day(model)
     rng = random.Random(model.simulation.random_seed if seed is None else seed)
     env = simpy.Environment()
     window = DEFAULT_REPLAY_WINDOW_S if replay_window_s is None else replay_window_s
     window = min(window, model.simulation.duration_s)
-    world = build(model, env, replay_window_s=window)
+    world = build(model, env, replay_window_s=window, graph=graph)
 
     for i in range(world.n_pickers):
         w = Worker(id=f"picker-{i+1}", role="picker")
@@ -135,13 +165,12 @@ def run_once(
         # every event with time ≤ t then stops, so running it for an increasing
         # series of t is event-for-event identical to one full run — purely a
         # reporting hook, zero behaviour change when ``progress`` is None.
+        # A callback may raise RunCancelled to abort between chunks (the 中止
+        # escape hatch); any other exception it raises is swallowed.
         steps = 50
         for k in range(1, steps + 1):
             env.run(until=duration * k / steps)
-            try:
-                progress(env.now, duration)
-            except Exception:  # noqa: BLE001 — a reporting hiccup never fails a run
-                pass
+            _report(progress, env.now, duration)
     else:
         env.run(until=duration)
     return RunResult(
@@ -174,6 +203,23 @@ def _cost_inputs(model: WarehouseModel) -> dict:
     }
 
 
+def busiest_day_load(model: WarehouseModel) -> tuple[int, int]:
+    """(orders, lines) of the busiest single day — the day a run will simulate.
+
+    Mirrors ``representative_day``'s bucketing/tie-break WITHOUT the deep copy,
+    so callers (e.g. the web layer's adaptive replication clamp) can size a run
+    cheaply before starting it."""
+    orders = model.orders.outbound
+    if not orders:
+        return 0, 0
+    days: dict[int, list] = {}
+    for o in orders:
+        days.setdefault(int((o.arrival_s or 0.0) // 86400), []).append(o)
+    best = max(days, key=lambda d: (len(days[d]), -d))
+    day_orders = days[best]
+    return len(day_orders), sum(len(o.lines) for o in day_orders)
+
+
 def run_replications(
     model: WarehouseModel, reps: int | None = None, progress=None
 ) -> tuple[list[RunResult], np.ndarray]:
@@ -183,14 +229,27 @@ def run_replications(
 
     ``progress(rep, reps, sim_now, sim_duration)`` (optional) is called as the
     sim clock advances within each replication, so a UI can show the *honest*
-    progress + ETA. Default None ⇒ no chunking, identical to before."""
+    progress + ETA. Default None ⇒ no chunking, identical to before. The
+    callback may raise :class:`RunCancelled` to abort the whole sweep promptly
+    (between sim chunks and between replications); it may also receive extra
+    best-effort ``phase=`` keyword calls at stage boundaries."""
     reps = max(1, reps if reps is not None else model.simulation.replications)
+    # Collapse a multi-day import to its busiest day ONCE (idempotent: run_once's
+    # own call then passes straight through), and build ONE wall-aware routing
+    # graph shared by every replication. The layout is identical across reps, so
+    # rebuilding the graph (and re-solving its Dijkstra sources) per rep was pure
+    # waste on large floors. Behaviour-preserving: the graph is deterministic and
+    # read-only apart from its memoised distance/snap caches.
+    model = representative_day(model)
+    graph = AisleGraph.from_model(model)
     results: list[RunResult] = []
     heat_sum: np.ndarray | None = None
     for r in range(reps):
-        cb = (lambda now, dur, _r=r: progress(_r, reps, now, dur)) if progress else None
+        cb = ((lambda *args, _r=r, **kw: progress(_r, reps, *args, **kw))
+              if progress else None)
         res = run_once(model, seed=model.simulation.random_seed + r,
-                       replay_window_s=None if r == 0 else 0.0, progress=cb)
+                       replay_window_s=None if r == 0 else 0.0, progress=cb,
+                       graph=graph)
         results.append(res)
         heat_sum = res.heat.copy() if heat_sum is None else heat_sum + res.heat
     assert heat_sum is not None

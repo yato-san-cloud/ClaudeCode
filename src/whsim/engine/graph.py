@@ -70,6 +70,56 @@ MAX_ACCESS = 512
 # correctness behaviour on small walled grids).
 ACCESS_COLLAPSE_MIN_NODES = 2000
 
+# Spatial-hash cell size (metres) for the wall-segment / obstacle indexes below.
+# Coarse enough that short probes hit only a handful of cells, fine enough that
+# a cell holds few segments even on a dense MapMaker floor.
+_INDEX_CELL_M = 4.0
+
+
+class _SegmentIndex:
+    """Uniform-grid spatial hash over 2D segments (a pure candidate filter).
+
+    A MapMaker-scale floor carries thousands of wall/shelf-perimeter segments;
+    scanning all of them for every probe segment made graph construction and
+    snapping O(probes x segments) — the multi-minute "freeze" on large imports.
+    Each segment is binned into every cell its bounding box overlaps; a query
+    returns the superset of segments whose bbox can touch the probe's bbox.
+    Callers still run the exact intersection test on the candidates, so results
+    are identical to the full scan, just without the O(N) sweep per probe.
+    """
+
+    def __init__(self, segments: list, cell: float = _INDEX_CELL_M) -> None:
+        self._cell = max(float(cell), 1e-6)
+        self._segments = segments
+        self._grid: dict[tuple[int, int], list[int]] = {}
+        for i, (a, b) in enumerate(segments):
+            for key in self._cells(a, b):
+                self._grid.setdefault(key, []).append(i)
+
+    def _cells(self, a, b) -> list[tuple[int, int]]:
+        c = self._cell
+        x0 = int(min(a[0], b[0]) // c)
+        x1 = int(max(a[0], b[0]) // c)
+        y0 = int(min(a[1], b[1]) // c)
+        y1 = int(max(a[1], b[1]) // c)
+        return [(cx, cy) for cx in range(x0, x1 + 1) for cy in range(y0, y1 + 1)]
+
+    def candidates(self, a, b) -> list:
+        """Segments whose bbox cells overlap the probe segment's bbox cells."""
+        keys = self._cells(a, b)
+        grid = self._grid
+        segs = self._segments
+        if len(keys) == 1:
+            return [segs[i] for i in grid.get(keys[0], ())]
+        seen: set[int] = set()
+        out = []
+        for k in keys:
+            for i in grid.get(k, ()):
+                if i not in seen:
+                    seen.add(i)
+                    out.append(segs[i])
+        return out
+
 
 def _manhattan(a: tuple[float, float], b: tuple[float, float]) -> float:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
@@ -183,6 +233,19 @@ class AisleGraph:
         self.nrows = max(int(self.depth / res) + 1, 1)
 
         self._walls = wall_segments
+        # Spatial hash over the wall segments: _segment_blocked queries only the
+        # segments near the probe instead of scanning all of them (the full scan
+        # froze graph construction on dense MapMaker floors).
+        self._wall_index = _SegmentIndex(wall_segments) if wall_segments else None
+        # Spatial hash over obstacle rects for O(1)-ish point-in-rack tests.
+        self._obs_grid: dict[tuple[int, int], list[int]] | None = None
+        if self._obstacles:
+            self._obs_grid = {}
+            c = _INDEX_CELL_M
+            for i, (rx, ry, rw, rh) in enumerate(self._obstacles):
+                for cx in range(int(rx // c), int((rx + rw) // c) + 1):
+                    for cy in range(int(ry // c), int((ry + rh) // c) + 1):
+                        self._obs_grid.setdefault((cx, cy), []).append(i)
         # Build edge blocking only when walls exist; otherwise the grid is open
         # and every orthogonal neighbour edge is free (weight = resolution).
         self._blocked: set[tuple[int, int]] = set()
@@ -193,6 +256,11 @@ class AisleGraph:
         self._dist_cache: dict[int, dict[int, float]] = {}
         # Cache: source node index -> {node index -> predecessor node index}.
         self._prev_cache: dict[int, dict[int, int]] = {}
+        # Memoised endpoint snaps: the engine queries distance() from the same
+        # few hundred shelf/station points tens of thousands of times per run,
+        # so snapping (which probes walls/obstacles) is computed once per point.
+        self._snap_cache: dict[tuple[float, float], tuple[int, float]] = {}
+        self._snap_access_cache: dict[tuple[float, float], tuple[int, float]] = {}
 
         # Number of full single-source Dijkstra solves actually run (instrument
         # for tests / profiling; bounded by the distinct access nodes queried).
@@ -312,7 +380,9 @@ class AisleGraph:
     def _segment_blocked(
         self, a: tuple[float, float], b: tuple[float, float]
     ) -> bool:
-        for w1, w2 in self._walls:
+        walls = (self._wall_index.candidates(a, b)
+                 if self._wall_index is not None else self._walls)
+        for w1, w2 in walls:
             if _segments_intersect(a, b, w1, w2):
                 return True
         return False
@@ -333,6 +403,15 @@ class AisleGraph:
 
     def _inside_obstacle(self, x: float, y: float, eps: float = 1e-6) -> bool:
         """True if (x, y) lies strictly inside any shelf/rack footprint."""
+        if self._obs_grid is not None:
+            c = _INDEX_CELL_M
+            idxs = self._obs_grid.get((int(x // c), int(y // c)), ())
+            obstacles = self._obstacles
+            for i in idxs:
+                rx, ry, rw, rh = obstacles[i]
+                if rx + eps < x < rx + rw - eps and ry + eps < y < ry + rh - eps:
+                    return True
+            return False
         for (rx, ry, rw, rh) in self._obstacles:
             if rx + eps < x < rx + rw - eps and ry + eps < y < ry + rh - eps:
                 return True
@@ -418,6 +497,24 @@ class AisleGraph:
         # Boxed in on every access leg -> exact fine snap (rare).
         return self._snap(p)
 
+    def _snap_cached(self, p: tuple[float, float]) -> tuple[int, float]:
+        """Memoised :meth:`_snap` — same result, computed once per distinct point."""
+        key = (p[0], p[1])
+        hit = self._snap_cache.get(key)
+        if hit is None:
+            hit = self._snap(p)
+            self._snap_cache[key] = hit
+        return hit
+
+    def _snap_access_cached(self, p: tuple[float, float]) -> tuple[int, float]:
+        """Memoised :meth:`_snap_access` — same result, computed once per point."""
+        key = (p[0], p[1])
+        hit = self._snap_access_cache.get(key)
+        if hit is None:
+            hit = self._snap_access(p)
+            self._snap_access_cache[key] = hit
+        return hit
+
     def _neighbors(self, idx: int):
         c, r = self._node_cr(idx)
         for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -499,8 +596,8 @@ class AisleGraph:
         the wall-aware grid distance between the access node and the target is
         still the exact shortest path on the grid.
         """
-        acc_a, leg_a = self._snap_access(a)
-        sb, off_b = self._snap(b)
+        acc_a, leg_a = self._snap_access_cached(a)
+        sb, off_b = self._snap_cached(b)
         dist, _ = self._dijkstra(acc_a)
         d = dist.get(sb)
         if d is None or d == float("inf"):
@@ -512,8 +609,8 @@ class AisleGraph:
         self, a: tuple[float, float], b: tuple[float, float]
     ) -> list[tuple[float, float]]:
         """Node-centre xy waypoints along the shortest route (for draw / heat)."""
-        acc_a, _ = self._snap_access(a)
-        sb, _ = self._snap(b)
+        acc_a, _ = self._snap_access_cached(a)
+        sb, _ = self._snap_cached(b)
         dist, prev = self._dijkstra(acc_a)
         if sb not in dist:
             return [a, b]

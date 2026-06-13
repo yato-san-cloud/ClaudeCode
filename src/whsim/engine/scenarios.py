@@ -55,10 +55,15 @@ def default_scenarios(base: WarehouseModel) -> list[Scenario]:
 
 
 def run_scenario(base: WarehouseModel, scenario: Scenario,
-                 reps: int = 6) -> tuple[RunResult, dict]:
-    """Monte-Carlo a scenario; return (rep-0 result for replay, aggregated KPIs)."""
+                 reps: int = 6, progress=None) -> tuple[RunResult, dict]:
+    """Monte-Carlo a scenario; return (rep-0 result for replay, aggregated KPIs).
+
+    ``progress`` is forwarded to :func:`run_replications`, so multi-scenario
+    sweeps report live within-job progress and can be cancelled promptly
+    (the callback raising ``RunCancelled`` aborts mid-scenario, not just
+    between scenarios)."""
     model = apply_scenario(base, scenario)
-    results, _heat = run_replications(model, reps=reps)
+    results, _heat = run_replications(model, reps=reps, progress=progress)
     metrics = kpi_mod.compute(results, model)
     return results[0], metrics
 

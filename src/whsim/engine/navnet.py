@@ -41,6 +41,11 @@ _OPEN_FACE_OFFSET = 0.5
 # are: left = -x face, right = +x face, up = -y face, down = +y face.
 _FACING_SIDE = {"left": 0, "right": 1, "up": 2, "down": 3}
 
+# Spatial-hash cell size (metres) for the obstacle grid: probes only test the
+# rectangles near their bounding box instead of every shelf on the floor (the
+# all-rects scan made the network build take minutes on MapMaker-scale imports).
+_OBS_CELL_M = 6.0
+
 
 def _seg_intersect(p1, p2, p3, p4, eps: float = 1e-9) -> bool:
     def ccw(ax, ay, bx, by, cx, cy):
@@ -75,11 +80,44 @@ class NavNetwork:
         # Indices (into self.waypoints) of the open-face pick points we appended.
         self.pick_points: list[int] = []
         self._adj: dict[int, list[tuple[int, float]]] = {}
+        # Spatial hash: cell -> obstacle indices whose bbox overlaps the cell.
+        # A pure candidate filter (callers still run the exact tests), so the
+        # geometry answers are identical to the full scan — just not O(N) each.
+        self._obs_grid: dict[tuple[int, int], list[int]] = {}
+        c = _OBS_CELL_M
+        for i, (rx, ry, rw, rh) in enumerate(self.obstacles):
+            for cx in range(int(rx // c), int((rx + rw) // c) + 1):
+                for cy in range(int(ry // c), int((ry + rh) // c) + 1):
+                    self._obs_grid.setdefault((cx, cy), []).append(i)
         self._build()
 
     # --------------------------------------------------------------- geometry
+    def _near_obstacles(self, a, b):
+        """Indices of obstacles whose bbox cells overlap segment a-b's bbox cells
+        (a superset of every rect the segment could touch or hold its midpoint in)."""
+        c = _OBS_CELL_M
+        x0 = int(min(a[0], b[0]) // c)
+        x1 = int(max(a[0], b[0]) // c)
+        y0 = int(min(a[1], b[1]) // c)
+        y1 = int(max(a[1], b[1]) // c)
+        if (x1 - x0 + 1) * (y1 - y0 + 1) >= len(self._obs_grid):
+            return range(len(self.obstacles))   # probe spans the floor: test all
+        grid = self._obs_grid
+        seen: set[int] = set()
+        out: list[int] = []
+        for cx in range(x0, x1 + 1):
+            for cy in range(y0, y1 + 1):
+                for i in grid.get((cx, cy), ()):
+                    if i not in seen:
+                        seen.add(i)
+                        out.append(i)
+        return out
+
     def _inside(self, x: float, y: float, eps: float = 1e-6) -> bool:
-        for (rx, ry, rw, rh) in self.obstacles:
+        c = _OBS_CELL_M
+        obstacles = self.obstacles
+        for i in self._obs_grid.get((int(x // c), int(y // c)), ()):
+            rx, ry, rw, rh = obstacles[i]
             if rx + eps < x < rx + rw - eps and ry + eps < y < ry + rh - eps:
                 return True
         return False
@@ -93,9 +131,11 @@ class NavNetwork:
         ``obstacleScanner.isClipping_ignore(coord, center, shelf)``).
         """
         mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
-        for idx, (rx, ry, rw, rh) in enumerate(self.obstacles):
+        obstacles = self.obstacles
+        for idx in self._near_obstacles(a, b):
             if idx == ignore:
                 continue
+            rx, ry, rw, rh = obstacles[idx]
             if rx + 1e-6 < mx < rx + rw - 1e-6 and ry + 1e-6 < my < ry + rh - 1e-6:
                 return False
             cs = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
