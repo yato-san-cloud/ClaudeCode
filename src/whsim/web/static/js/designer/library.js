@@ -26,8 +26,14 @@ export const libraryMethods = {
     if (!(this.brush.kind === 'equip' && this.brush.key === 'conveyor')) this.conveyorDraft = null;
     this.shelfDraft = null;
     this.snapLine = null;
-    if (this.brush.kind !== 'select') { this.selected = null; this.selShelves = new Set(); }
-    if (this.canvas) this.canvas.style.cursor = this.brush.kind === 'select' ? 'default' : 'crosshair';
+    if (this.brush.kind !== 'select') {
+      this.selected = null;
+      this.selShelves = new Set();
+      this.selObjs = [];
+      // an armed brush stamps on click — the hand tool would swallow that click.
+      if (this.handTool) { this.handTool = false; this._refreshHandBtn(); }
+    }
+    if (this.canvas) this.canvas.style.cursor = this._canvasCursor();
     if (this._layoutStatus) {
       this._layoutStatus.style.color = 'var(--ink-secondary)';
       this._layoutStatus.textContent = this._brushHint();

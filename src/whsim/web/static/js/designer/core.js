@@ -24,6 +24,7 @@
 //   ./render.js  — Canvas2D draw loop (grid/ghost/glyphs/selection chrome)
 //   ./place.js   — placement pointer (stamp/zone hit-test/wall/door/conveyor)
 //   ./shelf.js   — M2 shelf editor (select/drag/resize/snap, bulk/area dialogs)
+//   ./select.js  — PowerPoint-style marquee multi-select + group move/delete
 //   ./flow.js    — フロー tool (stage strip, flow canvas, per-stage work method)
 //   ./route.js   — 動線 tool (aisle net, A→B measure, route table)
 //   ./side.js    — right-hand object inspector panels
@@ -42,6 +43,7 @@ import { libraryMethods } from './library.js';
 import { renderMethods } from './render.js';
 import { placeMethods } from './place.js';
 import { shelfMethods } from './shelf.js';
+import { selectMethods } from './select.js';
 import { flowMethods } from './flow.js';
 import { routeMethods } from './route.js';
 import { sideMethods } from './side.js';
@@ -64,6 +66,12 @@ export class Designer {
     // M2: when shelves are selected, `selShelves` is a Set of shelf ids inside the
     // active storage zone (`shelfZoneId`). Single zone selection still uses `selected`.
     this.selShelves = new Set();   // selected ShelfArea ids (MapMaker multi-select)
+    // PowerPoint-style multi-select: non-shelf objects in the selection union
+    // ([{kind,id}], see ./select.js) + the live rubber-band rect while dragging.
+    this.selObjs = [];             // multi-selected zones/equipment/stations/doors
+    this.marquee = null;           // {x0,y0,x1,y1} world rect while rubber-banding
+    this.handTool = false;         // 🖐: left-drag pans (toolbar toggle)
+    this._spaceDown = false;       // Space held → left-drag pans (PowerPoint/Figma)
     this.shelfZoneId = null;       // storage zone whose shelves are being edited
     this.shelfDraft = null;        // {x0,y0,x1,y1} while corner-dragging a new shelf
     this.snapLine = null;          // {x?, y?} green snap guide in world coords
@@ -155,6 +163,8 @@ export class Designer {
     this._normalize(model);
     this.selected = null;
     this.selShelves = new Set();
+    this.selObjs = [];
+    this.marquee = null;
     this.shelfZoneId = null;
     this.shelfDraft = null;
     this.conveyorDraft = null;
@@ -197,7 +207,8 @@ export class Designer {
       + '<div><b>配置</b>: 左のライブラリから置きたい物を選ぶ（またはカードを床へドラッグ）。'
       + 'カーソルに実寸のゴーストが出るので、床をクリックで配置。連続で置けます。'
       + '<b>Esc</b>か右クリックで「選択」に戻ります。</div>'
-      + '<div><b>選択</b>: クリックで選択（棚はShiftで複数）、ドラッグで移動、ハンドルでサイズ変更。'
+      + '<div><b>選択</b>: クリックで選択（<b>Shift</b>＋クリックで追加/解除）、ドラッグで移動、ハンドルでサイズ変更。'
+      + '空き床を左ドラッグすると<b>範囲選択</b>（PowerPoint風）— まとめて移動・削除できます。'
       + '右パネルで名前・寸法・台数などを数値編集。</div>'
       + '<div><b>棚</b>: クリック=1台スタンプ / ドラッグ=角から角で1枚。エッジに自動スナップ'
       + '（<b>Ctrl</b>で無効）。<b>一括生成</b>＝間口の向き・連結数を指定、<b>面積生成</b>＝矩形から棚列＋通路を自動配置。</div>'
@@ -205,7 +216,8 @@ export class Designer {
       + '<div><b>コンベア</b>: クリックで頂点追加、ダブルクリックで確定。</div>'
       + '<div><b>フロー</b>: 工程をクリックで作業方法を設定。「床図でフロー配置」で工程→ゾーンを割当。</div>'
       + '<div><b>動線</b>: 床をクリックで頂点追加、ダブルクリックで確定。距離と所要時間を自動計算。</div>'
-      + '<div style="margin-top:6px;">ホイールで拡大縮小、中ボタンドラッグで移動、「全体表示」でリセット。</div>'
+      + '<div style="margin-top:6px;">ホイールで拡大縮小。表示の移動は<b>右ドラッグ</b> / '
+      + '<b>Space</b>＋ドラッグ / 中ボタンドラッグ / 🖐ボタン。「全体表示」でリセット。</div>'
       + '<div style="margin-top:8px;border-top:1px solid var(--line-hair);padding-top:8px;">'
       + '<b>キーボード</b><br>ライブラリ: <b>1</b>=選択 <b>2</b>=保管ゾーン <b>3</b>=棚 <b>4</b>=壁 '
       + '<b>5</b>=梱包台 <b>6</b>=AGV <b>7</b>=コンベア <b>8</b>=自動倉庫 <b>9</b>=ドックドア<br>'
@@ -520,6 +532,8 @@ export class Designer {
     this.tool = key;
     this.selected = null;
     this.selShelves = new Set();
+    this.selObjs = [];
+    this.marquee = null;
     this.shelfDraft = null;
     this.snapLine = null;
     this.conveyorDraft = null;
@@ -565,7 +579,7 @@ export class Designer {
     wrap.style.cssText = 'flex:1;min-height:0;position:relative;border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-app);overflow:hidden;';
     wrap.classList.add('dz-canvas-wrap');
     this.canvas = document.createElement('canvas');
-    this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this.brush.kind === 'select' ? 'default' : 'crosshair'};`;
+    this.canvas.style.cssText = `width:100%;height:100%;display:block;cursor:${this._canvasCursor()};`;
     wrap.appendChild(this.canvas);
     // canvas accepts drops from the library cards (drag a card → place at drop).
     this._bindCanvasDrop(wrap);
@@ -591,7 +605,16 @@ export class Designer {
     const bar = document.createElement('div');
     bar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 8px;'
       + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);';
-    this._btn(bar, '全体表示', () => this._zoomToFit(), 'font-size:12px;').title = '全体が収まるように表示（ホイールで拡大縮小、中ボタンドラッグで移動）';
+    this._btn(bar, '全体表示', () => this._zoomToFit(), 'font-size:12px;').title = '全体が収まるように表示（ホイールで拡大縮小、右ドラッグ/Space＋ドラッグで移動）';
+    // 🖐 hand tool: discoverable pan — while ON, plain left-drag pans the view.
+    this._handBtn = this._btn(bar, '🖐 移動', () => {
+      this.handTool = !this.handTool;
+      this._refreshHandBtn();
+      if (this.canvas) this.canvas.style.cursor = this._canvasCursor();
+    }, 'font-size:12px;');
+    this._handBtn.title = '手のひらツール: ドラッグで表示を移動（右ドラッグ / Space＋ドラッグ / 中ボタンでも移動できます）';
+    this._handBtn.setAttribute('aria-pressed', this.handTool ? 'true' : 'false');
+    this._refreshHandBtn();
     const ulLbl = document.createElement('label');
     ulLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-secondary);cursor:pointer;';
     const ulCb = document.createElement('input');
@@ -623,8 +646,30 @@ export class Designer {
     this._stPos = this._div(bar, 'min-width:120px;');
     this._stBrush = this._div(bar, 'min-width:150px;font-weight:700;color:var(--ink-primary);');
     this._stSel = this._div(bar, 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
-    this._stZoom = this._div(bar, 'margin-left:auto;');
+    // persistent pan/zoom hint (MapMaker discoverability — no docs needed).
+    const hint = this._div(bar, 'margin-left:auto;color:var(--ink-tertiary);white-space:nowrap;');
+    hint.textContent = '移動: 右ドラッグ / Space＋ドラッグ ・ ズーム: ホイール';
+    this._stZoom = this._div(bar, '');
     parent.appendChild(bar);
+  }
+
+  // hand-tool button active state (the canvas bar is rebuilt per tool render).
+  _refreshHandBtn() {
+    if (!this._handBtn || !this._handBtn.isConnected) return;
+    const base = 'padding:6px 10px;border:1px solid var(--line-hair);border-radius:var(--r-sm);'
+      + 'background:var(--bg-app);color:var(--ink-primary);font-size:12px;cursor:pointer;';
+    this._handBtn.style.cssText = this.handTool
+      ? base + 'background:var(--ink-primary);color:var(--bg-app);border-color:var(--ink-primary);font-weight:700;'
+      : base;
+    this._handBtn.setAttribute('aria-pressed', this.handTool ? 'true' : 'false');
+  }
+
+  // The cursor the canvas should show when no drag is active (pan affordances win).
+  _canvasCursor() {
+    if (this._spaceDown || (this.handTool && this.tool === 'place')) return 'grab';
+    if (this.tool === 'route') return 'crosshair';
+    if (this.tool === 'flow') return this.flowMode ? 'pointer' : 'default';
+    return this.brush && this.brush.kind === 'select' ? 'default' : 'crosshair';
   }
 
   _updateStatus() {
@@ -633,7 +678,9 @@ export class Designer {
     this._stPos.textContent = h ? `X ${h.mx.toFixed(2)}m  Y ${h.my.toFixed(2)}m` : 'X —  Y —';
     this._stBrush.textContent = `配置: ${this._brushLabel()}`;
     let sel = '';
-    if (this.selShelves && this.selShelves.size) {
+    if (this.selObjs && this.selObjs.length) {
+      sel = `${this._multiCount()}個選択中（${this._multiBreakdown()}）`;
+    } else if (this.selShelves && this.selShelves.size) {
       const objs = this._selShelfObjs();
       if (objs.length === 1) {
         const sh = objs[0].sh;
@@ -677,7 +724,7 @@ export class Designer {
 
   _brushHint() {
     const b = this.brush;
-    if (!b || b.kind === 'select') return 'ライブラリから置きたい物を選択（またはカードを床へドラッグ）。クリックで編集。';
+    if (!b || b.kind === 'select') return 'ライブラリから置きたい物を選択（またはカードを床へドラッグ）。クリックで編集、空き床をドラッグで範囲選択。';
     if (b.kind === 'rack') return 'クリック=1台 / ドラッグ=角から角で1枚。Esc・右クリックで選択に戻る。';
     if (b.kind === 'wall') return 'クリックで頂点追加（Shift=水平/垂直）、ダブルクリックで確定。';
     if (b.kind === 'equip' && b.key === 'conveyor') return 'クリックで頂点追加、ダブルクリックで確定。';
@@ -824,10 +871,11 @@ export class Designer {
     // M2: wheel = smooth zoom toward the cursor; middle-drag = pan (handled in
     // _onMove via this.drag.mode==='pan'). All tools get pan/zoom for free.
     this._on(this.canvas, 'wheel', (e) => this._onWheel(e), { passive: false });
-    // Right-click = back to 選択 (Minecraft "empty the hand"). Suppress the
-    // browser menu only when a placing brush/draft is active, so inspect etc.
-    // still work in select mode.
+    // Right-drag = pan (MapMaker), so the menu is suppressed after a real drag.
+    // A plain right-CLICK keeps its old meanings: back to 選択 while placing
+    // (Minecraft "empty the hand"), browser menu otherwise.
     this._on(this.canvas, 'contextmenu', (e) => {
+      if (this._suppressCtx) { e.preventDefault(); this._suppressCtx = false; return; }
       if (this.tool !== 'place') return;
       const placing = (this.brush && this.brush.kind !== 'select') || this.wallDraft || this.conveyorDraft;
       if (!placing) return;
@@ -858,19 +906,26 @@ export class Designer {
 
   _onDown(e) {
     const { px, py } = this._pt(e);
-    // Middle button (or Space-less right-drag avoided): pan the camera. Works in
-    // every tool so the user can always reposition the view.
-    if (e.button === 1) {
-      e.preventDefault();
-      this.drag = { mode: 'pan', startPx: px, startPy: py,
-        camCx: this._cam.cx == null ? this.model.layout.bounds.width / 2 : this._cam.cx,
-        camCy: this._cam.cy == null ? this.model.layout.bounds.depth / 2 : this._cam.cy };
+    // Pan the camera (works in every tool so the view is always repositionable):
+    //   middle-drag (CAD habit) / RIGHT-drag (MapMaker habit) /
+    //   Space＋left-drag or the 🖐 hand tool (PowerPoint/Figma habit).
+    if (e.button === 1 || e.button === 2
+        || (e.button === 0 && (this._spaceDown || (this.handTool && this.tool === 'place')))) {
+      if (e.button !== 2) e.preventDefault();
+      this._startPan(px, py, e.button);
       return;
     }
     if (e.button !== 0 && e.button !== undefined) return;
     if (this.tool === 'place') return this._placeDown(px, py, e);
     if (this.tool === 'route') return this._routeDown(px, py);
     if (this.tool === 'flow') return this._flowDown(px, py);
+  }
+  _startPan(px, py, button) {
+    const b = this.model.layout.bounds;
+    this.drag = { mode: 'pan', button, moved: false, startPx: px, startPy: py,
+      camCx: this._cam.cx == null ? b.width / 2 : this._cam.cx,
+      camCy: this._cam.cy == null ? b.depth / 2 : this._cam.cy };
+    if (this.canvas) this.canvas.style.cursor = 'grabbing';
   }
   _onMove(e) {
     if (!this.canvas) return;
@@ -887,8 +942,9 @@ export class Designer {
       if ((this.brush && this.brush.kind !== 'select') || this.wallDraft || this.conveyorDraft) this._repaint();
       return;
     }
-    // Camera pan (middle-drag): no model mutation, no undo entry.
+    // Camera pan (middle/right/Space/hand drag): no model mutation, no undo entry.
     if (this.drag.mode === 'pan') {
+      if (Math.abs(px - this.drag.startPx) + Math.abs(py - this.drag.startPy) > 2) this.drag.moved = true;
       const dxMeters = (px - this.drag.startPx) / this._view.sc;
       const dyMeters = (this.drag.startPy - py) / this._view.sc;  // y flipped
       this._cam = { cx: clamp(this.drag.camCx - dxMeters, 0, b.width),
@@ -899,6 +955,13 @@ export class Designer {
     }
     this.hover = { mx: this._mx(px), my: this._my(py), px, py, shift: !!e.shiftKey };
     this._updateStatus();
+    // Rubber-band marquee (select tool, started on empty floor): pure selection
+    // UI — no model mutation, no undo entry, just track + repaint.
+    if (this.drag.mode === 'marquee') {
+      if (this.marquee) { this.marquee.x1 = this.hover.mx; this.marquee.y1 = this.hover.my; }
+      this._repaint();
+      return;
+    }
     // Shelf drags (create / move / resize) have their own handler.
     if (this.tool === 'place'
         && (this.drag.mode === 'shelfCreate' || this.drag.mode === 'shelfMove' || this.drag.mode === 'shelfResize')) {
@@ -929,6 +992,9 @@ export class Designer {
       // dragged doors stay on the envelope too (project, don't free-place).
       const pos = this._snapDoorPos(this._mx(px), this._my(py));
       o.x = pos.x; o.y = pos.y;
+    } else if (this.drag.mode === 'groupMove') {
+      // PowerPoint group drag: the whole multi-selection moves as one body.
+      this._groupMoveApply(this._mx(px), this._my(py));
     }
     this._drawCanvas();
     this._updateStatus();
@@ -937,7 +1003,19 @@ export class Designer {
   _onUp() {
     if (!this.drag) return;
     const mode = this.drag.mode;
-    if (mode === 'pan') { this.drag = null; return; }
+    if (mode === 'pan') {
+      // a real right-drag pan suppresses the context menu that follows mouseup.
+      if (this.drag.button === 2 && this.drag.moved) this._suppressCtx = true;
+      this.drag = null;
+      if (this.canvas) this.canvas.style.cursor = this._canvasCursor();
+      return;
+    }
+    if (mode === 'marquee') {
+      const additive = !!this.drag.additive;
+      this.drag = null;
+      this._marqueeCommit(additive);
+      return;
+    }
     // a real mutation just ended (create / move / resize) — re-score the rail
     // with the FINAL geometry (the drag-start _pushUndo only saw the old state).
     const mutated = mode !== 'pan';
@@ -979,6 +1057,7 @@ export class Designer {
     else if (this.tool === 'flow') this._flowDown(px, py);
     this.drag = null;  // no touch-drag; a tap should not start a move
     this.shelfDraft = null;  // a tap should not leave a dangling shelf draft
+    this.marquee = null;  // a tap should not leave a dangling rubber-band
   }
 
   // ---- undo/redo (lightweight model snapshots) -----------------------------
@@ -1024,6 +1103,8 @@ export class Designer {
     this.model.routes = clone(snap.routes);
     this.selected = null;
     this.selShelves = new Set();
+    this.selObjs = [];
+    this.marquee = null;
     this.shelfDraft = null;
     this.snapLine = null;
     this.drag = null;
@@ -1052,12 +1133,33 @@ export class Designer {
   // ---- keyboard: Delete removes selection, Esc cancels, Ctrl/⌘+Z undo ------
   _bindKeys() {
     this._on(window, 'keydown', (e) => this._onKey(e));
+    // Space release ends the temporary pan mode (cursor back to the tool's own).
+    this._on(window, 'keyup', (e) => {
+      if (e.code !== 'Space' || !this._spaceDown) return;
+      this._spaceDown = false;
+      if (this.canvas && (!this.drag || this.drag.mode !== 'pan')) {
+        this.canvas.style.cursor = this._canvasCursor();
+      }
+    });
   }
   _onKey(e) {
     // Only act when the Designer is the visible surface and focus isn't in a field.
     if (!this.container || !this.container.isConnected || this.container.offsetParent === null) return;
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    // Space held = temporary hand tool (left-drag pans; the page must not
+    // scroll). Buttons OUTSIDE the designer keep their native Space activation;
+    // inside, pan wins — a toolbar click leaves focus on that button, and
+    // Space＋drag must still pan right after it (Enter still activates).
+    if (e.code === 'Space') {
+      if (tag === 'BUTTON' && !this.container.contains(e.target)) return;
+      if (!this._spaceDown) {
+        this._spaceDown = true;
+        if (this.canvas && !this.drag) this.canvas.style.cursor = 'grab';
+      }
+      e.preventDefault();
+      return;
+    }
     const meta = e.ctrlKey || e.metaKey;
     if (meta && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { e.preventDefault(); this._undo(); return; }
     if (meta && ((e.key === 'z' || e.key === 'Z') && e.shiftKey || e.key === 'y' || e.key === 'Y')) {
@@ -1077,8 +1179,8 @@ export class Designer {
       } else if (this.tool === 'place' && this.brush && this.brush.kind !== 'select') {
         // armed brush → back to 選択 (the Minecraft "empty hand").
         this._setBrush({ kind: 'select' });
-      } else if (this.selShelves && this.selShelves.size) {
-        this.selShelves = new Set(); this._renderTool();
+      } else if ((this.selShelves && this.selShelves.size) || (this.selObjs && this.selObjs.length)) {
+        this.selShelves = new Set(); this.selObjs = []; this._renderTool();
       } else if (this.selected) {
         this.selected = null; this._renderTool();
       }
@@ -1104,6 +1206,9 @@ export class Designer {
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (this.tool === 'place' && this.selObjs && this.selObjs.length) {
+        e.preventDefault(); this._deleteMultiSelection(); return;
+      }
       if (this.tool === 'place' && this.selShelves && this.selShelves.size) {
         e.preventDefault(); this._deleteShelves(); return;
       }
@@ -1205,6 +1310,7 @@ Object.assign(
   renderMethods,
   placeMethods,
   shelfMethods,
+  selectMethods,
   flowMethods,
   routeMethods,
   sideMethods,

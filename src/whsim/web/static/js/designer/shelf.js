@@ -18,9 +18,14 @@ export const shelfMethods = {
   _selectDown(px, py, e) {
     const zs = this.model.layout.zones;
     const mx = this._mx(px), my = this._my(py);
+    // Shift = additive (PowerPoint): toggle the hit object in/out of the
+    // multi-selection instead of replacing it. (Ctrl stays the no-snap key.)
+    const additive = !!(e && e.shiftKey);
 
-    // 1) shelf control points (resize of an existing shelf selection)
-    if (this.selShelves.size) {
+    // 1) shelf control points (resize of an existing shelf selection).
+    //    Suppressed for a MIXED multi-selection — resizing shelves while zones/
+    //    equipment are co-selected would silently distort only part of the group.
+    if (this.selShelves.size && !(this.selObjs && this.selObjs.length)) {
       const cp = this._controlAt(px, py);
       if (cp) {
         this._pushUndo();
@@ -43,8 +48,16 @@ export const shelfMethods = {
     const hitSt = (this.model.resources.stations || []).find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 14);
     if (hitEq || hitSt) {
       const o = hitEq || hitSt;
+      const kind = hitEq ? 'equip' : 'station';
+      if (additive) { this._toggleMultiObj(kind, o.id); return; }
+      // part of a multi-selection → the whole group moves together.
+      if (this._inMultiSel(kind, o.id) && this._multiCount() > 1) {
+        this._groupMoveStart(mx, my);
+        return;
+      }
       this.selShelves = new Set();
-      this.selected = { kind: hitEq ? 'equip' : 'station', id: o.id };
+      this.selObjs = [];
+      this.selected = { kind, id: o.id };
       this.drag = { mode: 'moveObj', kind: this.selected.kind, id: o.id };
       this._renderSide(); this._drawCanvas(); this._updateStatus();
       return;
@@ -53,7 +66,13 @@ export const shelfMethods = {
     // 3) doors
     const hitDoor = (this.model.layout.doors || []).find((q) => Math.hypot(this._X(q.x) - px, this._Y(q.y) - py) <= 12);
     if (hitDoor) {
+      if (additive) { this._toggleMultiObj('door', hitDoor.id); return; }
+      if (this._inMultiSel('door', hitDoor.id) && this._multiCount() > 1) {
+        this._groupMoveStart(mx, my);
+        return;
+      }
       this.selShelves = new Set();
+      this.selObjs = [];
       this.selected = { kind: 'door', id: hitDoor.id };
       this.drag = { mode: 'moveDoor', id: hitDoor.id };
       this._renderSide(); this._drawCanvas(); this._updateStatus();
@@ -63,8 +82,10 @@ export const shelfMethods = {
     // 4) shelves (Shift = add/remove from the multi-selection)
     const hit = this._shelfAt(px, py);
     if (hit) {
-      const additive = e && e.shiftKey;
-      if (!additive && !this.selShelves.has(hit.sh.id)) this.selShelves = new Set();
+      if (!additive && !this.selShelves.has(hit.sh.id)) {
+        this.selShelves = new Set();
+        this.selObjs = [];
+      }
       if (additive && this.selShelves.has(hit.sh.id)) {
         this.selShelves.delete(hit.sh.id);
         this.selected = null; this._renderSide(); this._repaint(); this._updateStatus();
@@ -72,7 +93,16 @@ export const shelfMethods = {
       }
       this.selShelves.add(hit.sh.id);
       this.shelfZoneId = hit.zone.id;
+      // Shift-adding a shelf while a zone/equipment is singly selected promotes
+      // that selection into the multi union (PowerPoint keeps both selected).
+      if (additive && this.selected) this._migrateSelectedToMulti();
       this.selected = null;
+      // MIXED selection (shelves + zones/equipment): the whole group moves.
+      if (this.selObjs && this.selObjs.length) {
+        this._groupMoveStart(mx, my);
+        this._renderSide(); this._repaint(); this._updateStatus();
+        return;
+      }
       this._pushUndo();
       const items = this._selShelfObjs().map(({ sh }) => ({ sh, ox: sh.x, oy: sh.y }));
       this.drag = { mode: 'shelfMove', items, downX: mx, downY: my, _snapped: true };
@@ -80,10 +110,11 @@ export const shelfMethods = {
       return;
     }
 
-    // 5) walls
+    // 5) walls (single-select only — excluded from the multi union)
     const hitWall = this._wallHit(px, py);
     if (hitWall) {
       this.selShelves = new Set();
+      this.selObjs = [];
       this.selected = { kind: 'wall', id: hitWall.id };
       this._renderSide(); this._drawCanvas(); this._updateStatus();
       return;
@@ -105,7 +136,13 @@ export const shelfMethods = {
     for (let i = zs.length - 1; i >= 0; i--) {
       const z = zs[i];
       if (mx >= z.x && mx <= z.x + z.w && my >= z.y && my <= z.y + z.h) {
+        if (additive) { this._toggleMultiObj('zone', z.id); return; }
+        if (this._inMultiSel('zone', z.id) && this._multiCount() > 1) {
+          this._groupMoveStart(mx, my);
+          return;
+        }
         this.selShelves = new Set();
+        this.selObjs = [];
         this.selected = { kind: 'zone', id: z.id };
         this.drag = { mode: 'move', id: z.id, dx: mx - z.x, dy: my - z.y };
         this._renderSide(); this._drawCanvas(); this._updateStatus();
@@ -113,9 +150,15 @@ export const shelfMethods = {
       }
     }
 
-    // empty space: clear all selection
-    this.selShelves = new Set();
-    this.selected = null;
+    // empty space: clear the selection (unless Shift-extending) and start the
+    // PowerPoint rubber-band — mouseup multi-selects everything it touched.
+    if (!additive) {
+      this.selShelves = new Set();
+      this.selObjs = [];
+      this.selected = null;
+    }
+    this.marquee = { x0: mx, y0: my, x1: mx, y1: my };
+    this.drag = { mode: 'marquee', additive };
     this._renderSide(); this._drawCanvas(); this._updateStatus();
   },
   // --- edge snapping (port of MapInputHandler.snapX/snapY + point hints) ---

@@ -44,7 +44,10 @@ export const renderMethods = {
 
     const dim = this.tool === 'route';   // zones rendered faintly under routes
     for (const z of this.model.layout.zones) {
-      const sel = this.tool === 'place' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
+      const selSingle = this.tool === 'place' && this.selected && this.selected.kind === 'zone' && this.selected.id === z.id;
+      // multi-selected zones get the selected outline, but no resize handle
+      // (only a single selection exposes the zone's resize affordance).
+      const sel = selSingle || (this.tool === 'place' && this._inMultiSel('zone', z.id));
       const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
       ctx.fillStyle = hexA(color, dim ? 0.12 : (sel ? 0.42 : 0.3));
       ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
@@ -58,8 +61,8 @@ export const renderMethods = {
       ctx.fillStyle = dim ? P.inkDim : P.ink;
       ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(ZONE_JP[z.type] || z.type, this._X(z.x + z.w / 2), this._Y(z.y + z.h / 2));
-      // resize handle + live size badge when selected
-      if (sel) {
+      // resize handle + live size badge when (singly) selected
+      if (selSingle) {
         ctx.fillStyle = P.sel;
         ctx.fillRect(this._X(z.x + z.w) - HANDLE, this._Y(z.y) - HANDLE, HANDLE, HANDLE);
         this._sizeBadge(z);
@@ -71,7 +74,7 @@ export const renderMethods = {
     if (this.tool === 'place') {
       for (const w of this.model.layout.walls) this._drawWall(w.points, w.thickness, this._isSel('wall', w.id), false);
       if (this.wallDraft) this._drawWallDraft();
-      for (const d of this.model.layout.doors) this._drawDoor(d, this._isSel('door', d.id));
+      for (const d of this.model.layout.doors) this._drawDoor(d, this._isSel('door', d.id) || this._inMultiSel('door', d.id));
     }
 
     // conveyors (under equipment glyphs)
@@ -80,10 +83,10 @@ export const renderMethods = {
 
     // equipment + stations as CAD-style top-view glyphs (real-meter footprints)
     for (const e of this.model.resources.equipment) {
-      this._drawEquipGlyph(e, this._isSel('equip', e.id));
+      this._drawEquipGlyph(e, this._isSel('equip', e.id) || this._inMultiSel('equip', e.id));
     }
     for (const s of this.model.resources.stations) {
-      this._drawStationGlyph(s, this._isSel('station', s.id));
+      this._drawStationGlyph(s, this._isSel('station', s.id) || this._inMultiSel('station', s.id));
     }
 
     // 動線 tool: walkable lane network + walls for context + route polylines
@@ -127,6 +130,25 @@ export const renderMethods = {
     this._drawSelectionChrome();
     // M2 shelf editor chrome (bbox + control points + snap guides + draft rect).
     this._drawShelfChrome();
+    // PowerPoint rubber-band rectangle while multi-selecting.
+    if (this.tool === 'place' && this.marquee) this._drawMarquee();
+  },
+  // ---- marquee (rubber-band multi-select) rectangle --------------------------
+  _drawMarquee() {
+    const m = this.marquee;
+    if (!m) return;
+    const ctx = this.ctx;
+    const CY = '#34E3FF';                           // same accent as the selection chrome
+    const x0 = this._X(Math.min(m.x0, m.x1)), x1 = this._X(Math.max(m.x0, m.x1));
+    const y0 = this._Y(Math.max(m.y0, m.y1)), y1 = this._Y(Math.min(m.y0, m.y1));
+    ctx.save();
+    ctx.fillStyle = hexA(CY, 0.08);
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.strokeStyle = CY;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
   },
   // ---- CAD grid (1m minor, 5m major) ----------------------------------------
   _drawGrid() {
@@ -543,8 +565,10 @@ export const renderMethods = {
         this._label((x0 + x1) / 2, y0 - 14, `${wM.toFixed(2)} × ${hM.toFixed(2)} m`);
       }
     }
-    // selection bbox + control points
-    const bb = this._selBBox();
+    // selection bbox + control points — shelf-only selections. A MIXED multi
+    // selection (selObjs non-empty) shows per-object outlines instead; resize
+    // handles would only act on the shelves, which reads as a bug.
+    const bb = (this.selObjs && this.selObjs.length) ? null : this._selBBox();
     if (bb) {
       const x0 = this._X(bb.l), x1 = this._X(bb.r);
       const yTop = this._Y(bb.t), yBot = this._Y(bb.b);

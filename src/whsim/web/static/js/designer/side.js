@@ -18,12 +18,24 @@ export const sideMethods = {
   _renderSide() {
     if (!this.side) return;
     const s = this.side; s.innerHTML = '';
+    // PowerPoint-style multi-selection (marquee / Shift-click across object
+    // kinds) gets its own group panel; shelves-only keeps the rich M2 editor.
+    if (this.selObjs && this.selObjs.length) { this._sideMulti(s); return; }
     if (this.selShelves && this.selShelves.size) { this._sideShelf(s); return; }
     const k = this.selected && this.selected.kind;
     if (k === 'zone') this._sideLayout(s);
     else if (k === 'wall' || k === 'door') this._sideBuilding(s);
     else if (k === 'equip' || k === 'station') this._sideEquip(s);
     else this._sideFloor(s);
+  },
+  // ---- multi-selection inspector: count + type breakdown + group actions ----
+  _sideMulti(s) {
+    const n = this._multiCount();
+    this._h(s, `${n}個選択中`);
+    const breakdown = this._multiBreakdown();
+    if (breakdown) this._note(s, `内訳: ${breakdown}`);
+    this._note(s, 'ドラッグでまとめて移動できます。Shift＋クリックで追加/解除、Escで選択解除。');
+    this._btn(s, '削除', () => this._deleteMultiSelection(), 'margin-top:10px;color:var(--bad);');
   },
   // ---- no-selection inspector: floor settings + active drafts ---------------
   _sideFloor(s) {
