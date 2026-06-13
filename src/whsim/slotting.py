@@ -19,6 +19,9 @@ def assign_inventory(model: WarehouseModel, strategy: str = "abc") -> dict:
     strategy:
       "abc"      -- fastest movers (highest pick_freq) nearest the pack station
       "compact"  -- fill locations in id order (simple, keeps SKUs together)
+      "optimize" -- velocity×distance-greedy travel optimiser (delegates to
+                    slottingopt); minimises Σ pick_freq·distance with golden-zone /
+                    cube awareness and reports the BEFORE/AFTER distance reduction.
     Locations beyond the SKU count stay empty; SKUs beyond the location count are
     left unassigned (reported), so the result is honest about capacity.
     """
@@ -27,6 +30,25 @@ def assign_inventory(model: WarehouseModel, strategy: str = "abc") -> dict:
         return {"assigned": 0, "locations": len(storage), "skus": len(model.items),
                 "unassigned": len(model.items), "fill_rate": 0.0, "strategy": strategy,
                 "message": "ロケーションまたは商品データがありません。"}
+
+    if strategy == "optimize":
+        from whsim import slottingopt
+        plan = slottingopt.optimize(model)
+        placed = slottingopt.apply_plan(model, plan)
+        return {
+            "assigned": placed,
+            "locations": len(storage),
+            "skus": len(model.items),
+            "unassigned": plan.unplaced,
+            "fill_rate": round(placed / len(storage), 3) if storage else 0.0,
+            "strategy": strategy,
+            "before_weighted_distance": round(plan.before, 2),
+            "after_weighted_distance": round(plan.after, 2),
+            "reduction_pct": round(plan.reduction_pct, 4),
+            "message": (f"{placed}SKUを最適割付。加重歩行距離を"
+                        f"{round(plan.reduction_pct * 100)}%短縮。"
+                        + (f" 容量不足で{plan.unplaced}SKU未割付。" if plan.unplaced else "")),
+        }
 
     station = model.resources.stations[0] if model.resources.stations else None
     ref = (station.x, station.y) if station else (0.0, 0.0)

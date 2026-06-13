@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 
 from whsim import analytic
 
-from ._common import _analysis_payload, _open
+from ._common import Source, _analysis_payload, _open
 
 router = APIRouter()
 
@@ -347,6 +347,54 @@ def api_analysis(name: str):
         metrics = analytic.estimate(model)
         source = "estimate"
     return _analysis_payload(model, metrics, source)
+
+
+@router.get("/api/projects/{name}/slotting")
+def api_slotting(name: str):
+    """棚割り: current weighted pick-distance, the optimisation preview (BEFORE vs
+    AFTER + top SKU moves), and the storage-strategy recommendation — all analytic
+    (no sim, no mutation). 'never blocks': a bare model returns placed=0 / strategy
+    available=false rather than an error."""
+    from whsim import slottingopt, storagestrategy
+    model = _open(name).load_model()
+    plan = slottingopt.optimize(model)
+    return {
+        "optimization": slottingopt.plan_summary(plan),
+        "strategy": storagestrategy.recommend(model),
+    }
+
+
+@router.post("/api/projects/{name}/slotting/apply")
+def api_slotting_apply(name: str, payload: dict | None = None):
+    """棚割りを最適化して適用: write the optimised pegging onto item.default_location
+    / loc.sku (NEVER the schema), persist, and mark locations as INTERVIEW-sourced.
+    Returns the same summary as GET plus the placed count."""
+    from whsim import slottingopt
+    proj = _open(name)
+    model = proj.load_model()
+    plan = slottingopt.optimize(model)
+    placed = slottingopt.apply_plan(model, plan)
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("locations", Source.INTERVIEW)
+    proj.save_provenance(prov)
+    summary = slottingopt.plan_summary(plan)
+    summary["applied"] = placed
+    summary["message"] = (
+        f"{placed}SKUを最適スロットに割付。加重歩行距離を"
+        f"{round(plan.reduction_pct * 100)}%短縮しました。"
+        if plan.reduction > 0 else f"{placed}SKUを割付しました。"
+    )
+    return summary
+
+
+@router.get("/api/projects/{name}/storage-strategy")
+def api_storage_strategy(name: str, active_days: float | None = None):
+    """保管戦略: フリーロケ vs 固定ロケ(リザーブ＋アクティブ) を velocity/cube/turnover
+    から per-SKU + 全体で推奨。補充回数/日と 歩行短縮 vs 補充工数 のトレードオフ付き。"""
+    from whsim import storagestrategy
+    params = {"active_days": active_days} if active_days is not None else {}
+    return storagestrategy.recommend(_open(name).load_model(), params)
 
 
 @router.get("/api/projects/{name}/scorecard")
