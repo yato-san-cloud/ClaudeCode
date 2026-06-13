@@ -89,16 +89,19 @@ const IHUB_CSS = `
   color:var(--ink-primary);font:inherit;font-size:11px;font-weight:600;
   padding:3px 12px;border-radius:var(--r-pill);cursor:pointer}
 .ihub-pick:hover{border-color:var(--accent)}
-.ihub-kinds{display:flex;gap:4px;flex-wrap:wrap}
-.ihub-kind{flex:0 0 auto;border:1px solid var(--line-soft);background:var(--bg-sunken);
-  color:var(--ink-secondary);font:inherit;font-size:11px;font-weight:600;
-  padding:3px 11px;border-radius:var(--r-pill);cursor:pointer;
-  transition:background var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),
-    border-color var(--dur-1) var(--ease-out)}
-.ihub-kind:hover{border-color:var(--accent)}
-.ihub-kind.is-on{background:var(--accent);border-color:var(--accent);
-  color:var(--ink-onAccent);font-weight:700}
-.ihub-kind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* 実績データ card: 出荷/入荷/在庫 are three always-visible stacked drop rows
+   (no kind toggle — the vertical space was there, so each kind keeps its own
+   target + its own "last import" status line). */
+.ihub-rowwrap{display:flex;flex-direction:column;gap:2px}
+.ihub-drop-row{flex-direction:row;align-items:center;gap:8px;min-height:36px;
+  padding:5px 9px;text-align:left}
+.ihub-drop-row .ihub-drop-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.ihub-row-ico{flex:0 0 auto;font-size:14px;line-height:1}
+.ihub-rst{font-size:10px;line-height:1.5;color:var(--ink-tertiary);margin:0 2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:15px}
+.ihub-rst.is-ok{color:var(--ok-ink)}
+.ihub-rst.is-err{color:var(--bad)}
 .ihub-mini{display:flex;flex-wrap:wrap;gap:4px}
 .ihub-mini button{flex:0 0 auto;border:1px solid var(--line-soft);background:transparent;
   color:var(--ink-secondary);font:inherit;font-size:10.5px;font-weight:600;
@@ -161,8 +164,8 @@ export function mountOverview(el, opts = {}) {
   el.innerHTML = '';
   el.appendChild(root);
 
-  let mode = null;            // 'empty' | 'hub' — what the DOM is built for
-  let actualKind = 'shipments'; // 実績データ card segment: shipments|inbound|master(在庫)
+  let mode = null;          // 'empty' | 'hub' — what the DOM is built for
+  let pendingKind = 'shipments'; // which 実績 row opened the shared tableInput picker
 
   // ---- persistent-node adoption --------------------------------------------
   function parkAssets() {
@@ -180,11 +183,18 @@ export function mountOverview(el, opts = {}) {
   }
 
   // ---- file routing ----------------------------------------------------------
-  function routeActual(f) {
-    if (actualKind === 'shipments') uploadShipments(f);
-    else uploadTable(f, actualKind);
+  // One upload call per 実績 kind (the rows are explicit now — no toggle state).
+  function uploadActual(kind, f) {
+    if (kind === 'shipments') return uploadShipments(f);
+    if (kind === 'inbound') return uploadTable(f, 'inbound');
+    return uploadTable(f, 'master', 'stock'); // 在庫実績 row (INVENTORY columns)
   }
-  function dropRoute(cat, f) {
+  // Rows accept MULTIPLE files (e.g. 12 monthly 出荷実績 at once) — uploaded
+  // sequentially so the log/status stay readable and the server isn't slammed.
+  async function dropRoute(cat, files) {
+    const list = Array.from(files || []);
+    if (!list.length) return undefined;
+    const f = list[0];
     const n = String(f.name || '').toLowerCase();
     if (cat === 'layout') {
       if (n.endsWith('.dxf')) return uploadCad(f);
@@ -194,13 +204,21 @@ export function mountOverview(el, opts = {}) {
       if (n.endsWith('.csv')) return uploadMapcsv(f); // MapMaker 地図CSV
       return toast('未対応の形式です（.dxf / .rmpm / .json / 地図CSV / .zip）。', 'error');
     }
-    if (cat === 'actual') {
-      if (n.endsWith('.zip')) return uploadZip(f);
-      if (TABLE_EXT.test(n)) return routeActual(f);
-      return toast('CSV / Excel（.csv / .xlsx / .xls）をドロップしてください。', 'error');
+    if (cat === 'actual' || cat === 'inbound' || cat === 'stock') {
+      const kind = cat === 'actual' ? 'shipments' : cat === 'inbound' ? 'inbound' : 'master';
+      for (const file of list) {
+        const fn = String(file.name || '').toLowerCase();
+        if (fn.endsWith('.zip')) { await uploadZip(file); continue; }
+        if (!TABLE_EXT.test(fn)) {
+          toast(`${file.name}: CSV / Excel（.csv / .xlsx / .xls）をドロップしてください。`, 'error');
+          continue;
+        }
+        await uploadActual(kind, file);
+      }
+      return undefined;
     }
     if (cat === 'items') {
-      if (TABLE_EXT.test(n)) return uploadTable(f, 'master');
+      if (TABLE_EXT.test(n)) return uploadTable(f, 'master', 'items');
       return toast('CSV / Excel（.csv / .xlsx / .xls）をドロップしてください。', 'error');
     }
     return undefined;
@@ -215,16 +233,17 @@ export function mountOverview(el, opts = {}) {
       distInput: (f) => uploadDistances(f),
       mapcsvInput: (f) => uploadMapcsv(f),
       rmpmInput: (f) => uploadRmpm(f),
-      tableInput: (f) => routeActual(f),
-      itemsInput: (f) => uploadTable(f, 'master'),
+      tableInput: (f) => uploadActual(pendingKind, f),
+      itemsInput: (f) => uploadTable(f, 'master', 'items'),
     };
     for (const [id, fn] of Object.entries(routes)) {
       const inp = document.getElementById(id);
       if (!inp) continue;
-      inp.onchange = () => {
-        const f = inp.files && inp.files[0];
-        if (f) fn(f);
+      inp.onchange = async () => {
+        // tableInput allows multiple (monthly files) — upload sequentially.
+        const files = Array.from(inp.files || []);
         inp.value = '';
+        for (const f of files) await fn(f);
       };
     }
   }
@@ -275,6 +294,7 @@ export function mountOverview(el, opts = {}) {
   // ---- build: hub skeleton (per project; statuses prefilled from 履歴) --------
   function buildHub() {
     parkAssets();
+    // The 実績データ card carries a status line per ROW, so no card-level slot.
     const card = (cat, ico, title, descr, body) =>
       `<section class="ihub-card" data-cat="${cat}">
          <header class="ihub-ch">
@@ -282,7 +302,8 @@ export function mountOverview(el, opts = {}) {
            <div><div class="ihub-t">${esc(title)}</div><div class="ihub-d">${esc(descr)}</div></div>
          </header>
          <div class="ihub-cb">${body}</div>
-         ${cat === 'base' ? '' : `<div class="ihub-st" data-ihub-status="${cat}">未取込</div>`}
+         ${cat === 'base' || cat === 'actual' ? ''
+    : `<div class="ihub-st" data-ihub-status="${cat}">未取込</div>`}
        </section>`;
 
     const drop = (cat, label, pick) =>
@@ -290,6 +311,19 @@ export function mountOverview(el, opts = {}) {
             aria-label="${esc(label)}（ドラッグ&ドロップまたはファイル選択）">
          <span class="ihub-drop-t">${esc(label)}</span>
          <button type="button" class="ihub-pick" data-pick="${pick}">ファイルを選択</button>
+       </div>`;
+
+    // 出荷/入荷/在庫: stacked rows, each its own drop target + status line —
+    // no toggle to flip (タブ切替が面倒, per direct user feedback).
+    const actualRow = (cat, ico, label, kind) =>
+      `<div class="ihub-rowwrap">
+         <div class="ihub-drop ihub-drop-row" data-drop="${cat}" tabindex="0" role="button"
+              aria-label="${esc(label)}（ドラッグ&ドロップまたはファイル選択）">
+           <span class="ihub-row-ico" aria-hidden="true">${ico}</span>
+           <span class="ihub-drop-t">${esc(label)}</span>
+           <button type="button" class="ihub-pick" data-pickkind="${kind}">選択</button>
+         </div>
+         <div class="ihub-rst" data-ihub-status="${cat}">未取込</div>
        </div>`;
 
     root.innerHTML =
@@ -309,12 +343,10 @@ export function mountOverview(el, opts = {}) {
          </div>
        </div>
        <div class="ihub-grid">
-         ${card('actual', '📦', '実績データ', '出荷・入荷・在庫（CSV / Excel）',
-    `<div class="ihub-kinds" role="radiogroup" aria-label="実績データの種別">
-            <button type="button" class="ihub-kind is-on" data-kind="shipments" aria-pressed="true">出荷</button>
-            <button type="button" class="ihub-kind" data-kind="inbound" aria-pressed="false">入荷</button>
-            <button type="button" class="ihub-kind" data-kind="master" aria-pressed="false">在庫</button>
-          </div>` + drop('actual', 'CSV / Excel をドロップ', 'tableInput'))}
+         ${card('actual', '📦', '実績データ', '出荷・入荷・在庫（CSV / Excel・複数まとめてドロップ可）',
+    actualRow('actual', '📦', '出荷実績', 'shipments')
+          + actualRow('inbound', '🚚', '入荷実績', 'inbound')
+          + actualRow('stock', '📊', '在庫実績', 'master'))}
          ${card('items', '🏷️', '商品マスタ', '品番・入数・名称・ABC（CSV / Excel）',
     drop('items', 'CSV / Excel をドロップ', 'itemsInput')
           + `<button type="button" id="genMissingBtn" class="ihub-gen"
@@ -340,15 +372,13 @@ export function mountOverview(el, opts = {}) {
   }
 
   function wireHub() {
-    // segment toggle (実績データの種別)
-    root.querySelectorAll('.ihub-kind').forEach((b) => {
-      b.onclick = () => {
-        actualKind = b.dataset.kind || 'shipments';
-        root.querySelectorAll('.ihub-kind').forEach((x) => {
-          const on = x === b;
-          x.classList.toggle('is-on', on);
-          x.setAttribute('aria-pressed', on ? 'true' : 'false');
-        });
+    // 実績 row pick buttons share #tableInput; remember which row opened it.
+    root.querySelectorAll('[data-pickkind]').forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();  // don't double-trigger via the surrounding dropzone
+        pendingKind = b.dataset.pickkind || 'shipments';
+        const inp = document.getElementById('tableInput');
+        if (inp) inp.click();
       };
     });
     // pick buttons → hidden persistent inputs
@@ -374,8 +404,8 @@ export function mountOverview(el, opts = {}) {
         e.preventDefault(); dz.classList.remove('drag');
       }));
       dz.addEventListener('drop', (e) => {
-        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-        if (f) dropRoute(cat, f);
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) dropRoute(cat, files);
       });
     });
     // 不足データを生成 (imports.js owns the busy state via #genMissingBtn)
@@ -387,7 +417,7 @@ export function mountOverview(el, opts = {}) {
   // Prefill each card's status line from the latest matching 履歴 entry, so the
   // "last import" survives reloads (live imports then overwrite via mark()).
   function prefillStatuses() {
-    for (const cat of ['actual', 'items', 'layout']) {
+    for (const cat of ['actual', 'inbound', 'stock', 'items', 'layout']) {
       const st = root.querySelector(`[data-ihub-status="${cat}"]`);
       if (!st) continue;
       const e = hist.latest(cat);

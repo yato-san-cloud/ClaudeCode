@@ -95,7 +95,11 @@ class Project:
 
     # --- lifecycle ------------------------------------------------------------
     @classmethod
-    def create(cls, name: str, template_id: str, base: Path = PROJECTS_DIR) -> "Project":
+    def create(cls, name: str, template_id: str, base: Path | None = None) -> "Project":
+        # base=None → resolve PROJECTS_DIR at CALL time, not as a captured default,
+        # so tests that monkeypatch whsim.project.PROJECTS_DIR are actually
+        # honoured and never leak projects into the real workspace.
+        base = PROJECTS_DIR if base is None else base
         slug = safe_name(name)
         model = templates.load_template_model(template_id)
         model.meta.name = name
@@ -121,7 +125,8 @@ class Project:
         return proj
 
     @classmethod
-    def open(cls, name: str, base: Path = PROJECTS_DIR) -> "Project":
+    def open(cls, name: str, base: Path | None = None) -> "Project":
+        base = PROJECTS_DIR if base is None else base  # lazy: honour monkeypatches
         root = base / safe_name(name)
         if not (root / "project.json").is_file():
             raise FileNotFoundError(f"no project named {name!r} under {base}")

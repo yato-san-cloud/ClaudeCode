@@ -150,7 +150,8 @@ async def api_import_shipments(name: str, shipments: UploadFile,
         except Exception:  # noqa: BLE001 — master is optional; never fail the import
             items_df = None
 
-    result = ingest.ingest_shipments(_open(name), mapped, items_df)
+    proj = _open(name)
+    result = ingest.ingest_shipments(proj, mapped, items_df)
     # Surface the resolved column mapping (label → matched source column) so the
     # client can confirm/trust the auto-紐付け. None means "not found".
     src_by_key = {f.key: f.label for f in SHIPMENT_FIELDS}
@@ -160,7 +161,54 @@ async def api_import_shipments(name: str, shipments: UploadFile,
         ilabel = {f.key: f.label for f in ITEM_FIELDS}
         result["item_mapping"] = [{"field": ilabel[k], "column": v}
                                   for k, v in item_map.items() if k in ilabel]
+    if result.get("ok"):
+        # Persist the mapped table + its 紐付け/クレンジング so ②分析「物量サマリ」
+        # can re-analyse the project's own data without a re-upload.
+        from whsim.analysis import tablestore
+        tablestore.save_table(proj, "shipments", mapped, {
+            "filename": shipments.filename,
+            "mapping": result.get("mapping"),
+            "item_mapping": result.get("item_mapping"),
+            "cleansing": (result.get("summary") or {}).get("cleansing"),
+        })
     return result
+
+
+@router.get("/api/projects/{name}/analysis/bundle")
+def api_project_analysis_bundle(name: str):
+    """②分析「物量サマリ」 on the PROJECT's own imported data — no re-upload.
+
+    Prefers the persisted import tables (``analysis/<key>.csv``, exact columns
+    the user shipped); falls back to reconstructing a shipments frame from
+    ``model.orders.outbound`` for projects ingested before tables were saved.
+    Returns ``{"available": false}`` when the project has no demand data yet
+    (the UI then points at ①取込) — never an error."""
+    import pandas as pd  # noqa: F401 — report/ingest need pandas importable
+
+    from whsim.analysis import ingest, report, tablestore
+    proj = _open(name)
+    ship = tablestore.load_saved_table(proj, "shipments")
+    src = "project"
+    if ship is None:
+        model = proj.load_model()
+        ship = ingest.orders_to_frame(model.orders.outbound)
+        src = "project(model)"
+        if ship.empty:
+            return {"available": False}
+    inb = tablestore.load_saved_table(proj, "inbound")
+    inv = tablestore.load_saved_table(proj, "inventory")
+    bundle = report.run_all(ship, inb, inv)
+    bundle["available"] = True
+    bundle["source"] = src
+    bundle["meta"] = tablestore.load_meta(proj)
+    # Honesty flag: template orders are PROVISIONAL — the UI must label the
+    # dashboard 仮データ rather than claim it shows imported 実データ.
+    try:
+        v = proj.load_provenance().subtrees.get("orders")
+        bundle["orders_imported"] = getattr(v, "value", v) in ("imported", "interview")
+    except Exception:  # noqa: BLE001 — labelling only, never blocks the bundle
+        bundle["orders_imported"] = False
+    return bundle
 
 
 @router.get("/api/projects/{name}/storage")

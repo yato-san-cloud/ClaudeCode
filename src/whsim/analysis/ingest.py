@@ -163,6 +163,24 @@ def build_orders(df: pd.DataFrame) -> tuple[list[Order], list[Item], dict]:
     return orders, items, summary
 
 
+def orders_to_frame(orders) -> pd.DataFrame:
+    """Inverse of ``build_orders`` (lossy but analysis-grade): model outbound
+    orders → a standard shipments frame (date/timestamp/sku/qty/order_id).
+
+    ``arrival_s`` is Monday-anchored (see module docstring), so re-anchoring on
+    any fixed Monday reproduces the true weekday/hour shape; absolute dates are
+    synthetic. Used as the fallback when no saved import table exists (projects
+    ingested before tables were persisted)."""
+    rows = []
+    anchor = pd.Timestamp("2024-01-01")  # a Monday — weekday()==0
+    for o in orders or []:
+        dt = anchor + pd.to_timedelta(float(o.arrival_s or 0.0), unit="s")
+        for ln in o.lines:
+            rows.append({"date": dt.normalize(), "timestamp": dt,
+                         "sku": ln.sku, "qty": ln.qty, "order_id": o.order_id})
+    return pd.DataFrame(rows)
+
+
 def item_master(df: pd.DataFrame | None) -> dict[str, dict]:
     """商品マスタ frame → {sku: {name?, case_qty?, abc_class?}} (cleaned). Empty on
     None/empty. case_qty is coerced to a positive int; ABC normalised to A/B/C.

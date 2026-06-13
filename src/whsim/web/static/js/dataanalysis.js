@@ -107,13 +107,35 @@ function injectStyle() {
     text-transform:uppercase;margin-bottom:7px}
   .da-kpi .v{font-size:var(--fs-title);font-weight:700;color:var(--ink-primary,#16202e);line-height:1.05}
   .da-kpi .v small{font-size:var(--fs-sm);font-weight:500;color:var(--ink-secondary,#52677c)}
-  .da-cards{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)}
-  @media(max-width:900px){.da-cards{grid-template-columns:1fr}}
+  /* Full-bleed dashboard: a 6-track grid so each chart row fills the viewport
+     width (trend+weekday / ABC+hour), with chart heights tied to the viewport
+     so the 全体感 is visible without scrolling on a normal screen. */
+  .da-cards{display:grid;grid-template-columns:repeat(6,1fr);gap:var(--sp-3)}
+  .da-card.sp4{grid-column:span 4}.da-card.sp2{grid-column:span 2}
+  .da-card.sp6,.da-card.full{grid-column:1/-1}
+  @media(max-width:1100px){.da-card.sp4,.da-card.sp2{grid-column:1/-1}}
   .da-card{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
-    border-radius:14px;padding:var(--sp-5)}
+    border-radius:14px;padding:var(--sp-5);min-width:0}
   .da-card h3{margin:0 0 14px;font-size:var(--fs-body);font-weight:600;color:var(--ink-primary,#16202e)}
   .da-ec{width:100%}
   .da-ins{display:flex;flex-direction:column;gap:9px}
+  /* ── 自動インサイト: compact collapsible strip (collapsed by default) ── */
+  .da-insx{border:1px solid var(--line,rgba(120,140,170,.18));border-radius:12px;
+    background:var(--bg-panel,#f7f6f3)}
+  .da-insx>summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;
+    padding:8px 14px;font-size:var(--fs-sm,12.5px);font-weight:600;color:var(--ink-primary,#16202e);
+    list-style:none;user-select:none}
+  .da-insx>summary::-webkit-details-marker{display:none}
+  .da-insx>summary::after{content:"▸";margin-left:auto;color:var(--ink-tertiary,#8195a8);
+    transition:transform var(--dur-1,.12s) var(--ease-out,ease)}
+  .da-insx[open]>summary::after{transform:rotate(90deg)}
+  .da-insx-chip{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-micro,10.5px);
+    font-weight:700;border-radius:999px;padding:2px 9px;border:1px solid var(--line,rgba(120,140,170,.18));
+    background:var(--bg-app,#fff)}
+  .da-insx-top{font-weight:500;color:var(--ink-secondary,#52677c);font-size:var(--fs-xs,12px);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46ch}
+  .da-insx-body{padding:4px 12px 12px}
+  @media(prefers-reduced-motion:reduce){.da-insx>summary::after{transition:none}}
   .da-i{display:flex;gap:11px;padding:11px 13px;border-radius:11px;border:1px solid var(--line,rgba(120,140,170,.18));
     background:var(--bg-app,#fff);border-left-width:4px}
   .da-i .ico{font-size:var(--fs-section);line-height:1.3}
@@ -126,15 +148,6 @@ function injectStyle() {
   .da-chart-empty{display:flex;align-items:center;justify-content:center;min-height:120px;
     color:var(--ink-tertiary,#8195a8);font-size:var(--fs-sm)}
   .da-src{font-size:var(--fs-micro);color:var(--ink-tertiary,#8195a8);font-family:monospace}
-  /* ── one-click ingest banner (upload → project orders) ── */
-  .da-ingest{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-    background:var(--ok-tint,rgba(52,227,160,.08));border:1px solid var(--ok-line,rgba(52,227,160,.3));
-    border-left:4px solid var(--ok,#34c97a);border-radius:12px;padding:12px 16px}
-  .da-ingest-t{font-size:var(--fs-sm,12.5px);color:var(--ink-secondary,#52677c);min-width:240px;flex:1}
-  .da-ingest-t b{color:var(--ink-primary,#16202e)}
-  .da-ingest-sub{display:block;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);margin-top:2px}
-  .da-ingest .da-btn{white-space:nowrap}
-  .da-ingest .da-btn[data-act="master"]{margin-left:auto}
   /* 取込項目の紐付け確認 (column-mapping transparency) */
   .da-map{border:1px solid var(--line,rgba(120,140,170,.18));border-radius:12px;
     padding:10px 14px;background:var(--bg-panel,#f7f6f3)}
@@ -152,13 +165,6 @@ function injectStyle() {
   .da-clean-chip.warn{border-color:var(--warn,#f5b05a)} .da-clean-chip.warn b{color:var(--warn,#b7791f)}
   .da-clean-chip.bad{border-color:var(--bad,#c4453f)} .da-clean-chip.bad b{color:var(--bad,#c4453f)}
   .da-clean-note{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);margin-top:5px}
-  /* ── drag-and-drop affordance (drop a CSV/Excel anywhere on the panel) ── */
-  #dataanalysis.da-drag, .da-drag{position:relative}
-  .da-drag::after{content:"⤓ ここにCSV/Excelをドロップして取り込み";
-    position:absolute;inset:6px;z-index:30;display:flex;align-items:center;justify-content:center;
-    font-family:var(--font-mono);font-size:15px;color:var(--accent);
-    background:color-mix(in srgb,var(--bg-app,#fff) 78%,transparent);
-    border:2px dashed var(--accent);border-radius:14px;pointer-events:none}
   .da-err{display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:var(--sp-3);min-height:240px;text-align:center;
     border:1px solid var(--line-hair,rgba(120,140,170,.18));border-radius:var(--r-3,14px);
@@ -397,12 +403,36 @@ function homeHeader(b) {
   </div>`;
 }
 
-// A chart card whose body is an ECharts mount node (id) or a friendly empty note.
-function chartCard(title, id, hasData, full) {
+// A chart card whose body is an ECharts mount node (id) or a friendly empty
+// note. `span` is the grid track class (sp4/sp2/full); heights follow the
+// viewport so the dashboard reads at a glance (全体感) without scrolling.
+function chartCard(title, id, hasData, span = 'sp4', h = 'clamp(220px,30vh,340px)') {
   const body = hasData
-    ? `<div class="da-ec" data-ec="${id}" style="height:200px"></div>`
-    : `<div class="da-chart-empty">データなし</div>`;
-  return `<div class="da-card"${full ? ' style="grid-column:1/-1"' : ''}><h3>${title}</h3>${body}</div>`;
+    ? `<div class="da-ec" data-ec="${id}" style="height:${h}"></div>`
+    : `<div class="da-chart-empty" style="min-height:${h}">データなし</div>`;
+  return `<div class="da-card ${span}"><h3>${title}</h3>${body}</div>`;
+}
+
+// 自動インサイト as a one-line collapsible strip: severity counts + the top
+// finding inline; the full card list only on expand (collapsed by default —
+// the dashboard keeps the screen, the insights keep their depth).
+function insightsStrip(ins) {
+  if (!ins || !ins.length) {
+    return `<details class="da-insx"><summary>💡 自動インサイト 0件
+      <span class="da-insx-top">指摘事項はありません</span></summary></details>`;
+  }
+  const counts = { critical: 0, warning: 0, info: 0 };
+  ins.forEach((i) => {
+    counts[i && counts[i.severity] !== undefined ? i.severity : 'info'] += 1;
+  });
+  const chips = ['critical', 'warning', 'info'].filter((k) => counts[k]).map((k) =>
+    `<span class="da-insx-chip" style="color:${SEV[k].c};border-color:${SEV[k].c}">
+       ${SEV[k].t} ${counts[k]}</span>`).join('');
+  return `<details class="da-insx">
+    <summary>💡 自動インサイト ${ins.length}件 ${chips}
+      <span class="da-insx-top">${esc((ins[0] && ins[0].title) || '')}</span></summary>
+    <div class="da-insx-body">${insightList(ins)}</div>
+  </details>`;
 }
 
 export function mountDataAnalysis(el, opts = {}) {
@@ -413,11 +443,8 @@ export function mountDataAnalysis(el, opts = {}) {
   root.className = 'da';
   el.innerHTML = '';
   el.appendChild(root);
-  setupDropZone();
   let bundle = null;
-  let lastFile = null;   // remember the upload so it can be ingested into the model
-  let masterFile = null; // optional 商品マスタ (入数/名前/ABC enrichment)
-  let lastImport = null; // last ingest result (mapping/summary) for the 確認 panel
+  let projState = 'none'; // 'none' (no project) | 'nodata' (project, no demand yet) | 'data'
   const toast = opts.toast || (() => {});
   const getProject = opts.getProject || (() => null);
 
@@ -451,91 +478,64 @@ export function mountDataAnalysis(el, opts = {}) {
     if (b.staffing) mountChart('headcount', headcountOption(b.staffing.total_headcount_by_hour));
   }
 
+  // The 紐付け確認 panel content now comes from the bundle's persisted meta
+  // (what ①取込 resolved at import time) — not from a local upload.
+  function mapPanel(b) {
+    const m = b && b.meta && b.meta.shipments;
+    if (!m || !Array.isArray(m.mapping) || !m.mapping.length) return '';
+    return `<details class="da-insx">
+      <summary>🔗 取込項目の紐付け（①取込で自動解決）
+        <span class="da-insx-top">${esc(m.filename || '')}</span></summary>
+      <div class="da-insx-body"><div class="da-map" style="border:none;padding:0">
+        <div class="da-map-rows">${m.mapping.map((mp) =>
+    `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
+       <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}
+        </div>${(m.item_mapping || []).length
+    ? `<div class="da-map-h" style="margin-top:6px">商品マスタの紐付け</div>
+       <div class="da-map-rows">${m.item_mapping.map((mp) =>
+    `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
+       <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}</div>` : ''}
+        ${cleansingHtml(m.cleansing)}
+      </div></div>
+    </details>`;
+  }
+
   function render(b) {
     disposeCharts();
+    const isProj = b && String(b.source || '').startsWith('project');
     root.innerHTML =
       homeHeader(b) +
       `<div class="da-bar">
-         <button class="da-btn primary" data-act="sample">▶ サンプルで試す</button>
-         <button class="da-btn" data-act="upload">出荷データを取り込む</button>
-         <input type="file" data-da-file accept=".csv,.xlsx,.xls,.json" hidden />
-         <span class="da-hint">出荷WMSデータ(CSV/Excel)から物量推移・ABC・ピーク・在庫を分析</span>
+         ${isProj
+    ? (b.orders_imported
+      ? `<span class="da-hint">①取込のデータを分析中${b.meta && b.meta.shipments && b.meta.shipments.filename
+        ? `: <b>${esc(b.meta.shipments.filename)}</b>` : ''}（データの追加・差替は①取込で）</span>`
+      : `<span class="da-hint">テンプレの<b>仮データ</b>を表示中 — ①取込で実データに差し替えられます</span>
+         <button class="da-btn" data-act="goto-intake">①取込へ →</button>`)
+    : '<button class="da-btn primary" data-act="sample">▶ サンプルで試す</button>' +
+      '<span class="da-hint">出荷WMSデータ(CSV/Excel)から物量推移・ABC・ピーク・在庫を分析</span>'}
          ${b && b.source ? `<span class="da-src" style="margin-left:auto">source: ${b.source}</span>` : ''}
        </div>` +
-      // After an upload, offer one-click ingest into the project model (so BI +
-      // SimPy use the real demand). Hidden for the bundled sample.
-      (lastFile && b && b.source === 'upload'
-        ? `<div class="da-ingest">
-             <div class="da-ingest-t">「${esc(lastFile.name)}」を読み込みました。
-               <b>このデータでシミュレーションしますか？</b>
-               <span class="da-ingest-sub">出荷明細をオーダーとして取り込み、対話分析・基礎物量・実行に反映します。
-               <br>商品マスタ（任意）を足すと <b>入数(CS入数)</b> が反映され、ケース/パレット/坪数の精度が上がります。
-               <span data-master-name style="color:var(--accent)">${masterFile ? `商品マスタ: ${esc(masterFile.name)}` : ''}</span></span></div>
-             <input type="file" data-da-master accept=".csv,.xlsx,.xls,.json" hidden />
-             <button class="da-btn" data-act="master">＋ 商品マスタ（任意）</button>
-             <button class="da-btn primary" data-act="ingest">このデータでシミュレーション（取り込む）→</button>
-           </div>`
-        : '') +
-      (lastImport && lastImport.mapping
-        ? `<div class="da-map">
-             <div class="da-map-h">取込項目の紐付け（自動）</div>
-             <div class="da-map-rows">${lastImport.mapping.map((mp) =>
-               `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
-                  <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}
-             </div>${(lastImport.item_mapping || []).length
-               ? `<div class="da-map-h" style="margin-top:6px">商品マスタの紐付け</div>
-                  <div class="da-map-rows">${lastImport.item_mapping.map((mp) =>
-                    `<span class="da-map-chip${mp.column ? '' : ' miss'}">${esc(mp.field)}
-                       <i>→ ${mp.column ? esc(mp.column) : '未検出'}</i></span>`).join('')}</div>` : ''}
-             ${cleansingHtml(lastImport.summary && lastImport.summary.cleansing)}
-           </div>`
-        : '') +
       (b
         ? kpiCards(b.kpis) +
+          insightsStrip(b.insights) +
+          mapPanel(b) +
           `<div class="da-cards">
-             <div class="da-card"><h3>自動インサイト</h3>${insightList(b.insights)}</div>
-             ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length))}
-             ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length))}
-             ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length))}
-             ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), true)}
+             ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length), 'sp4')}
+             ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length), 'sp2')}
+             ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4')}
+             ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2')}
              ${staffingCard(b.staffing)}
            </div>`
-        : `<div class="da-empty"><b>WMSデータを分析</b>
-             <div>「サンプルで試す」ですぐ確認、または出荷データを取り込んでください。</div>
-             <div data-da-projhint></div></div>`);
+        : projState === 'nodata'
+          ? `<div class="da-empty"><b>まだ実データがありません</b>
+               <div>①取込で出荷実績（CSV / Excel）を取り込むと、ここに物量推移・ABC・ピークの全体像が表示されます。</div>
+               <button class="da-btn primary" data-act="goto-intake">①取込でデータを取り込む →</button></div>`
+          : `<div class="da-empty"><b>WMSデータを分析</b>
+               <div>「サンプルで試す」ですぐ確認できます。実データの取り込みは①取込から。</div>
+               <button class="da-btn" data-act="goto-intake">①取込へ →</button></div>`);
     wire();
     mountAllCharts(b);
-    hintProjectData();
-  }
-
-  // The 物量サマリ analyses a *file*; a project that ALREADY carries imported
-  // orders looks confusingly "empty" here. Detect that case and point at the
-  // project-data views (対話分析/基礎物量) so nobody re-uploads what's already in.
-  async function hintProjectData() {
-    const slot = root.querySelector('[data-da-projhint]');
-    const proj = getProject();
-    if (!slot || !proj) return;
-    try {
-      const r = await fetch(`/api/projects/${encodeURIComponent(proj)}/bi/volumes`);
-      if (!r.ok) return;
-      const v = await r.json();
-      const orders = Number(v && (v.out_orders ?? (v.totals && v.totals.out_orders))) || 0;
-      if (!orders) return;
-      slot.innerHTML =
-        `<div style="margin-top:10px;padding:10px 14px;border:1px solid var(--accent);border-radius:10px;
-                     background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:12.5px;max-width:52ch;">
-           このプロジェクトには<b>取込済みの実データ</b>があります（この画面はファイル単体の分析用）。
-           プロジェクトのデータは
-           <a href="#" data-nav="bianalytics" style="color:var(--accent);font-weight:700">対話分析</a> ・
-           <a href="#" data-nav="bi" style="color:var(--accent);font-weight:700">基礎物量</a> で確認できます。
-         </div>`;
-      slot.querySelectorAll('[data-nav]').forEach((a) => {
-        a.addEventListener('click', (e) => {
-          e.preventDefault();
-          document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view: a.dataset.nav } }));
-        });
-      });
-    } catch (_e) { /* hint only — stay silent */ }
   }
 
   // `makePromise` is a thunk so the same fetch can be re-invoked by 再試行.
@@ -575,25 +575,15 @@ export function mountDataAnalysis(el, opts = {}) {
       btn.onclick = () => document.dispatchEvent(
         new CustomEvent('whsim:nav', { detail: { view: btn.dataset.nav } }));
     });
-    const fileInput = root.querySelector('[data-da-file]');
     const sample = root.querySelector('[data-act="sample"]');
     if (sample) sample.onclick = () => load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
-    const upload = root.querySelector('[data-act="upload"]');
-    if (upload) upload.onclick = () => fileInput.click();
+    // 取込はここではしない: import lives in ①取込 (the single ETL home).
+    const intake = root.querySelector('[data-act="goto-intake"]');
+    if (intake) intake.onclick = () => document.dispatchEvent(
+      new CustomEvent('whsim:nav', { detail: { view: 'overview' } }));
     const ttBtn = root.querySelector('[data-act="to-timetable"]');
     if (ttBtn) ttBtn.onclick = () => document.dispatchEvent(new CustomEvent(
       'whsim:load-timetable', { detail: { scenario: bundle && bundle.timetable_scenario } }));
-    if (fileInput) fileInput.onchange = () => analyzeFile(fileInput.files[0]);
-    const ingest = root.querySelector('[data-act="ingest"]');
-    if (ingest) ingest.onclick = () => ingestFile();
-    const masterBtn = root.querySelector('[data-act="master"]');
-    const masterInput = root.querySelector('[data-da-master]');
-    if (masterBtn && masterInput) masterBtn.onclick = () => masterInput.click();
-    if (masterInput) masterInput.onchange = () => {
-      masterFile = masterInput.files[0] || null;
-      const lab = root.querySelector('[data-master-name]');
-      if (lab) lab.textContent = masterFile ? `商品マスタ: ${masterFile.name}` : '';
-    };
   }
 
   // クレンジング確認 (SLC「異常値タブ」の軽量版): 取込時に落とした行と異常値を表示。
@@ -617,64 +607,19 @@ export function mountDataAnalysis(el, opts = {}) {
       <div class="da-clean-note">${note}</div>`;
   }
 
-  // Analyze an uploaded shipments file (describe it) and remember it so the user
-  // can then ingest it into the project with one click.
-  function analyzeFile(f) {
-    if (!f) return;
-    lastFile = f;
-    load(() => {
-      const fd = new FormData();
-      fd.append('shipments', f);
-      return getJSON('/api/analysis/upload', { method: 'POST', body: fd });
-    }, `「${f.name}」を分析中…`);
-  }
-
-  // ETL: push the uploaded shipments into the project's outbound orders, so the
-  // BI (対話分析) and the SimPy run use the REAL demand. Then refresh + jump to
-  // 対話分析 so the effect is immediate.
-  async function ingestFile() {
-    const f = lastFile;
+  // Project-first: analyse the project's own imported data (persisted by the
+  // ①取込 ETL). available:false ⇒ no demand yet → point at ①取込.
+  async function loadProject() {
     const proj = getProject();
-    if (!f) { toast('先に出荷データを取り込んでください。', 'error'); return; }
-    if (!proj) { toast('先にプロジェクトを作成してください（左上の「作成」）。', 'error'); return; }
-    const btn = root.querySelector('[data-act="ingest"]');
-    if (btn) { btn.disabled = true; btn.textContent = '取り込み中…'; }
-    try {
-      const fd = new FormData();
-      fd.append('shipments', f);
-      if (masterFile) fd.append('items', masterFile);    // optional 商品マスタ
-      const r = await getJSON(`/api/projects/${encodeURIComponent(proj)}/import/shipments`,
-        { method: 'POST', body: fd });
-      if (!r || !r.ok) { toast((r && r.message) || '取り込める明細がありませんでした。', 'error'); }
-      else {
-        toast(r.message || '取り込みました。', 'ok');
-        lastImport = r;          // remember the mapping so render() can show it
-        render(bundle);          // re-render to surface the 紐付け確認 panel
-        // Refresh provenance / 実データ% / readiness, then show the BI on real data.
-        document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: { nav: 'bianalytics' } }));
-      }
-    } catch (e) {
-      toast('取り込みに失敗: ' + (e && e.message ? e.message : e), 'error');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'このデータでシミュレーション（取り込む）→'; }
-    }
+    if (!proj) { projState = 'none'; render(null); return; }
+    await load(async () => {
+      const b = await getJSON(`/api/projects/${encodeURIComponent(proj)}/analysis/bundle`);
+      if (b && b.available === false) { projState = 'nodata'; return null; }
+      projState = 'data';
+      return b;
+    }, 'プロジェクトデータを分析中…');
   }
-
-  // Drag-and-drop a file anywhere on the panel → analyze it. Attached once to the
-  // panel element (survives render()'s innerHTML swaps of `root`).
-  function setupDropZone() {
-    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
-    let depth = 0; // dragenter/leave fire per child; count to know when we truly left
-    el.addEventListener('dragenter', (e) => { stop(e); depth += 1; el.classList.add('da-drag'); });
-    el.addEventListener('dragover', stop);
-    el.addEventListener('dragleave', (e) => { stop(e); depth = Math.max(0, depth - 1); if (!depth) el.classList.remove('da-drag'); });
-    el.addEventListener('drop', (e) => {
-      stop(e); depth = 0; el.classList.remove('da-drag');
-      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) analyzeFile(f);
-    });
-  }
-  render(bundle);
+  loadProject();
 
   // Re-render the current bundle (no refetch) and re-wire on theme flip so chart
   // paints (resolved at build time) pick up the new tokens.
@@ -689,6 +634,7 @@ export function mountDataAnalysis(el, opts = {}) {
       window.removeEventListener('resize', onWinResize);
       el.innerHTML = '';
     },
-    refresh() {},
+    // Called by the shell after every ①取込 import — the dashboard follows live.
+    refresh() { loadProject(); },
   };
 }

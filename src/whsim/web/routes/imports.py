@@ -189,6 +189,16 @@ async def api_import_table(name: str, file: UploadFile, kind: str = "shipments",
     if counts.get("orders") or counts.get("items"):
         prov.mark(prov_key, Source.IMPORTED)
     proj.save_provenance(prov)
+    # Persist the mapped table so ②分析「物量サマリ」 can rebuild its bundle from
+    # the project itself (kind=master is the 在庫 table → "inventory").
+    from whsim.analysis import tablestore
+    store_key = {"shipments": "shipments", "inbound": "inbound",
+                 "master": "inventory"}.get(kind)
+    if store_key:
+        tablestore.save_table(proj, store_key, std, {
+            "filename": file.filename,
+            "mapping": [{"field": f.label, "column": mp.get(f.key)} for f in fields],
+        })
     return {
         "kind": kind, "counts": counts, "columns": list(df.columns),
         "mapping": {f.key: {"label": f.label, "required": f.required,

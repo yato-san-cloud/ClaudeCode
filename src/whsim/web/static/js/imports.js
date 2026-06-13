@@ -189,17 +189,21 @@ export async function uploadShipments(file, itemsFile = null) {
 }
 
 // ---- unified 入荷/出荷/商品マスタ・在庫 import with editable column mapping ----
+// `cat` is the ①取込 hub status slot to write (出荷/入荷/在庫 each have their own
+// row now); kind=master is shared by the 在庫 row (cat 'stock') and the 商品マスタ
+// card (cat 'items'), so callers pass it explicitly.
 const TABLE_JP = { shipments: '出荷実績', inbound: '入荷実績', master: '商品マスタ・在庫' };
-const TABLE_CAT = { shipments: 'actual', inbound: 'actual', master: 'items' };
+const TABLE_CAT = { shipments: 'actual', inbound: 'inbound', master: 'stock' };
 const TABLE_ICON = { shipments: '📦', inbound: '🚚', master: '🏷️' };
-let _tableFile = null, _tableKind = 'shipments';
-export async function uploadTable(file, kind = 'shipments') {
-  if (!S.project) { noProject(TABLE_CAT[kind] || 'actual'); return; }
+let _tableFile = null, _tableKind = 'shipments', _tableCat = null;
+export async function uploadTable(file, kind = 'shipments', cat = null) {
+  if (!S.project) { noProject(cat || TABLE_CAT[kind] || 'actual'); return; }
   _tableFile = file; _tableKind = TABLE_JP[kind] ? kind : 'shipments';
+  _tableCat = cat;
   await doTableImport(null);
 }
 async function doTableImport(mapping) {
-  const cat = TABLE_CAT[_tableKind] || 'actual';
+  const cat = _tableCat || TABLE_CAT[_tableKind] || 'actual';
   const fd = new FormData(); fd.append('file', _tableFile);
   let url = `/api/projects/${S.project}/import-table?kind=${_tableKind}`;
   if (mapping) url += '&mapping=' + encodeURIComponent(JSON.stringify(mapping));
