@@ -20,9 +20,10 @@
 import { esc } from './util.js';
 import {
   uploadZip, uploadCad, uploadDistances, uploadMapcsv, uploadRmpm,
-  uploadTable, uploadShipments, generateMissing,
+  uploadTable, uploadShipments, reviewTable, reviewShipments, generateMissing,
 } from './imports.js';
 import { hist, relTime } from './history.js';
+import { closeImportDock } from './importpreview.js';
 
 const IHUB_CSS = `
 /* ①取込 hub fills the stage exactly: the panel is a non-scrolling flex column;
@@ -30,7 +31,8 @@ const IHUB_CSS = `
 #overview.panel.active{display:flex;flex-direction:column;overflow:hidden}
 #overviewDash{flex:1;min-height:0;display:flex;flex-direction:column}
 .ihub{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;width:100%;
-  max-width:1440px;margin:0 auto;color:var(--ink-primary);font-family:var(--font-sans)}
+  max-width:1440px;margin:0 auto;color:var(--ink-primary);font-family:var(--font-sans);
+  overflow-y:auto;overscroll-behavior:contain}
 /* --- status band ----------------------------------------------------------- */
 .ihub-band{flex:0 0 auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
   background:var(--bg-panel);border:1px solid var(--line-hair);
@@ -102,6 +104,25 @@ const IHUB_CSS = `
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:15px}
 .ihub-rst.is-ok{color:var(--ok-ink)}
 .ihub-rst.is-err{color:var(--bad)}
+/* per-box queued/dropped file chips — each kind shows its OWN files (name +
+   status + a ✕ to cancel one). Clicking a chip opens the bottom preview dock. */
+.ihub-chips{display:flex;flex-wrap:wrap;gap:4px;margin:1px 2px 0}
+.ihub-chips:empty{margin:0}
+.ihub-fchip{display:inline-flex;align-items:center;gap:5px;max-width:100%;
+  font-size:10px;font-weight:600;line-height:1.4;padding:2px 4px 2px 8px;
+  border-radius:var(--r-pill);border:1px solid var(--line-soft);
+  background:var(--bg-sunken);color:var(--ink-secondary)}
+.ihub-fchip.is-ok{border-color:var(--ok-line);color:var(--ok-ink)}
+.ihub-fchip.is-err{border-color:var(--bad);color:var(--bad)}
+.ihub-fchip-s{flex:0 0 auto;font-style:normal;font-weight:800}
+.ihub-fchip-n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  cursor:pointer}
+.ihub-fchip-rev{flex:0 0 auto;border:none;background:transparent;color:inherit;cursor:pointer;
+  font:inherit;font-size:9px;opacity:.7;padding:0 2px;border-radius:6px}
+.ihub-fchip-rev:hover{opacity:1;text-decoration:underline}
+.ihub-fchip-x{flex:0 0 auto;border:none;background:transparent;color:inherit;cursor:pointer;
+  font:inherit;font-size:12px;line-height:1;opacity:.6;padding:0 3px;border-radius:6px}
+.ihub-fchip-x:hover{opacity:1;background:var(--line-hair)}
 .ihub-mini{display:flex;flex-wrap:wrap;gap:4px}
 .ihub-mini button{flex:0 0 auto;border:1px solid var(--line-soft);background:transparent;
   color:var(--ink-secondary);font:inherit;font-size:10.5px;font-weight:600;
@@ -165,7 +186,14 @@ export function mountOverview(el, opts = {}) {
   el.appendChild(root);
 
   let mode = null;          // 'empty' | 'hub' — what the DOM is built for
-  let pendingKind = 'shipments'; // which 実績 row opened the shared tableInput picker
+  let pendingCat = 'actual';     // which box opened the shared tableInput picker
+
+  // Per-box file queue: each box (cat) shows its OWN dropped/selected files as
+  // chips. A chip carries {id,name,file,status,kind}. Dropping/selecting MULTIPLE
+  // files queues them all and imports sequentially (no one-modal-at-a-time).
+  const queues = {};          // cat -> [chip]
+  let chipSeq = 0;
+  const queueFor = (cat) => (queues[cat] || (queues[cat] = []));
 
   // ---- persistent-node adoption --------------------------------------------
   function parkAssets() {
@@ -183,67 +211,152 @@ export function mountOverview(el, opts = {}) {
   }
 
   // ---- file routing ----------------------------------------------------------
-  // One upload call per 実績 kind (the rows are explicit now — no toggle state).
-  function uploadActual(kind, f) {
-    if (kind === 'shipments') return uploadShipments(f);
-    if (kind === 'inbound') return uploadTable(f, 'inbound');
-    return uploadTable(f, 'master', 'stock'); // 在庫実績 row (INVENTORY columns)
+  // Table-import descriptor per cat: which engine kind to call and how to open
+  // the bottom preview dock for review.
+  const TABLE_KIND = { actual: 'shipments', inbound: 'inbound', stock: 'master', items: 'master' };
+
+  // Import a single table file with auto-mapping (smooth, non-blocking). Returns
+  // the imports.js result `{ ok, summary }`.
+  function importTableFile(cat, f) {
+    const kind = TABLE_KIND[cat];
+    if (cat === 'actual') return uploadShipments(f);
+    if (cat === 'inbound') return uploadTable(f, 'inbound');
+    if (cat === 'stock') return uploadTable(f, 'master', 'stock'); // 在庫 (INVENTORY cols)
+    return uploadTable(f, 'master', 'items', null);                // 商品マスタ
   }
-  // Rows accept MULTIPLE files (e.g. 12 monthly 出荷実績 at once) — uploaded
-  // sequentially so the log/status stay readable and the server isn't slammed.
-  async function dropRoute(cat, files) {
+  // Open the bottom preview dock to review/correct a table file's mapping.
+  function reviewTableFile(cat, f) {
+    if (cat === 'actual') return reviewShipments(f);
+    if (cat === 'inbound') return reviewTable(f, 'inbound', 'inbound');
+    if (cat === 'stock') return reviewTable(f, 'master', 'stock');
+    return reviewTable(f, 'master', 'items');
+  }
+
+  // ---- per-box chip queue ----------------------------------------------------
+  function chipsHost(cat) { return root.querySelector(`[data-chips="${cat}"]`); }
+  function renderChips(cat) {
+    const host = chipsHost(cat);
+    if (!host) return;
+    const list = queueFor(cat);
+    const reviewable = !!TABLE_KIND[cat];
+    host.innerHTML = list.map((c) => {
+      const sym = c.status === 'ok' ? '✓' : c.status === 'err' ? '✕' : '⏳';
+      const cls = c.status === 'ok' ? ' is-ok' : c.status === 'err' ? ' is-err' : '';
+      const rev = reviewable
+        ? `<button type="button" class="ihub-fchip-rev" data-rev="${c.id}" title="紐付けを確認・修正">紐付け</button>` : '';
+      return `<span class="ihub-fchip${cls}" data-chip="${c.id}" title="${esc(c.name)}${c.note ? ' — ' + esc(c.note) : ''}">
+        <i class="ihub-fchip-s" aria-hidden="true">${sym}</i>
+        <span class="ihub-fchip-n" data-rev="${reviewable ? c.id : ''}">${esc(c.name)}</span>
+        ${rev}
+        <button type="button" class="ihub-fchip-x" data-cancel="${c.id}" aria-label="${esc(c.name)} を取消">×</button>
+      </span>`;
+    }).join('');
+    host.querySelectorAll('[data-cancel]').forEach((b) => {
+      b.onclick = (e) => { e.stopPropagation(); cancelChip(cat, b.dataset.cancel); };
+    });
+    if (reviewable) {
+      host.querySelectorAll('[data-rev]').forEach((b) => {
+        if (!b.dataset.rev) return;
+        b.onclick = (e) => {
+          e.stopPropagation();
+          const c = queueFor(cat).find((x) => x.id === b.dataset.rev);
+          if (c) reviewTableFile(cat, c.file);
+        };
+      });
+    }
+  }
+  function cancelChip(cat, id) {
+    const list = queueFor(cat);
+    const i = list.findIndex((c) => c.id === id);
+    if (i < 0) return;
+    list[i].cancelled = true;     // skip if not yet imported
+    list.splice(i, 1);
+    renderChips(cat);
+  }
+  function addChip(cat, file) {
+    const chip = { id: 'c' + (++chipSeq), name: file.name, file, status: 'pending', note: '' };
+    queueFor(cat).push(chip);
+    renderChips(cat);
+    return chip;
+  }
+
+  // Queue + import MULTIPLE files dropped/selected into a box. Table kinds import
+  // sequentially with auto-mapping (chip → ✓/✕); the dock is opened on demand via
+  // the chip's 「紐付け」 to review/correct. Layout files route by extension.
+  async function queueFiles(cat, files) {
     const list = Array.from(files || []);
-    if (!list.length) return undefined;
-    const f = list[0];
-    const n = String(f.name || '').toLowerCase();
-    if (cat === 'layout') {
-      if (n.endsWith('.dxf')) return uploadCad(f);
-      if (n.endsWith('.rmpm') || n.endsWith('.rmpm.json')) return uploadRmpm(f);
-      if (n.endsWith('.zip')) return uploadZip(f);
-      if (n.endsWith('.json')) return uploadRmpm(f);  // MapMaker JSON export
-      if (n.endsWith('.csv')) return uploadMapcsv(f); // MapMaker 地図CSV
-      return toast('未対応の形式です（.dxf / .rmpm / .json / 地図CSV / .zip）。', 'error');
-    }
-    if (cat === 'actual' || cat === 'inbound' || cat === 'stock') {
-      const kind = cat === 'actual' ? 'shipments' : cat === 'inbound' ? 'inbound' : 'master';
-      for (const file of list) {
-        const fn = String(file.name || '').toLowerCase();
-        if (fn.endsWith('.zip')) { await uploadZip(file); continue; }
-        if (!TABLE_EXT.test(fn)) {
-          toast(`${file.name}: CSV / Excel（.csv / .xlsx / .xls）をドロップしてください。`, 'error');
-          continue;
-        }
-        await uploadActual(kind, file);
+    if (!list.length) return;
+    if (cat === 'layout') { await queueLayout(list); return; }
+    // table kinds: actual / inbound / stock / items
+    for (const file of list) {
+      const fn = String(file.name || '').toLowerCase();
+      if (fn.endsWith('.zip')) { const ch = addChip(cat, file); await uploadZip(file); ch.status = 'ok'; renderChips(cat); continue; }
+      if (!TABLE_EXT.test(fn)) {
+        toast(`${file.name}: CSV / Excel（.csv / .xlsx / .xls）をドロップしてください。`, 'error');
+        continue;
       }
-      return undefined;
+      const chip = addChip(cat, file);
+      if (chip.cancelled) continue;
+      const r = await importTableFile(cat, file);
+      if (chip.cancelled) continue;       // user removed it mid-flight
+      chip.status = r && r.ok ? 'ok' : 'err';
+      chip.note = (r && r.summary) || '';
+      renderChips(cat);
     }
-    if (cat === 'items') {
-      if (TABLE_EXT.test(n)) return uploadTable(f, 'master', 'items');
-      return toast('CSV / Excel（.csv / .xlsx / .xls）をドロップしてください。', 'error');
+  }
+
+  // Layout box accepts several drawings/maps at once; route each by extension.
+  async function queueLayout(list) {
+    for (const file of list) {
+      const n = String(file.name || '').toLowerCase();
+      const chip = addChip('layout', file);
+      try {
+        if (n.endsWith('.dxf')) await uploadCad(file);
+        else if (n.endsWith('.rmpm') || n.endsWith('.rmpm.json')) await uploadRmpm(file);
+        else if (n.endsWith('.zip')) await uploadZip(file);
+        else if (n.endsWith('.json')) await uploadRmpm(file);  // MapMaker JSON export
+        else if (n.endsWith('.csv')) await uploadMapcsv(file); // MapMaker 地図CSV
+        else {
+          toast('未対応の形式です（.dxf / .rmpm / .json / 地図CSV / .zip）。', 'error');
+          chip.status = 'err'; renderChips('layout'); continue;
+        }
+        chip.status = 'ok';
+      } catch (_e) { chip.status = 'err'; }
+      renderChips('layout');
     }
-    return undefined;
   }
 
   // Hidden file inputs (persistent in #ihubAssets) → upload routes. Wired once;
-  // value reset after each pick so the same file can be re-imported.
+  // value reset after each pick so the same file can be re-imported. The category
+  // pickers (tableInput / itemsInput / rmpmInput) route through the per-box queue
+  // so MULTIPLE selected files chip+import without a one-modal-at-a-time block.
   function wireInputs() {
-    const routes = {
-      fileInput: (f) => uploadZip(f),
-      cadInput: (f) => uploadCad(f),
-      distInput: (f) => uploadDistances(f),
-      mapcsvInput: (f) => uploadMapcsv(f),
-      rmpmInput: (f) => uploadRmpm(f),
-      tableInput: (f) => uploadActual(pendingKind, f),
-      itemsInput: (f) => uploadTable(f, 'master', 'items'),
+    // category pickers → queue (multi-file). `pendingCat` is set by the opener.
+    const queuePickers = {
+      tableInput: () => pendingCat,        // 出荷/入荷/在庫 share this input
+      itemsInput: () => 'items',
+      rmpmInput: () => 'layout',
+      cadInput: () => 'layout',
+      mapcsvInput: () => 'layout',
+      fileInput: () => 'layout',
     };
-    for (const [id, fn] of Object.entries(routes)) {
+    for (const [id, catOf] of Object.entries(queuePickers)) {
       const inp = document.getElementById(id);
       if (!inp) continue;
+      inp.multiple = true;  // allow several files per pick
       inp.onchange = async () => {
-        // tableInput allows multiple (monthly files) — upload sequentially.
         const files = Array.from(inp.files || []);
         inp.value = '';
-        for (const f of files) await fn(f);
+        await queueFiles(catOf(), files);
+      };
+    }
+    // 棚間距離 stays a single specialised import (no queue/dock).
+    const dist = document.getElementById('distInput');
+    if (dist) {
+      dist.onchange = async () => {
+        const files = Array.from(dist.files || []);
+        dist.value = '';
+        for (const f of files) await uploadDistances(f);
       };
     }
   }
@@ -311,19 +424,21 @@ export function mountOverview(el, opts = {}) {
             aria-label="${esc(label)}（ドラッグ&ドロップまたはファイル選択）">
          <span class="ihub-drop-t">${esc(label)}</span>
          <button type="button" class="ihub-pick" data-pick="${pick}">ファイルを選択</button>
-       </div>`;
+       </div>
+       <div class="ihub-chips" data-chips="${cat}" aria-label="${esc(label)} の取込ファイル"></div>`;
 
-    // 出荷/入荷/在庫: stacked rows, each its own drop target + status line —
-    // no toggle to flip (タブ切替が面倒, per direct user feedback).
-    const actualRow = (cat, ico, label, kind) =>
+    // 出荷/入荷/在庫: stacked rows, each its own drop target + status line +
+    // its OWN file chips — no toggle to flip (タブ切替が面倒, per user feedback).
+    const actualRow = (cat, ico, label) =>
       `<div class="ihub-rowwrap">
          <div class="ihub-drop ihub-drop-row" data-drop="${cat}" tabindex="0" role="button"
               aria-label="${esc(label)}（ドラッグ&ドロップまたはファイル選択）">
            <span class="ihub-row-ico" aria-hidden="true">${ico}</span>
            <span class="ihub-drop-t">${esc(label)}</span>
-           <button type="button" class="ihub-pick" data-pickkind="${kind}">選択</button>
+           <button type="button" class="ihub-pick" data-pickcat="${cat}">選択</button>
          </div>
          <div class="ihub-rst" data-ihub-status="${cat}">未取込</div>
+         <div class="ihub-chips" data-chips="${cat}" aria-label="${esc(label)} の取込ファイル"></div>
        </div>`;
 
     root.innerHTML =
@@ -344,9 +459,9 @@ export function mountOverview(el, opts = {}) {
        </div>
        <div class="ihub-grid">
          ${card('actual', '📦', '実績データ', '出荷・入荷・在庫（CSV / Excel・複数まとめてドロップ可）',
-    actualRow('actual', '📦', '出荷実績', 'shipments')
-          + actualRow('inbound', '🚚', '入荷実績', 'inbound')
-          + actualRow('stock', '📊', '在庫実績', 'master'))}
+    actualRow('actual', '📦', '出荷実績')
+          + actualRow('inbound', '🚚', '入荷実績')
+          + actualRow('stock', '📊', '在庫実績'))}
          ${card('items', '🏷️', '商品マスタ', '品番・入数・名称・ABC（CSV / Excel）',
     drop('items', 'CSV / Excel をドロップ', 'itemsInput')
           + `<button type="button" id="genMissingBtn" class="ihub-gen"
@@ -372,11 +487,12 @@ export function mountOverview(el, opts = {}) {
   }
 
   function wireHub() {
-    // 実績 row pick buttons share #tableInput; remember which row opened it.
-    root.querySelectorAll('[data-pickkind]').forEach((b) => {
+    // 実績 row pick buttons share #tableInput; remember which box opened it so
+    // selected files queue into the right box.
+    root.querySelectorAll('[data-pickcat]').forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();  // don't double-trigger via the surrounding dropzone
-        pendingKind = b.dataset.pickkind || 'shipments';
+        pendingCat = b.dataset.pickcat || 'actual';
         const inp = document.getElementById('tableInput');
         if (inp) inp.click();
       };
@@ -389,7 +505,7 @@ export function mountOverview(el, opts = {}) {
         if (inp) inp.click();
       };
     });
-    // drop zones: click = pick, drag&drop = auto-route by extension
+    // drop zones: click = pick, drag&drop = queue (multi-file) by extension
     root.querySelectorAll('.ihub-drop').forEach((dz) => {
       const cat = dz.dataset.drop;
       const pick = dz.querySelector('.ihub-pick');
@@ -405,9 +521,11 @@ export function mountOverview(el, opts = {}) {
       }));
       dz.addEventListener('drop', (e) => {
         const files = e.dataTransfer && e.dataTransfer.files;
-        if (files && files.length) dropRoute(cat, files);
+        if (files && files.length) queueFiles(cat, files);
       });
     });
+    // restore any chips for this freshly-built skeleton (survive re-render/patch)
+    for (const cat of Object.keys(queues)) renderChips(cat);
     // 不足データを生成 (imports.js owns the busy state via #genMissingBtn)
     const gen = root.querySelector('#genMissingBtn');
     if (gen) gen.onclick = () => generateMissing();
@@ -503,6 +621,6 @@ export function mountOverview(el, opts = {}) {
   render();
   return {
     refresh() { render(); },
-    dispose() { parkAssets(); el.innerHTML = ''; },
+    dispose() { closeImportDock(); parkAssets(); el.innerHTML = ''; },
   };
 }

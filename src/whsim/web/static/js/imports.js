@@ -16,7 +16,7 @@ import { S } from './state.js';
 import { $, api, esc } from './util.js';
 import { hist } from './history.js';
 import { forkliftBusy } from './progress.js';
-import { pickImportMapping } from './importpreview.js';
+import { openImportDock } from './importpreview.js';
 
 // Replace the plain "…中…" line in the hub footer with a forklift-shuttle busy
 // strip so the wait reads as 「処理してる感」. The success/error path overwrites
@@ -151,26 +151,28 @@ export async function uploadRmpm(file) {
 // Reads a shipments CSV/Excel, auto-maps columns, and ingests it as the
 // project's outbound orders (real calendar weekday/hour survive via arrival_s).
 // Optional 商品マスタ file enriches SKUs (入数/名前/ABC).
-export async function uploadShipments(file, itemsFile = null) {
-  if (!S.project) { noProject('actual'); return; }
-  // Preview + confirm the column mapping in a big window first (no commit yet).
-  const picked = await pickImportMapping({ project: S.project, file, kind: 'shipments' });
-  if (!picked) return;  // user closed the preview without importing
+//
+// Smooth default: imports IMMEDIATELY with auto-mapping (mapping=null lets the
+// server auto-detect). To review/correct, call `reviewShipments(file)` which
+// opens the bottom dock and re-imports with the chosen mapping. Returns a result
+// object `{ ok, summary }` so the queue UI can chip-mark each file.
+export async function uploadShipments(file, itemsFile = null, mapping = null) {
+  if (!S.project) { noProject('actual'); return { ok: false }; }
   const fd = new FormData();
   fd.append('shipments', file);
   if (itemsFile) fd.append('items', itemsFile);
   busyLog('出荷実績を取込中…');
   mark('actual', null, `${file.name} を取込中…`);
   try {
-    const url = `/api/projects/${S.project}/import/shipments?mapping=`
-      + encodeURIComponent(JSON.stringify(picked.mapping));
+    let url = `/api/projects/${S.project}/import/shipments`;
+    if (mapping) url += '?mapping=' + encodeURIComponent(JSON.stringify(mapping));
     const r = await api(url, { method: 'POST', body: fd });
     if (!r || !r.ok) {
       const msg = (r && r.message) || '取り込める明細がありませんでした。';
       $('importLog').innerHTML = `<span class="warn">! ${esc(msg)}</span>`;
       mark('actual', false, `✕ ${file.name} — ${msg}`);
       toast(msg, 'error');
-      return;
+      return { ok: false, summary: msg };
     }
     const s = r.summary || {};
     const parts = [];
@@ -187,11 +189,23 @@ export async function uploadShipments(file, itemsFile = null) {
     await openProject(S.project); // refresh headline/provenance/readiness
     if (S.dataanalysis) S.dataanalysis.refresh();
     toast('出荷実績を取り込みました。②分析で物量を確認できます。', 'ok');
+    return { ok: true, summary };
   } catch (e) {
     $('importLog').textContent = 'エラー: ' + e.message;
     mark('actual', false, '✕ ' + file.name + ' — ' + e.message);
     toast('取込に失敗しました: ' + e.message, 'error');
+    return { ok: false, summary: e.message };
   }
+}
+
+// Open the bottom preview dock for an 出荷実績 file; commit re-imports with the
+// chosen mapping. Non-blocking — the dock stays open while the user tunes.
+export function reviewShipments(file) {
+  if (!S.project) { noProject('actual'); return; }
+  openImportDock({
+    project: S.project, file, kind: 'shipments',
+    onCommit: (mapping) => uploadShipments(file, null, mapping),
+  });
 }
 
 // ---- unified 入荷/出荷/商品マスタ・在庫 import with editable column mapping ----
@@ -201,42 +215,50 @@ export async function uploadShipments(file, itemsFile = null) {
 const TABLE_JP = { shipments: '出荷実績', inbound: '入荷実績', master: '商品マスタ・在庫' };
 const TABLE_CAT = { shipments: 'actual', inbound: 'inbound', master: 'stock' };
 const TABLE_ICON = { shipments: '📦', inbound: '🚚', master: '🏷️' };
-let _tableFile = null, _tableKind = 'shipments', _tableCat = null;
-export async function uploadTable(file, kind = 'shipments', cat = null) {
-  if (!S.project) { noProject(cat || TABLE_CAT[kind] || 'actual'); return; }
-  _tableKind = TABLE_JP[kind] ? kind : 'shipments';
-  _tableCat = cat;
-  _tableFile = file;
-  // Preview + confirm the column mapping in a big window first (no commit yet).
-  const picked = await pickImportMapping({ project: S.project, file, kind: _tableKind });
-  if (!picked) return;
-  await doTableImport(picked.mapping);
+// Smooth default: import immediately with auto-mapping (mapping=null). To review,
+// call `reviewTable(...)` which opens the dock. Returns `{ ok, summary }`.
+export async function uploadTable(file, kind = 'shipments', cat = null, mapping = null) {
+  if (!S.project) { noProject(cat || TABLE_CAT[kind] || 'actual'); return { ok: false }; }
+  const tkind = TABLE_JP[kind] ? kind : 'shipments';
+  return doTableImport(file, tkind, cat, mapping);
 }
-async function doTableImport(mapping) {
-  const cat = _tableCat || TABLE_CAT[_tableKind] || 'actual';
-  const fd = new FormData(); fd.append('file', _tableFile);
-  let url = `/api/projects/${S.project}/import-table?kind=${_tableKind}`;
+async function doTableImport(file, kind, catArg, mapping) {
+  const cat = catArg || TABLE_CAT[kind] || 'actual';
+  const fd = new FormData(); fd.append('file', file);
+  let url = `/api/projects/${S.project}/import-table?kind=${kind}`;
   if (mapping) url += '&mapping=' + encodeURIComponent(JSON.stringify(mapping));
   busyLog('取込中…');
-  mark(cat, null, `${_tableFile.name} を取込中…`);
+  mark(cat, null, `${file.name} を取込中…`);
   try {
     const r = await api(url, { method: 'POST', body: fd });
     if (r.provenance_summary) $('provenance').textContent = r.provenance_summary;
     const cnt = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(' / ');
-    $('importLog').innerHTML = `<span class="ok">${esc(TABLE_JP[_tableKind])}を取込（${esc(cnt || '0')}）</span>`;
-    mark(cat, true, `✓ ${_tableFile.name} — ${TABLE_JP[_tableKind]}（${cnt || '0'}）`);
-    hist.log(TABLE_ICON[_tableKind] || '📄',
-      `${TABLE_JP[_tableKind]}を取込: ${_tableFile.name}（${cnt || '0'}）`,
-      _tableKind === 'master' ? 'overview' : 'dataanalysis', cat);
-    if (_tableKind !== 'master') S.hasData = true;
+    $('importLog').innerHTML = `<span class="ok">${esc(TABLE_JP[kind])}を取込（${esc(cnt || '0')}）</span>`;
+    mark(cat, true, `✓ ${file.name} — ${TABLE_JP[kind]}（${cnt || '0'}）`);
+    hist.log(TABLE_ICON[kind] || '📄',
+      `${TABLE_JP[kind]}を取込: ${file.name}（${cnt || '0'}）`,
+      kind === 'master' ? 'overview' : 'dataanalysis', cat);
+    if (kind !== 'master') S.hasData = true;
     await openProject(S.project);
     if (S.dataanalysis) S.dataanalysis.refresh();
     toast('取込しました。', 'ok');
+    return { ok: true, summary: cnt || '0' };
   } catch (e) {
     $('importLog').textContent = 'エラー: ' + e.message;
-    mark(cat, false, '✕ ' + _tableFile.name + ' — ' + e.message);
+    mark(cat, false, '✕ ' + file.name + ' — ' + e.message);
     toast('取込に失敗しました: ' + e.message, 'error');
+    return { ok: false, summary: e.message };
   }
+}
+
+// Open the bottom preview dock for an 入荷/在庫/商品マスタ file; commit re-imports.
+export function reviewTable(file, kind = 'shipments', cat = null) {
+  if (!S.project) { noProject(cat || TABLE_CAT[kind] || 'actual'); return; }
+  const tkind = TABLE_JP[kind] ? kind : 'shipments';
+  openImportDock({
+    project: S.project, file, kind: tkind,
+    onCommit: (mapping) => uploadTable(file, tkind, cat, mapping),
+  });
 }
 
 export async function generateMissing() {
