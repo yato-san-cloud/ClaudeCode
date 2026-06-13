@@ -193,6 +193,37 @@ def _excel_engine(name: str) -> str:
         return "openpyxl" if name.endswith(".xlsx") else "xlrd"
 
 
+def _excel_head_xlsx(file_bytes: bytes, nrows: int, sheet: str | None = None):
+    """Stream the first ~nrows rows of an .xlsx via openpyxl read_only — it reads
+    rows LAZILY and stops, so a preview is O(nrows), NOT O(filesize). calamine
+    (the full-read engine) parses the whole sheet, which is multi-second on a big
+    month; this stays ~1s no matter how big the file. Returns None on any failure
+    so the caller falls back to the engine read."""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        ws = wb[sheet] if sheet else wb[wb.sheetnames[0]]
+        cap = nrows + 25  # buffer for title/meta rows above the real header
+        raw_rows = []
+        for i, r in enumerate(ws.iter_rows(values_only=True)):
+            raw_rows.append(list(r))
+            if i >= cap:
+                break
+        wb.close()
+    except Exception:  # noqa: BLE001 — fall back to the full-read engine
+        return None
+    if not raw_rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(raw_rows[1:nrows + 1], columns=raw_rows[0])
+    if _header_suspicious(df):
+        raw = pd.DataFrame(raw_rows)
+        hdr = _best_header_row(raw)
+        if hdr is not None:
+            df = raw.iloc[hdr + 1: hdr + 1 + nrows].reset_index(drop=True)
+            df.columns = list(raw.iloc[hdr])
+    return df
+
+
 def load_table(file_bytes: bytes, filename: str, sheet: str | None = None,
                nrows: int | None = None) -> pd.DataFrame:
     """Load a CSV or Excel file by filename extension, tolerant of real-world
@@ -200,10 +231,16 @@ def load_table(file_bytes: bytes, filename: str, sheet: str | None = None,
 
     ``nrows`` caps how many DATA rows are read — pass it for a fast PREVIEW (e.g.
     the column-mapping dock only needs the header + a sample, not the whole month
-    of data). For CSV this genuinely stops the read early; for Excel it bounds the
-    parse/serialise work. None reads the whole file (the real import path)."""
+    of data). For CSV this genuinely stops the read early; for .xlsx it streams via
+    openpyxl read_only (O(nrows), not O(filesize)). None reads the whole file."""
     name = filename.lower()
     if name.endswith((".xlsx", ".xls")):
+        # Fast preview: stream the head of an .xlsx (stops at nrows, file-size
+        # independent). .xls has no streaming reader, so it uses the engine below.
+        if nrows is not None and name.endswith(".xlsx"):
+            head = _excel_head_xlsx(file_bytes, nrows, sheet)
+            if head is not None:
+                return _normalise_table(head)
         # python-calamine (Rust) reads .xlsx/.xls ~10–40× faster than openpyxl on
         # month-scale WMS files; openpyxl/xlrd stay as the fallback if it is absent.
         engine = _excel_engine(name)
