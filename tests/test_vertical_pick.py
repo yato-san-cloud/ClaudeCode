@@ -71,4 +71,5 @@ def test_engine_level_one_unchanged_vs_no_vertical():
     from whsim.engine.build import build
     m = _model(1)
     world = build(m)
-    assert all(v == 0.0 for v in world.sku_vert.values())
+    # sku_pick[i] = (vertical_seconds, level, mover, height); 段1 → 0 vertical time.
+    assert all(v[0] == 0.0 and v[1] == 1 for v in world.sku_pick.values())

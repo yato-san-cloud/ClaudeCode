@@ -21,14 +21,20 @@ from whsim.schema.model import WarehouseModel
 @dataclass
 class Worker:
     """One picker agent. Keyframes are (t, x, y, state) waypoints; viewers lerp
-    position between consecutive frames, and apply `state` from each frame on."""
+    position between consecutive frames, and apply `state` from each frame on.
+
+    A `pick` (or `putaway`) keyframe MAY carry a 5th `meta` dict
+    ``{"lv": 段, "by": "manual"|"forklift"|"crane", "h": pick-face height m}`` so
+    the 2D/3D replay can raise the picker/forklift to the right level. Ground-level
+    (段1) frames stay 4-tuples — byte-identical to the legacy contract."""
 
     id: str
     role: str
     keyframes: list[tuple] = field(default_factory=list)
 
-    def kf(self, t: float, x: float, y: float, state: str) -> None:
-        self.keyframes.append((round(t, 2), round(x, 3), round(y, 3), state))
+    def kf(self, t: float, x: float, y: float, state: str, meta: dict | None = None) -> None:
+        f = (round(t, 2), round(x, 3), round(y, 3), state)
+        self.keyframes.append(f if meta is None else (*f, meta))
 
 
 @dataclass
@@ -59,7 +65,7 @@ class World:
     conveyor_points: list[tuple[float, float]]  # conveyor pickup points (if any)
     sku_xy: dict[str, tuple[float, float]]
     sku_ts: dict[str, float]
-    sku_vert: dict[str, float]
+    sku_pick: dict[str, tuple]
     sku_weights: list[float]
     sku_list: list[str]
     grid_m: float
@@ -177,28 +183,32 @@ def build(
         pick_method = "manual"
 
     loc_by_id = model.location_by_id()
-    # sku_xy = pick position; sku_vert = per-visit vertical access time for picking
-    # that SKU's 段(level) — picking an upper level costs lift/reach time (racktypes
-    # vertical model, tuned by process.lift_speed_mps / manual_reach_s_per_m).
+    # sku_xy = pick position; sku_pick = per-visit pick meta carrying the vertical
+    # access time AND the 段(level)/height/mover so the engine can both *time* the
+    # lift and *animate* it (the 2D/3D replay raise the picker/forklift to height).
     from whsim import racktypes
     _lift = float(model.process.lift_speed_mps)
     _reach = float(model.process.manual_reach_s_per_m)
 
-    def _vert(loc):
-        return racktypes.vertical_pick_s(
-            getattr(loc, "rack_type", None), getattr(loc, "level", 1), _lift, _reach)
+    def _pick_meta(loc):
+        rt = getattr(loc, "rack_type", None)
+        lv = int(getattr(loc, "level", 1) or 1)
+        return (racktypes.vertical_pick_s(rt, lv, _lift, _reach),  # [0] seconds
+                lv,                                                  # [1] 段(level)
+                racktypes.mover(rt),                                 # [2] manual/forklift/crane
+                racktypes.level_height_m(rt, lv))                    # [3] pick-face height (m)
 
     sku_xy: dict[str, tuple[float, float]] = {}
-    sku_vert: dict[str, float] = {}
+    sku_pick: dict[str, tuple] = {}
     for it in model.items:
         if it.default_location and it.default_location in loc_by_id:
             loc = loc_by_id[it.default_location]
             sku_xy[it.sku] = (loc.x, loc.y)
-            sku_vert[it.sku] = _vert(loc)
+            sku_pick[it.sku] = _pick_meta(loc)
     for loc in model.locations:
         if loc.sku and loc.sku not in sku_xy:
             sku_xy[loc.sku] = (loc.x, loc.y)
-            sku_vert[loc.sku] = _vert(loc)
+            sku_pick[loc.sku] = _pick_meta(loc)
 
     sku_ts = {it.sku: it.ts_per_unit for it in model.items}
     by_sku = model.item_by_sku()
@@ -323,7 +333,7 @@ def build(
         home=home, agv_home=agv_home,
         fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),
         slot_xy=slot_xy, conveyor_points=conveyor_points,
-        sku_xy=sku_xy, sku_ts=sku_ts, sku_vert=sku_vert,
+        sku_xy=sku_xy, sku_ts=sku_ts, sku_pick=sku_pick,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
         graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,

@@ -136,7 +136,11 @@ def _congestion_grid(model: WarehouseModel, res: RunResult) -> dict:
 
     counts: dict[tuple[int, int], float] = {}
     for kf in tracks:
-        for (t0, x0, y0, _s0), (t1, x1, y1, _s1) in zip(kf, kf[1:]):
+        # Keyframes are (t, x, y, state[, meta]) — slice the first 3 so a 5-tuple
+        # (upper-段 pick carrying level meta) does not break the unpack.
+        for a, b in zip(kf, kf[1:]):
+            t0, x0, y0 = a[0], a[1], a[2]
+            x1, y1 = b[1], b[2]
             if win and t0 > win:
                 break
             for gx, gy in leg_cells((x0, y0), (x1, y1), grid_m):
@@ -233,8 +237,11 @@ def _attach_pick_hits(model: WarehouseModel, workers: list[dict],
                         best = (ri, along, sku, qty)
                 if best is not None:
                     ri, along, sku, qty = best
+                    # MERGE into any existing meta (the engine's 段 level/height for
+                    # the vertical animation) so both coexist in one dict.
+                    existing = kf[4] if len(kf) >= 5 and isinstance(kf[4], dict) else {}
                     kf = [kf[0], kf[1], kf[2], kf[3],
-                          {"run_id": ri, "along": along, "sku": sku, "qty": qty}]
+                          {**existing, "run_id": ri, "along": along, "sku": sku, "qty": qty}]
             new_kfs.append(kf)
         w["keyframes"] = new_kfs
 

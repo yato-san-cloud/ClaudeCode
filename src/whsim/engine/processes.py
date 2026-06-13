@@ -136,9 +136,13 @@ def forklift_agent(world: World, f: Worker, rng: random.Random):
                   resource="forklift", worker=f.id)
 
 
+_GROUND = (0.0, 1, "manual", 0.0)  # default pick meta: ground 段, no vertical time
+
+
 def _order_points(world: World, order: Order):
-    """Parallel (points, qtys, tss, vss): vss = per-visit vertical access seconds
-    for picking each SKU's 段(level) (0 for ground/golden, longer for upper levels)."""
+    """Parallel (points, qtys, tss, vss): vss[i] = (vertical_seconds, 段, mover,
+    height_m) for picking each SKU's level — used for both the time and the
+    2D/3D vertical animation. Ground/golden 段1 = (0, 1, 'manual', 0)."""
     pts, qtys, tss, vss = [], [], [], []
     for line in order.lines:
         xy = world.sku_xy.get(line.sku)
@@ -147,7 +151,7 @@ def _order_points(world: World, order: Order):
         pts.append(xy)
         qtys.append(line.qty)
         tss.append(world.sku_ts.get(line.sku, 1.5))
-        vss.append(world.sku_vert.get(line.sku, 0.0))
+        vss.append(world.sku_pick.get(line.sku, _GROUND))
     return pts, qtys, tss, vss
 
 
@@ -220,7 +224,7 @@ def _totals_points(world: World, orders: list[Order]):
         pts.append(world.sku_xy[sku])
         qtys.append(qty)
         tss.append(world.sku_ts.get(sku, 1.5))
-        vss.append(world.sku_vert.get(sku, 0.0))
+        vss.append(world.sku_pick.get(sku, _GROUND))
     return pts, qtys, tss, vss
 
 
@@ -233,11 +237,15 @@ def _walk_route(world: World, w: Worker, start, points, qtys, tss, vss, speed):
         dest = points[idx]
         total += yield from _walk(world, w, pos, dest, speed, "travel")
         pos = dest
+        vert_s, lv, by, h = vss[idx]
         if world.recording():
-            w.kf(world.env.now, pos[0], pos[1], "pick")
-        # handle = horizontal unit handling + vertical 段 access (upper levels cost
-        # lift/reach time); the replay dwell at this keyframe lengthens accordingly.
-        yield world.env.timeout(qtys[idx] * tss[idx] + vss[idx])
+            # Upper 段 carry a meta dict so the 2D/3D replay raise the picker/forklift
+            # to the level height; 段1 stays a clean 4-tuple (legacy contract).
+            meta = {"lv": lv, "by": by, "h": h} if lv > 1 else None
+            w.kf(world.env.now, pos[0], pos[1], "pick", meta)
+        # handle = horizontal unit handling + vertical 段 access (lift/reach); the
+        # replay dwell at this keyframe lengthens with the vertical time.
+        yield world.env.timeout(qtys[idx] * tss[idx] + vert_s)
     return pos, total
 
 
@@ -368,7 +376,7 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 tss += t
                 vss += v
         # handle = horizontal unit handling + the 段(level) vertical access time.
-        handle_time = sum(q * t for q, t in zip(qtys, tss)) + sum(vss)
+        handle_time = sum(q * t for q, t in zip(qtys, tss)) + sum(v[0] for v in vss)
 
         total_dist = 0.0
         if agv_mode:
