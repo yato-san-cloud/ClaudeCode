@@ -14,6 +14,7 @@
 // follow-up calls (incl. the chat-bucket rename/clear) in the same order.
 import { S } from './state.js';
 import { $, api, modalPrompt, modalConfirm } from './util.js';
+import { refreshMySamples } from './mysamples.js';
 
 // Shell helpers that remain in app.js, injected at boot.
 let toast = () => {};
@@ -23,6 +24,30 @@ let clearProjectState = () => {};
 
 export function initProjectMenu(deps) {
   ({ toast, refreshProjects, openProject, clearProjectState } = deps);
+}
+
+// Freeze the current project into a LOCAL-ONLY「マイサンプル」 (gitignored; never
+// uploaded), so the same real layout + data is one-click reusable later.
+export async function projSaveSample() {
+  const name = S.project;
+  if (!name) return;
+  closeProjMenu();
+  const label = (await modalPrompt({
+    title: 'マイサンプルとして保存',
+    message: `「${name}」を、この端末だけのマイサンプルとして保存します（GitHubには上げません）。`,
+    label: 'サンプル名',
+    value: name,
+    okLabel: '保存',
+  }) || '').trim();
+  if (!label) return;
+  try {
+    await api('/api/samples', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: name, label }),
+    });
+    await refreshMySamples();
+    toast(`「${label}」をマイサンプルに保存しました。`, 'ok');
+  } catch (e) { toast('保存に失敗しました: ' + (e && e.message ? e.message : e), 'error'); }
 }
 
 // ---- project management menu (duplicate / rename / delete) -----------------

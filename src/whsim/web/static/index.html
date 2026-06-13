@@ -49,12 +49,16 @@
                     aria-label="プロジェクト操作メニュー" aria-haspopup="menu" aria-expanded="false"
                     aria-controls="projMenu" disabled>⋯</button>
             <div id="projMenu" class="proj-menu" role="menu" aria-label="プロジェクト操作" hidden>
+              <button type="button" role="menuitem" data-act="save-sample">📌 マイサンプルとして保存</button>
               <button type="button" role="menuitem" data-act="duplicate">複製</button>
               <button type="button" role="menuitem" data-act="rename">名前変更</button>
               <button type="button" role="menuitem" data-act="delete" class="danger-item">削除</button>
             </div>
           </div>
         </div>
+        <!-- マイサンプル: local-only saved project snapshots (gitignored; never
+             uploaded). Populated by js/mysamples.js. -->
+        <div id="mySamples"></div>
         <div class="row new-proj">
           <input id="newName" placeholder="プロジェクト名 例: acme" />
           <select id="templateSelect"></select>

@@ -15,3 +15,7 @@ examples/*.zip
 
 # Claude Code local state / transient agent worktrees
 .claude/
+
+# Personal "my" samples — local-only project snapshots (may contain real
+# customer data); never committed.
+samples/

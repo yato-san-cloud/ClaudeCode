@@ -79,6 +79,49 @@ def api_sample(payload: dict | None = None):
     return {"name": name, "ready": ready}
 
 
+@router.get("/api/samples")
+def api_samples_list():
+    """List the user's LOCAL personal samples (frozen project snapshots). These
+    live in a gitignored ``samples/`` dir and never leave the machine."""
+    from whsim import samplestore
+    return samplestore.list_samples()
+
+
+@router.post("/api/samples")
+def api_sample_save(payload: dict):
+    """Freeze the current project as a personal sample. Body:
+    ``{"project": str, "label"?: str}``."""
+    from whsim import samplestore
+    proj = _open(payload.get("project") or "")
+    return samplestore.save_sample(proj, payload.get("label") or "")
+
+
+@router.post("/api/samples/{sid}/instantiate")
+def api_sample_instantiate(sid: str, payload: dict | None = None):
+    """Create a fresh project from a personal sample. Body (optional):
+    ``{"name"?: str}`` — a free name is auto-picked if omitted/taken."""
+    from whsim import samplestore
+    payload = payload or {}
+    raw = payload.get("name")
+    base = samplestore.list_samples()
+    label = next((m.get("label") for m in base if m.get("id") == sid), None)
+    preferred = _safe_name(raw) if isinstance(raw, str) and raw.strip() else (label or "sample")
+    name = _free_project_name(preferred)
+    try:
+        samplestore.instantiate(sid, name)
+    except FileNotFoundError:
+        raise HTTPException(404, f"no sample {sid!r}")
+    return {"name": name}
+
+
+@router.delete("/api/samples/{sid}")
+def api_sample_delete(sid: str):
+    from whsim import samplestore
+    if not samplestore.delete_sample(sid):
+        raise HTTPException(404, f"no sample {sid!r}")
+    return {"ok": True}
+
+
 @router.delete("/api/projects/{name}")
 def api_delete(name: str):
     """Delete a project workspace and all its artifacts."""

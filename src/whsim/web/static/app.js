@@ -29,7 +29,9 @@ import { initImports } from './js/imports.js';
 import { mountHistory, hist } from './js/history.js';
 import {
   initProjectMenu, closeProjMenu, openProjMenu, projDuplicate, projRename, projDelete,
+  projSaveSample,
 } from './js/projectmenu.js';
+import { initMySamples, refreshMySamples } from './js/mysamples.js';
 // 2D replay canvas renderer + shared playback clock (lifted verbatim from this
 // shell). The shell still owns view switching, so it calls draw2d/fitCanvas/
 // refreshPalette/loop and reuses JP_TO_TYPE for the 3D bottleneck spotlight.
@@ -1128,7 +1130,8 @@ function initUI() {
     mi.onclick = () => {
       const act = mi.dataset.act;
       closeProjMenu();
-      if (act === 'duplicate') projDuplicate();
+      if (act === 'save-sample') projSaveSample();
+      else if (act === 'duplicate') projDuplicate();
       else if (act === 'rename') projRename();
       else if (act === 'delete') projDelete();
     };
@@ -1185,6 +1188,8 @@ function initUI() {
   // interaction can fire the import / project-menu handlers) is safe.
   initImports({ toast, openProject, mountDesigner, nudgeToDesign, setBtnBusy, cody });
   initProjectMenu({ toast, refreshProjects, openProject, clearProjectState });
+  initMySamples({ openProject, refreshProjects, toast });
+  refreshMySamples();
   initTheme();
   refreshPalette();
   initUI();
