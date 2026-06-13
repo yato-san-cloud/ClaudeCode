@@ -32,6 +32,37 @@ GENERIC_PROCESSES: list[dict] = [
 _INBOUND_WINDOW = list(range(8, 16))
 
 
+def process_master(model=None) -> list[dict]:
+    """The work-process master: the project's editable list when present, else the
+    engine default (GENERIC_PROCESSES). This is the SINGLE source of truth — every
+    consumer (solver, cost, productivity, flow seed) resolves processes through here
+    so a renamed/added/removed process flows everywhere. Each dict has the same
+    shape as GENERIC_PROCESSES (id/section/driver/prod/unit) plus 'depends'."""
+    wp = getattr(getattr(model, "process", None), "work_processes", None)
+    if not wp:
+        return [{**p, "depends": list(_FLOW_DEPS.get(p["id"], []))} for p in GENERIC_PROCESSES]
+    out: list[dict] = []
+    for p in wp:
+        d = p.model_dump() if hasattr(p, "model_dump") else dict(p)
+        out.append({
+            "id": str(d.get("id", "工程")),
+            "section": str(d.get("section", "出荷")),
+            "driver": str(d.get("driver", "out_lines")),
+            "prod": float(d.get("prod", 60.0) or 60.0),
+            "unit": str(d.get("unit", "行/h")),
+            "depends": [str(u) for u in (d.get("depends") or [])],
+        })
+    return out
+
+
+def process_deps(model=None) -> dict[str, list[str]]:
+    """Precedence DAG {process_id: [upstream ids]} from the master (model's edited
+    `depends`, else the engine default _FLOW_DEPS)."""
+    master = process_master(model)
+    ids = {p["id"] for p in master}
+    return {p["id"]: [u for u in p["depends"] if u in ids] for p in master if p["depends"]}
+
+
 def _n_days(df: pd.DataFrame | None) -> int:
     if df is None or df.empty or "date" not in df.columns:
         return 1
@@ -426,7 +457,8 @@ def solve_staffing(
     finish_hour + feasible/shortfall, plus day totals (man_hours, peak, makespan,
     feasible, shortfall man-hours). never-blocks: empty volume → empty-but-valid.
     """
-    deps = dependencies if isinstance(dependencies, dict) else default_dependencies()
+    master = process_master(model)  # editable list when present, else GENERIC_PROCESSES
+    deps = dependencies if isinstance(dependencies, dict) else process_deps(model)
     ppc = {str(k): float(v) for k, v in (per_process_cap or {}).items() if v}
     front = str(placement).lower() in ("front", "frontload", "front-load") \
         or str(placement) in ("前詰め", "前倒し", "frontLoad")
@@ -440,10 +472,10 @@ def solve_staffing(
     hours = list(range(s, e))
     n_hours = len(hours)
 
-    proc_by_id = {p["id"]: p for p in GENERIC_PROCESSES}
+    proc_by_id = {p["id"]: p for p in master}
     # Keep only processes that exist in the master and carry positive volume.
     active_ids = [
-        p["id"] for p in GENERIC_PROCESSES
+        p["id"] for p in master
         if float(volumes_by_process.get(p["id"], 0) or 0) > 0
     ]
     order = _toposort(active_ids, deps)
@@ -501,7 +533,7 @@ def solve_staffing(
                 sec_curve[str(sec)] = curve
         if sec_curve:
             seen_sec: set[str] = set()
-            for p in GENERIC_PROCESSES:  # master order
+            for p in master:  # master order
                 pid, sec = p["id"], p["section"]
                 if pid in order_set and sec in sec_curve and sec not in seen_sec:
                     arrival_curve_by_pid[pid] = sec_curve[sec]
@@ -660,7 +692,7 @@ def solve_staffing(
         })
 
     # Order the output rows in master order (toposort reorders for compute only).
-    master_order = {p["id"]: i for i, p in enumerate(GENERIC_PROCESSES)}
+    master_order = {p["id"]: i for i, p in enumerate(master)}
     procs_out.sort(key=lambda r: master_order.get(r["id"], 1_000_000))
 
     peak = max(total_by_hour) if total_by_hour else 0

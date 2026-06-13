@@ -188,3 +188,35 @@ def test_no_batches_is_unchanged():
     assert base["total_man_hours"] == withn["total_man_hours"]
     assert base["makespan_hour"] == withn["makespan_hour"]
     assert withn["batches"] == {}
+
+
+# ---- editable work-process master (完全フリー工程) ----------------------------
+
+def test_process_master_defaults_to_generic():
+    from whsim.schema.model import WarehouseModel
+    m = WarehouseModel()  # empty work_processes
+    ids = [p["id"] for p in staffing.process_master(m)]
+    assert ids == [p["id"] for p in staffing.GENERIC_PROCESSES]
+    # process_deps mirrors the engine default precedence.
+    assert staffing.process_deps(m)["格納"] == ["入荷検品"]
+    assert staffing.process_master(None)  # None model → engine default, never blocks
+
+
+def test_solver_honours_custom_process_list():
+    from whsim.schema.model import WarehouseModel, WorkProcess
+    m = WarehouseModel()
+    m.process.work_processes = [
+        WorkProcess(id="入荷", section="入荷", driver="in_lines", prod=50, unit="行/h"),
+        WorkProcess(id="出荷ピック", section="出荷", driver="out_lines", prod=80,
+                    unit="行/h", depends=["入荷"]),
+    ]
+    res = staffing.solve_staffing(
+        {"入荷": 500, "出荷ピック": 800}, model=m,
+        start_hour=8, end_hour=20, placement="front")
+    assert {p["id"] for p in res["processes"]} == {"入荷", "出荷ピック"}
+    # The custom precedence (出荷ピック after 入荷) still staggers the start.
+    recv = _first_active_hour(_proc(res, "入荷"))
+    pick = _first_active_hour(_proc(res, "出荷ピック"))
+    assert recv is not None and pick is not None and pick > recv
+    # The custom default productivity is used for 出荷ピック.
+    assert _proc(res, "出荷ピック")["productivity"] == 80.0

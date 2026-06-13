@@ -223,11 +223,32 @@ def _default_stages() -> list["Stage"]:
     ]
 
 
+class WorkProcess(BaseModel):
+    """An editable work-process row driving the 人員タイムチャート / 原価 / 生産性 stack.
+
+    Empty `Process.work_processes` ⇒ the engine's default 6-process 3PL flow
+    (see staffing.GENERIC_PROCESSES). A project can add / rename / reorder / delete
+    these to model its real operation. `driver` names the volume source
+    (in_lines / in_qty / out_lines / out_orders); `prod` is the engine-default
+    productivity (units/person/hour, the 3rd tier under 実測>想定); `depends` lists
+    upstream process ids (the precedence DAG). Every field defaulted → never blocks."""
+
+    id: str = "工程"
+    section: str = "出荷"                 # band grouping (入荷 / 出荷 / …); colours the gantt
+    driver: str = "out_lines"            # volume source: in_lines/in_qty/out_lines/out_orders
+    prod: float = 60.0                   # engine-default productivity (units/person/hour)
+    unit: str = "行/h"
+    depends: list[str] = Field(default_factory=list)  # upstream process ids
+
+
 class Process(BaseModel):
     flow: list[str] = Field(
         default_factory=lambda: ["receive", "putaway", "pick", "pack", "ship"]
     )
     stages: list[Stage] = Field(default_factory=_default_stages)
+    # Editable work-process master for staffing/cost/productivity. Empty = engine
+    # default (staffing.GENERIC_PROCESSES); resolve via staffing.process_master(model).
+    work_processes: list[WorkProcess] = Field(default_factory=list)
     pick_strategy: PickStrategy = "discrete"
     routing_policy: RoutingPolicy = "nearest"
     batch_size: int = 1
