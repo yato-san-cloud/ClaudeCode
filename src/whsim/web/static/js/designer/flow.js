@@ -401,7 +401,7 @@ export const flowMethods = {
     this._methodAxis(s, work, 'consolidation');
     this._methodAxis(s, work, 'release');
     // wave interval (only meaningful when release == wave)
-    this._field(s, 'ウェーブ間隔（分）', () => this._num(Math.round((work.wave_interval_s || 1800) / 60), (v) => {
+    this._field(s, 'バッチ間隔（分）', () => this._num(Math.round((work.wave_interval_s || 1800) / 60), (v) => {
       work.wave_interval_s = Math.max(1, Math.round(v)) * 60;
       this._refreshMethodBanner(work);
     }, 1));

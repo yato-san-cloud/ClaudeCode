@@ -112,8 +112,8 @@ export const METHOD_COLOR = {
   manual: '#9aa4b0', agv: '#1f78b4', conveyor: '#33a02c', asrs: '#6a3d9a',
 };
 export const PICK_STRATS = [
-  { value: 'discrete', label: '都度ピック' }, { value: 'batch', label: 'バッチ' },
-  { value: 'zone', label: 'ゾーン' }, { value: 'wave', label: 'ウェーブ' },
+  { value: 'discrete', label: 'シングルオーダー' }, { value: 'batch', label: 'マルチオーダー' },
+  { value: 'zone', label: 'ゾーン（リレー）' }, { value: 'wave', label: 'バッチ投入' },
 ];
 // Work-method 5-axis controls (cf. docs/WORK_METHOD_DESIGN.md). Plain-Japanese
 // labels for a non-expert; the expert term shows as a small sub-label. Only the
@@ -134,9 +134,9 @@ export const WORK_AXES = {
     { value: 'pick', label: 'オーダー別に採る（摘み取り）' },
     { value: 'sort', label: '総量を採って後で仕分け（種まき）' },
   ] },
-  // E 投入: 連続 / ウェーブ
+  // E 投入: 連続 / バッチ（締め単位）
   release: { label: 'いつ流す？', sub: '投入 (release)', opts: [
-    { value: 'continuous', label: '随時（連続）' }, { value: 'wave', label: '締め単位（ウェーブ）' },
+    { value: 'continuous', label: '随時（連続）' }, { value: 'wave', label: '締め単位（バッチ）' },
   ] },
 };
 // Default 5-axis work method (mirrors schema WorkMethod defaults; always valid).

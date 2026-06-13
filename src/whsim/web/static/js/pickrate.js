@@ -93,7 +93,7 @@ export function mountPickrate(el, opts = {}) {
   function renderEmpty(msg) {
     disposeChart();
     root.innerHTML = `<div class="pr-head"><h2>生産性試算</h2>
-      <div class="sub">MapMaker距離×動作時間で、オーダー/マルチ/トータルを解析（実行不要）</div></div>
+      <div class="sub">MapMaker距離×動作時間で、シングル/マルチ/トータルを解析（実行不要）</div></div>
       <div class="pr-empty">${esc(msg)}</div>`;
   }
 

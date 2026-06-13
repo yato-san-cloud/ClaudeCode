@@ -27,21 +27,25 @@ def test_method_name_transport_variants():
 
 
 def test_method_name_sort_family():
+    # Unified taxonomy: sort family is always "トータル" (batch release is the
+    # timetable's バッチ投入, no longer suffixed onto the picking-method name).
     base = workmethod.method_name(WorkMethod(consolidation="sort"))
-    assert "種まき" in base
+    assert base == "トータル"
     waved = workmethod.method_name(WorkMethod(consolidation="sort", release="wave"))
-    assert waved == base + "＋ウェーブ"
+    assert waved == "トータル"
 
 
 def test_method_name_zoning_and_release():
-    assert "並列" in workmethod.method_name(WorkMethod(zoning="parallel"))
-    assert "リレー" in workmethod.method_name(WorkMethod(zoning="sequential"))
-    assert workmethod.method_name(WorkMethod(release="wave")) == "ウェーブピッキング"
+    # Both zoning variants surface as the canonical "ゾーン（リレー）".
+    assert workmethod.method_name(WorkMethod(zoning="parallel")) == "ゾーン（リレー）"
+    assert workmethod.method_name(WorkMethod(zoning="sequential")) == "ゾーン（リレー）"
+    # release="wave" alone is no longer a picking method → plain シングルオーダー.
+    assert workmethod.method_name(WorkMethod(release="wave")) == "シングルオーダー"
 
 
 def test_method_name_multi_and_single_order():
-    assert "マルチオーダー" in workmethod.method_name(WorkMethod(orders_per_trip=4))
-    assert workmethod.method_name(WorkMethod()) == "シングルオーダー（摘み取り都度）"
+    assert workmethod.method_name(WorkMethod(orders_per_trip=4)) == "マルチオーダー"
+    assert workmethod.method_name(WorkMethod()) == "シングルオーダー"
 
 
 # ---- explain ------------------------------------------------------------------
@@ -61,7 +65,7 @@ def test_explain_covers_all_clauses():
     assert "5オーダー" in text
     assert "並列" in text
     assert "種まき" in text
-    assert "10分の波" in text  # 600s / 60 == 10 min
+    assert "10分ごとのバッチ" in text  # 600s / 60 == 10 min
 
 
 def test_explain_sequential_zoning_clause():
@@ -94,13 +98,13 @@ def _order(n_lines: int, sku_pool: int) -> Order:
 
 
 def test_recommend_few_skus_many_lines_picks_sort():
-    # few distinct SKUs, many lines per order, few destinations -> 種まき (sort)
+    # few distinct SKUs, many lines per order, few destinations -> トータル (sort)
     items = [Item(sku=f"S{i}") for i in range(10)]
     orders = [_order(6, sku_pool=10) for _ in range(20)]
     rec = _model_with_orders(orders, items)
     r = workmethod.recommend(rec)
     assert r.work.consolidation == "sort"
-    assert "種まき" in r.name
+    assert "トータル" in r.name
     assert "少品種" in r.reason
 
 

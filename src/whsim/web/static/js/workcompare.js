@@ -1,6 +1,6 @@
-// workcompare.js — ⑤提案「作業方法比較」: オーダー/マルチ/ゾーン/種まき を実行比較.
+// workcompare.js — ⑤提案「作業方法比較」: シングル/マルチ/ゾーン/トータル を実行比較.
 // deep-research の指針: 全方式は「移動 vs 仕分け」のトレードオフの一点。4プリセットを
-// SimPyで実行し、①横並びKPI（都度をベースラインにデルタ）②移動vs仕分けの散布図
+// SimPyで実行し、①横並びKPI（シングルオーダーをベースラインにデルタ）②移動vs仕分けの散布図
 // （x=移動/件, y=仕分/件, バブル=¥/件）③注文プロファイルからの推奨、を出す。
 // バックエンド: POST /workmethod/compare（純: whsim.workmethod + scenario runner）。
 // 「この方式で設計」で選んだ方式をモデルのピッキング工程に反映。EN comments / JA UI.
@@ -80,7 +80,7 @@ export function mountWorkCompare(el, opts = {}) {
     renderRunning();
     const prog = startRunProgress({ getProject: () => name,
       onCancel: () => api(`/api/projects/${encodeURIComponent(name)}/run/cancel`, { method: 'POST' }).catch(() => {}),
-      title: '4方式をDESで比較実行中…', sub: '都度・マルチ・ゾーン・種まきをそれぞれ回して移動vs仕分けを実測します。' });
+      title: '4方式をDESで比較実行中…', sub: 'シングルオーダー・マルチオーダー・ゾーン（リレー）・トータルをそれぞれ回して移動vs仕分けを実測します。' });
     try {
       data = await api(`/api/projects/${encodeURIComponent(name)}/workmethod/compare`, { method: 'POST' });
       if (data && data.cancelled) {
@@ -99,7 +99,7 @@ export function mountWorkCompare(el, opts = {}) {
 
   function headHtml() {
     return `<div class="wc-head"><h2>作業方法比較</h2>
-      <span class="sub">オーダー / マルチ / ゾーン / 種まき を実行して「移動 vs 仕分け」で比べる</span>
+      <span class="sub">シングル / マルチ / ゾーン / トータル を実行して「移動 vs 仕分け」で比べる</span>
       <button type="button" class="wc-run" data-run${running ? ' disabled' : ''}>${running ? '比較を実行中…' : '▶ 4方式を比較実行'}</button></div>`;
   }
   function wireHead() {
@@ -108,7 +108,7 @@ export function mountWorkCompare(el, opts = {}) {
   }
   function renderRunning() {
     disposeChart();
-    root.innerHTML = headHtml() + '<div class="wc-empty">4方式をSimPyで実行中… （都度／マルチ／ゾーン／種まき）</div>';
+    root.innerHTML = headHtml() + '<div class="wc-empty">4方式をSimPyで実行中… （シングル／マルチ／ゾーン／トータル）</div>';
     wireHead();
   }
 
@@ -160,7 +160,7 @@ export function mountWorkCompare(el, opts = {}) {
           + '</tr>';
       }).join('')
       + '</tbody></table>'
-      + '<div class="wc-note">※ 散布図：左下ほど移動・仕分けが少ない。種まきは移動最小だが仕分け工数が立つ＝トレードオフ。'
+      + '<div class="wc-note">※ 散布図：左下ほど移動・仕分けが少ない。トータルは移動最小だが仕分け工数が立つ＝トレードオフ。'
       + '「この方式で設計」でモデルのピッキング工程に反映し、再実行・原価へ繋がります。</div>';
     buildScatter(root.querySelector('[data-ec]'), methods, rec.id);
     wireHead();

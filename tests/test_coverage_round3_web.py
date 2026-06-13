@@ -45,7 +45,7 @@ def test_workmethod_name_agv_and_sort(client):
     assert "AGV" in r.json()["name"]
     r2 = client.post("/api/workmethod/name",
                      json={"consolidation": "sort", "release": "wave"})
-    assert "種まき" in r2.json()["name"] and "ウェーブ" in r2.json()["name"]
+    assert r2.json()["name"] == "トータル"
 
 
 def test_workmethod_recommend_for_project(client):

@@ -30,10 +30,10 @@ def test_workmethod_name_default(client):
 
 def test_workmethod_name_combinations(client):
     """A few axis combinations reverse-name to the familiar method names."""
-    # 種まき (total picking / sort)
+    # トータル (total picking / sort)
     r = client.post("/api/workmethod/name",
                     json={"consolidation": "sort", "orders_per_trip": 8})
-    assert "種まき" in r.json()["name"]
+    assert r.json()["name"] == "トータル"
 
     # goods-to-person (AGV)
     r = client.post("/api/workmethod/name", json={"transport": "agv"})

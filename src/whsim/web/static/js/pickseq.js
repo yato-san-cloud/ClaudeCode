@@ -116,7 +116,7 @@ export function mountPickseq(el, opts = {}) {
 
   function render() {
     if (!data.has_data) { renderEmpty(data.verdict); return; }
-    const recJp = { order: '都度', multi: 'まとめ', total: 'トータル' }[data.recommend_mode] || '都度';
+    const recJp = { order: 'シングル', multi: 'マルチ', total: 'トータル' }[data.recommend_mode] || 'シングル';
     root.innerHTML =
       `<div class="ps-head"><h2>ピック順序最適化 <span style="font-size:12px;font-weight:500;color:var(--ink-tertiary)">2-opt・解析的</span></h2>
         <div class="sub">棚距離（${data.wall_aware ? '壁考慮グラフ' : 'マンハッタン'}）でピック順序を最適化。ナイーブ／貪欲／2-optを ${esc(String(data.n_orders))} オーダーで比較。</div></div>
