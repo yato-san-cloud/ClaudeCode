@@ -114,6 +114,21 @@ function injectStyle() {
     background:var(--panel,var(--bg-app));color:var(--muted,var(--ink-tertiary));font-size:var(--fs-micro,11px);cursor:pointer}
   .tt-deptoggle.on{background:var(--accent-tint,#E4F8FC);border-color:var(--accent,#16C0DE);
     color:var(--accent-ink,var(--accent));font-weight:700}
+  /* バッチ投入スケジュール editor */
+  .tt-solver-batches{display:flex;flex-direction:column;gap:var(--sp-2,8px);
+    margin-top:var(--sp-2,8px);padding-top:var(--sp-2,8px);border-top:1px solid var(--line-hair,var(--line))}
+  .tt-batch-block{display:flex;flex-direction:column;gap:4px}
+  .tt-batch-head{display:flex;align-items:center;gap:var(--sp-2,8px);flex-wrap:wrap}
+  .tt-batch-sec{min-width:40px;font-size:var(--fs-sm,13px);font-weight:700;color:var(--ink,var(--ink-primary))}
+  .tt-batch-grid{display:flex;align-items:center;gap:var(--sp-2,8px);flex-wrap:wrap}
+  .tt-batch-row{display:inline-flex;align-items:center;gap:3px;background:var(--bg-sunken,rgba(120,140,170,.08));
+    border:1px solid var(--line-hair,var(--line));border-radius:var(--r-md,8px);padding:3px 6px}
+  .tt-batch-row .tt-mini{width:46px}
+  .tt-batch-x{font-size:var(--fs-micro,11px);color:var(--muted,var(--ink-tertiary))}
+  .tt-batch-del{border:none;background:transparent;color:var(--muted,var(--ink-tertiary));
+    font-size:14px;line-height:1;cursor:pointer;padding:0 2px}
+  .tt-batch-del:hover{color:var(--bad,#ff6b7d)}
+  .tt-batch-note{font-size:var(--fs-micro,11px);color:var(--muted,var(--ink-tertiary))}
   @media (prefers-reduced-motion: reduce){ .tt-cursor-sync,.tt-cursor-sync i,.tt-recalc-pill{transition:none} }
   `;
   document.head.appendChild(s);
@@ -163,11 +178,21 @@ export function mountTimetable(targetEl, opts = {}) {
   let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
 
   // ---- analytic staffing solver (稼働窓 + 上限 + 依存 + 前詰め/均等) ----------
-  let elSolver, elSolverDeps, elSolverSummary, elSolverCurve;
+  let elSolver, elSolverDeps, elSolverBatches, elSolverSummary, elSolverCurve;
   let solverResult = null;
   const solverState = {
     start: 9, end: 18, cap: 0, placement: 'front',
     deps: {}, defaultDeps: {}, processIds: [], _seededDeps: false,
+    batches: {}, _seededBatches: false,  // {section: [{hour, pct}]} バッチ投入
+  };
+  // Sections that can carry a batch-release schedule (入荷=arrivals, 出荷=order cutoffs).
+  const BATCH_SECTIONS = ['入荷', '出荷'];
+  // Presets the planner can one-click instead of typing rows.
+  const BATCH_PRESETS = {
+    入荷: { 'なし（随時）': [], '昼1便': [{ hour: 12, pct: 100 }],
+      '朝70/昼20/夕10': [{ hour: 8, pct: 70 }, { hour: 12, pct: 20 }, { hour: 15, pct: 10 }] },
+    出荷: { 'なし（随時）': [], '夕締め1便': [{ hour: 16, pct: 100 }],
+      '昼40/夕60': [{ hour: 11, pct: 40 }, { hour: 16, pct: 60 }] },
   };
 
   function build() {
@@ -314,6 +339,10 @@ export function mountTimetable(targetEl, opts = {}) {
     elSolverDeps = el('div', 'tt-solver-deps');
     body.appendChild(elSolverDeps);
 
+    // Batch-release schedule editor (入荷/出荷 の {時刻, %} 投入).
+    elSolverBatches = el('div', 'tt-solver-batches');
+    body.appendChild(elSolverBatches);
+
     // Summary + per-hour curve render targets.
     elSolverSummary = el('div', 'tt-solver-summary');
     body.appendChild(elSolverSummary);
@@ -323,6 +352,81 @@ export function mountTimetable(targetEl, opts = {}) {
     elSolver.appendChild(body);
     root.appendChild(elSolver);
     renderDepEditor();
+    renderBatchEditor();
+  }
+
+  // ---- バッチ投入スケジュール editor ------------------------------------------
+  // The day's volume for a section lands in batches at given hours; this is how a
+  // batch operation actually releases work (e.g. 入荷 朝70%/昼20%/夕10%). Each row
+  // is {時刻, %}; the solver gates the section's first process to what has landed.
+  function renderBatchEditor() {
+    if (!elSolverBatches) return;
+    elSolverBatches.innerHTML = '';
+    elSolverBatches.appendChild(el('div', 'tt-solver-deps-title',
+      'バッチ投入スケジュール（その時刻までに何％が入荷／出荷されるか。空＝随時）'));
+    for (const sec of BATCH_SECTIONS) {
+      const rows = solverState.batches[sec] || [];
+      const block = el('div', 'tt-batch-block');
+      const head = el('div', 'tt-batch-head');
+      head.appendChild(el('span', 'tt-batch-sec', sec));
+      // presets
+      const presets = el('span', 'tt-solver-presets');
+      for (const [label, def] of Object.entries(BATCH_PRESETS[sec] || {})) {
+        const chip = el('button', 'tt-chip', label);
+        chip.onclick = () => {
+          solverState.batches[sec] = def.map((d) => ({ ...d }));
+          if (!solverState.batches[sec].length) delete solverState.batches[sec];
+          renderBatchEditor(); runSolver();
+        };
+        presets.appendChild(chip);
+      }
+      head.appendChild(presets);
+      block.appendChild(head);
+
+      // editable rows
+      const grid = el('div', 'tt-batch-grid');
+      rows.forEach((r, i) => {
+        const row = el('div', 'tt-batch-row');
+        const hIn = el('input', 'tt-mini'); hIn.type = 'number'; hIn.min = '0'; hIn.max = '30';
+        hIn.value = String(r.hour); hIn.setAttribute('aria-label', `${sec} 時刻`);
+        hIn.oninput = () => { r.hour = parseInt(hIn.value, 10) || 0; scheduleBatchSolve(); };
+        const pIn = el('input', 'tt-mini'); pIn.type = 'number'; pIn.min = '0'; pIn.max = '100';
+        pIn.value = String(r.pct); pIn.setAttribute('aria-label', `${sec} 割合(%)`);
+        pIn.oninput = () => { r.pct = parseFloat(pIn.value) || 0; scheduleBatchSolve(); };
+        const del = el('button', 'tt-batch-del', '×'); del.title = 'この便を削除';
+        del.onclick = () => {
+          solverState.batches[sec].splice(i, 1);
+          if (!solverState.batches[sec].length) delete solverState.batches[sec];
+          renderBatchEditor(); runSolver();
+        };
+        row.appendChild(hIn); row.appendChild(el('span', 'tt-batch-x', '時 →'));
+        row.appendChild(pIn); row.appendChild(el('span', 'tt-batch-x', '%'));
+        row.appendChild(del);
+        grid.appendChild(row);
+      });
+      const add = el('button', 'tt-chip', '＋便を追加');
+      add.onclick = () => {
+        (solverState.batches[sec] = solverState.batches[sec] || []).push({ hour: 12, pct: 0 });
+        renderBatchEditor();
+      };
+      grid.appendChild(add);
+      // sum hint
+      const sum = rows.reduce((a, r) => a + (Number(r.pct) || 0), 0);
+      if (rows.length) {
+        block.appendChild(grid);
+        const note = el('div', 'tt-batch-note',
+          `合計 ${r1(sum)}%（合計で正規化するので端数でも可）`);
+        block.appendChild(note);
+      } else {
+        block.appendChild(grid);
+      }
+      elSolverBatches.appendChild(block);
+    }
+  }
+  let batchSolveTimer = 0;
+  function scheduleBatchSolve() {
+    if (batchSolveTimer) clearTimeout(batchSolveTimer);
+    batchSolveTimer = setTimeout(runSolver, DEBOUNCE_MS);
   }
 
   function ctrlField(label, control) {
@@ -390,6 +494,9 @@ export function mountTimetable(targetEl, opts = {}) {
       start_hour: solverState.start, end_hour: solverState.end,
       cap: solverState.cap || null, placement: solverState.placement,
       dependencies: solverState.deps,
+      // Send the batch schedule once the user has touched it (seeded flag set),
+      // so the backend persists/applies it; before that, let the saved one stand.
+      ...(solverState._seededBatches ? { batches: solverState.batches } : {}),
     };
     let res;
     try {
@@ -407,6 +514,18 @@ export function mountTimetable(targetEl, opts = {}) {
       if (!Object.keys(solverState.deps).length) solverState.deps = cloneDeps(res.default_dependencies);
       solverState._seededDeps = true;
       renderDepEditor();
+    }
+    // Seed the batch editor from the persisted schedule on first solve.
+    if (res && !solverState._seededBatches) {
+      const saved = res.batches && typeof res.batches === 'object' ? res.batches : {};
+      solverState.batches = {};
+      for (const [sec, rows] of Object.entries(saved)) {
+        if (Array.isArray(rows) && rows.length) {
+          solverState.batches[sec] = rows.map((d) => ({ hour: d.hour, pct: d.pct }));
+        }
+      }
+      solverState._seededBatches = true;
+      renderBatchEditor();
     }
     renderSolver();
   }
