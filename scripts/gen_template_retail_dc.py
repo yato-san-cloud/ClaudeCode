@@ -177,9 +177,22 @@ def build():
     return model, manifest
 
 
+def _stamp_addresses(model: dict) -> None:
+    """Run materialize_racks so the shipped locations already carry their
+    structured 棚番号 (address) + 段 (level) — keeping the on-disk template
+    byte-identical to what the runtime regenerates (never-jumps)."""
+    from whsim import design
+    from whsim.schema.model import WarehouseModel
+    wm = WarehouseModel.model_validate(model)
+    design.materialize_racks(wm)
+    model["locations"] = [loc.model_dump() for loc in wm.locations]
+    model["items"] = [it.model_dump() for it in wm.items]
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     model, manifest = build()
+    _stamp_addresses(model)
     (OUT / "template.json").write_text(
         json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
     (OUT / "manifest.json").write_text(

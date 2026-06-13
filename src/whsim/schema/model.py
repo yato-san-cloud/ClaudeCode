@@ -145,6 +145,15 @@ class Layout(BaseModel):
 class Location(BaseModel):
     id: str = "loc"
     name: str = ""            # addressable location name (from the shelf/run it sits in)
+    # Structured human 棚番号 (location address). Generated deterministically by
+    # design.materialize_racks of the form 通路-連-段 (aisle-bay-level), e.g.
+    # "A03-12-2". Stable across a re-materialize so slotting / pick-sequence can
+    # rely on it as a sort key. Empty only for legacy/hand-authored locations.
+    address: str = ""
+    # 段 (rack level), 1 = bottom shelf. A pallet bay (rack_type.levels == 4)
+    # materialises 4 stacked locations sharing one (x,y) at level 1..4, with the
+    # bay capacity divided across levels. Default 1 keeps single-level models valid.
+    level: int = 1
     zone: str = "storage"
     x: float = 0.0
     y: float = 0.0

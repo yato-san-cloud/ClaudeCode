@@ -8,7 +8,7 @@
 import {
   CP_HALF, DOOR_JP, DOOR_PALETTE, EQUIP_PALETTE, HANDLE, MOVER_COLOR, RACK_TYPES, ZONE_DEFAULT_COLOR, ZONE_JP,
 } from './constants.js';
-import { clamp, hexA, snap } from './geometry.js';
+import { cellAddress, clamp, hexA, shelfCells, snap } from './geometry.js';
 
 export const renderMethods = {
   // ---- drawing -------------------------------------------------------------
@@ -541,6 +541,23 @@ export const renderMethods = {
       ctx.fillStyle = this.pal.ink;
       ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(sh.name, cx, cy);
+    }
+    // 棚番号 (location address) label at HIGH ZOOM: once cells are big enough on
+    // screen, stamp each cell's 通路-連-段 address (bottom level) so the user can
+    // read addresses off the floor plan. Mirrors design._address.
+    if (this._view.sc >= 18) this._drawShelfAddresses(sh, rt);
+  },
+  // Per-cell 棚番号 labels (only when zoomed in enough that they won't overlap).
+  _drawShelfAddresses(sh, rt) {
+    const ctx = this.ctx;
+    const cells = shelfCells(sh, rt);
+    const bayPx = (rt.bay || 1) * this._view.sc;
+    if (bayPx < 30) return;                  // too dense to label legibly
+    ctx.fillStyle = this.pal.ink;
+    ctx.font = '8px var(--font-mono, monospace)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [x, y] of cells) {
+      ctx.fillText(cellAddress(x, y, 1), this._X(x), this._Y(y) + 6);
     }
   },
   // ---- M2 shelf selection chrome: bbox + 8 control points + snap guides + draft -

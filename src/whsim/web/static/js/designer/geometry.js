@@ -44,3 +44,46 @@ export function hexA(hex, a) {                       // "#rrggbb" -> rgba()
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
+
+// ---- 棚番号 (location address) — JS MIRROR of design._address (keep in parity) ---
+// Addresses are 通路-連-段 (aisle-bay-level), e.g. "A03-12-2": aisle LETTER from
+// an x-band, 連 (bay) number from the y-position along the run, 段 (level) suffix.
+// This mirrors src/whsim/design.py so the inspector can preview the exact 棚番号
+// the server will materialise — WITHOUT a save round-trip.
+const AISLE_BAND_M = 4.0;   // metres of x per aisle letter (must match design.py)
+
+export function aisleLetter(idx) {                   // 0->A .. 25->Z, 26->AA ...
+  idx = Math.max(0, idx | 0);
+  let s = '';
+  for (;;) {
+    s = String.fromCharCode(65 + (idx % 26)) + s;
+    idx = Math.floor(idx / 26) - 1;
+    if (idx < 0) break;
+  }
+  return s;
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+export function cellAddress(x, y, level, x0 = 0) {   // mirrors design._address
+  const aisle = Math.floor((x - x0) / AISLE_BAND_M);
+  const bay = Math.round(y / 0.5) + 1;
+  return `${aisleLetter(aisle)}${pad2(aisle + 1)}-${pad2(bay)}-${level}`;
+}
+
+// Enumerate cell (x,y) centres of a shelf at its rack type's pitch — MIRROR of
+// design._shelf_slots (bays along the long axis, depth across the short axis).
+export function shelfCells(sh, rt) {
+  const bay = Math.max(+sh.cell_w || rt.bay, 0.3);
+  const depth = Math.max(+sh.cell_d || rt.depth, 0.3);
+  const vertical = sh.h >= sh.w;
+  const px = vertical ? depth : bay;
+  const py = vertical ? bay : depth;
+  const xs = [];
+  const ys = [];
+  for (let x = sh.x + px / 2; x <= sh.x + sh.w - px / 2 + 1e-9; x += px) xs.push(Math.round(x * 1e3) / 1e3);
+  for (let y = sh.y + py / 2; y <= sh.y + sh.h - py / 2 + 1e-9; y += py) ys.push(Math.round(y * 1e3) / 1e3);
+  if (!xs.length) xs.push(Math.round((sh.x + sh.w / 2) * 1e3) / 1e3);
+  if (!ys.length) ys.push(Math.round((sh.y + sh.h / 2) * 1e3) / 1e3);
+  const out = [];
+  for (const x of xs) for (const y of ys) out.push([x, y]);
+  return out;
+}

@@ -7,7 +7,7 @@
 import {
   DOOR_JP, DOOR_PALETTE, EQUIP_PALETTE, MIN_M, RACK_ORDER, RACK_TYPES, SHELF_MIN_M, ZONE_JP, ZONE_TYPES,
 } from './constants.js';
-import { clamp, uid } from './geometry.js';
+import { cellAddress, clamp, shelfCells, uid } from './geometry.js';
 
 export const sideMethods = {
   // ---- side editor panels (layout + equip tools) ---------------------------
@@ -107,6 +107,7 @@ export const sideMethods = {
     // single shelf editor
     const sh = objs[0].sh;
     this._h(s, '選択中の棚');
+    this._kindBadge(s, '棚');
     // name — verbatim, unique, comma-banned (live validation like ShelfEditor).
     const nameRow = this._div(s, 'margin-bottom:6px;');
     const nl = this._div(nameRow, 'font-size:12px;margin-bottom:3px;');
@@ -149,8 +150,56 @@ export const sideMethods = {
     this._field(s, 'X (m)', () => this._num(sh.x, (v) => { this._pushUndo(); sh.x = clamp(v, 0, b.width - sh.w); this._repaint(); }, 0.1));
     this._field(s, 'Y (m)', () => this._num(sh.y, (v) => { this._pushUndo(); sh.y = clamp(v, 0, b.depth - sh.h); this._repaint(); }, 0.1));
 
+    // 棚番号 (location address) — the structured 通路-連-段 address this shelf's
+    // locations will carry. Previewed client-side (mirror of design._address) so
+    // the user sees it WITHOUT saving; the server regenerates the same scheme.
+    this._shelfAddressInfo(s, sh);
+
     this._btn(s, '複製（+1m）', () => this._duplicateShelves(), 'margin-top:8px;');
     this._btn(s, '削除', () => this._deleteShelves(), 'margin-top:8px;color:var(--bad);');
+  },
+  // 棚番号 section: shows the kind (棚=保管設備), how many locations the shelf
+  // makes (bays × 段), the address RANGE, and a re-number action that saves
+  // (the server re-materialises addresses deterministically on save).
+  _shelfAddressInfo(s, sh) {
+    const rt = RACK_TYPES[sh.rack_type] || RACK_TYPES.medium;
+    const levels = Math.max(1, rt.levels || 1);
+    const cells = shelfCells(sh, rt);
+    const first = cells[0];
+    const last = cells[cells.length - 1];
+    const a0 = cellAddress(first[0], first[1], 1);
+    const a1 = cellAddress(last[0], last[1], levels);
+    const total = cells.length * levels;
+    this._h(s, '棚番号 (ロケーション)');
+    this._note(s, `この棚は 保管設備 です。間口${cells.length} × ${levels}段 = ${total}ロケーション。`);
+    // address chip — the representative first address (bottom level).
+    const chip = this._div(s, 'font-family:var(--font-mono,monospace);font-size:14px;font-weight:700;'
+      + 'color:var(--ink-primary);background:var(--bg-app);border:1px solid var(--line-hair);'
+      + 'border-radius:var(--r-sm);padding:6px 9px;margin:2px 0 6px;display:inline-block;');
+    chip.textContent = a0;
+    if (total > 1) this._note(s, `採番範囲: ${a0} 〜 ${a1}（通路-連-段）。`);
+    this._btn(s, '棚番号を振り直す', () => this._renumberLocations(),
+      'margin-top:4px;').title = '保管設備のロケーションに通路-連-段の棚番号を一括で振り直して保存します。';
+  },
+  // Re-number = re-materialise: the server regenerates every location's 棚番号
+  // (deterministic 通路-連-段) and persists. We just trigger a save.
+  _renumberLocations() {
+    if (this._saveMsg) { this._saveMsg.style.color = 'var(--ink-secondary)'; this._saveMsg.textContent = '棚番号を振り直しています…'; }
+    this._save();
+  },
+  // Kind badge: every placed object is one of 棚 / ゾーン / 設備 / 壁 / ドア /
+  // ステーション. ONLY 棚 (storage) carry 棚番号/locations — surface that so the
+  // user knows where addresses do (and don't) live ("保管設備だけ").
+  _kindBadge(s, kind) {
+    const row = this._div(s, 'display:flex;align-items:center;gap:6px;margin:2px 0 4px;');
+    const b = this._div(row, 'font-size:11px;font-weight:700;letter-spacing:.04em;'
+      + 'background:var(--bg-app);border:1px solid var(--line-hair);border-radius:999px;'
+      + 'padding:2px 8px;color:var(--ink-secondary);');
+    b.textContent = kind;
+    if (kind !== '棚') {
+      const t = this._div(row, 'font-size:11px;color:var(--ink-tertiary);');
+      t.textContent = '棚番号なし（棚番号は保管設備の棚だけ）';
+    }
   },
   // selected wall / door inspector (placement happens via the library brushes).
   _sideBuilding(s) {
@@ -158,6 +207,7 @@ export const sideMethods = {
       ? this.model.layout.walls.find((q) => q.id === this.selected.id) : null;
     if (w) {
       this._h(s, '選択中の壁');
+      this._kindBadge(s, '壁');
       this._field(s, '厚さ (m)', () => this._num(w.thickness, (v) => { w.thickness = Math.max(0.05, v); this._drawCanvas(); }));
       const pts = w.points || [];
       let len = 0;
@@ -174,6 +224,7 @@ export const sideMethods = {
       ? this.model.layout.doors.find((q) => q.id === this.selected.id) : null;
     if (d) {
       this._h(s, `選択中: ${DOOR_JP[d.type] || d.type}`);
+      this._kindBadge(s, 'ドア');
       this._field(s, '種別', () => {
         const sel = this._select(null, DOOR_PALETTE.map((p) => ({ value: p.type, label: p.label })), d.type);
         this._on(sel, 'change', () => { d.type = sel.value; this._renderSide(); this._drawCanvas(); });
@@ -196,6 +247,9 @@ export const sideMethods = {
     if (!z) { this._sideFloor(s); return; }
 
     this._h(s, '選択中のゾーン');
+    this._kindBadge(s, 'ゾーン');
+    if (z.type === 'storage')
+      this._note(s, '保管ゾーンです。中に置いた棚（保管設備）が棚番号付きのロケーションになります。');
     // type
     this._field(s, '種別', () => {
       const sel = this._select(null, ZONE_TYPES.map((t) => ({ value: t, label: ZONE_JP[t] })), z.type);
@@ -255,6 +309,7 @@ export const sideMethods = {
       if (e) {
         const p = EQUIP_PALETTE.find((x) => x.type === e.type);
         this._h(s, `選択中: ${p ? p.label : e.type}`);
+        this._kindBadge(s, '設備');
         if (p && p.desc) this._note(s, p.desc);
         this._field(s, '台数', () => this._num(e.count, (v) => { e.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
         this._field(s, '速度 (m/s)', () => this._num(e.speed_mps, (v) => { e.speed_mps = Math.max(0, v); }));
@@ -266,6 +321,7 @@ export const sideMethods = {
       const st = this.model.resources.stations.find((q) => q.id === sel.id);
       if (st) {
         this._h(s, '選択中: 梱包台');
+        this._kindBadge(s, 'ステーション');
         this._field(s, '台数', () => this._num(st.count, (v) => { st.count = Math.max(0, Math.round(v)); this._drawCanvas(); }, 1));
         this._field(s, 'X (m)', () => this._num(st.x, (v) => { st.x = clamp(v, 0, this.model.layout.bounds.width); this._drawCanvas(); }, 0.1));
         this._field(s, 'Y (m)', () => this._num(st.y, (v) => { st.y = clamp(v, 0, this.model.layout.bounds.depth); this._drawCanvas(); }, 0.1));
