@@ -263,9 +263,100 @@
   }
 }
 
+/* ---------- OCTA character motion (the "life") ----------
+   Each animated body part is its own <g>; transform-box:fill-box makes the
+   transform-origin local to that part. Base idle: the dumbo ears flap and the
+   tentacles sway. Each mood layers its own comical beat on the body group. */
+.octa-ears,
+.octa-ear-l,
+.octa-ear-r,
+.octa-tentacles,
+.octa-body {
+  transform-box: fill-box;
+}
+.octa-body {
+  transform-origin: 50% 90%;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.octa-ear-l {
+  transform-origin: 86% 58%;
+  animation: octa-ear-l 2.8s ease-in-out infinite;
+}
+.octa-ear-r {
+  transform-origin: 14% 58%;
+  animation: octa-ear-r 2.8s ease-in-out infinite;
+}
+.octa-tentacles {
+  transform-origin: 50% 6%;
+  animation: octa-sway 3.6s ease-in-out infinite;
+}
+
+@keyframes octa-ear-l {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-15deg); }
+}
+@keyframes octa-ear-r {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(15deg); }
+}
+@keyframes octa-sway {
+  0%, 100% { transform: skewX(-4deg); }
+  50% { transform: skewX(4deg); }
+}
+
+/* excited: fast wing-flap + a springy boing */
+.cody-root[data-mood="excited"] .octa-ear-l,
+.cody-root[data-mood="excited"] .octa-ear-r { animation-duration: 0.7s; }
+.cody-root[data-mood="excited"] .octa-body { animation: octa-boing 0.5s ease-in-out infinite; }
+@keyframes octa-boing {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  45% { transform: translateY(-5px) scale(0.97, 1.05); }
+  70% { transform: translateY(0) scale(1.04, 0.96); }
+}
+
+/* success: a couple of happy hops */
+.cody-root[data-mood="success"] .octa-body { animation: octa-hop 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) 2; }
+@keyframes octa-hop {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-8px); }
+}
+
+/* thinking / curious: a quizzical head-tilt + slower ears */
+.cody-root[data-mood="thinking"] .octa-body { transform: rotate(-5deg); }
+.cody-root[data-mood="curious"] .octa-body { transform: rotate(5deg); }
+.cody-root[data-mood="thinking"] .octa-ear-l,
+.cody-root[data-mood="thinking"] .octa-ear-r { animation-duration: 4.4s; }
+
+/* error: a quick worried shudder (plays a few times, then settles) */
+.cody-root[data-mood="error"] .octa-body { animation: octa-shake 0.42s ease-in-out 3; }
+@keyframes octa-shake {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  25% { transform: translateX(-3px) rotate(-2deg); }
+  75% { transform: translateX(3px) rotate(2deg); }
+}
+
+/* sleeping: ears droop, tentacles slow, body breathes */
+.cody-root[data-mood="sleeping"] .octa-ear-l { animation: none; transform: rotate(22deg); }
+.cody-root[data-mood="sleeping"] .octa-ear-r { animation: none; transform: rotate(-22deg); }
+.cody-root[data-mood="sleeping"] .octa-tentacles { animation-duration: 6s; }
+.cody-root[data-mood="sleeping"] .octa-body { animation: octa-breathe 3.6s ease-in-out infinite; }
+@keyframes octa-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.025, 0.975); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cody-companion .cody-figure {
     animation: cody-enter 0.42s ease both;
+  }
+  /* No flap / sway / per-mood motion when the user prefers reduced motion. */
+  .octa-ear-l,
+  .octa-ear-r,
+  .octa-tentacles,
+  .octa-body,
+  .cody-root[data-mood] .octa-body {
+    animation: none !important;
+    transform: none !important;
   }
 }
 
