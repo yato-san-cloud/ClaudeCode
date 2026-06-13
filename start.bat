@@ -37,7 +37,7 @@ REM the base scientific stack, so when a new feature adds one (e.g. javaobj-py3
 REM for native .rmpm, xlrd for legacy .xls) an existing install picks it up on the
 REM next launch instead of erroring at import time. `pip install -e` is fast when
 REM everything is already satisfied.
-python -c "import fastapi, uvicorn, javaobj, xlrd, openpyxl, ezdxf, pptx, reportlab" 1>nul 2>nul
+python -c "import fastapi, uvicorn, javaobj, xlrd, openpyxl, python_calamine, ezdxf, pptx, reportlab" 1>nul 2>nul
 if errorlevel 1 (
   echo Installing / updating dependencies ^(first run takes a few minutes^)...
   echo.

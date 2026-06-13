@@ -1,0 +1,180 @@
+{
+ "dated_ts_oid": {
+  "orders": [
+   {
+    "id": "O1",
+    "arr": 34200.0,
+    "lines": [
+     [
+      "A",
+      2
+     ],
+     [
+      "B",
+      1
+     ]
+    ]
+   },
+   {
+    "id": "O2",
+    "arr": 137100.0,
+    "lines": [
+     [
+      "A",
+      5
+     ],
+     [
+      "C",
+      3
+     ]
+    ]
+   }
+  ],
+  "items": [
+   "A",
+   "B",
+   "C"
+  ],
+  "summary": {
+   "orders": 2,
+   "lines": 4,
+   "skus": 3,
+   "units": 11,
+   "dated": true,
+   "date_min": "2025-09-01",
+   "date_max": "2025-09-02"
+  }
+ },
+ "dated_noclock": {
+  "orders": [
+   {
+    "id": "O1",
+    "arr": 34200.0,
+    "lines": [
+     [
+      "A",
+      1
+     ]
+    ]
+   },
+   {
+    "id": "O2",
+    "arr": 45000.0,
+    "lines": [
+     [
+      "B",
+      2
+     ]
+    ]
+   },
+   {
+    "id": "O3",
+    "arr": 55800.0,
+    "lines": [
+     [
+      "C",
+      3
+     ]
+    ]
+   }
+  ],
+  "items": [
+   "A",
+   "B",
+   "C"
+  ],
+  "summary": {
+   "orders": 3,
+   "lines": 3,
+   "skus": 3,
+   "units": 6,
+   "dated": true,
+   "date_min": "2025-09-01",
+   "date_max": "2025-09-01"
+  }
+ },
+ "nodate_nooid": {
+  "orders": [
+   {
+    "id": "S000001",
+    "arr": 72000.0,
+    "lines": [
+     [
+      "A",
+      1
+     ]
+    ]
+   },
+   {
+    "id": "S000002",
+    "arr": 216000.0,
+    "lines": [
+     [
+      "B",
+      2
+     ]
+    ]
+   },
+   {
+    "id": "S000003",
+    "arr": 360000.0,
+    "lines": [
+     [
+      "A",
+      4
+     ]
+    ]
+   }
+  ],
+  "items": [
+   "A",
+   "B"
+  ],
+  "summary": {
+   "orders": 3,
+   "lines": 3,
+   "skus": 2,
+   "units": 7,
+   "dated": false,
+   "date_min": null,
+   "date_max": null
+  }
+ },
+ "oid_blanks": {
+  "orders": [
+   {
+    "id": "O1",
+    "arr": 207000.0,
+    "lines": [
+     [
+      "A",
+      1
+     ]
+    ]
+   },
+   {
+    "id": "S000002",
+    "arr": 217800.0,
+    "lines": [
+     [
+      "A",
+      2
+     ]
+    ]
+   }
+  ],
+  "items": [
+   "A",
+   "B"
+  ],
+  "summary": {
+   "orders": 2,
+   "lines": 2,
+   "skus": 2,
+   "units": 3,
+   "dated": true,
+   "date_min": "2025-09-03",
+   "date_max": "2025-09-03"
+  }
+ }
+}

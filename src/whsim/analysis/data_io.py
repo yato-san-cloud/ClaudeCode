@@ -63,12 +63,14 @@ def _read_csv_resilient(buf: bytes, **kwargs) -> pd.DataFrame:
 
 
 def list_excel_sheets(buf: bytes) -> list[str]:
-    # try the modern engine first, then legacy .xls (BIFF) — callers only have
-    # bytes, so we sniff by engine rather than by filename.
-    try:
-        return pd.ExcelFile(BytesIO(buf), engine="openpyxl").sheet_names
-    except Exception:  # noqa: BLE001 — fall through to xlrd
-        return pd.ExcelFile(BytesIO(buf), engine="xlrd").sheet_names
+    # try the fast/modern engines first, then legacy .xls (BIFF) — callers only
+    # have bytes, so we sniff by engine rather than by filename.
+    for engine in ("calamine", "openpyxl", "xlrd"):
+        try:
+            return pd.ExcelFile(BytesIO(buf), engine=engine).sheet_names
+        except Exception:  # noqa: BLE001 — try the next engine
+            continue
+    raise ValueError("Excelのシートを読み取れませんでした。")
 
 
 # ---- real-world WMS export hardening ----------------------------------------
@@ -181,12 +183,24 @@ def _normalise_table(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _excel_engine(name: str) -> str:
+    """Prefer the fast Rust 'calamine' engine when installed, else the per-format
+    default (openpyxl for .xlsx / xlrd for legacy .xls)."""
+    try:
+        import python_calamine  # noqa: F401
+        return "calamine"
+    except Exception:  # noqa: BLE001 — not installed: fall back to the slow engines
+        return "openpyxl" if name.endswith(".xlsx") else "xlrd"
+
+
 def load_table(file_bytes: bytes, filename: str, sheet: str | None = None) -> pd.DataFrame:
     """Load a CSV or Excel file by filename extension, tolerant of real-world
     WMS exports (title rows above the header / 合計 rows / messy header cells)."""
     name = filename.lower()
     if name.endswith((".xlsx", ".xls")):
-        engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+        # python-calamine (Rust) reads .xlsx/.xls ~10–40× faster than openpyxl on
+        # month-scale WMS files; openpyxl/xlrd stay as the fallback if it is absent.
+        engine = _excel_engine(name)
         try:
             df = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet or 0, engine=engine)
         except ImportError as e:

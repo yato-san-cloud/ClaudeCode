@@ -27,18 +27,21 @@ def build_orders(std, duration_s: float = 3600.0) -> list[Order]:
     """Outbound orders from a standardised shipment table (cols: sku, qty, order_id?)."""
     if std is None or getattr(std, "empty", True) or "sku" not in std.columns:
         return []
+    # itertuples + model_construct (no per-row pydantic validation) keeps the exact
+    # grouping/skip semantics but is ~10× faster than iterrows on big files.
     orders: list[Order] = []
     if "order_id" in std.columns:
         for oid, g in std.groupby("order_id"):
-            lines = [OrderLine(sku=str(r["sku"]), qty=_int(r.get("qty")))
-                     for _, r in g.iterrows() if _ok(r.get("sku"))]
+            lines = [OrderLine.model_construct(sku=str(r.sku), qty=_int(getattr(r, "qty", None)))
+                     for r in g.itertuples(index=False) if _ok(getattr(r, "sku", None))]
             if lines:
-                orders.append(Order(order_id=str(oid), lines=lines))
+                orders.append(Order.model_construct(order_id=str(oid), lines=lines))
     else:
-        for i, (_, r) in enumerate(std.iterrows()):
-            if _ok(r.get("sku")):
-                orders.append(Order(order_id=f"O{i:06d}",
-                                    lines=[OrderLine(sku=str(r["sku"]), qty=_int(r.get("qty")))]))
+        for i, r in enumerate(std.itertuples(index=False)):
+            if _ok(getattr(r, "sku", None)):
+                orders.append(Order.model_construct(
+                    order_id=f"O{i:06d}",
+                    lines=[OrderLine.model_construct(sku=str(r.sku), qty=_int(getattr(r, "qty", None)))]))
     # Spread arrivals evenly across the operating window so the sim has a flow.
     n = max(1, len(orders))
     for i, o in enumerate(orders):

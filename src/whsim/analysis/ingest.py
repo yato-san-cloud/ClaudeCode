@@ -15,6 +15,7 @@ we spread a day's orders across 8–17時 so hourly shape is still meaningful.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from whsim.schema.model import Item, Order, OrderLine
@@ -100,54 +101,69 @@ def build_orders(df: pd.DataFrame) -> tuple[list[Order], list[Item], dict]:
         d["__cnt"] = len(d)
 
     n = len(d)
-
-    def arrival_for(row, i):
-        if dated and pd.notna(row["__dt"]):
-            day_off = int((row["__dt"].normalize() - base).days)
-            if row["__has_time"]:
-                sod = int(row["__dt"].hour * 3600 + row["__dt"].minute * 60 + row["__dt"].second)
-            else:
-                frac = (row["__seq"] + 0.5) / max(1, int(row["__cnt"]))
-                sod = int((_DAY_START_H + frac * _DAY_SPAN_H) * 3600)
-            return float(day_off * 86400 + sod)
-        # No dates anywhere: spread sequentially across a synthetic 5-day week.
-        span = 5 * 86400
-        return float((i + 0.5) / max(1, n) * span)
+    span = 5 * 86400  # synthetic week for undated rows
 
     has_oid = "order_id" in d.columns and d["order_id"].astype(str).str.strip().replace(
         {"nan": ""}).ne("").any()
-
-    orders: list[Order] = []
-    units = 0
     if has_oid:
         d["__oid"] = d["order_id"].astype(str).str.strip()
         d.loc[d["__oid"].isin(["", "nan"]), "__oid"] = ""
         # rows lacking an order_id each become their own order
         blank = d["__oid"] == ""
         d.loc[blank, "__oid"] = ["__row%d" % i for i in range(int(blank.sum()))]
-        d = d.reset_index(drop=True)
-        d["__arr"] = [arrival_for(r, i) for i, r in d.iterrows()]
-        for oid, g in d.groupby("__oid", sort=False):
-            arr = float(g["__arr"].min())
-            lines_map: dict[str, int] = {}
-            for r in g.itertuples(index=False):
-                lines_map[r.sku] = lines_map.get(r.sku, 0) + int(r.qty)
-            lines = [OrderLine(sku=s, qty=q) for s, q in lines_map.items()]
-            units += sum(q for q in lines_map.values())
-            label = oid if not str(oid).startswith("__row") else f"S{len(orders) + 1:06d}"
-            orders.append(Order(order_id=str(label), arrival_s=arr, lines=lines))
+    d = d.reset_index(drop=True)
+
+    # ---- vectorised arrival_s (seconds; Monday-anchored — see module docstring).
+    # Equivalent to the former per-row arrival_for() but computed over whole
+    # columns: real timestamp → clock seconds, date-only → spread across 8–17時 by
+    # within-day sequence, undated rows → sequential over a synthetic 5-day week.
+    pos = np.arange(n)
+    synthetic = (pos + 0.5) / max(1, n) * span
+    if dated:
+        dt = d["__dt"]
+        has_dt = dt.notna().to_numpy()
+        day_off = ((dt.dt.normalize() - base).dt.days).to_numpy(dtype="float64")
+        sod_time = (dt.dt.hour * 3600 + dt.dt.minute * 60
+                    + dt.dt.second).to_numpy(dtype="float64")
+        frac = (d["__seq"].to_numpy() + 0.5) / np.maximum(1, d["__cnt"].to_numpy())
+        sod_noclock = np.floor((_DAY_START_H + frac * _DAY_SPAN_H) * 3600.0)
+        sod = np.where(d["__has_time"].to_numpy(), sod_time, sod_noclock)
+        arr = np.where(has_dt, day_off * 86400.0 + sod, synthetic)
     else:
-        d = d.reset_index(drop=True)
-        for i, r in d.iterrows():
-            orders.append(Order(order_id=f"S{i + 1:06d}", arrival_s=arrival_for(r, i),
-                                lines=[OrderLine(sku=r["sku"], qty=int(r["qty"]))]))
-            units += int(r["qty"])
+        arr = synthetic
+    arr = arr.astype("float64")
+    d["__arr"] = arr
+
+    orders: list[Order] = []
+    # model_construct skips per-object pydantic validation — safe here because the
+    # frame is already cleaned/typed above (str sku, int qty, float arr), and it is
+    # ~10× faster than full construction on hundred-thousand-line months.
+    if has_oid:
+        # NB: groupby drops null __oid keys, so units counts only rows that form
+        # an order (preserves the prior per-group accumulation, not a raw column sum).
+        garr = d.groupby("__oid", sort=False)["__arr"].min()
+        gsum = d.groupby(["__oid", "sku"], sort=False)["qty"].sum()
+        units = int(gsum.sum())
+        for oid, sub in gsum.groupby(level=0, sort=False):
+            label = oid if not str(oid).startswith("__row") else f"S{len(orders) + 1:06d}"
+            lines = [OrderLine.model_construct(sku=str(s), qty=int(q))
+                     for (_, s), q in sub.items()]
+            orders.append(Order.model_construct(order_id=str(label),
+                          arrival_s=float(garr[oid]), lines=lines))
+    else:
+        units = int(d["qty"].sum())
+        skus_a = d["sku"].astype(str).to_numpy()
+        qty_a = d["qty"].astype(int).to_numpy()
+        orders = [Order.model_construct(
+            order_id=f"S{i + 1:06d}", arrival_s=float(arr[i]),
+            lines=[OrderLine.model_construct(sku=str(skus_a[i]), qty=int(qty_a[i]))])
+            for i in range(n)]
 
     orders.sort(key=lambda o: o.arrival_s)
 
     # Items for every referenced SKU (name defaults to the code).
     skus = list(dict.fromkeys(d["sku"].tolist()))
-    items = [Item(sku=s, name=s) for s in skus]
+    items = [Item.model_construct(sku=s, name=s) for s in skus]
 
     # bad_date: rows that had a date column but failed to parse (kept anyway, on a
     # synthetic timeline) — surfaced so the user can fix the source if they want.
