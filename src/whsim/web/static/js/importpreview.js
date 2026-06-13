@@ -56,7 +56,7 @@ function injectStyle() {
   .ipv-x{border:none;background:transparent;color:var(--ink-secondary,#b6c6d4);
     font-size:19px;line-height:1;cursor:pointer;padding:2px 8px;border-radius:8px;flex:0 0 auto}
   .ipv-x:hover{background:var(--line-hair,rgba(120,140,170,.16))}
-  .ipv-body{flex:1;min-height:0;overflow-y:auto;padding:12px 16px 14px;display:flex;
+  .ipv-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px 16px 14px;display:flex;
     flex-direction:column;gap:12px}
   .ipv-dock.collapsed .ipv-body,.ipv-dock.collapsed .ipv-foot{visibility:hidden}
   /* mapping editor */
@@ -79,8 +79,11 @@ function injectStyle() {
     border-radius:999px;padding:3px 11px;font-weight:600}
   .ipv-chip b{font-variant-numeric:tabular-nums}
   /* data preview table */
-  .ipv-prev-wrap{flex:1;min-height:90px;overflow:auto;border:1px solid var(--line-hair,rgba(120,140,170,.16));
-    border-radius:10px}
+  /* min-width:0 lets this flex child shrink below the table width so its OWN
+     overflow:auto produces the horizontal scrollbar (wide, many-column files)
+     instead of the table overflowing the fixed dock. */
+  .ipv-prev-wrap{flex:1;min-width:0;min-height:90px;overflow:auto;
+    border:1px solid var(--line-hair,rgba(120,140,170,.16));border-radius:10px}
   .ipv-tbl{border-collapse:collapse;font-size:12px;width:max-content;min-width:100%}
   .ipv-tbl th,.ipv-tbl td{padding:5px 10px;border-bottom:1px solid var(--line-hair,rgba(120,140,170,.12));
     border-right:1px solid var(--line-hair,rgba(120,140,170,.08));white-space:nowrap;text-align:left}
