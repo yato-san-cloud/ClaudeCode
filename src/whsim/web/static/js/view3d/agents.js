@@ -14,6 +14,33 @@ import {
   PICK_GLOW, PICK_LINE, sampleKeyframes, approach, _enableShadows,
 } from './constants.js';
 
+// Vertical-pick envelope: given a worker's keyframes and the playback time `t`,
+// return how "raised" the picker should be (0 at the start of the pick dwell,
+// EASES up to 1, HOLDS, then EASES back down to 0 by the end of the dwell span).
+// Mirrors sampleKeyframes' bracket scan (no allocation) but reads `f` within the
+// current pair so the lift tracks the sim-clock playback exactly. Returns 0 when
+// `t` is not inside a bracketed span (start/end clamp → resting on the floor).
+const _LIFT_EDGE = 0.28; // fraction of the dwell spent easing up / easing down
+function _dwellEnv(keyframes, t) {
+  if (!keyframes || keyframes.length < 2) return 0;
+  if (t <= keyframes[0][0] || t >= keyframes[keyframes.length - 1][0]) return 0;
+  let i = 0;
+  for (; i < keyframes.length - 1; i++) {
+    if (keyframes[i][0] <= t && t < keyframes[i + 1][0]) break;
+  }
+  const k0 = keyframes[i];
+  const k1 = keyframes[i + 1];
+  const span = k1[0] - k0[0];
+  if (span <= 0) return 0;
+  const f = (t - k0[0]) / span; // 0..1 progress through this dwell
+  let e;
+  if (f < _LIFT_EDGE) e = f / _LIFT_EDGE;                  // ease up
+  else if (f > 1 - _LIFT_EDGE) e = (1 - f) / _LIFT_EDGE;   // ease down
+  else e = 1;                                              // hold at the level
+  e = Math.max(0, Math.min(1, e));
+  return e * e * (3 - 2 * e); // smoothstep the edges
+}
+
 export const agentMethods = {
   // Workers are now ~1.7 m HUMANS, not spheres — the fix for the user's #1
   // complaint (spheres towered over the old 1.2 m racks and "突き抜け"-ed). Each
@@ -33,22 +60,34 @@ export const agentMethods = {
     const helmetG = new THREE.SphereGeometry(0.15, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
     const armG = new THREE.BoxGeometry(0.11, 0.5, 0.11);
     const toteG = new THREE.BoxGeometry(0.34, 0.26, 0.30);
-    this._geometries.push(legG, torsoG, headG, helmetG, armG, toteG);
+    // Order-picker platform: a small cage floor + mast that appears UNDER a worker
+    // only while they ride up to a forklift-served upper 段 (hidden at ground/manual).
+    const platDeckG = new THREE.BoxGeometry(0.7, 0.06, 0.7);   // cage floor under the feet
+    const platMastG = new THREE.BoxGeometry(0.1, 1.0, 0.1);    // telescoping mast (scaled in y)
+    this._geometries.push(legG, torsoG, headG, helmetG, armG, toteG, platDeckG, platMastG);
     // Shared non-vest materials.
     const legMat = new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.8, metalness: 0.05 });
     const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0b48a, roughness: 0.7, metalness: 0.02 });
     const helmetMat = new THREE.MeshStandardMaterial({ color: 0xf2c200, roughness: 0.45, metalness: 0.1 });
     const armMat = new THREE.MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.7, metalness: 0.05 });
     const toteMat = new THREE.MeshStandardMaterial({ color: 0xc9a36b, roughness: 0.85, metalness: 0.04 });
-    this._materials.push(legMat, skinMat, helmetMat, armMat, toteMat);
+    const platDeckMat = new THREE.MeshStandardMaterial({ color: 0xf57c00, roughness: 0.5, metalness: 0.4 });
+    const platMastMat = new THREE.MeshStandardMaterial({ color: 0xb0b6bd, roughness: 0.4, metalness: 0.6 });
+    this._materials.push(legMat, skinMat, helmetMat, armMat, toteMat, platDeckMat, platMastMat);
 
     for (const wk of workers) {
       const g = new THREE.Group();
+      // `lifter` holds the whole figure (legs→helmet→arm→tote). Raising its y lifts
+      // the picker like an order-picker truck deck WITHOUT moving `g` (the floor
+      // anchor that the contact shadow / glow halo follow). Manual reaches don't
+      // move it; only forklift/crane upper-段 picks raise it (see _updateWorkers).
+      const lifter = new THREE.Group();
+      g.add(lifter);
       // Two legs.
       for (const dx of [-0.12, 0.12]) {
         const leg = new THREE.Mesh(legG, legMat);
         leg.position.set(dx, 0.35, 0);
-        g.add(leg);
+        lifter.add(leg);
       }
       // Hi-vis vest torso — per-worker material (state colour + glow emissive).
       const vestMat = new THREE.MeshStandardMaterial({
@@ -58,14 +97,14 @@ export const agentMethods = {
       this._materials.push(vestMat);
       const torso = new THREE.Mesh(torsoG, vestMat);
       torso.position.set(0, 1.0, 0);
-      g.add(torso);
+      lifter.add(torso);
       // Head + helmet.
       const head = new THREE.Mesh(headG, skinMat);
       head.position.set(0, 1.45, 0);
-      g.add(head);
+      lifter.add(head);
       const helmet = new THREE.Mesh(helmetG, helmetMat);
       helmet.position.set(0, 1.5, 0);
-      g.add(helmet);
+      lifter.add(helmet);
       // Near arm pivoting from the shoulder — reaches forward (+Z) on pick. We
       // parent it to a pivot at the shoulder so a rotation swings the hand up.
       const armPivot = new THREE.Group();
@@ -73,20 +112,36 @@ export const agentMethods = {
       const arm = new THREE.Mesh(armG, armMat);
       arm.position.set(0, -0.22, 0); // hangs down from the pivot at rest
       armPivot.add(arm);
-      g.add(armPivot);
+      lifter.add(armPivot);
       // Tote held in front while carrying (hidden otherwise).
       const tote = new THREE.Mesh(toteG, toteMat);
       tote.position.set(0, 0.95, 0.32);
       tote.visible = false;
-      g.add(tote);
+      lifter.add(tote);
+      // Order-picker platform: a cage deck (rides UP under the feet) + a mast that
+      // telescopes from the floor to the deck. The whole group is HIDDEN unless a
+      // forklift-served upper-段 pick raises the worker (driven in _updateWorkers
+      // off meta.by) — so ground / manual picks never show it (legacy look intact).
+      // Lives on `g` (the floor anchor), so the deck.y is set to the lift height
+      // each frame rather than inheriting the lifter's rise.
+      const platDeck = new THREE.Mesh(platDeckG, platDeckMat);
+      platDeck.position.set(0, 0.03, 0); // y re-driven to the lift height per frame
+      const platMast = new THREE.Mesh(platMastG, platMastMat);
+      platMast.position.set(-0.34, 0.5, -0.3); // back-left, scaled to deck height
+      const platform = new THREE.Group();
+      platform.add(platDeck);
+      platform.add(platMast);
+      platform.visible = false;
+      g.add(platform);
 
       _enableShadows(g);
       this.scene.add(g);
       // `mesh` proxy = the group (its .position is the floor anchor) so shadow /
       // glow followers keep working. Extra refs drive the pick reach + carry tote.
       const rec = {
-        mesh: g, vestMat, armPivot, tote, keyframes: wk.keyframes || [],
-        glow: 0, reach: 0, faceYaw: 0, idx: this._workers.length, kind: 'worker',
+        mesh: g, lifter, vestMat, armPivot, tote, platform, platDeck, platMast,
+        keyframes: wk.keyframes || [],
+        glow: 0, reach: 0, lift: 0, faceYaw: 0, idx: this._workers.length, kind: 'worker',
       };
       g.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
       this._workers.push(rec);
@@ -490,7 +545,16 @@ export const agentMethods = {
     // Push to the pick face: bay yaw's +Z normal, half the depth out.
     const nx = Math.sin(r.yaw), nz = Math.cos(r.yaw);
     const off = (r.dims.depth || 0.6) * 0.5 + 0.1;
-    const y = Math.min(1.3, (r.dims.h || 2.0) * 0.45); // mid-reach height
+    // Vertical: upper-段 picks carry the real pick-face height in meta.h — lift the
+    // marker to it (capped to the rack's overall height). Ground/段1 picks (no h)
+    // keep the legacy mid-reach height so they look EXACTLY as before.
+    let y;
+    if (hit.h !== undefined && hit.h !== null) {
+      const cap = (r.dims.h || 2.0) + 0.3;
+      y = Math.max(0.2, Math.min(cap, hit.h));
+    } else {
+      y = Math.min(1.3, (r.dims.h || 2.0) * 0.45); // mid-reach height
+    }
     out.set(cx + nx * off, y, cz + nz * off);
     return out;
   },
@@ -527,7 +591,7 @@ export const agentMethods = {
     // Connector: worker hand (approx shoulder + forward) → target cell.
     fx.line.visible = true;
     const wp = w.mesh.position;
-    const hy = 1.2; // hand height
+    const hy = 1.2 + (w.lift || 0); // hand height, raised with the order-picker deck
     // Hand a touch in front of the body along its facing.
     const hx = wp.x + Math.sin(w.faceYaw) * 0.3;
     const hz = wp.z + Math.cos(w.faceYaw) * 0.3;
@@ -631,7 +695,50 @@ export const agentMethods = {
       // back to rest otherwise. The pivot rotates about local X so the hand lifts.
       const reaching = (s.state === 'pick') ? 1 : 0;
       w.reach = approach(w.reach, reaching, dt, 6);
-      if (w.armPivot) w.armPivot.rotation.x = -w.reach * 1.15; // up to ~66° forward
+
+      // --- Vertical pick motion (upper 段) --------------------------------------
+      // The 5th keyframe element (`hit`) on a pick MERGES the engine's level meta
+      // {lv, by, h} with the derived cell {run_id, along, …}. lv>1 means the SKU
+      // sits on an upper level; how we reach it depends on `by`:
+      //   manual   → extend the arm UP toward h (reach/ladder), figure stays grounded
+      //   forklift → RAISE the whole figure on an order-picker deck up to h
+      //   crane    → AS/RS: marker does the work, figure barely moves (fast auto)
+      // The lift EASES up over the dwell, HOLDS, EASES down (see _dwellEnv). lv1 /
+      // no-meta picks have env 0 and `by` undefined → byte-identical legacy look.
+      const meta = s.hit;
+      const upper = !!(meta && meta.lv > 1 && meta.h);
+      const by = upper ? (meta.by || 'manual') : null;
+      const env = upper ? _dwellEnv(w.keyframes, t) : 0; // 0→1→0 across the pick dwell
+      // Target lift HEIGHT in metres for the deck (forklift only), capped sanely.
+      // Manual keeps the body grounded (the ARM reaches); crane stays put (the
+      // marker carries the height). The deck rises so the hand (~1.2 m up the body)
+      // lines up with the pick-face height h.
+      const liftH = (by === 'forklift') ? Math.max(0, meta.h - 1.2) * env : 0;
+      w.lift = approach(w.lift, liftH, dt, 6);
+      if (w.lifter) w.lifter.position.y = w.lift;
+      // Manual upper-段 reach: bias the arm further UP (beyond the forward swing)
+      // proportional to how high the pick face is, so a ladder/over-head reach reads.
+      let armUp = w.reach * 1.15; // base forward swing (legacy)
+      if (by === 'manual') {
+        const overhead = Math.min(1, Math.max(0, (meta.h - 1.3) / 1.0)); // 0 at chest → 1 by ~2.3 m
+        armUp = w.reach * (1.15 + overhead * 1.0 * env); // swing higher overhead
+      }
+      if (w.armPivot) w.armPivot.rotation.x = -armUp;
+      // Order-picker platform: show the deck + telescoping mast only while the
+      // forklift lift is meaningfully raised; ride the deck up with the worker and
+      // scale the mast to the current height. Hidden (deck gone) otherwise.
+      if (w.platform) {
+        const show = (by === 'forklift') && w.lift > 0.05;
+        if (w.platform.visible !== show) w.platform.visible = show;
+        if (show) {
+          if (w.platDeck) w.platDeck.position.y = 0.03 + w.lift; // deck under the raised feet
+          if (w.platMast) {
+            const my = Math.max(0.1, w.lift + 0.05);
+            w.platMast.scale.y = my;          // box base height is 1.0 m → scale = metres
+            w.platMast.position.y = my / 2;   // grow from the floor up
+          }
+        }
+      }
 
       // Carried tote: visible while carrying (種まき/搬送) — picks the held box.
       if (w.tote) w.tote.visible = (s.state === 'carry' || s.state === 'pack');
