@@ -565,6 +565,15 @@ button.primary:disabled { background: var(--bg-active); border-color: transparen
   position: relative;
 }
 .panel.active { display: flex; flex: 1; }
+/* ②スクロール: document-like panels must scroll vertically when their content is
+   taller than the stage (many views were clipped with no scrollbar). Default to a
+   scrolling flex column; the full-bleed "app" panels below opt OUT and manage
+   their own layout (canvas / 3D / hubs that fill the stage exactly). */
+.panel.active { flex-direction: column; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+#design.panel.active, #view2d.panel.active, #view3d.panel.active,
+#overview.panel.active, #chat.panel.active, #replay.panel.active {
+  overflow: hidden;
+}
 
 .view3d-fallback {
   margin: auto;
