@@ -58,6 +58,7 @@ export function mountPickseq(el, opts = {}) {
   async function load() {
     const name = getProject();
     if (!name) { renderEmpty('プロジェクトを開くと、ピック順序の最適化効果を試算します。'); return; }
+    renderEmpty('ピック順序を試算中…（棚距離で2-opt最適化）');
     try {
       data = await api(`/api/projects/${encodeURIComponent(name)}/pickseq`);
       render();

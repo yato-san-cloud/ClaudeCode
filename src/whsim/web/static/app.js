@@ -17,6 +17,8 @@ import { mountTimetable } from './js/timetable.js';
 import { mountStorage } from './js/storage.js';
 import { mountCost } from './js/cost.js';
 import { mountPickrate } from './js/pickrate.js';
+import { mountSlotting } from './js/slotting.js';
+import { mountPickseq } from './js/pickseq.js';
 import { mountWorkCompare } from './js/workcompare.js';
 import { mountDataAnalysis } from './js/dataanalysis.js';
 import { mountMaterialFlow } from './js/materialflow.js';
@@ -645,6 +647,7 @@ function switchView(view) {
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
       || view === 'bi' || view === 'bianalytics' || view === 'design'
       || view === 'storage' || view === 'cost' || view === 'pickrate' || view === 'workcompare'
+      || view === 'slotting' || view === 'pickseq'
       || view === 'viewpng')  // ⑤提案 carries its own ③検証 strip (pstoryKpis)
       ? 'none' : '';
   // ④検証: in the 2D/3D replay views the verdict + KPIs read as the page HERO
@@ -686,6 +689,8 @@ function switchView(view) {
   if (view === 'storage') mountStorageView();
   if (view === 'cost') mountCostView();
   if (view === 'pickrate') mountPickrateView();
+  if (view === 'slotting') mountSlottingView();
+  if (view === 'pickseq') mountPickseqView();
   if (view === 'workcompare') mountWorkCompareView();
   if (view === 'overview') mountOverviewView();
   if (view === 'bi') mountBIView();
@@ -711,7 +716,7 @@ const VIEW_PHASE = {
   dataanalysis: 'analyze', bianalytics: 'analyze', bi: 'analyze', materialflow: 'analyze',
   design: 'design', storage: 'design', timetable: 'design',
   analysis: 'validate', view2d: 'validate', view3d: 'validate', workcompare: 'validate',
-  cost: 'design', pickrate: 'design',
+  cost: 'design', pickrate: 'design', slotting: 'design', pickseq: 'design',
   viewpng: 'propose', compare: 'propose', export: 'propose',
 };
 
@@ -838,6 +843,22 @@ function mountCostView() {
 function mountPickrateView() {
   if (S.pickrate) { S.pickrate.refresh(); return; }
   S.pickrate = mountPickrate($('pickrate'), {
+    getProject: () => S.project,
+    toast: (m, k) => toast(m, k),
+  });
+}
+
+function mountSlottingView() {
+  if (S.slotting) { S.slotting.refresh(); return; }
+  S.slotting = mountSlotting($('slotting'), {
+    getProject: () => S.project,
+    toast: (m, k) => toast(m, k),
+  });
+}
+
+function mountPickseqView() {
+  if (S.pickseq) { S.pickseq.refresh(); return; }
+  S.pickseq = mountPickseq($('pickseq'), {
     getProject: () => S.project,
     toast: (m, k) => toast(m, k),
   });

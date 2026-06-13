@@ -80,13 +80,14 @@ def api_replay(name: str):
     return JSONResponse(build_layout_replay(proj.load_model()))
 
 
-def _sku_xy_and_dist(model):
-    """Build the SKU->position map and a distance function matching the engine.
+def _sku_xy_and_dist(model, fast: bool = False):
+    """Build the SKU->position map and a distance function.
 
     Mirrors ``engine.build``'s sku_xy resolution (item default_location, then any
-    SKU pinned on a location) and its distance resolution order: wall-aware graph
-    when walls/shelves exist, else Manhattan. Pure; no SimPy world needed."""
-    from whsim.engine.graph import AisleGraph
+    SKU pinned on a location). ``fast=True`` forces Manhattan shelf-distance — the
+    ③設計 estimate must be snappy (a wall-aware 2-opt over the day's consolidated
+    tour is multi-second); ④検証 DES does the wall-aware truth. ``fast=False`` uses
+    the wall-aware graph when walls/shelves exist (closer to the engine)."""
     from whsim.engine.routing import manhattan
 
     loc_by_id = model.location_by_id()
@@ -99,6 +100,9 @@ def _sku_xy_and_dist(model):
         if loc.sku and loc.sku not in sku_xy:
             sku_xy[loc.sku] = (loc.x, loc.y)
 
+    if fast:
+        return sku_xy, manhattan, False
+    from whsim.engine.graph import AisleGraph
     graph = AisleGraph.from_model(model)
     if graph.enabled:
         def dist(a, b):
@@ -140,9 +144,20 @@ def api_pickseq(name: str):
 
     proj = _open(name)
     model = proj.load_model()
-    sku_xy, dist, wall_aware = _sku_xy_and_dist(model)
+    # fast=True → Manhattan shelf-distance so clicking the tab is ~instant; the
+    # 2-opt % reductions are faithful as a ratio. ④検証 DES adds the wall-aware truth.
+    sku_xy, dist, wall_aware = _sku_xy_and_dist(model, fast=True)
     depot = _depot_xy(model)
     orders_pts = _order_pts(model, sku_xy)
+
+    # Keep the comparison snappy (clicking the tab should be ~instant): the % is a
+    # ratio, so an evenly-strided representative sample is faithful. The wall-aware
+    # 2-opt over the full day's consolidated tour is otherwise multi-second.
+    _PICKSEQ_MAX_ORDERS = 60
+    sampled = len(orders_pts) > _PICKSEQ_MAX_ORDERS
+    if sampled:
+        stride = len(orders_pts) / _PICKSEQ_MAX_ORDERS
+        orders_pts = [orders_pts[int(i * stride)] for i in range(_PICKSEQ_MAX_ORDERS)]
 
     walk_speed = max(0.1, float(model.process.walk_speed_mps))
     handle_s = 6.0  # seconds per pick line (motion-time default, mirrors pickrate)
@@ -229,6 +244,7 @@ def api_pickseq(name: str):
     return JSONResponse({
         "has_data": has_data,
         "n_orders": len(orders_pts),
+        "sampled": sampled,
         "wall_aware": wall_aware,
         "walk_speed_mps": walk_speed,
         "handle_s_per_line": handle_s,
