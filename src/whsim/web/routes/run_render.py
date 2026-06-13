@@ -64,9 +64,20 @@ def api_compare_png(name: str, cmp: str, i: int):
 def api_replay(name: str):
     proj = _open(name)
     rd = proj.latest_run_dir()
-    if rd is None or not (rd / "replay.json").is_file():
-        raise HTTPException(404, "no run yet")
-    return JSONResponse(json.loads((rd / "replay.json").read_text("utf-8")))
+    replay_file = (rd / "replay.json") if rd is not None else None
+    # Use the stored run replay only while it is still FRESH — i.e. the model has
+    # not been edited since that run. Otherwise (no run yet, or the layout changed)
+    # return a run-free layout replay so 2D/3D reflect the CURRENT design
+    # immediately; ▶実行 then refreshes it with the moving agents.
+    if replay_file is not None and replay_file.is_file():
+        try:
+            fresh = proj.model_file.stat().st_mtime <= replay_file.stat().st_mtime
+        except OSError:
+            fresh = True
+        if fresh:
+            return JSONResponse(json.loads(replay_file.read_text("utf-8")))
+    from whsim.render.replay import build_layout_replay
+    return JSONResponse(build_layout_replay(proj.load_model()))
 
 
 @router.get("/api/projects/{name}/png")

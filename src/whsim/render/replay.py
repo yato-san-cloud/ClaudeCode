@@ -239,6 +239,46 @@ def _attach_pick_hits(model: WarehouseModel, workers: list[dict],
         w["keyframes"] = new_kfs
 
 
+def build_layout_replay(model: WarehouseModel) -> dict:
+    """A run-free replay carrying only the STATIC layout — zones, racks/shelves,
+    walls, doors, stations, equipment, conveyors, routes — so the 2D/3D viewers can
+    show the CURRENT design the moment it is saved, before any simulation. Agent
+    tracks / heat / KPIs are empty (there is no run yet); ``layout_only`` flags this
+    so the UI can prompt ▶実行 to see the movement."""
+    _nav = NavNetwork.from_model(model)
+    by_sku = model.item_by_sku()
+    racks = [{"x": loc.x, "y": loc.y,
+              "abc": by_sku[loc.sku].abc_class if loc.sku in by_sku else "C"}
+             for loc in model.locations]
+    zones = [{"id": z.id, "type": z.type, "x": z.x, "y": z.y, "w": z.w, "h": z.h,
+              "color": z.color} for z in model.layout.zones]
+    stations = [{"id": s.id, "x": s.x, "y": s.y, "count": s.count}
+                for s in model.resources.stations]
+    routes = [{"id": r.id, "name": r.name, "mover": r.mover,
+               "speed_mps": r.speed_mps, "points": r.points} for r in model.routes]
+    conveyors = [{"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
+                 for c in model.resources.conveyors]
+    equipment = [{"id": e.id, "type": e.type, "x": e.x, "y": e.y, "count": e.count}
+                 for e in model.resources.equipment]
+    walls = [{"id": w.id, "points": w.points, "thickness": w.thickness}
+             for w in model.layout.walls]
+    doors = [{"id": d.id, "type": d.type, "x": d.x, "y": d.y, "w": d.w}
+             for d in model.layout.doors]
+    dur = float(model.simulation.duration_s or 0.0)
+    return {
+        "layout_only": True,
+        "meta": {"name": model.meta.name, "duration_s": dur, "replay_window_s": dur,
+                 "bounds": {"width": model.layout.bounds.width,
+                            "depth": model.layout.bounds.depth},
+                 "grid_m": model.simulation.heatmap_grid_m},
+        "zones": zones, "racks": racks, "shelves": shelf_runs(model),
+        "navnet": _nav.to_dict() if _nav.obstacles else None,
+        "stations": stations, "workers": [], "agvs": [], "forklifts": [],
+        "conveyors": conveyors, "equipment": equipment, "walls": walls, "doors": doors,
+        "routes": routes, "staging": None, "congestion": None, "series": [], "kpis": {},
+    }
+
+
 def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     by_sku = model.item_by_sku()
     _nav = NavNetwork.from_model(model)  # MapMaker-style waypoint/Delaunay net

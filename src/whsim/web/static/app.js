@@ -213,8 +213,9 @@ async function mountDesigner() {
         body: JSON.stringify(sections),
       });
       $('provenance').textContent = r.provenance_summary;
-      $('status').textContent = '設計を保存しました。「実行」で検証できます。';
+      $('status').textContent = '設計を保存しました。2D/3Dに反映済み（▶実行で動きも検証）。';
       hist.log('💾', '設計を保存しました', 'design', 'design');
+      S.replay = null;           // invalidate: 2D/3D re-fetch the live layout on entry
       await openProjectQuiet();  // refresh headline values after re-materialise
       refreshScorecard();        // re-score the saved design
       return r;
@@ -358,6 +359,12 @@ async function loadReplay() {
   $('playBtn').textContent = '⏸';
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
   if (S.view === 'view3d') mount3d();
+  if (S.view === 'view2d') { fitCanvas(); draw2d(); }
+  // Layout-only replay = the live design before/after an edit (no run yet). Tell
+  // the user the static objects are shown but movement needs ▶実行.
+  if (rep.layout_only) {
+    $('status').textContent = 'レイアウト表示中（配置を反映）。▶実行で動き・混雑・KPIを検証できます。';
+  }
 }
 // ⑤提案: retell the run as a one-page story on screen — ① 課題 verdict, the
 // proposal sheet (② 設計 / ③ 検証 baked into the PNG), then ⑤ 裏付け provenance +
@@ -663,8 +670,13 @@ function switchView(view) {
   if (S.cody) { if (view === 'chat') S.cody.hide(); else S.cody.show(); }
   if (view === 'design') mountDesigner();
   if (view === 'analysis') { mountAnalysis($('analysis'), S.project); if (S.project) cody('curious', '結果を読み解こう。気になる指摘があれば言って。'); }
-  if (view === 'view3d') mount3d();
-  if (view === 'view2d') { fitCanvas(); S._needs2d = true; } // repaint on entry (paused or empty)
+  // 2D/3D: if the cached replay was invalidated (e.g. by a design save), re-fetch
+  // it — GET /replay returns the live layout so placed objects show immediately.
+  if (view === 'view3d') { if (S.project && !S.replay) loadReplay().catch(() => {}); else mount3d(); }
+  if (view === 'view2d') {
+    if (S.project && !S.replay) loadReplay().catch(() => {});
+    fitCanvas(); S._needs2d = true;
+  }
   if (view === 'viewpng') renderProposalStory();
   if (view === 'export') mountExport();
   if (view === 'dataanalysis') mountDataAnalysisView();
