@@ -92,7 +92,7 @@ const HIST_CSS = `
 .hist-row.is-link:hover{background:var(--bg-hover);color:var(--ink-primary)}
 .hist-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .hist-ico{flex:0 0 auto;font-size:12px;line-height:1.5;width:16px;text-align:center}
-.hist-body{flex:1;min-width:0}
+.hist-body{flex:1;min-width:0;display:flex;flex-direction:column}
 .hist-text{font-size:11.5px;line-height:1.45;overflow:hidden;display:-webkit-box;
   -webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
 .hist-time{font-size:10px;color:var(--ink-tertiary);margin-top:1px}
