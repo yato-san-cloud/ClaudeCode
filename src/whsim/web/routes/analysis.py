@@ -59,6 +59,46 @@ def api_timetable_from_bi(name: str):
             "scenario": staffing.scenario_from_volumes(vols, proj.load_model())}
 
 
+@router.post("/api/projects/{name}/timetable/solve-staffing")
+def api_timetable_solve_staffing(name: str, payload: dict | None = None):
+    """人員タイムチャート 解析ソルバー: set an operating window (start–end hour) and a
+    headcount cap (global and/or per-process), pull library productivity (3-tier
+    実測>想定>既定), and analytically solve the per-hour headcount per process to
+    clear the day's volume under the cap — honouring process precedence (入荷→格納,
+    ピッキング→梱包→出荷) and a placement choice (前詰め vs 均等). Deterministic, no DES.
+
+    Body (all optional): {start_hour, end_hour, cap, per_process_cap{id:n},
+    dependencies{id:[upstream]}, placement('front'|'level'), volumes{id:vol}}.
+    When `volumes` is omitted the project's best-available 物量 is derived
+    (BI 仮値 > measured orders). never-blocks: no demand → {available:false}."""
+    from whsim.analysis import staffing
+    proj = _open(name)
+    p = payload or {}
+    vols = p.get("volumes")
+    if not isinstance(vols, dict) or not any(float(v or 0) > 0 for v in vols.values()):
+        vols = staffing.project_volumes(proj)
+    if not vols or not any(float(v or 0) > 0 for v in vols.values()):
+        return {"available": False,
+                "message": "荷役物量がまだありません。マテリアルフローで物量を作成してください。"}
+    model = proj.load_model()
+    try:
+        result = staffing.solve_staffing(
+            vols, model=model,
+            start_hour=int(p.get("start_hour", 9)),
+            end_hour=int(p.get("end_hour", 18)),
+            cap=(int(p["cap"]) if p.get("cap") else None),
+            per_process_cap=p.get("per_process_cap") or {},
+            dependencies=p.get("dependencies"),
+            placement=str(p.get("placement", "level")),
+        )
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, f"ソルバー入力が不正です: {e}") from e
+    result["available"] = True
+    result["volumes"] = {k: round(float(v), 1) for k, v in vols.items()}
+    result["default_dependencies"] = staffing.default_dependencies()
+    return result
+
+
 @router.get("/api/analysis/sample")
 def api_analysis_sample():
     """Run the full data-analysis suite on the bundled demo WMS dataset.

@@ -283,3 +283,331 @@ def generate_flow_volumes(base: dict | None) -> dict:
     b["in_lines"] = f("in_lines") or out_lines
     b["in_qty"] = f("in_qty") or b["out_qty"]
     return {p["id"]: round(float(b.get(p["driver"], 0.0)), 1) for p in GENERIC_PROCESSES}
+
+
+def project_volumes(proj) -> dict:
+    """Best-available per-process 物量 for a project, never-blocks.
+
+    Source preference mirrors the rest of the timetable chain:
+      1) the saved BI 仮値 derivation (bi.json) if applied,
+      2) the project's own outbound orders (measured staffing_profile),
+      3) {} when the project carries no demand yet (caller shows an empty state).
+    Returns a {process_id: daily volume} dict over GENERIC_PROCESSES ids."""
+    try:
+        from whsim import bi
+        vols = volumes_from_bi(bi.load_bi_config(proj))
+        if vols:
+            return vols
+    except Exception:  # noqa: BLE001 — BI is optional; fall through to measured
+        pass
+    try:
+        from whsim.analysis import ingest
+        model = proj.load_model()
+        ship = ingest.orders_to_frame(model.orders.outbound)
+        inb = ingest.orders_to_frame(model.orders.inbound)
+        if ship is not None and not ship.empty:
+            prof = staffing_profile(ship, inb if inb is not None and not inb.empty else None)
+            vols = {p["id"]: p["daily_volume"] for p in prof["processes"]}
+            if any(v > 0 for v in vols.values()):
+                return vols
+    except Exception:  # noqa: BLE001 — never blocks; empty volumes are valid
+        pass
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Analytic staffing SOLVER (人員タイムチャート — 解析的ソルバー)
+# ---------------------------------------------------------------------------
+# You set an operating window (start–end hour) and a headcount cap (global and/or
+# per-process); the solver pulls library productivity (3-tier), splits the day's
+# volume into HOURLY buckets per process, and analytically iterates a few passes
+# to find the per-bucket headcount that clears the day under the cap, honouring
+# process precedence (入荷→格納, ピッキング→梱包→出荷) and a placement choice
+# (前詰め=front-load vs 均等=level-load). Deterministic, fast, no DES.
+
+# Default precedence edges over GENERIC_PROCESSES (receive→putaway, pick→inspect
+# →pack→ship). The receive→putaway→pick chain links inbound to outbound flow.
+_FLOW_DEPS: dict[str, list[str]] = {
+    "格納": ["入荷検品"],
+    "ピッキング": ["格納"],
+    "検品": ["ピッキング"],
+    "梱包": ["検品"],
+    "出荷": ["梱包"],
+}
+
+_SOLVE_PASSES = 4  # analytic balancing passes (precedence settles in a few sweeps)
+
+
+def default_dependencies() -> dict[str, list[str]]:
+    """The default precedence DAG (process_id -> upstream ids) the UI seeds."""
+    return {pid: list(ups) for pid, ups in _FLOW_DEPS.items()}
+
+
+def _toposort(ids: list[str], deps: dict[str, list[str]]) -> list[str]:
+    """Order ids so every dependency precedes its dependents. A visited set both
+    dedupes and breaks accidental cycles (a cyclic edge is simply dropped)."""
+    order: list[str] = []
+    seen: set[str] = set()
+    idset = set(ids)
+
+    def visit(pid: str) -> None:
+        if pid in seen:
+            return
+        seen.add(pid)
+        for up in deps.get(pid, []) or []:
+            if up in idset:
+                visit(up)
+        order.append(pid)
+
+    for pid in ids:
+        visit(pid)
+    return order
+
+
+def solve_staffing(
+    volumes_by_process: dict,
+    *,
+    model=None,
+    start_hour: int = 9,
+    end_hour: int = 18,
+    cap: int | None = None,
+    per_process_cap: dict | None = None,
+    dependencies: dict | None = None,
+    placement: str = "level",
+) -> dict:
+    """Analytic per-hour staffing solver over an operating window under a cap.
+
+    Inputs
+      volumes_by_process: {process_id: daily volume} (GENERIC_PROCESSES ids).
+      model:    passed to resolve_productivity for the 3-tier 実測>想定>既定 rate.
+      start_hour/end_hour: operating window (integer hours; end may pass 24 for
+                a logistics day spilling past midnight).
+      cap:      global headcount ceiling shared by ALL processes in any hour
+                (None = unlimited).
+      per_process_cap: {process_id: ceiling} per-process headcount ceilings.
+      dependencies: {process_id: [upstream ids]} precedence DAG; None = default.
+      placement: '前詰め'/'front'/'frontload' = staff up early (finish ASAP);
+                 anything else = '均等'/level-load (spread evenly).
+
+    Output (JSON-safe): hours[], per-process headcount_by_hour + man_hours +
+    finish_hour + feasible/shortfall, plus day totals (man_hours, peak, makespan,
+    feasible, shortfall man-hours). never-blocks: empty volume → empty-but-valid.
+    """
+    deps = dependencies if isinstance(dependencies, dict) else default_dependencies()
+    ppc = {str(k): float(v) for k, v in (per_process_cap or {}).items() if v}
+    front = str(placement).lower() in ("front", "frontload", "front-load") \
+        or str(placement) in ("前詰め", "前倒し", "frontLoad")
+
+    # Normalise the window. Guard against a degenerate/empty window (never-blocks):
+    # fall back to a single hour so divisions stay finite and the day still solves.
+    s = int(start_hour)
+    e = int(end_hour)
+    if e <= s:
+        e = s + 1
+    hours = list(range(s, e))
+    n_hours = len(hours)
+
+    proc_by_id = {p["id"]: p for p in GENERIC_PROCESSES}
+    # Keep only processes that exist in the master and carry positive volume.
+    active_ids = [
+        p["id"] for p in GENERIC_PROCESSES
+        if float(volumes_by_process.get(p["id"], 0) or 0) > 0
+    ]
+    order = _toposort(active_ids, deps)
+
+    # Per-process scalars: volume, productivity (units/person/hour), required
+    # person-hours and the global cap (min of global cap & per-process cap).
+    vol: dict[str, float] = {}
+    prod: dict[str, float] = {}
+    req_hours: dict[str, float] = {}
+    pcap: dict[str, float | None] = {}
+    for pid in order:
+        p = proc_by_id[pid]
+        v = float(volumes_by_process.get(pid, 0) or 0)
+        rate = max(1.0, resolve_productivity(model, pid, float(p["prod"])))
+        vol[pid] = v
+        prod[pid] = rate
+        req_hours[pid] = v / rate
+        caps = [c for c in (float(cap) if cap else None, ppc.get(pid)) if c]
+        pcap[pid] = min(caps) if caps else None
+
+    # The per-hour allocation we iteratively refine. headcount[pid][h_index].
+    head: dict[str, list[int]] = {pid: [0] * n_hours for pid in order}
+
+    def upstream_cum_volume(pid: str, up_to_hour_idx: int) -> float:
+        """Min over upstream deps of the volume they have CUMULATIVELY produced by
+        the END of hour `up_to_hour_idx`, scaled into this process's own units (by
+        the volume ratio). math.inf when there is no (active) upstream constraint
+        OR when every upstream is essentially complete (so the trailing increment
+        is never starved by integer-rounding of the upstream's last bucket)."""
+        ups = deps.get(pid, []) or []
+        best = math.inf
+        for up in ups:
+            if up not in head:  # inactive/zero-volume upstream imposes no flow cap
+                continue
+            up_units = sum(head[up][:up_to_hour_idx + 1]) * prod[up]
+            up_target = vol[up] or 1.0
+            if up_units >= up_target * 0.999:  # upstream done → no flow cap remains
+                continue
+            scaled = (up_units / up_target) * vol[pid]
+            best = min(best, scaled)
+        return best
+
+    # ---- analytic placement passes -------------------------------------------
+    # Each pass re-derives every process's per-hour headcount given the CURRENT
+    # upstream allocation; upstream is solved first (topological order) so a few
+    # sweeps let the staggered start ripple downstream and settle. front-load and
+    # level-load differ only in HOW the remaining volume is spread across the
+    # still-open hours each hour; both clamp by precedence + cap every hour.
+    gcap = int(cap) if cap else None  # global per-hour ceiling on TOTAL headcount
+    for _ in range(_SOLVE_PASSES):
+        for pid in order:
+            rate = prod[pid]
+            target = vol[pid]
+            cph = pcap[pid]  # max persons per hour for this process
+            alloc = [0] * n_hours
+            cum_units = 0.0
+            for hi in range(n_hours):
+                remaining = target - cum_units
+                if remaining <= 1e-9:
+                    break
+                hours_left = n_hours - hi
+                if front or hours_left <= 1:
+                    # Front-load (or the final usable hour of level-load): take as
+                    # many persons this hour as the remaining volume needs, so the
+                    # day still clears rather than leaving a sub-bucket residual.
+                    want = remaining / rate
+                else:
+                    # Level-load: spread the remaining volume over remaining hours.
+                    want = (remaining / rate) / hours_left
+                need = math.ceil(want - 1e-9)
+                if need < 1:
+                    need = 1
+                if cph is not None:
+                    need = min(need, int(math.floor(cph)))
+                # Global cap: the SUM over all processes this hour cannot exceed
+                # `cap`; subtract what every OTHER process already takes this hour
+                # so the budget is shared (front-load especially leans on this).
+                if gcap is not None:
+                    used_by_others = sum(head[q][hi] for q in order if q != pid)
+                    budget = gcap - used_by_others
+                    need = min(need, max(0, budget))
+                # Precedence: a downstream process in hour `hi` can only handle
+                # what upstream had finished by the END of the PREVIOUS hour, so
+                # 格納 ramps only after 入荷 has produced (a visible staggered
+                # start). Cumulative output therefore can't exceed that feed.
+                fed = upstream_cum_volume(pid, hi - 1)
+                if fed < math.inf:
+                    allowed_units = max(0.0, fed - cum_units)
+                    max_persons = int(math.floor(allowed_units / rate / 1.0 + 1e-9))
+                    need = min(need, max_persons)
+                    if need < 0:
+                        need = 0
+                alloc[hi] = need
+                cum_units += need * rate
+            head[pid] = alloc
+
+    # ---- top-up sweep ---------------------------------------------------------
+    # Integer per-hour rounding + the precedence per-hour feed cap can leave a
+    # sub-bucket tail (e.g. a fast process starved hour-by-hour by a slow upstream
+    # whose CUMULATIVE feed is fine). Sweep once more in topological order and
+    # fill any process still short into the EARLIEST hours that have precedence +
+    # cap headroom. This makes the day clear whenever the window+cap physically
+    # allow it; a genuinely infeasible window simply ends with an honest tail.
+    for pid in order:
+        rate = prod[pid]
+        target = vol[pid]
+        cph = pcap[pid]
+        for hi in range(n_hours):
+            cum = sum(head[pid][:hi + 1]) * rate
+            if sum(head[pid]) * rate >= target - 1e-9:
+                break
+            # Headroom from the per-process cap.
+            room = math.inf if cph is None else max(0, int(math.floor(cph)) - head[pid][hi])
+            # Headroom from the global cap (shared budget this hour).
+            if gcap is not None:
+                used = sum(head[q][hi] for q in order)
+                room = min(room, max(0, gcap - used))
+            if room <= 0:
+                continue
+            # Precedence: cumulative output through this hour can't exceed what
+            # upstream finished by the END of the previous hour.
+            fed = upstream_cum_volume(pid, hi - 1)
+            if fed < math.inf:
+                allowed = max(0.0, fed - (cum - head[pid][hi] * rate))
+                room = min(room, int(math.floor(allowed / rate + 1e-9)) - head[pid][hi])
+                room = max(0, room)
+            still_needed = math.ceil((target - sum(head[pid]) * rate) / rate - 1e-9)
+            add = min(room, max(0, still_needed))
+            head[pid][hi] += add
+
+    # ---- assemble the result --------------------------------------------------
+    procs_out: list[dict] = []
+    total_by_hour = [0] * n_hours
+    total_manhours = 0.0
+    day_feasible = True
+    day_shortfall_units = 0.0
+    makespan_hour = s
+    for pid in order:
+        alloc = head[pid]
+        achieved = sum(alloc) * prod[pid]
+        target = vol[pid]
+        feasible = achieved >= target * 0.999
+        shortfall = max(0.0, target - achieved)
+        finish_idx = max((i for i, n in enumerate(alloc) if n > 0), default=-1)
+        finish_hour = hours[finish_idx] + 1 if finish_idx >= 0 else s
+        manhours = float(sum(alloc))  # 1 person × 1 hour = 1 man-hour
+        for i, n in enumerate(alloc):
+            total_by_hour[i] += n
+        total_manhours += manhours
+        if not feasible:
+            day_feasible = False
+            day_shortfall_units += shortfall
+        makespan_hour = max(makespan_hour, finish_hour)
+        p = proc_by_id[pid]
+        procs_out.append({
+            "id": pid,
+            "section": p["section"],
+            "unit": p["unit"],
+            "productivity": round(prod[pid], 1),
+            "daily_volume": round(target, 1),
+            "required_man_hours": round(req_hours[pid], 2),
+            "man_hours": round(manhours, 1),
+            "headcount_by_hour": alloc,
+            "peak_headcount": max(alloc) if alloc else 0,
+            "finish_hour": finish_hour,
+            "feasible": feasible,
+            "shortfall_volume": round(shortfall, 1),
+            "depends": [u for u in (deps.get(pid, []) or []) if u in proc_by_id],
+        })
+
+    # Order the output rows in master order (toposort reorders for compute only).
+    master_order = {p["id"]: i for i, p in enumerate(GENERIC_PROCESSES)}
+    procs_out.sort(key=lambda r: master_order.get(r["id"], 1_000_000))
+
+    peak = max(total_by_hour) if total_by_hour else 0
+    peak_idx = total_by_hour.index(peak) if total_by_hour else 0
+    cap_exceeded = bool(cap and peak > cap)
+    # Total shortfall expressed in man-hours (units ÷ that process's rate).
+    shortfall_mh = round(
+        sum(p["shortfall_volume"] / max(1.0, p["productivity"]) for p in procs_out), 1
+    )
+
+    return {
+        "hours": hours,
+        "start_hour": s,
+        "end_hour": e,
+        "placement": "front" if front else "level",
+        "cap": int(cap) if cap else None,
+        "processes": procs_out,
+        "total_headcount_by_hour": total_by_hour,
+        "total_man_hours": round(total_manhours, 1),
+        "peak_headcount": peak,
+        "peak_hour": (hours[peak_idx] if hours else s),
+        "makespan_hour": makespan_hour,
+        "finish_hour": makespan_hour,
+        "feasible": day_feasible and not cap_exceeded,
+        "cap_exceeded": cap_exceeded,
+        "shortfall_man_hours": shortfall_mh,
+        "dependencies": {pid: ups for pid, ups in (deps or {}).items() if pid in proc_by_id},
+    }

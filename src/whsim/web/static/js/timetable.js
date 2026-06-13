@@ -20,6 +20,7 @@
 import {
   solve, generateSlots, minToTime, timeToMin, SECTION_COLOR, SECTION_ZONE_TYPE,
 } from './timetable_solver.js';
+import { api, esc } from './util.js';
 import { ZONE_JP } from './constants.js';
 
 const SLOTS = generateSlots();           // 60 half-hour marks, 0..1770 min
@@ -82,6 +83,37 @@ function injectStyle() {
     border-radius:var(--r-lg);background:var(--bg-panel)}
   .tt-empty-title{font-weight:700;color:var(--ink-primary);font-size:var(--fs-section)}
   .tt-empty-body{color:var(--ink-secondary);font-size:var(--fs-sm);max-width:48ch}
+  /* analytic staffing solver panel */
+  .tt-solver{border:1px solid var(--line);border-radius:var(--r-lg,12px);
+    background:var(--panel-2,var(--bg-panel));padding:var(--sp-2,8px) var(--sp-3,12px)}
+  .tt-solver>summary{cursor:pointer;font-weight:700;color:var(--ink-primary,var(--ink));
+    font-size:var(--fs-sm,13px);padding:var(--sp-1,4px) 0}
+  .tt-solver-body{display:flex;flex-direction:column;gap:var(--sp-3,12px);padding-top:var(--sp-2,8px)}
+  .tt-solver-ctrl{display:flex;flex-wrap:wrap;gap:var(--sp-3,12px);align-items:flex-end}
+  .tt-solver-field{display:flex;flex-direction:column;gap:4px;font-size:var(--fs-micro,11px);
+    color:var(--ink-secondary,var(--muted))}
+  .tt-solver-flabel{font-size:var(--fs-micro,11px);color:var(--muted,var(--ink-tertiary))}
+  .tt-solver-run{align-self:flex-end;background:var(--accent,#16C0DE);
+    color:var(--ink-onAccent,#04222C);border-color:var(--accent,#16C0DE);font-weight:700}
+  .tt-solver-run:hover{background:var(--accent-hover,#3AD3EE)}
+  .tt-seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-md,8px);overflow:hidden}
+  .tt-seg-btn{padding:6px 10px;border:0;background:var(--panel,var(--bg-app));color:var(--ink,var(--ink-primary));
+    font-size:var(--fs-sm,13px);cursor:pointer}
+  .tt-seg-btn.on{background:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222C);font-weight:700}
+  .tt-solver-deps-title,.tt-solver-curve .tt-section-title{font-size:var(--fs-sm,13px);
+    font-weight:700;color:var(--ink-primary,var(--ink));margin-bottom:var(--sp-1,4px)}
+  .tt-solver-presets{display:flex;gap:var(--sp-2,8px);flex-wrap:wrap;margin-bottom:var(--sp-2,8px)}
+  .tt-chip{padding:4px 10px;border:1px solid var(--line);border-radius:var(--r-pill,999px);
+    background:var(--panel,var(--bg-app));color:var(--ink,var(--ink-primary));font-size:var(--fs-micro,11px);cursor:pointer}
+  .tt-chip:hover{background:var(--bg-hover)}
+  .tt-solver-depgrid{display:flex;flex-direction:column;gap:4px}
+  .tt-solver-deprow{display:flex;align-items:center;gap:var(--sp-2,8px);flex-wrap:wrap}
+  .tt-solver-depname{min-width:84px;font-size:var(--fs-micro,11px);font-weight:600;color:var(--ink,var(--ink-primary))}
+  .tt-solver-depups{display:flex;gap:4px;flex-wrap:wrap}
+  .tt-deptoggle{padding:2px 8px;border:1px solid var(--line);border-radius:var(--r-pill,999px);
+    background:var(--panel,var(--bg-app));color:var(--muted,var(--ink-tertiary));font-size:var(--fs-micro,11px);cursor:pointer}
+  .tt-deptoggle.on{background:var(--accent-tint,#E4F8FC);border-color:var(--accent,#16C0DE);
+    color:var(--accent-ink,var(--accent));font-weight:700}
   @media (prefers-reduced-motion: reduce){ .tt-cursor-sync,.tt-cursor-sync i,.tt-recalc-pill{transition:none} }
   `;
   document.head.appendChild(s);
@@ -129,6 +161,14 @@ export function mountTimetable(targetEl, opts = {}) {
   let elMap, elMapCanvas, elMapTitle;
   let elCursorSync;          // low-key "時刻連動中" indicator near the time cursor
   let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
+
+  // ---- analytic staffing solver (稼働窓 + 上限 + 依存 + 前詰め/均等) ----------
+  let elSolver, elSolverDeps, elSolverSummary, elSolverCurve;
+  let solverResult = null;
+  const solverState = {
+    start: 9, end: 18, cap: 0, placement: 'front',
+    deps: {}, defaultDeps: {}, processIds: [], _seededDeps: false,
+  };
 
   function build() {
     root.innerHTML = '';
@@ -227,6 +267,204 @@ export function mountTimetable(targetEl, opts = {}) {
     elParams = el('div', 'tt-params-body');
     det.appendChild(elParams);
     root.appendChild(det);
+
+    // Analytic staffing SOLVER (稼働時間＋上限人数＋依存＋前詰め/均等 → 解析的人員)
+    buildSolverPanel();
+  }
+
+  // ---- analytic staffing solver (稼働窓 + 上限 + 依存 DAG + 前詰め/均等) -------
+  // A second, complementary planner: instead of placing volume across 30-min
+  // slots from work-bands, you set an operating window (start–end hour) and a
+  // headcount CAP, and the backend solves the per-HOUR headcount per process that
+  // clears the day under the cap, honouring precedence (入荷→格納→…→出荷) and a
+  // placement choice (前詰め vs 均等). Analytic, instant.
+  function buildSolverPanel() {
+    elSolver = el('details', 'tt-solver'); elSolver.open = true;
+    elSolver.appendChild(el('summary', null, 'ソルバー（稼働時間・上限人数・依存・前詰め/均等）'));
+    const body = el('div', 'tt-solver-body');
+
+    // Controls row: window, cap, placement, run.
+    const ctrl = el('div', 'tt-solver-ctrl');
+    solverState.startEl = numInput(solverState.start, 0, 30, (v) => { solverState.start = v; });
+    solverState.endEl = numInput(solverState.end, 1, 30, (v) => { solverState.end = v; });
+    solverState.capEl = numInput(solverState.cap, 0, 999, (v) => { solverState.cap = v; });
+    ctrl.appendChild(ctrlField('稼働開始(時)', solverState.startEl));
+    ctrl.appendChild(ctrlField('稼働終了(時)', solverState.endEl));
+    ctrl.appendChild(ctrlField('上限人数(0=無制限)', solverState.capEl));
+
+    const placeWrap = el('div', 'tt-seg');
+    for (const [val, txt] of [['front', '前詰め（早く終える）'], ['level', '均等（平準化）']]) {
+      const b = el('button', 'tt-seg-btn' + (solverState.placement === val ? ' on' : ''), txt);
+      b.dataset.place = val;
+      b.onclick = () => {
+        solverState.placement = val;
+        placeWrap.querySelectorAll('.tt-seg-btn').forEach((x) => x.classList.toggle('on', x.dataset.place === val));
+        runSolver();
+      };
+      placeWrap.appendChild(b);
+    }
+    ctrl.appendChild(ctrlField('配置方針', placeWrap));
+
+    const run = el('button', 'tt-btn tt-solver-run', '▶ ソルバー実行');
+    run.onclick = runSolver;
+    ctrl.appendChild(run);
+    body.appendChild(ctrl);
+
+    // Dependency editor (presets + per-process upstream edges).
+    elSolverDeps = el('div', 'tt-solver-deps');
+    body.appendChild(elSolverDeps);
+
+    // Summary + per-hour curve render targets.
+    elSolverSummary = el('div', 'tt-solver-summary');
+    body.appendChild(elSolverSummary);
+    elSolverCurve = el('div', 'tt-solver-curve');
+    body.appendChild(elSolverCurve);
+
+    elSolver.appendChild(body);
+    root.appendChild(elSolver);
+    renderDepEditor();
+  }
+
+  function ctrlField(label, control) {
+    const w = el('label', 'tt-solver-field');
+    w.appendChild(el('span', 'tt-solver-flabel', label));
+    w.appendChild(control);
+    return w;
+  }
+  function numInput(value, min, max, onChange) {
+    const inp = el('input', 'tt-mini'); inp.type = 'number';
+    inp.min = String(min); inp.max = String(max); inp.value = String(value);
+    inp.oninput = () => onChange(parseInt(inp.value, 10) || 0);
+    return inp;
+  }
+
+  // Dependency editor: presets + a compact per-process upstream multi-toggle.
+  function renderDepEditor() {
+    if (!elSolverDeps) return;
+    elSolverDeps.innerHTML = '';
+    elSolverDeps.appendChild(el('div', 'tt-solver-deps-title', '工程依存（前工程が供給するまで後工程は立ち上がらない）'));
+    const presets = el('div', 'tt-solver-presets');
+    const std = el('button', 'tt-chip', '標準フロー（入荷→格納→…→出荷）');
+    std.onclick = () => { solverState.deps = cloneDeps(solverState.defaultDeps); renderDepEditor(); runSolver(); };
+    const none = el('button', 'tt-chip', '依存なし（並列）');
+    none.onclick = () => { solverState.deps = {}; renderDepEditor(); runSolver(); };
+    presets.appendChild(std); presets.appendChild(none);
+    elSolverDeps.appendChild(presets);
+
+    const ids = (solverState.processIds && solverState.processIds.length)
+      ? solverState.processIds : Object.keys(solverState.defaultDeps);
+    const grid = el('div', 'tt-solver-depgrid');
+    for (const pid of ids) {
+      const row = el('div', 'tt-solver-deprow');
+      row.appendChild(el('span', 'tt-solver-depname', pid));
+      const ups = el('span', 'tt-solver-depups');
+      for (const up of ids) {
+        if (up === pid) continue;
+        const on = (solverState.deps[pid] || []).includes(up);
+        const tag = el('button', 'tt-deptoggle' + (on ? ' on' : ''), up);
+        tag.title = on ? `${up} を前工程から外す` : `${up} を前工程に追加`;
+        tag.onclick = () => {
+          const cur = new Set(solverState.deps[pid] || []);
+          if (cur.has(up)) cur.delete(up); else cur.add(up);
+          solverState.deps[pid] = [...cur];
+          renderDepEditor(); runSolver();
+        };
+        ups.appendChild(tag);
+      }
+      row.appendChild(ups);
+      grid.appendChild(row);
+    }
+    elSolverDeps.appendChild(grid);
+  }
+  function cloneDeps(d) { const o = {}; for (const k of Object.keys(d || {})) o[k] = [...(d[k] || [])]; return o; }
+
+  // POST the window/cap/deps/placement to the analytic solver and render.
+  async function runSolver() {
+    const proj = typeof o.getProject === 'function' ? o.getProject() : null;
+    if (!proj) {
+      if (elSolverSummary) elSolverSummary.innerHTML = '<div class="tt-info">プロジェクトを開くと、稼働窓・上限・依存からソルバーで人員を解けます。</div>';
+      return;
+    }
+    if (elSolverSummary) elSolverSummary.innerHTML = '<div class="tt-info">ソルバー計算中…</div>';
+    const body = {
+      start_hour: solverState.start, end_hour: solverState.end,
+      cap: solverState.cap || null, placement: solverState.placement,
+      dependencies: solverState.deps,
+    };
+    let res;
+    try {
+      res = await api(`/api/projects/${encodeURIComponent(proj)}/timetable/solve-staffing`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+    } catch (e) {
+      if (elSolverSummary) elSolverSummary.innerHTML = `<div class="tt-alert"><div class="tt-alert-head">ソルバーに失敗しました</div><div>${esc(String(e.message || e))}</div></div>`;
+      return;
+    }
+    solverResult = res;
+    if (res && res.default_dependencies && !solverState._seededDeps) {
+      solverState.defaultDeps = res.default_dependencies;
+      solverState.processIds = (res.processes || []).map((p) => p.id);
+      if (!Object.keys(solverState.deps).length) solverState.deps = cloneDeps(res.default_dependencies);
+      solverState._seededDeps = true;
+      renderDepEditor();
+    }
+    renderSolver();
+  }
+
+  function renderSolver() {
+    const r = solverResult;
+    if (!r) return;
+    if (r.available === false) {
+      elSolverSummary.innerHTML = `<div class="tt-info">${esc(r.message || '荷役物量がまだありません。')}</div>`;
+      elSolverCurve.innerHTML = '';
+      return;
+    }
+    // Summary cards.
+    const feasTone = r.feasible ? 'good' : 'bad';
+    const cards = [
+      ['総工数', r1(r.total_man_hours), '人時'],
+      ['ピーク人数', r.peak_headcount, `名 (${r.peak_hour}時)`],
+      ['終了時刻', `${r.makespan_hour}時`, ''],
+      ['判定', r.feasible ? '充足' : '不足', r.feasible ? '' : `${r1(r.shortfall_man_hours)}人時`, feasTone],
+    ];
+    let html = '<div class="tt-kpis">';
+    for (const [label, value, unit, tone] of cards) {
+      html += `<div class="tt-kpi${tone ? ' ' + tone : ''}"><div class="tt-kpi-label">${esc(label)}</div>`
+        + `<div class="tt-kpi-value">${esc(String(value))}${unit ? `<span class="tt-kpi-unit"> ${esc(unit)}</span>` : ''}</div></div>`;
+    }
+    html += '</div>';
+    if (r.cap_exceeded) html += `<div class="tt-alert"><div class="tt-alert-head">⚠ 上限超過</div><div>ピーク ${r.peak_headcount}名 が上限 ${r.cap}名 を超えています。</div></div>`;
+    else if (!r.feasible) html += `<div class="tt-alert"><div class="tt-alert-head">⚠ 物量未達</div><div>稼働窓・上限・依存の制約内で当日物量を処理しきれません（不足 ${r1(r.shortfall_man_hours)}人時）。窓を広げるか上限を上げてください。</div></div>`;
+    elSolverSummary.innerHTML = html;
+    renderSolverCurve(r);
+  }
+
+  // Per-hour headcount table (process rows × hour columns) + total row. Plain DOM
+  // table (no canvas) so it always prints/scrolls and the curve change is legible.
+  function renderSolverCurve(r) {
+    const hours = r.hours || [];
+    let html = '<div class="tt-section-title">時間帯別 必要人員（工程 × 時、解析ソルバー）</div>';
+    html += '<div class="tt-matrix-scroll"><table class="tt-table"><thead><tr><th class="tt-rowhead">工程</th>';
+    for (const h of hours) html += `<th class="tt-time">${h}時</th>`;
+    html += '<th class="tt-total">人時</th><th class="tt-total">終</th></tr></thead><tbody>';
+    for (const p of r.processes) {
+      const color = SECTION_COLOR[p.section] || 'var(--ink-tertiary,#8195a8)';
+      html += `<tr><th class="tt-rowhead"><i class="tt-dot" style="background:${esc(color)}"></i>${esc(p.id)}</th>`;
+      for (let i = 0; i < hours.length; i++) {
+        const n = p.headcount_by_hour[i] || 0;
+        html += `<td class="tt-cell n${Math.min(8, n)}">${n || ''}</td>`;
+      }
+      const fin = p.feasible ? `${p.finish_hour}時` : '✕';
+      html += `<td class="tt-total">${r1(p.man_hours)}</td><td class="tt-total${p.feasible ? '' : ' bad'}">${esc(fin)}</td></tr>`;
+    }
+    html += '<tr class="tt-grandtotal"><th class="tt-rowhead">時刻総人数</th>';
+    for (const n of (r.total_headcount_by_hour || [])) {
+      const over = r.cap && n > r.cap;
+      html += `<td class="tt-cell${over ? ' tt-cell-cursor' : ''}">${n || ''}</td>`;
+    }
+    html += `<td class="tt-total">${r1(r.total_man_hours)}</td><td class="tt-total">${r.makespan_hour}時</td></tr>`;
+    html += '</tbody></table></div>';
+    elSolverCurve.innerHTML = html;
   }
 
   // Zero-scenario state: don't throw or render a blank tab — explain + give a CTA.
@@ -240,6 +478,10 @@ export function mountTimetable(targetEl, opts = {}) {
     cta.onclick = () => document.dispatchEvent(new CustomEvent('whsim:goto', { detail: { view: 'materialflow' } }));
     box.appendChild(cta);
     root.appendChild(box);
+    // Even with no work-band scenario, the analytic solver can staff straight
+    // from the project's volumes — so offer it here too.
+    buildSolverPanel();
+    runSolver();
   }
 
   function ganttLegend() {
@@ -772,6 +1014,7 @@ export function mountTimetable(targetEl, opts = {}) {
     build();
     renderParams();
     recompute();
+    runSolver();   // solve the analytic staffing panel from the project's volumes
     if (pendingExternal) { applyExternalScenario(pendingExternal); pendingExternal = null; }
   }
 
@@ -786,6 +1029,7 @@ export function mountTimetable(targetEl, opts = {}) {
     build();
     renderParams();
     recompute();
+    runSolver();
   }
 
   const onTheme = () => { if (result) { ganttCache = null; renderGantt(); renderStaffMap(); } };
@@ -809,7 +1053,13 @@ export function mountTimetable(targetEl, opts = {}) {
     recompute,
     headcountAt,
     setMinute(min) { cursorSlot = Math.max(0, Math.min(N - 1, Math.floor(min / 30))); onCursor(); },
-    setLayout(l) { layout = l || null; if (result) renderStaffMap(); },
+    setLayout(l) {
+      layout = l || null;
+      if (result) renderStaffMap();
+      // setLayout fires when the active project changes → re-solve the analytic
+      // staffing panel against the new project's volumes (the deps re-seed once).
+      if (elSolver) { solverState._seededDeps = false; solverState.deps = {}; runSolver(); }
+    },
     // Load a data-derived generic scenario (from 物量分析) and solve it. Queues
     // if the seed hasn't loaded yet (handoff can fire right after mount).
     loadExternal(payload) {
