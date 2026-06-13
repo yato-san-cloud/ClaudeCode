@@ -244,6 +244,12 @@ class Process(BaseModel):
     # before forklift putaway (an explicit upstream stage with its own WIP).
     inspector_count: int = 0
     inbound_inspection_time_s: float = 8.0   # seconds to inspect one inbound receipt
+    # 段(level)からのピック垂直アクセス時間: picking an upper 段 costs vertical time on
+    # top of the handle. lift_speed_mps = forklift/order-picker hoist speed (m/s,
+    # up+down); manual_reach_s_per_m = the ergonomic reach/ladder penalty per metre
+    # of height for hand picking. Rack pitch + who picks come from racktypes.
+    lift_speed_mps: float = 0.4
+    manual_reach_s_per_m: float = 2.0
 
     def pick_stage(self) -> "Stage | None":
         for s in self.stages:

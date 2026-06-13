@@ -61,6 +61,46 @@ ORDER = ["light", "medium", "pallet", "nestainer", "flow", "asrs",
          "mezzanine", "mobile", "hanger"]
 DEFAULT = "medium"
 
+# ---- vertical pick model (段からのピックは時間がかかる) -----------------------
+# Per-level shelf pitch (m) and who reaches it: manual (human reach/ladder),
+# forklift (reach-truck/order-picker hoist), or crane (AS/RS, fast automated). The
+# engine turns this into a per-visit vertical access time on top of the handle, so
+# picking the top 段 takes longer — and the 2D/3D replay dwell reflects it.
+_LEVEL_H = {"light": 0.40, "medium": 0.45, "pallet": 1.50, "nestainer": 1.40,
+            "flow": 0.50, "asrs": 0.80, "mezzanine": 2.50, "mobile": 0.40,
+            "hanger": 0.0}
+_MOVER = {"pallet": "forklift", "nestainer": "forklift", "mezzanine": "forklift",
+          "asrs": "crane"}  # everything else is manual reach
+
+
+def level_height_m(rid: str | None, level: int) -> float:
+    """Pick-face height (m) above the ground 段 for `level` (1 = ground/golden)."""
+    return max(0.0, int(level) - 1) * _LEVEL_H.get(rid or DEFAULT, 0.40)
+
+
+def mover(rid: str | None) -> str:
+    """Who picks this rack: 'manual' | 'forklift' | 'crane'."""
+    return _MOVER.get(rid or DEFAULT, "manual")
+
+
+def vertical_pick_s(rid: str | None, level: int,
+                    lift_mps: float = 0.4, manual_s_per_m: float = 2.0) -> float:
+    """Extra seconds to access a pick at `level` (vs the ground 段).
+
+    manual = ergonomic reach/ladder penalty growing with height; forklift =
+    hoist up+down at ``lift_mps`` plus a small mast setup; crane = fast automated
+    vertical. Level 1 (ground/golden zone) is always 0. Tunable via the two knobs
+    (process.lift_speed_mps / process.manual_reach_s_per_m)."""
+    h = level_height_m(rid, level)
+    if h <= 0.0:
+        return 0.0
+    m = mover(rid)
+    if m == "forklift":
+        return 2.0 * h / max(0.1, lift_mps) + 3.0
+    if m == "crane":
+        return h / max(0.1, lift_mps * 3.0)
+    return h * max(0.0, manual_s_per_m)
+
 
 def get(rid: str | None) -> dict:
     """Preset for an id, falling back to the default (never raises)."""

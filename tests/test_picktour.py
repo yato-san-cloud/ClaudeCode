@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from whsim import picktour, templates
 from whsim.engine.routing import manhattan
 from whsim.engine.run import run_once
-from whsim.schema.model import Order, OrderLine
 from whsim.web.app import app
 
 

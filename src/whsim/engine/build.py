@@ -59,6 +59,7 @@ class World:
     conveyor_points: list[tuple[float, float]]  # conveyor pickup points (if any)
     sku_xy: dict[str, tuple[float, float]]
     sku_ts: dict[str, float]
+    sku_vert: dict[str, float]
     sku_weights: list[float]
     sku_list: list[str]
     grid_m: float
@@ -176,14 +177,28 @@ def build(
         pick_method = "manual"
 
     loc_by_id = model.location_by_id()
+    # sku_xy = pick position; sku_vert = per-visit vertical access time for picking
+    # that SKU's 段(level) — picking an upper level costs lift/reach time (racktypes
+    # vertical model, tuned by process.lift_speed_mps / manual_reach_s_per_m).
+    from whsim import racktypes
+    _lift = float(model.process.lift_speed_mps)
+    _reach = float(model.process.manual_reach_s_per_m)
+
+    def _vert(loc):
+        return racktypes.vertical_pick_s(
+            getattr(loc, "rack_type", None), getattr(loc, "level", 1), _lift, _reach)
+
     sku_xy: dict[str, tuple[float, float]] = {}
+    sku_vert: dict[str, float] = {}
     for it in model.items:
         if it.default_location and it.default_location in loc_by_id:
             loc = loc_by_id[it.default_location]
             sku_xy[it.sku] = (loc.x, loc.y)
+            sku_vert[it.sku] = _vert(loc)
     for loc in model.locations:
         if loc.sku and loc.sku not in sku_xy:
             sku_xy[loc.sku] = (loc.x, loc.y)
+            sku_vert[loc.sku] = _vert(loc)
 
     sku_ts = {it.sku: it.ts_per_unit for it in model.items}
     by_sku = model.item_by_sku()
@@ -308,7 +323,7 @@ def build(
         home=home, agv_home=agv_home,
         fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),
         slot_xy=slot_xy, conveyor_points=conveyor_points,
-        sku_xy=sku_xy, sku_ts=sku_ts,
+        sku_xy=sku_xy, sku_ts=sku_ts, sku_vert=sku_vert,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
         graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,

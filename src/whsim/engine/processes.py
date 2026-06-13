@@ -137,7 +137,9 @@ def forklift_agent(world: World, f: Worker, rng: random.Random):
 
 
 def _order_points(world: World, order: Order):
-    pts, qtys, tss = [], [], []
+    """Parallel (points, qtys, tss, vss): vss = per-visit vertical access seconds
+    for picking each SKU's 段(level) (0 for ground/golden, longer for upper levels)."""
+    pts, qtys, tss, vss = [], [], [], []
     for line in order.lines:
         xy = world.sku_xy.get(line.sku)
         if xy is None:
@@ -145,7 +147,8 @@ def _order_points(world: World, order: Order):
         pts.append(xy)
         qtys.append(line.qty)
         tss.append(world.sku_ts.get(line.sku, 1.5))
-    return pts, qtys, tss
+        vss.append(world.sku_vert.get(line.sku, 0.0))
+    return pts, qtys, tss, vss
 
 
 def agv_agent(world: World, a: Worker):
@@ -157,7 +160,7 @@ def agv_agent(world: World, a: Worker):
     while True:
         item = yield world.order_store.get()
         order = item["order"]
-        points, _, _ = _order_points(world, order)
+        points, _, _, _ = _order_points(world, order)
         route = [points[i] for i in nearest_neighbor_route(world.agv_home, points)]
         trip_start = env.now
         cur = world.agv_home
@@ -205,24 +208,25 @@ def _pull_batch(world: World, source, first):
 def _totals_points(world: World, orders: list[Order]):
     """種まき (total picking): aggregate the batch's lines into SKU TOTALS, so a
     SKU stored in one place is visited ONCE for the whole batch (not per order).
-    Returns parallel (points, qtys, tss) lists keyed by distinct SKU."""
+    Returns parallel (points, qtys, tss, vss) lists keyed by distinct SKU."""
     totals: dict[str, int] = {}
     for o in orders:
         for line in o.lines:
             if world.sku_xy.get(line.sku) is None:
                 continue
             totals[line.sku] = totals.get(line.sku, 0) + line.qty
-    pts, qtys, tss = [], [], []
+    pts, qtys, tss, vss = [], [], [], []
     for sku, qty in totals.items():
         pts.append(world.sku_xy[sku])
         qtys.append(qty)
         tss.append(world.sku_ts.get(sku, 1.5))
-    return pts, qtys, tss
+        vss.append(world.sku_vert.get(sku, 0.0))
+    return pts, qtys, tss, vss
 
 
-def _walk_route(world: World, w: Worker, start, points, qtys, tss, speed):
-    """Walk a routed sweep over `points`, picking each (handle = qty*ts).
-    Returns (end_position, total_distance). Pure travel+handle, no pack."""
+def _walk_route(world: World, w: Worker, start, points, qtys, tss, vss, speed):
+    """Walk a routed sweep over `points`, picking each (handle = qty*ts + vertical
+    access for the 段). Returns (end_position, total_distance). No pack."""
     pos = start
     total = 0.0
     for idx in _route_order(world, pos, points):
@@ -231,32 +235,35 @@ def _walk_route(world: World, w: Worker, start, points, qtys, tss, speed):
         pos = dest
         if world.recording():
             w.kf(world.env.now, pos[0], pos[1], "pick")
-        yield world.env.timeout(qtys[idx] * tss[idx])
+        # handle = horizontal unit handling + vertical 段 access (upper levels cost
+        # lift/reach time); the replay dwell at this keyframe lengthens accordingly.
+        yield world.env.timeout(qtys[idx] * tss[idx] + vss[idx])
     return pos, total
 
 
 def _pick_zone(world: World, w: Worker, results: dict, key, start,
-               points, qtys, tss, speed):
+               points, qtys, tss, vss, speed):
     """A parallel-zone sub-pick: walk this zone's points, store (dist) by key.
     Runs as its own SimPy process so zones progress concurrently (C: parallel)."""
-    _pos, dist = yield from _walk_route(world, w, start, points, qtys, tss, speed)
+    _pos, dist = yield from _walk_route(world, w, start, points, qtys, tss, vss, speed)
     results[key] = results.get(key, 0.0) + dist
 
 
-def _split_by_zone(world: World, points, qtys, tss):
-    """Group parallel (points, qtys, tss) by their picking zone (C axis).
-    Returns {zone_index: (points, qtys, tss)} in ascending zone order."""
-    buckets: dict[int, tuple[list, list, list]] = {}
-    for p, q, t in zip(points, qtys, tss):
+def _split_by_zone(world: World, points, qtys, tss, vss):
+    """Group parallel (points, qtys, tss, vss) by their picking zone (C axis).
+    Returns {zone_index: (points, qtys, tss, vss)} in ascending zone order."""
+    buckets: dict[int, tuple[list, list, list, list]] = {}
+    for p, q, t, v in zip(points, qtys, tss, vss):
         z = world.zone_of(p)
-        bp, bq, bt = buckets.setdefault(z, ([], [], []))
+        bp, bq, bt, bv = buckets.setdefault(z, ([], [], [], []))
         bp.append(p)
         bq.append(q)
         bt.append(t)
+        bv.append(v)
     return dict(sorted(buckets.items()))
 
 
-def _pick_phase(world: World, w: Worker, pos, points, qtys, tss, speed):
+def _pick_phase(world: World, w: Worker, pos, points, qtys, tss, vss, speed):
     """Walk-and-pick a sweep honouring the zoning (C) axis. Returns
     (end_position, total_distance).
 
@@ -272,9 +279,9 @@ def _pick_phase(world: World, w: Worker, pos, points, qtys, tss, speed):
         return pos, 0.0
 
     if world.zoning == "none" or world.n_zones <= 1:
-        return (yield from _walk_route(world, w, pos, points, qtys, tss, speed))
+        return (yield from _walk_route(world, w, pos, points, qtys, tss, vss, speed))
 
-    buckets = _split_by_zone(world, points, qtys, tss)
+    buckets = _split_by_zone(world, points, qtys, tss, vss)
 
     if world.zoning == "parallel":
         # Launch one sub-process per zone; they run at the same simulated time.
@@ -286,10 +293,10 @@ def _pick_phase(world: World, w: Worker, pos, points, qtys, tss, speed):
         procs = []
         if world.recording():
             w.kf(world.env.now, pos[0], pos[1], "idle")
-        for z, (bp, bq, bt) in buckets.items():
+        for z, (bp, bq, bt, bv) in buckets.items():
             helper = world.helper_for(w, z)
             procs.append(world.env.process(
-                _pick_zone(world, helper, results, z, pos, bp, bq, bt, speed)))
+                _pick_zone(world, helper, results, z, pos, bp, bq, bt, bv, speed)))
         for p in procs:
             yield p
         # makespan = the slowest zone (they overlapped), distance = sum walked.
@@ -300,8 +307,8 @@ def _pick_phase(world: World, w: Worker, pos, points, qtys, tss, speed):
 
     # sequential (pick-and-pass relay): traverse zones in order, sweeping each.
     total = 0.0
-    for _z, (bp, bq, bt) in buckets.items():
-        pos, d = yield from _walk_route(world, w, pos, bp, bq, bt, speed)
+    for _z, (bp, bq, bt, bv) in buckets.items():
+        pos, d = yield from _walk_route(world, w, pos, bp, bq, bt, bv, speed)
         total += d
     return pos, total
 
@@ -351,15 +358,17 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
         # D axis: 種まき(sort) sweeps SKU TOTALS across the batch (each SKU
         # visited once); 摘み取り(pick) sweeps every order line as-is.
         if world.consolidation == "sort":
-            points, qtys, tss = _totals_points(world, orders)
+            points, qtys, tss, vss = _totals_points(world, orders)
         else:
-            points, qtys, tss = [], [], []
+            points, qtys, tss, vss = [], [], [], []
             for o in orders:
-                p, q, t = _order_points(world, o)
+                p, q, t, v = _order_points(world, o)
                 points += p
                 qtys += q
                 tss += t
-        handle_time = sum(q * t for q, t in zip(qtys, tss))
+                vss += v
+        # handle = horizontal unit handling + the 段(level) vertical access time.
+        handle_time = sum(q * t for q, t in zip(qtys, tss)) + sum(vss)
 
         total_dist = 0.0
         if agv_mode:
@@ -371,7 +380,7 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
         else:
             # Pick phase honours the C axis (none / sequential relay / parallel).
             pos, total_dist = yield from _pick_phase(
-                world, w, pos, points, qtys, tss, speed)
+                world, w, pos, points, qtys, tss, vss, speed)
             # 種まき: distribute the totals to destination orders at the put wall.
             if world.consolidation == "sort":
                 yield from _sort_phase(world, w, orders, pos)
