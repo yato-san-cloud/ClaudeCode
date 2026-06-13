@@ -207,6 +207,70 @@ async def api_import_table(name: str, file: UploadFile, kind: str = "shipments",
     }
 
 
+def _preview_counts(std, kind: str) -> dict:
+    """Fast (no order objects) estimate of what an import WOULD produce, from the
+    already-mapped frame. Vectorised pandas only — safe to call on every keystroke
+    in the mapping modal."""
+    import pandas as pd
+    out: dict = {}
+    if std is None or getattr(std, "empty", True):
+        return out
+    cols = set(std.columns)
+    if "sku" in cols:
+        sku = std["sku"].astype(str).str.strip()
+        valid = sku[(sku != "") & (~sku.str.lower().isin(["nan", "none"]))]
+        out["skus"] = int(valid.nunique())
+    if "qty" in cols:
+        out["units"] = int(pd.to_numeric(std["qty"], errors="coerce").fillna(0).clip(lower=0).sum())
+    if kind == "master":
+        out["items"] = out.get("skus", 0)
+    elif kind == "inbound":
+        out["inbound_lines"] = int(len(std))
+    else:  # shipments
+        out["lines"] = int(len(std))
+        out["orders"] = int(std["order_id"].astype(str).str.strip().nunique()) \
+            if "order_id" in cols else int(len(std))
+    return out
+
+
+@router.post("/api/projects/{name}/import-preview")
+async def api_import_preview(name: str, file: UploadFile, kind: str = "shipments",
+                             mapping: str | None = None):
+    """Read-only preview for the 取込プレビュー / 項目の紐付け modal.
+
+    Parses the file, resolves (or applies the caller's) column mapping, and
+    returns the resolved mapping + a data preview (first rows of the ORIGINAL
+    columns) + the counts that WOULD result — WITHOUT writing anything to the
+    project. Tolerant: a bad file is a friendly 400, never a 500."""
+    import json as _json
+
+    import pandas as pd
+
+    from whsim.analysis import data_io
+    _open(name)  # validate the project exists (404 if not)
+    data = await _read_upload(file)
+    fields = getattr(data_io, _TABLE_FIELDS.get(kind, "SHIPMENT_FIELDS"))
+    try:
+        df = data_io.load_table(data, file.filename)
+    except Exception as e:  # noqa: BLE001 — tolerant
+        raise HTTPException(400, f"表を読み込めませんでした: {e}")
+    mp = _json.loads(mapping) if mapping else data_io.initial_mapping(df, fields)
+    std = data_io.apply_mapping(df, mp, fields)
+    head = df.head(20)
+    rows = [["" if pd.isna(v) else str(v) for v in row]
+            for row in head.itertuples(index=False)]
+    return {
+        "kind": kind,
+        "filename": file.filename,
+        "columns": [str(c) for c in df.columns],
+        "mapping": {f.key: {"label": f.label, "required": f.required,
+                            "column": mp.get(f.key)} for f in fields},
+        "counts": _preview_counts(std, kind),
+        "preview": {"columns": [str(c) for c in df.columns], "rows": rows,
+                    "total_rows": int(len(df))},
+    }
+
+
 @router.post("/api/projects/{name}/import-distances")
 async def api_import_distances(name: str, file: UploadFile):
     """Import a measured shelf-to-shelf distance matrix (CSV/JSON) to refine routing."""

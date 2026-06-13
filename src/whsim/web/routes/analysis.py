@@ -110,16 +110,20 @@ async def api_analysis_upload(shipments: UploadFile, inbound: UploadFile | None 
 
 @router.post("/api/projects/{name}/import/shipments")
 async def api_import_shipments(name: str, shipments: UploadFile,
-                               items: UploadFile | None = None):
+                               items: UploadFile | None = None,
+                               mapping: str | None = None):
     """ETL: read a shipments file (CSV/Excel/JSON), auto-map its columns, and
     ingest it as the project's outbound orders so the BI views AND the SimPy run
     use the customer's REAL demand. An OPTIONAL 商品マスタ file enriches SKUs with
-    入数(case_qty)/名前/ABC so the 荷姿・保管設備 chain is accurate. Returns a
-    summary {orders, lines, skus, enriched, …} plus the resolved column `mapping`
-    (so the UI can show 何をどう取り込んだか — the 物量分析ツール「項目の紐付け確認」).
+    入数(case_qty)/名前/ABC so the 荷姿・保管設備 chain is accurate. ``mapping`` (JSON,
+    field-key→column) overrides the auto-detected column mapping — the 取込プレビュー
+    modal sends the user-confirmed/corrected mapping here. Returns a summary
+    {orders, lines, skus, enriched, …} plus the resolved column `mapping`.
 
     Honours 'never blocks': unreadable files 400 with a friendly message; a file
     with no usable rows returns ok:false (the model is left untouched)."""
+    import json as _json
+
     import pandas as pd  # noqa: F401  (load_table needs pandas importable)
 
     from whsim.analysis import ingest
@@ -136,7 +140,7 @@ async def api_import_shipments(name: str, shipments: UploadFile,
         df = load_table(raw, shipments.filename)
     except Exception as e:  # noqa: BLE001 — surface a friendly 400
         raise HTTPException(400, f"読込に失敗しました（{shipments.filename}）: {e}") from e
-    ship_map = initial_mapping(df, SHIPMENT_FIELDS)
+    ship_map = _json.loads(mapping) if mapping else initial_mapping(df, SHIPMENT_FIELDS)
     mapped = apply_mapping(df, ship_map, SHIPMENT_FIELDS)
 
     items_df = None

@@ -16,6 +16,7 @@ import { S } from './state.js';
 import { $, api, esc } from './util.js';
 import { hist } from './history.js';
 import { forkliftBusy } from './progress.js';
+import { pickImportMapping } from './importpreview.js';
 
 // Replace the plain "…中…" line in the hub footer with a forklift-shuttle busy
 // strip so the wait reads as 「処理してる感」. The success/error path overwrites
@@ -152,13 +153,18 @@ export async function uploadRmpm(file) {
 // Optional 商品マスタ file enriches SKUs (入数/名前/ABC).
 export async function uploadShipments(file, itemsFile = null) {
   if (!S.project) { noProject('actual'); return; }
+  // Preview + confirm the column mapping in a big window first (no commit yet).
+  const picked = await pickImportMapping({ project: S.project, file, kind: 'shipments' });
+  if (!picked) return;  // user closed the preview without importing
   const fd = new FormData();
   fd.append('shipments', file);
   if (itemsFile) fd.append('items', itemsFile);
   busyLog('出荷実績を取込中…');
   mark('actual', null, `${file.name} を取込中…`);
   try {
-    const r = await api(`/api/projects/${S.project}/import/shipments`, { method: 'POST', body: fd });
+    const url = `/api/projects/${S.project}/import/shipments?mapping=`
+      + encodeURIComponent(JSON.stringify(picked.mapping));
+    const r = await api(url, { method: 'POST', body: fd });
     if (!r || !r.ok) {
       const msg = (r && r.message) || '取り込める明細がありませんでした。';
       $('importLog').innerHTML = `<span class="warn">! ${esc(msg)}</span>`;
@@ -198,9 +204,13 @@ const TABLE_ICON = { shipments: '📦', inbound: '🚚', master: '🏷️' };
 let _tableFile = null, _tableKind = 'shipments', _tableCat = null;
 export async function uploadTable(file, kind = 'shipments', cat = null) {
   if (!S.project) { noProject(cat || TABLE_CAT[kind] || 'actual'); return; }
-  _tableFile = file; _tableKind = TABLE_JP[kind] ? kind : 'shipments';
+  _tableKind = TABLE_JP[kind] ? kind : 'shipments';
   _tableCat = cat;
-  await doTableImport(null);
+  _tableFile = file;
+  // Preview + confirm the column mapping in a big window first (no commit yet).
+  const picked = await pickImportMapping({ project: S.project, file, kind: _tableKind });
+  if (!picked) return;
+  await doTableImport(picked.mapping);
 }
 async function doTableImport(mapping) {
   const cat = _tableCat || TABLE_CAT[_tableKind] || 'actual';
@@ -211,40 +221,22 @@ async function doTableImport(mapping) {
   mark(cat, null, `${_tableFile.name} を取込中…`);
   try {
     const r = await api(url, { method: 'POST', body: fd });
-    renderTableMapping(r);
     if (r.provenance_summary) $('provenance').textContent = r.provenance_summary;
     const cnt = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(' / ');
+    $('importLog').innerHTML = `<span class="ok">${esc(TABLE_JP[_tableKind])}を取込（${esc(cnt || '0')}）</span>`;
     mark(cat, true, `✓ ${_tableFile.name} — ${TABLE_JP[_tableKind]}（${cnt || '0'}）`);
     hist.log(TABLE_ICON[_tableKind] || '📄',
       `${TABLE_JP[_tableKind]}を取込: ${_tableFile.name}（${cnt || '0'}）`,
       _tableKind === 'master' ? 'overview' : 'dataanalysis', cat);
     if (_tableKind !== 'master') S.hasData = true;
     await openProject(S.project);
+    if (S.dataanalysis) S.dataanalysis.refresh();
     toast('取込しました。', 'ok');
   } catch (e) {
     $('importLog').textContent = 'エラー: ' + e.message;
     mark(cat, false, '✕ ' + _tableFile.name + ' — ' + e.message);
     toast('取込に失敗しました: ' + e.message, 'error');
   }
-}
-function renderTableMapping(r) {
-  const opts = (sel) => ['<option value="">（なし）</option>']
-    .concat((r.columns || []).map(c => `<option${c === sel ? ' selected' : ''}>${esc(c)}</option>`)).join('');
-  const rows = Object.entries(r.mapping || {}).map(([k, m]) =>
-    `<div class="row" style="gap:6px;margin:3px 0;align-items:center">
-       <span style="flex:1;font-size:12px">${esc(m.label)}${m.required ? ' <b style="color:var(--bad)">*</b>' : ''}</span>
-       <select data-mapfield="${esc(k)}" style="flex:1">${opts(m.column)}</select>
-     </div>`).join('');
-  const cnt = Object.entries(r.counts || {}).map(([k, v]) => `${k}: ${v}`).join(' / ');
-  $('importLog').innerHTML =
-    `<span class="ok">取込（${esc(cnt || '0')}）</span>
-     <div style="margin-top:6px;font-size:11px;color:var(--muted-2)">列マッピング（必要なら直して再取込）</div>${rows}
-     <button id="remapBtn" style="margin-top:6px;width:100%">この対応で再取込</button>`;
-  $('remapBtn').onclick = () => {
-    const mp = {};
-    $('importLog').querySelectorAll('[data-mapfield]').forEach(s => { mp[s.dataset.mapfield] = s.value || null; });
-    doTableImport(mp);
-  };
 }
 
 export async function generateMissing() {
