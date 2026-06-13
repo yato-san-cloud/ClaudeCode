@@ -19,7 +19,8 @@ const PHASES = [
   // ③設計 adds 生産性試算 (pickrate): analytic motion-time productivity from the
   // MapMaker距離 — the SLC-style "step ②" that picks オーダー/マルチ/トータル
   // before any heavyweight DES run.
-  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'storage', 'slotting', 'pickrate', 'timetable'] },
+  // 保管設計・棚割り は「レイアウト」内のサイドパネルに集約（designer/sidepanel.js）。
+  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'pickrate', 'timetable'] },
   // ④検証 = DESで裏取りするレーン。原価は「判定」内、ピック順序は「作業方法比較」内、
   // 2Dと3Dは1つの「ビュー」内トグルに集約（in-view toggle, app.js が #viewToggle で描画）。
   { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'workcompare'] },
