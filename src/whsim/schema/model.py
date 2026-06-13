@@ -391,6 +391,10 @@ class Settings(BaseModel):
     # benchmark_productivity = 物流形態別の想定生産性 (whsim.benchmarks で適用).
     benchmark_productivity: dict[str, float] = Field(default_factory=dict)
     benchmark_id: str = ""                   # which 物流形態プリセットを適用したか
+    # バッチ投入スケジュール: {section: [{"hour": H, "pct": P}]} — the day's volume for
+    # a section (入荷/出荷) arrives in batches at given hours (e.g. 08:00→70%/12:00→
+    # 20%/15:00→10%, or a single noon batch). Empty = all volume from window start.
+    batch_schedule: dict[str, list[dict]] = Field(default_factory=dict)
 
 
 class Scenario(BaseModel):

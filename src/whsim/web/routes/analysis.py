@@ -81,6 +81,15 @@ def api_timetable_solve_staffing(name: str, payload: dict | None = None):
         return {"available": False,
                 "message": "荷役物量がまだありません。マテリアルフローで物量を作成してください。"}
     model = proj.load_model()
+    # バッチ投入スケジュール: explicit payload wins; else the persisted schedule. When
+    # the payload carries one we persist it so the plan survives a reload. A payload
+    # key present-but-empty ({}) intentionally clears the schedule.
+    batches = p.get("batches")
+    if not isinstance(batches, dict):
+        batches = getattr(model.settings, "batch_schedule", {}) or {}
+    elif batches != (getattr(model.settings, "batch_schedule", {}) or {}):
+        model.settings.batch_schedule = batches
+        proj.save_model(model)
     try:
         result = staffing.solve_staffing(
             vols, model=model,
@@ -90,6 +99,7 @@ def api_timetable_solve_staffing(name: str, payload: dict | None = None):
             per_process_cap=p.get("per_process_cap") or {},
             dependencies=p.get("dependencies"),
             placement=str(p.get("placement", "level")),
+            batches=batches,
         )
     except (TypeError, ValueError) as e:
         raise HTTPException(400, f"ソルバー入力が不正です: {e}") from e
