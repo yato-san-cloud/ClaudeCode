@@ -343,6 +343,33 @@ def default_dependencies() -> dict[str, list[str]]:
     return {pid: list(ups) for pid, ups in _FLOW_DEPS.items()}
 
 
+def batch_arrival_curve(batch_list: list[dict], hours: list[int]) -> list[float] | None:
+    """Cumulative AVAILABLE fraction (0..1) per hour from a バッチ投入スケジュール.
+
+    A batch schedule is how a batch-based operation actually releases work: a few
+    `{"hour": H, "pct": P}` entries, e.g. 入荷 08:00→70% / 12:00→20% / 15:00→10%,
+    or a single noon batch (12:00→100%). The work for each chunk can only start
+    once that batch has landed, so this returns the cumulative fraction that has
+    arrived by the END of each hour in `hours` (a batch landing AT hour H is usable
+    during hour H). Percentages are normalised by their own total so the day always
+    clears (never-blocks); a batch landing after the window simply never arrives.
+    Returns None when there is no usable schedule (→ caller imposes no arrival gate,
+    i.e. all volume is available from the start, as before)."""
+    pts: list[tuple[int, float]] = []
+    for b in batch_list or []:
+        try:
+            h = int(b.get("hour", b.get("time", b.get("h"))))
+            p = float(b.get("pct", b.get("percent", b.get("share", 0))) or 0)
+        except (TypeError, ValueError):
+            continue
+        if p > 0:
+            pts.append((h, p))
+    if not pts:
+        return None
+    total = sum(p for _, p in pts) or 1.0
+    return [min(1.0, sum(p for bh, p in pts if bh <= h) / total) for h in hours]
+
+
 def _toposort(ids: list[str], deps: dict[str, list[str]]) -> list[str]:
     """Order ids so every dependency precedes its dependents. A visited set both
     dedupes and breaks accidental cycles (a cyclic edge is simply dropped)."""
@@ -374,6 +401,7 @@ def solve_staffing(
     per_process_cap: dict | None = None,
     dependencies: dict | None = None,
     placement: str = "level",
+    batches: dict | None = None,
 ) -> dict:
     """Analytic per-hour staffing solver over an operating window under a cap.
 
@@ -388,6 +416,11 @@ def solve_staffing(
       dependencies: {process_id: [upstream ids]} precedence DAG; None = default.
       placement: '前詰め'/'front'/'frontload' = staff up early (finish ASAP);
                  anything else = '均等'/level-load (spread evenly).
+      batches:  {section: [{"hour": H, "pct": P}]} バッチ投入スケジュール — the
+                day's volume for a section (入荷/出荷) arrives in batches at given
+                hours, so the first process of that section cannot output more than
+                has arrived by each hour (a staggered start that follows the batch
+                profile). None = all volume available from the window start.
 
     Output (JSON-safe): hours[], per-process headcount_by_hour + man_hours +
     finish_hour + feasible/shortfall, plus day totals (man_hours, peak, makespan,
@@ -453,6 +486,36 @@ def solve_staffing(
             best = min(best, scaled)
         return best
 
+    # ---- batch arrival gate ---------------------------------------------------
+    # A バッチ投入スケジュール releases a section's volume in batches over the day.
+    # Assign each section's cumulative-arrival curve to that section's FIRST process
+    # (master order) — downstream processes inherit the staggered start through the
+    # precedence feed above, so gating the root is enough.
+    order_set = set(order)
+    arrival_curve_by_pid: dict[str, list[float]] = {}
+    if isinstance(batches, dict) and batches:
+        sec_curve: dict[str, list[float]] = {}
+        for sec, blist in batches.items():
+            curve = batch_arrival_curve(blist if isinstance(blist, list) else [], hours)
+            if curve is not None:
+                sec_curve[str(sec)] = curve
+        if sec_curve:
+            seen_sec: set[str] = set()
+            for p in GENERIC_PROCESSES:  # master order
+                pid, sec = p["id"], p["section"]
+                if pid in order_set and sec in sec_curve and sec not in seen_sec:
+                    arrival_curve_by_pid[pid] = sec_curve[sec]
+                    seen_sec.add(sec)
+
+    def arrival_cum_units(pid: str, hour_idx: int) -> float:
+        """Cumulative units of `pid` available by the END of hour `hour_idx` under
+        its section's batch schedule (a batch landing AT that hour is usable that
+        hour). math.inf when the process has no arrival gate."""
+        curve = arrival_curve_by_pid.get(pid)
+        if curve is None:
+            return math.inf
+        return curve[hour_idx] * vol[pid]
+
     # ---- analytic placement passes -------------------------------------------
     # Each pass re-derives every process's per-hour headcount given the CURRENT
     # upstream allocation; upstream is solved first (topological order) so a few
@@ -503,6 +566,14 @@ def solve_staffing(
                     need = min(need, max_persons)
                     if need < 0:
                         need = 0
+                # Batch arrival: this process can't output more than has landed by
+                # this hour (a batch AT hour hi is usable during hour hi).
+                arr = arrival_cum_units(pid, hi)
+                if arr < math.inf:
+                    allowed_arr = max(0.0, arr - cum_units)
+                    need = min(need, int(math.floor(allowed_arr / rate + 1e-9)))
+                    if need < 0:
+                        need = 0
                 alloc[hi] = need
                 cum_units += need * rate
             head[pid] = alloc
@@ -536,6 +607,12 @@ def solve_staffing(
             if fed < math.inf:
                 allowed = max(0.0, fed - (cum - head[pid][hi] * rate))
                 room = min(room, int(math.floor(allowed / rate + 1e-9)) - head[pid][hi])
+                room = max(0, room)
+            # Batch arrival cap (same shape as the precedence feed cap above).
+            arr = arrival_cum_units(pid, hi)
+            if arr < math.inf:
+                allowed_arr = max(0.0, arr - (cum - head[pid][hi] * rate))
+                room = min(room, int(math.floor(allowed_arr / rate + 1e-9)) - head[pid][hi])
                 room = max(0, room)
             still_needed = math.ceil((target - sum(head[pid]) * rate) / rate - 1e-9)
             add = min(room, max(0, still_needed))
@@ -611,4 +688,5 @@ def solve_staffing(
         "cap_exceeded": cap_exceeded,
         "shortfall_man_hours": shortfall_mh,
         "dependencies": {pid: ups for pid, ups in (deps or {}).items() if pid in proc_by_id},
+        "batches": batches if isinstance(batches, dict) else {},
     }

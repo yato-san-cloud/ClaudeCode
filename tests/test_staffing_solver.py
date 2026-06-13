@@ -118,3 +118,73 @@ def test_default_dependencies_shape():
     )
     # With 格納's upstream edge removed it can start in hour 0 alongside 入荷検品.
     assert _first_active_hour(_proc(res, "格納")) == 0
+
+
+# ---- バッチ投入スケジュール (batch arrival gate) -------------------------------
+
+def test_batch_arrival_curve_cumulative():
+    # 朝70% / 昼20% / 15時10% over an 8–18 window → cumulative .7/.9/1.0 fraction.
+    hours = list(range(8, 18))
+    curve = staffing.batch_arrival_curve(
+        [{"hour": 8, "pct": 70}, {"hour": 12, "pct": 20}, {"hour": 15, "pct": 10}], hours)
+    assert curve is not None
+    assert abs(curve[hours.index(8)] - 0.70) < 1e-9    # 08:00 → 70% landed
+    assert abs(curve[hours.index(11)] - 0.70) < 1e-9   # still 70% just before noon
+    assert abs(curve[hours.index(12)] - 0.90) < 1e-9   # noon batch → 90%
+    assert abs(curve[hours.index(15)] - 1.0) < 1e-9    # final batch → 100%
+    assert abs(curve[-1] - 1.0) < 1e-9
+
+
+def test_batch_arrival_curve_normalises_and_empties():
+    hours = list(range(9, 12))
+    # Percentages that don't sum to 100 are normalised so the day still clears.
+    curve = staffing.batch_arrival_curve([{"hour": 9, "pct": 1}, {"hour": 10, "pct": 1}], hours)
+    assert abs(curve[-1] - 1.0) < 1e-9
+    # No usable entries → None (caller imposes no arrival gate).
+    assert staffing.batch_arrival_curve([], hours) is None
+    assert staffing.batch_arrival_curve([{"hour": 9, "pct": 0}], hours) is None
+
+
+def test_batch_noon_release_delays_inbound_root():
+    # A single noon batch for 入荷 means 入荷検品 cannot start before 12:00.
+    batches = {"入荷": [{"hour": 12, "pct": 100}]}
+    res = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=24, placement="front", batches=batches)
+    recv = _proc(res, "入荷検品")
+    first = _first_active_hour(recv)
+    assert res["hours"][first] >= 12, res["hours"]
+
+
+def test_batch_release_gates_outbound_independently():
+    # An 出荷 (order-release) batch gates ピッキング regardless of inbound timing.
+    batches = {"出荷": [{"hour": 14, "pct": 100}]}
+    res = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=24, placement="front",
+        dependencies={"ピッキング": []}, batches=batches)  # isolate the arrival gate
+    pick = _proc(res, "ピッキング")
+    first = _first_active_hour(pick)
+    assert res["hours"][first] >= 14, res["hours"]
+
+
+def test_batch_ramp_caps_cumulative_output():
+    # With 70% at 08:00 the inbound root cannot clear more than ~70% before noon.
+    batches = {"入荷": [{"hour": 8, "pct": 70}, {"hour": 12, "pct": 30}]}
+    res = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=24, placement="front", batches=batches)
+    recv = _proc(res, "入荷検品")
+    rate = recv["productivity"]
+    hours = res["hours"]
+    # Cumulative units produced through 11:00 (last hour before the noon batch).
+    idx_11 = hours.index(11)
+    cum_units = sum(recv["headcount_by_hour"][: idx_11 + 1]) * rate
+    assert cum_units <= recv["daily_volume"] * 0.70 + rate, (cum_units, recv["daily_volume"])
+
+
+def test_no_batches_is_unchanged():
+    # Regression: omitting batches solves identically to before (no arrival gate).
+    base = staffing.solve_staffing(VOLS, start_hour=8, end_hour=24, placement="front")
+    withn = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=24, placement="front", batches=None)
+    assert base["total_man_hours"] == withn["total_man_hours"]
+    assert base["makespan_hour"] == withn["makespan_hour"]
+    assert withn["batches"] == {}
