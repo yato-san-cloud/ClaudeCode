@@ -19,7 +19,7 @@
 // localStorage; prefers-reduced-motion is respected.
 import { $, api, esc } from './util.js';
 
-const KIND_JP = { shipments: '出荷実績', inbound: '入荷実績', master: '商品マスタ・在庫' };
+const KIND_JP = { shipments: '出荷実績', inbound: '入荷実績', master: '在庫', items: '商品マスタ' };
 const LS_HEIGHT = 'whsim-importdock-h';
 const MIN_H = 180;
 const DEFAULT_H = 340;
@@ -114,7 +114,7 @@ const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 function countsHtml(counts, kind) {
   const c = counts || {};
   const chip = (lab, v) => (v == null ? '' : `<span class="ipv-chip"><span>${lab}</span><b>${fmt(v)}</b></span>`);
-  if (kind === 'master') return chip('商品', c.items) + chip('SKU', c.skus);
+  if (kind === 'master' || kind === 'items') return chip('商品', c.items) + chip('SKU', c.skus);
   if (kind === 'inbound') return chip('明細', c.inbound_lines) + chip('SKU', c.skus) + chip('数量', c.units);
   return chip('注文', c.orders) + chip('明細', c.lines) + chip('SKU', c.skus) + chip('数量', c.units);
 }

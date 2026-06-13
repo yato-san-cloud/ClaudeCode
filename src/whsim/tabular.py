@@ -50,17 +50,33 @@ def build_orders(std, duration_s: float = 3600.0) -> list[Order]:
 
 
 def build_items(std) -> list[Item]:
-    """Item master from a standardised inventory/master table (cols: sku, qty?)."""
+    """Item master from a standardised table. Tolerant to both shapes:
+    在庫 (cols: sku, qty=on-hand stock) and 商品マスタ (cols: sku, name,
+    case_qty=入数(CS入数), abc_class). Any absent column falls back to the Item
+    default — the 商品マスタ is the only source of 入数/商品名/ABC, so capturing
+    them here feeds the 荷姿(ケース/パレット)・保管設備 chain instead of defaulting
+    case_qty to 1. Never blocks."""
     if std is None or getattr(std, "empty", True) or "sku" not in std.columns:
         return []
+    cols = set(std.columns)
     items: list[Item] = []
     seen: set[str] = set()
-    has_qty = "qty" in std.columns
     for _, r in std.iterrows():
         s = r.get("sku")
         if not _ok(s) or str(s) in seen:
             continue
         seen.add(str(s))
-        stock = _int(r.get("qty"), 0) if has_qty else 0
-        items.append(Item(sku=str(s), name=str(s), stock=stock, case_qty=1))
+        kw: dict = {"sku": str(s)}
+        kw["name"] = str(r.get("name")).strip() if "name" in cols and _ok(r.get("name")) else str(s)
+        if "qty" in cols:
+            kw["stock"] = _int(r.get("qty"), 0)
+        if "case_qty" in cols:
+            cq = _int(r.get("case_qty"), 0)
+            if cq > 0:
+                kw["case_qty"] = cq
+        if "abc_class" in cols:
+            ab = str(r.get("abc_class") or "").strip().upper()
+            if ab in ("A", "B", "C"):
+                kw["abc_class"] = ab
+        items.append(Item(**kw))
     return items

@@ -210,11 +210,12 @@ export function reviewShipments(file) {
 
 // ---- unified 入荷/出荷/商品マスタ・在庫 import with editable column mapping ----
 // `cat` is the ①取込 hub status slot to write (出荷/入荷/在庫 each have their own
-// row now); kind=master is shared by the 在庫 row (cat 'stock') and the 商品マスタ
-// card (cat 'items'), so callers pass it explicitly.
-const TABLE_JP = { shipments: '出荷実績', inbound: '入荷実績', master: '商品マスタ・在庫' };
-const TABLE_CAT = { shipments: 'actual', inbound: 'inbound', master: 'stock' };
-const TABLE_ICON = { shipments: '📦', inbound: '🚚', master: '🏷️' };
+// row now). 在庫 uses kind='master' (INVENTORY cols) and 商品マスタ uses
+// kind='items' (ITEM cols: SKU/商品名/入数/ABC) — both build model.items but from
+// different key fields, so callers pass kind explicitly.
+const TABLE_JP = { shipments: '出荷実績', inbound: '入荷実績', master: '在庫', items: '商品マスタ' };
+const TABLE_CAT = { shipments: 'actual', inbound: 'inbound', master: 'stock', items: 'items' };
+const TABLE_ICON = { shipments: '📦', inbound: '🚚', master: '📊', items: '🏷️' };
 // Smooth default: import immediately with auto-mapping (mapping=null). To review,
 // call `reviewTable(...)` which opens the dock. Returns `{ ok, summary }`.
 export async function uploadTable(file, kind = 'shipments', cat = null, mapping = null) {
@@ -237,8 +238,8 @@ async function doTableImport(file, kind, catArg, mapping) {
     mark(cat, true, `✓ ${file.name} — ${TABLE_JP[kind]}（${cnt || '0'}）`);
     hist.log(TABLE_ICON[kind] || '📄',
       `${TABLE_JP[kind]}を取込: ${file.name}（${cnt || '0'}）`,
-      kind === 'master' ? 'overview' : 'dataanalysis', cat);
-    if (kind !== 'master') S.hasData = true;
+      (kind === 'master' || kind === 'items') ? 'overview' : 'dataanalysis', cat);
+    if (kind !== 'master' && kind !== 'items') S.hasData = true;
     await openProject(S.project);
     if (S.dataanalysis) S.dataanalysis.refresh();
     toast('取込しました。', 'ok');

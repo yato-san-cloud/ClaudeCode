@@ -139,8 +139,11 @@ async def api_import_rmpm(name: str, file: UploadFile):
             "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
 
 
+# 在庫(master) maps the inventory schema; 商品マスタ(items) maps the item-master
+# schema (SKU/商品名/入数(CS入数)/ABC) — the only source of 入数, which the 荷姿・
+# 保管設備 chain needs. Both build model.items, but from different key fields.
 _TABLE_FIELDS = {"shipments": "SHIPMENT_FIELDS", "inbound": "INBOUND_FIELDS",
-                 "master": "INVENTORY_FIELDS"}
+                 "master": "INVENTORY_FIELDS", "items": "ITEM_FIELDS"}
 
 
 @router.post("/api/projects/{name}/import-table")
@@ -169,7 +172,7 @@ async def api_import_table(name: str, file: UploadFile, kind: str = "shipments",
     model = proj.load_model()
     counts: dict = {}
     prov_key = "orders"
-    if kind == "master":
+    if kind in ("master", "items"):
         items = tabular.build_items(std)
         if items:
             model.items = items
@@ -222,7 +225,7 @@ def _preview_counts(std, kind: str) -> dict:
         out["skus"] = int(valid.nunique())
     if "qty" in cols:
         out["units"] = int(pd.to_numeric(std["qty"], errors="coerce").fillna(0).clip(lower=0).sum())
-    if kind == "master":
+    if kind in ("master", "items"):
         out["items"] = out.get("skus", 0)
     elif kind == "inbound":
         out["inbound_lines"] = int(len(std))

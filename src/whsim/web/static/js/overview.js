@@ -213,7 +213,7 @@ export function mountOverview(el, opts = {}) {
   // ---- file routing ----------------------------------------------------------
   // Table-import descriptor per cat: which engine kind to call and how to open
   // the bottom preview dock for review.
-  const TABLE_KIND = { actual: 'shipments', inbound: 'inbound', stock: 'master', items: 'master' };
+  const TABLE_KIND = { actual: 'shipments', inbound: 'inbound', stock: 'master', items: 'items' };
 
   // Import a single table file with auto-mapping (smooth, non-blocking). Returns
   // the imports.js result `{ ok, summary }`.
@@ -222,14 +222,14 @@ export function mountOverview(el, opts = {}) {
     if (cat === 'actual') return uploadShipments(f);
     if (cat === 'inbound') return uploadTable(f, 'inbound');
     if (cat === 'stock') return uploadTable(f, 'master', 'stock'); // 在庫 (INVENTORY cols)
-    return uploadTable(f, 'master', 'items', null);                // 商品マスタ
+    return uploadTable(f, 'items', 'items', null);                 // 商品マスタ (ITEM cols)
   }
   // Open the bottom preview dock to review/correct a table file's mapping.
   function reviewTableFile(cat, f) {
     if (cat === 'actual') return reviewShipments(f);
     if (cat === 'inbound') return reviewTable(f, 'inbound', 'inbound');
     if (cat === 'stock') return reviewTable(f, 'master', 'stock');
-    return reviewTable(f, 'master', 'items');
+    return reviewTable(f, 'items', 'items');
   }
 
   // ---- per-box chip queue ----------------------------------------------------
