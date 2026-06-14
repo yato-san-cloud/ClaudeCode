@@ -109,6 +109,67 @@ def api_timetable_solve_staffing(name: str, payload: dict | None = None):
     return result
 
 
+@router.get("/api/projects/{name}/work-processes")
+def api_work_processes_get(name: str):
+    """The project's editable work-process master (custom list when set, else the
+    engine default 6-process flow). Powers the 完全フリー工程 editor + material flow:
+    each process has id/section/driver/prod/unit/depends. Also returns the driver
+    catalogue (volume sources) and the engine default for a one-click reset."""
+    from whsim.analysis import staffing
+    proj = _open(name)
+    return {
+        "processes": staffing.flow_seed(proj.load_model()),
+        "default": staffing.flow_seed(None),
+        "drivers": [
+            {"id": "in_lines", "label": "入荷行数", "unit": "行/h"},
+            {"id": "in_qty", "label": "入荷点数", "unit": "点/h"},
+            {"id": "out_lines", "label": "出荷行数", "unit": "行/h"},
+            {"id": "out_orders", "label": "出荷オーダー数", "unit": "件/h"},
+        ],
+    }
+
+
+@router.post("/api/projects/{name}/work-processes")
+def api_work_processes_save(name: str, payload: dict | None = None):
+    """Persist an edited work-process master. Body: {processes: [{id, section,
+    driver, prod, unit, depends}]}. Empty/absent processes ⇒ reset to the engine
+    default. Tolerant: blank/duplicate ids are dropped, dangling/self dependencies
+    are pruned so the precedence DAG stays valid. never-blocks."""
+    from whsim.analysis import staffing
+    from whsim.schema.model import WorkProcess
+    proj = _open(name)
+    model = proj.load_model()
+    rows = (payload or {}).get("processes")
+    wps: list[WorkProcess] = []
+    if isinstance(rows, list):
+        seen: set[str] = set()
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            pid = str(r.get("id") or "").strip()
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            try:
+                prod = float(r.get("prod", r.get("productivity", 60)) or 60)
+            except (TypeError, ValueError):
+                prod = 60.0
+            wps.append(WorkProcess(
+                id=pid,
+                section=str(r.get("section") or "出荷"),
+                driver=str(r.get("driver") or "out_lines"),
+                prod=prod if prod > 0 else 60.0,
+                unit=str(r.get("unit") or "行/h"),
+                depends=[str(u) for u in (r.get("depends") or [])],
+            ))
+        ids = {w.id for w in wps}
+        for w in wps:  # prune dangling / self edges → valid DAG
+            w.depends = [u for u in w.depends if u in ids and u != w.id]
+    model.process.work_processes = wps  # [] ⇒ reset to engine default
+    proj.save_model(model)
+    return {"processes": staffing.flow_seed(model), "saved": len(wps)}
+
+
 @router.get("/api/analysis/sample")
 def api_analysis_sample():
     """Run the full data-analysis suite on the bundled demo WMS dataset.
