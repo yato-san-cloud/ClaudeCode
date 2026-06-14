@@ -188,6 +188,10 @@ def scenario_from_volumes(volumes_by_process: dict, model=None) -> dict:
     `model` is given, so the 想定→実測 swap and the 物流形態 benchmark flow into the
     人員タイムチャート too. Schema matches whsim.timetable.solve / timetable_solver.js."""
     processes, productivity, volumes = [], {}, {}
+    # An upstream with no volume in THIS scenario imposes no precedence (mirrors the
+    # solver's inactive-upstream rule), so a partial volume set still staffs.
+    active = {p["id"] for p in process_master(model)
+              if float(volumes_by_process.get(p["id"], 0) or 0) > 0}
     for p in process_master(model):
         vk = f"{p['id']}_物量"
         prod = resolve_productivity(model, p["id"], p["prod"])
@@ -196,7 +200,7 @@ def scenario_from_volumes(volumes_by_process: dict, model=None) -> dict:
             "default_時間帯": _BAND.get(p["section"], ["09:00", "21:00"]),
             "productivity_key": p["id"], "volume_key": vk,
             "volume_unit": p["unit"].split("/")[0], "配置方式": "dynamic",
-            "固定人数": 0, "依存": list(p["depends"]),
+            "固定人数": 0, "依存": [u for u in p["depends"] if u in active],
         })
         productivity[p["id"]] = {"篁採用値": prod, "単位": p["unit"],
                                  "fixed_hours": False}
