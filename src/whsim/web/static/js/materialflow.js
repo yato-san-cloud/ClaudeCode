@@ -98,6 +98,33 @@ function injectStyle() {
   .mf-carrow{display:flex;align-items:center;color:var(--ink-faint,#aab);font-size:16px;flex:0 0 auto}
   .mf-chain-empty{font-size:12px;color:var(--ink-tertiary,#8195a8);padding:4px 0}
   @media(max-width:900px){.mf-carrow{display:none}}
+  /* 工程エディタ (完全フリー工程) */
+  .mfe{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
+    border-radius:13px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+  .mfe-head{font-size:13px;font-weight:700;color:var(--ink-primary,#16202e)}
+  .mfe-head .mfe-sub{font-size:11px;font-weight:500;color:var(--ink-tertiary,#8195a8);margin-left:8px}
+  .mfe-row{display:grid;grid-template-columns:42px 1.2fr .8fr 1fr .6fr 2.2fr 28px;
+    gap:7px;align-items:center}
+  .mfe-gh{font-size:10.5px;color:var(--ink-tertiary,#8195a8);padding:2px 0 0}
+  .mfe-ord{display:flex;flex-direction:column;gap:1px}
+  .mfe-mv{border:1px solid var(--line,#ccd);background:var(--bg-app,#fff);border-radius:5px;
+    color:var(--ink-secondary,#52677c);font-size:10px;line-height:1.1;cursor:pointer;padding:0 4px}
+  .mfe-mv:disabled{opacity:.35;cursor:default}
+  .mfe-in{width:100%;background:var(--bg-app,#fff);border:1px solid var(--line,#ccd);border-radius:7px;
+    padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink-primary,#16202e)}
+  .mfe-in:focus{outline:none;border-color:var(--accent,#16C0DE)}
+  .mfe-num{text-align:right}
+  .mfe-deps{display:flex;gap:3px;flex-wrap:wrap}
+  .mfe-dep{border:1px solid var(--line,#ccd);background:var(--bg-app,#fff);border-radius:999px;
+    color:var(--ink-tertiary,#8195a8);font-size:10.5px;cursor:pointer;padding:2px 8px}
+  .mfe-dep.on{background:var(--accent-tint,#E4F8FC);border-color:var(--accent,#16C0DE);
+    color:var(--accent-ink,var(--accent,#16C0DE));font-weight:700}
+  .mfe-nodep{font-size:11px;color:var(--ink-faint,#aab)}
+  .mfe-del{border:none;background:transparent;color:var(--ink-tertiary,#8195a8);font-size:16px;
+    line-height:1;cursor:pointer;padding:0}
+  .mfe-del:hover{color:#e3401c}
+  .mfe-foot{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap}
+  @media(max-width:900px){.mfe-row{grid-template-columns:36px 1fr 1fr;grid-auto-rows:auto}}
   `;
   document.head.appendChild(s);
 }
@@ -122,6 +149,9 @@ export function mountMaterialFlow(el, opts = {}) {
   let flow = [];                 // [{id, section, unit, productivity, driver, depends}]
   const vol = {};                // {id: number}
   const src = {};                // {id: 'data'|'manual'|'generated'|'none'}
+  let drivers = [];              // [{id,label,unit}] volume-source catalogue (from API)
+  let editing = false;           // 工程エディタ open?
+  let editFlow = null;           // working copy while editing (cancel restores `flow`)
   // Live 工程→エリア chain from the designer's spatial flow (process.stages).
   // Reflected in real time via the `whsim:flow-changed` bus + an initial fetch.
   let stages = [];               // [{id,label,method,zone_type,area_ok,area_warn}]
@@ -313,10 +343,12 @@ export function mountMaterialFlow(el, opts = {}) {
         <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
         <button class="mf-btn" data-act="frombi">基礎物量を取込</button>
         <button class="mf-btn" data-act="generate">不足を生成</button>
+        <button class="mf-btn" data-act="editproc">${editing ? '編集中…' : '工程を編集'}</button>
         <span class="mf-recalc" data-mf-recalc aria-live="polite">再計算中…</span>
         <button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>
        </div>
        <span class="mf-hint">工程ごとの荷役物量（1日平均）。データから取込・不足は手入力/生成し、人員配置へ。</span>
+       ${editorHtml()}
        <div data-mf-chain>${chainHtml()}</div>
        <div class="mf-kpis">
          <div class="mf-kpi"><div class="l">総工数</div><div class="v"><span data-kpi="totalMH">${totalMH.toFixed(1)}</span> <small>人時/日</small></div></div>
@@ -415,6 +447,134 @@ export function mountMaterialFlow(el, opts = {}) {
     const f = root.querySelector('[data-kpi="filled"]'); if (f) f.textContent = String(filled);
   }
 
+  // ── 工程エディタ (完全フリー工程: add / rename / reorder / depend / delete) ──
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function editorHtml() {
+    if (!editing) return '';
+    const ef = editFlow || [];
+    const driverOpts = (sel) => drivers.map((d) =>
+      `<option value="${esc(d.id)}"${d.id === sel ? ' selected' : ''}>${esc(d.label)}</option>`).join('');
+    const rows = ef.map((p, i) => {
+      const deps = ef.filter((q) => q.id !== p.id).map((q) => {
+        const on = (p.depends || []).includes(q.id);
+        return `<button type="button" class="mfe-dep${on ? ' on' : ''}" data-edep="${i}" data-depid="${esc(q.id)}">${esc(q.id)}</button>`;
+      }).join('');
+      return `<div class="mfe-row">
+        <span class="mfe-ord">
+          <button type="button" class="mfe-mv" data-emove="${i}" data-dir="-1" title="上へ"${i === 0 ? ' disabled' : ''}>↑</button>
+          <button type="button" class="mfe-mv" data-emove="${i}" data-dir="1" title="下へ"${i === ef.length - 1 ? ' disabled' : ''}>↓</button>
+        </span>
+        <input class="mfe-in" data-efield="id" data-i="${i}" value="${esc(p.id)}" aria-label="工程名"/>
+        <input class="mfe-in" data-efield="section" data-i="${i}" value="${esc(p.section || '')}" aria-label="セクション"/>
+        <select class="mfe-in" data-efield="driver" data-i="${i}" aria-label="物量ドライバ">${driverOpts(p.driver)}</select>
+        <input class="mfe-in mfe-num" type="number" min="1" step="1" data-efield="productivity" data-i="${i}" value="${p.productivity || 60}" aria-label="生産性"/>
+        <span class="mfe-deps">${deps || '<span class="mfe-nodep">—</span>'}</span>
+        <button type="button" class="mfe-del" data-edel="${i}" title="工程を削除">×</button>
+      </div>`;
+    }).join('');
+    return `<div class="mfe">
+      <div class="mfe-head">工程の編集 <span class="mfe-sub">ドライバ＝物量の出所 / 生産性＝既定値（実測・想定が優先）/ 依存＝前工程</span></div>
+      <div class="mfe-row mfe-gh"><span></span><span>工程名</span><span>セクション</span><span>物量ドライバ</span><span>生産性</span><span>前工程（依存）</span><span></span></div>
+      ${rows}
+      <div class="mfe-foot">
+        <button class="mf-btn" data-act="addproc">＋ 工程を追加</button>
+        <button class="mf-btn" data-act="resetproc">標準フローに戻す</button>
+        <span style="margin-left:auto"></span>
+        <button class="mf-btn" data-act="canceledit">キャンセル</button>
+        <button class="mf-btn primary" data-act="saveproc">保存</button>
+      </div>
+    </div>`;
+  }
+
+  function enterEdit() {
+    editFlow = flow.map((p) => ({
+      id: p.id, section: p.section || '出荷', driver: p.driver || 'out_lines',
+      productivity: p.productivity || 60, unit: p.unit || '行/h',
+      depends: [...(p.depends || [])],
+    }));
+    editing = true; render();
+  }
+  function cancelEdit() { editing = false; editFlow = null; render(); }
+  function addProcess() {
+    let n = 1, id = '新工程';
+    const ids = new Set((editFlow || []).map((p) => p.id));
+    while (ids.has(id)) { n += 1; id = `新工程${n}`; }
+    (editFlow = editFlow || []).push(
+      { id, section: '出荷', driver: 'out_lines', productivity: 60, unit: '行/h', depends: [] });
+    render();
+  }
+  function deleteProcess(i) {
+    const gone = editFlow[i] && editFlow[i].id;
+    editFlow.splice(i, 1);
+    if (gone) editFlow.forEach((p) => { p.depends = (p.depends || []).filter((d) => d !== gone); });
+    render();
+  }
+  function moveProcess(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= editFlow.length) return;
+    [editFlow[i], editFlow[j]] = [editFlow[j], editFlow[i]];
+    render();
+  }
+  function toggleDep(i, depid) {
+    const p = editFlow[i]; if (!p) return;
+    const set = new Set(p.depends || []);
+    if (set.has(depid)) set.delete(depid); else set.add(depid);
+    p.depends = [...set]; render();
+  }
+  function editField(i, field, val) {
+    const p = editFlow[i]; if (!p) return;
+    if (field === 'productivity') { p.productivity = Math.max(1, parseFloat(val) || 60); return; }
+    if (field === 'driver') {
+      p.driver = val;
+      const d = drivers.find((x) => x.id === val);
+      if (d && d.unit) p.unit = d.unit;  // keep unit in step with the driver
+      return;
+    }
+    p[field] = val;   // id / section: free text (re-render happens on blur/save)
+  }
+  async function saveProcesses() {
+    const name = getProject();
+    if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
+    // sync any in-flight id/section text inputs (they update editFlow live).
+    const payload = (editFlow || []).map((p) => ({
+      id: (p.id || '').trim(), section: p.section || '出荷', driver: p.driver || 'out_lines',
+      prod: p.productivity || 60, unit: p.unit || '行/h', depends: p.depends || [],
+    })).filter((p) => p.id);
+    setBusy(true);
+    try {
+      const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/work-processes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ processes: payload }),
+      });
+      flow = r.processes || [];
+      // keep volumes for surviving ids; new ids start at 0.
+      for (const p of flow) { if (vol[p.id] == null) { vol[p.id] = 0; src[p.id] = 'none'; } }
+      editing = false; editFlow = null;
+      render();
+      document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: { reason: 'work-processes' } }));
+      toast(`工程を保存しました（${flow.length}工程）。原価・タイムチャートにも反映されます。`, 'ok');
+    } catch (e) { toast('工程の保存に失敗: ' + (e && e.message ? e.message : e), 'error'); }
+    finally { setBusy(false); }
+  }
+  async function resetProcesses() {
+    const name = getProject();
+    if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/work-processes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ processes: [] }),
+      });
+      flow = r.processes || [];
+      editFlow = flow.map((p) => ({ ...p, depends: [...(p.depends || [])] }));
+      render();
+      toast('標準フローに戻しました。', 'ok');
+    } catch (e) { toast('リセットに失敗: ' + (e && e.message ? e.message : e), 'error'); }
+    finally { setBusy(false); }
+  }
+
   // Delegated listeners on root (one set, survives in-place updates).
   let wired = false;
   function wire() {
@@ -430,6 +590,9 @@ export function mountMaterialFlow(el, opts = {}) {
     if (wired) return;
     wired = true;
     root.addEventListener('input', (e) => {
+      // editor fields: update the working copy live (no re-render → keep focus).
+      const ef = e.target.closest('[data-efield]');
+      if (ef) { editField(parseInt(ef.dataset.i, 10), ef.dataset.efield, ef.value); return; }
       const inp = e.target.closest('input[data-id]');
       if (!inp) return;
       const id = inp.dataset.id;
@@ -437,7 +600,19 @@ export function mountMaterialFlow(el, opts = {}) {
       src[id] = 'manual';
       updateCard(id);
     });
+    // driver <select> fires 'change'; sync unit too.
+    root.addEventListener('change', (e) => {
+      const ef = e.target.closest('select[data-efield]');
+      if (ef) editField(parseInt(ef.dataset.i, 10), ef.dataset.efield, ef.value);
+    });
     root.addEventListener('click', (e) => {
+      // editor controls
+      const mv = e.target.closest('[data-emove]');
+      if (mv) { moveProcess(parseInt(mv.dataset.emove, 10), parseInt(mv.dataset.dir, 10)); return; }
+      const del = e.target.closest('[data-edel]');
+      if (del) { deleteProcess(parseInt(del.dataset.edel, 10)); return; }
+      const dep = e.target.closest('[data-edep]');
+      if (dep) { toggleDep(parseInt(dep.dataset.edep, 10), dep.dataset.depid); return; }
       const btn = e.target.closest('[data-act]');
       if (!btn) return;
       const act = btn.dataset.act;
@@ -446,6 +621,11 @@ export function mountMaterialFlow(el, opts = {}) {
       else if (act === 'frombi') fromBI();
       else if (act === 'generate') generate();
       else if (act === 'timetable') toTimetable();
+      else if (act === 'editproc') (editing ? cancelEdit() : enterEdit());
+      else if (act === 'addproc') addProcess();
+      else if (act === 'resetproc') resetProcesses();
+      else if (act === 'canceledit') cancelEdit();
+      else if (act === 'saveproc') saveProcesses();
     });
   }
 
@@ -514,14 +694,27 @@ export function mountMaterialFlow(el, opts = {}) {
     } catch (_e) { /* no model yet: the empty-state hint stays */ }
   }
 
-  (async () => {
+  // Load the work-process master: project-scoped (custom-aware) when a project is
+  // open, else the global engine-default seed. Volumes reset per process.
+  async function loadFlow() {
+    const name = getProject();
     try {
-      const seed = await getJSON('/api/materialflow/seed');
-      flow = seed.flow || [];
-      for (const p of flow) { vol[p.id] = 0; src[p.id] = 'none'; }
+      if (name) {
+        const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/work-processes`);
+        flow = r.processes || [];
+        drivers = r.drivers || [];
+      } else {
+        const seed = await getJSON('/api/materialflow/seed');
+        flow = seed.flow || [];
+      }
+      for (const p of flow) { if (vol[p.id] == null) { vol[p.id] = 0; src[p.id] = 'none'; } }
     } catch (e) {
       toast('工程フローの取得に失敗しました: ' + e.message, 'error');
     }
+  }
+
+  (async () => {
+    await loadFlow();
     render();
     loadStagesFromModel();
   })();
@@ -535,8 +728,12 @@ export function mountMaterialFlow(el, opts = {}) {
       window.removeEventListener('resize', resizeSankey);
       el.innerHTML = '';
     },
-    // re-pull the saved 工程→エリア (used when the project changes / on revisit).
-    refresh() { loadStagesFromModel(); },
+    // re-pull the project's work-process master + 工程→エリア (on project change /
+    // revisit), so a different project's custom processes show up.
+    refresh() {
+      if (editing) { loadStagesFromModel(); return; }  // don't clobber an open edit
+      loadFlow().then(() => { render(); loadStagesFromModel(); });
+    },
     setStages: applyStages,
   };
 }
