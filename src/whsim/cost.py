@@ -20,10 +20,10 @@ the working, like the company's own tool.
 from __future__ import annotations
 
 from whsim import bi, storage
-from whsim.analysis.staffing import GENERIC_PROCESSES
+from whsim.analysis.staffing import process_master
 from whsim.schema.model import WarehouseModel
 
-# base_volumes key feeding each GENERIC_PROCESSES driver (analytic 工数の母数).
+# base_volumes key feeding each process driver (analytic 工数の母数).
 _DRIVER_VOL = {
     "in_lines": "in_cases",   # 受入行 ≈ 入荷ケース
     "in_qty": "in_pieces",    # 格納点数
@@ -41,7 +41,7 @@ def _labor_lines(model: WarehouseModel, vol: dict, days: float, rate: float):
     bench = getattr(model.settings, "benchmark_productivity", {}) or {}
     lines = []
     total_mh = 0.0
-    for p in GENERIC_PROCESSES:
+    for p in process_master(model):
         v = float(vol.get(_DRIVER_VOL.get(p["driver"], ""), 0.0) or 0.0)
         # 3-tier: 実測採用値(override) > 物流形態ベンチマーク(想定) > エンジン既定.
         ov = overrides.get(p["id"])

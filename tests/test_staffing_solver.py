@@ -220,3 +220,23 @@ def test_solver_honours_custom_process_list():
     assert recv is not None and pick is not None and pick > recv
     # The custom default productivity is used for 出荷ピック.
     assert _proc(res, "出荷ピック")["productivity"] == 80.0
+
+
+def test_cost_honours_custom_process_list():
+    # 原価試算 reads the same editable master, so a custom process appears in the
+    # labour breakdown with its own driver + productivity.
+    from whsim import cost
+    from whsim.schema.model import Order, OrderLine, WarehouseModel, WorkProcess
+    m = WarehouseModel()
+    m.orders.outbound = [Order(order_id=f"o{i}", lines=[OrderLine(sku="A", qty=2)])
+                         for i in range(50)]
+    m.process.work_processes = [
+        WorkProcess(id="検品梱包", section="出荷", driver="out_orders", prod=25, unit="件/h"),
+    ]
+    r = cost.estimate_cost(m)
+    labour = next(c for c in r["categories"] if "人件費" in str(c.get("label", "")))
+    detail = labour.get("detail") or []
+    assert [d["id"] for d in detail] == ["検品梱包"]
+    assert detail[0]["prod"] == 25.0
+    # 50 orders/day ÷ 25 = 2.0 man-hours/day flows to the day total.
+    assert abs(r["mh_per_day"] - 2.0) < 1e-6

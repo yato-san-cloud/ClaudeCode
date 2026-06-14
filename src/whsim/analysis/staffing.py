@@ -91,11 +91,12 @@ def _inbound_shape() -> list[float]:
 
 
 def staffing_profile(shipments: pd.DataFrame | None,
-                     inbound: pd.DataFrame | None) -> dict:
+                     inbound: pd.DataFrame | None, model=None) -> dict:
     """Per-process daily volume, hourly required headcount, man-hours and peak.
 
     Volumes are **average per operating day** (so the staffing reflects a typical
-    day, not the whole import window). JSON-safe.
+    day, not the whole import window). Processes come from the editable master
+    (model's list when present, else the engine default). JSON-safe.
     """
     ndays_out = _n_days(shipments)
     ndays_in = _n_days(inbound)
@@ -119,7 +120,7 @@ def staffing_profile(shipments: pd.DataFrame | None,
     procs = []
     total_hourly = [0.0] * 24
     total_manhours = 0.0
-    for p in GENERIC_PROCESSES:
+    for p in process_master(model):
         vol = daily.get(p["driver"], 0.0)
         shape = in_shape if p["driver"].startswith("in_") else out_shape
         hourly_vol = [vol * f for f in shape]
@@ -146,19 +147,19 @@ def staffing_profile(shipments: pd.DataFrame | None,
     }
 
 
-# Process-flow dependencies (input completes before its dependent starts).
-_DEPS = {"格納": ["入荷検品"], "検品": ["ピッキング"], "梱包": ["検品"], "出荷": ["梱包"]}
+# Default work-band per section (the solver's deps live in _FLOW_DEPS / the master).
 _BAND = {"入荷": ["08:00", "16:00"], "出荷": ["09:00", "21:00"]}
 
 
-def flow_seed() -> list[dict]:
+def flow_seed(model=None) -> list[dict]:
     """The material-flow skeleton for the authoring screen: each process with its
-    section, unit, productivity, measured driver and upstream dependency."""
+    section, unit, productivity, measured driver and upstream dependency. Uses the
+    editable master (model's list when present, else the engine default)."""
     return [
         {"id": p["id"], "section": p["section"], "unit": p["unit"],
          "productivity": p["prod"], "driver": p["driver"],
-         "depends": _DEPS.get(p["id"], [])}
-        for p in GENERIC_PROCESSES
+         "depends": list(p["depends"])}
+        for p in process_master(model)
     ]
 
 
@@ -187,7 +188,7 @@ def scenario_from_volumes(volumes_by_process: dict, model=None) -> dict:
     `model` is given, so the 想定→実測 swap and the 物流形態 benchmark flow into the
     人員タイムチャート too. Schema matches whsim.timetable.solve / timetable_solver.js."""
     processes, productivity, volumes = [], {}, {}
-    for p in GENERIC_PROCESSES:
+    for p in process_master(model):
         vk = f"{p['id']}_物量"
         prod = resolve_productivity(model, p["id"], p["prod"])
         processes.append({
@@ -195,7 +196,7 @@ def scenario_from_volumes(volumes_by_process: dict, model=None) -> dict:
             "default_時間帯": _BAND.get(p["section"], ["09:00", "21:00"]),
             "productivity_key": p["id"], "volume_key": vk,
             "volume_unit": p["unit"].split("/")[0], "配置方式": "dynamic",
-            "固定人数": 0, "依存": _DEPS.get(p["id"], []),
+            "固定人数": 0, "依存": list(p["depends"]),
         })
         productivity[p["id"]] = {"篁採用値": prod, "単位": p["unit"],
                                  "fixed_hours": False}
@@ -278,24 +279,24 @@ def volumes_from_bi(bi_cfg: dict) -> dict | None:
 
 
 def timetable_scenario(shipments: pd.DataFrame | None,
-                       inbound: pd.DataFrame | None) -> dict:
+                       inbound: pd.DataFrame | None, model=None) -> dict:
     """Generic timetable payload from *measured* volumes (analysis → staffing)."""
-    prof = staffing_profile(shipments, inbound)
+    prof = staffing_profile(shipments, inbound, model=model)
     vols = {p["id"]: p["daily_volume"] for p in prof["processes"]}
-    return scenario_from_volumes(vols)
+    return scenario_from_volumes(vols, model=model)
 
 
 _PIECES_PER_LINE = 3.0
 _LINES_PER_ORDER = 1.4
 
 
-def generate_flow_volumes(base: dict | None) -> dict:
+def generate_flow_volumes(base: dict | None, model=None) -> dict:
     """Estimate every process's 荷役物量 from a partial base (不足データ作成).
 
     `base` may carry any of out_lines / out_qty / out_orders / in_lines / in_qty
     (daily). Missing drivers are inferred from typical 3PL ratios (pieces/line,
     lines/order, inbound≈outbound) so the material-flow screen can be filled even
-    when only one number is known."""
+    when only one number is known. Volumes are keyed by the editable master."""
     b = dict(base or {})
 
     def f(k):
@@ -313,7 +314,7 @@ def generate_flow_volumes(base: dict | None) -> dict:
     b["out_orders"] = f("out_orders") or (out_lines / _LINES_PER_ORDER if out_lines else 0.0)
     b["in_lines"] = f("in_lines") or out_lines
     b["in_qty"] = f("in_qty") or b["out_qty"]
-    return {p["id"]: round(float(b.get(p["driver"], 0.0)), 1) for p in GENERIC_PROCESSES}
+    return {p["id"]: round(float(b.get(p["driver"], 0.0)), 1) for p in process_master(model)}
 
 
 def project_volumes(proj) -> dict:
@@ -337,7 +338,8 @@ def project_volumes(proj) -> dict:
         ship = ingest.orders_to_frame(model.orders.outbound)
         inb = ingest.orders_to_frame(model.orders.inbound)
         if ship is not None and not ship.empty:
-            prof = staffing_profile(ship, inb if inb is not None and not inb.empty else None)
+            prof = staffing_profile(ship, inb if inb is not None and not inb.empty else None,
+                                    model=model)
             vols = {p["id"]: p["daily_volume"] for p in prof["processes"]}
             if any(v > 0 for v in vols.values()):
                 return vols
