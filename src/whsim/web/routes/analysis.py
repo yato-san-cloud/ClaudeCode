@@ -170,6 +170,67 @@ def api_work_processes_save(name: str, payload: dict | None = None):
     return {"processes": staffing.flow_seed(model), "saved": len(wps)}
 
 
+@router.get("/api/projects/{name}/timetable/compare")
+def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
+                          cap: int = 0, placement: str = "level"):
+    """Compare staffing across the CURRENT design and every saved scenario, under a
+    shared operating window/cap — so a planner can park 「朝寄せ案」「夕締め案」
+    「マルチ方式」 and read the peak人数 / 総工数 / 終了時刻 / 月額原価 / 作業方式
+    delta. The same project demand is run through each scenario's design (its frozen
+    batch schedule + work method + processes), isolating the OPERATIONS choice.
+    never-blocks: no demand → {available:false}."""
+    from whsim import cost as cost_mod, scenariostore, workmethod
+    from whsim.analysis import staffing
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    vols = staffing.project_volumes(proj)
+    avail = bool(vols and any(float(v or 0) > 0 for v in vols.values()))
+
+    def kpis_for(model, label, sid):
+        batches = getattr(model.settings, "batch_schedule", {}) or {}
+        res = (staffing.solve_staffing(
+            vols, model=model, start_hour=int(start_hour), end_hour=int(end_hour),
+            cap=(int(cap) or None), placement=str(placement), batches=batches)
+            if avail else {})
+        try:
+            c = cost_mod.estimate_cost(model)
+        except Exception:  # noqa: BLE001 — cost is best-effort in a compare row
+            c = {}
+        method = "—"
+        try:
+            ps = model.process.pick_stage()
+            if ps is not None and ps.work is not None:
+                method = workmethod.method_name(ps.work)
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "id": sid, "label": label,
+            "peak_headcount": res.get("peak_headcount"),
+            "total_man_hours": res.get("total_man_hours"),
+            "makespan_hour": res.get("makespan_hour"),
+            "feasible": res.get("feasible"),
+            "monthly_cost": c.get("total_yen_month"),
+            "cost_per_order": c.get("cost_per_order"),
+            "method": method,
+            "batch_counts": {k: len(v) for k, v in batches.items() if v},
+        }
+
+    rows = [kpis_for(proj.load_model(), "現在の設計", "__current__")]
+    for hdr in scenariostore.list_scenarios(proj):
+        doc = scenariostore.get_scenario(proj, hdr["id"])
+        if not doc:
+            continue
+        md = proj.load_model().model_dump()
+        for k, v in (doc.get("sections") or {}).items():
+            md[k] = v
+        try:
+            m = WarehouseModel.model_validate(md)
+        except Exception:  # noqa: BLE001 — a bad overlay is skipped, never fatal
+            continue
+        rows.append(kpis_for(m, hdr.get("label", hdr["id"]), hdr["id"]))
+    return {"available": avail, "rows": rows}
+
+
 @router.get("/api/analysis/sample")
 def api_analysis_sample():
     """Run the full data-analysis suite on the bundled demo WMS dataset.
