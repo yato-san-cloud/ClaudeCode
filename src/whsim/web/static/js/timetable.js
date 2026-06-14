@@ -120,10 +120,20 @@ function injectStyle() {
   .tt-batch-block{display:flex;flex-direction:column;gap:4px}
   .tt-batch-head{display:flex;align-items:center;gap:var(--sp-2,8px);flex-wrap:wrap}
   .tt-batch-sec{min-width:40px;font-size:var(--fs-sm,13px);font-weight:700;color:var(--ink,var(--ink-primary))}
-  .tt-batch-grid{display:flex;align-items:center;gap:var(--sp-2,8px);flex-wrap:wrap}
-  .tt-batch-row{display:inline-flex;align-items:center;gap:3px;background:var(--bg-sunken,rgba(120,140,170,.08));
-    border:1px solid var(--line-hair,var(--line));border-radius:var(--r-md,8px);padding:3px 6px}
-  .tt-batch-row .tt-mini{width:46px}
+  .tt-batch-step{display:inline-flex;align-items:center;gap:6px;background:var(--bg-sunken,rgba(120,140,170,.1));
+    border:1px solid var(--line-hair,var(--line));border-radius:var(--r-pill,999px);padding:2px 4px}
+  .tt-batch-stepbtn{width:22px;height:22px;border:none;border-radius:50%;cursor:pointer;
+    background:var(--panel,var(--bg-app));color:var(--ink,var(--ink-primary));font-size:14px;line-height:1}
+  .tt-batch-stepbtn:hover{background:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222C)}
+  .tt-batch-count{min-width:30px;text-align:center;font-size:var(--fs-micro,11px);font-weight:700;
+    font-variant-numeric:tabular-nums;color:var(--ink,var(--ink-primary))}
+  .tt-batch-grid{display:flex;flex-direction:column;gap:5px}
+  .tt-batch-srow{display:grid;grid-template-columns:34px 46px 16px 1fr 38px 22px;gap:7px;align-items:center}
+  .tt-batch-srow .tt-mini{width:46px}
+  .tt-batch-blabel{font-size:var(--fs-micro,11px);color:var(--muted,var(--ink-tertiary))}
+  .tt-batch-slider{width:100%;accent-color:var(--accent,#16C0DE);cursor:pointer}
+  .tt-batch-pct{font-size:var(--fs-micro,11px);font-weight:700;text-align:right;
+    font-variant-numeric:tabular-nums;color:var(--accent-ink,var(--accent,#16C0DE))}
   .tt-batch-x{font-size:var(--fs-micro,11px);color:var(--muted,var(--ink-tertiary))}
   .tt-batch-del{border:none;background:transparent;color:var(--muted,var(--ink-tertiary));
     font-size:14px;line-height:1;cursor:pointer;padding:0 2px}
@@ -357,18 +367,75 @@ export function mountTimetable(targetEl, opts = {}) {
 
   // ---- バッチ投入スケジュール editor ------------------------------------------
   // The day's volume for a section lands in batches at given hours; this is how a
-  // batch operation actually releases work (e.g. 入荷 朝70%/昼20%/夕10%). Each row
-  // is {時刻, %}; the solver gates the section's first process to what has landed.
+  // batch operation actually releases work (e.g. 入荷 朝70%/昼20%/夕10%). Per section
+  // a 便数 stepper adds/removes batches and each batch is a SLIDER whose ratios
+  // auto-rebalance to 100% (drag one up, the others give way). The solver gates the
+  // section's first process to what has landed by each hour.
+
+  // Distribute so the batch at `idx` becomes `val`% and the rest share (100-val)%
+  // in proportion to their current weights (equal share when they're all zero).
+  function rebalance(rows, idx, val) {
+    const n = rows.length;
+    if (!n) return;
+    val = Math.max(0, Math.min(100, Math.round(val)));
+    if (n === 1) { rows[0].pct = 100; return; }
+    rows[idx].pct = val;
+    const others = rows.map((_, i) => i).filter((i) => i !== idx);
+    const rest = 100 - val;
+    const otherSum = others.reduce((a, i) => a + (Number(rows[i].pct) || 0), 0);
+    others.forEach((i) => {
+      rows[i].pct = otherSum > 0 ? (rows[i].pct / otherSum) * rest : rest / others.length;
+    });
+    // integer round, then push the residual onto the largest OTHER bar so Σ=100.
+    rows.forEach((r) => { r.pct = Math.round(r.pct); });
+    const drift = 100 - rows.reduce((a, r) => a + r.pct, 0);
+    if (drift && others.length) {
+      const big = others.reduce((b, i) => (rows[i].pct > rows[b].pct ? i : b), others[0]);
+      rows[big].pct = Math.max(0, rows[big].pct + drift);
+    }
+  }
+  function equalSplit(rows) {
+    const n = rows.length;
+    if (!n) return;
+    const base = Math.floor(100 / n);
+    rows.forEach((r) => { r.pct = base; });
+    rows[0].pct += 100 - base * n;   // residual onto the first
+  }
+  function suggestHour(rows) {
+    const s = solverState.start, e = Math.max(s + 1, Math.min(24, solverState.end));
+    if (!rows.length) return s;
+    const step = Math.max(1, Math.round((e - s) / (rows.length + 1)));
+    return Math.min(e - 1, (Math.max(...rows.map((r) => r.hour)) || s) + step);
+  }
+  function setBatchCount(sec, n) {
+    const rows = solverState.batches[sec] ? [...solverState.batches[sec]] : [];
+    n = Math.max(0, Math.min(8, n));
+    while (rows.length < n) rows.push({ hour: suggestHour(rows), pct: 0 });
+    while (rows.length > n) rows.pop();
+    if (n === 0) delete solverState.batches[sec];
+    else { equalSplit(rows); solverState.batches[sec] = rows; }
+    renderBatchEditor(); runSolver();
+  }
+
   function renderBatchEditor() {
     if (!elSolverBatches) return;
     elSolverBatches.innerHTML = '';
     elSolverBatches.appendChild(el('div', 'tt-solver-deps-title',
-      'バッチ投入スケジュール（その時刻までに何％が入荷／出荷されるか。空＝随時）'));
+      'バッチ投入スケジュール（便数を増減、スライダーで比率を調整＝自動で合計100%。空＝随時）'));
     for (const sec of BATCH_SECTIONS) {
       const rows = solverState.batches[sec] || [];
       const block = el('div', 'tt-batch-block');
       const head = el('div', 'tt-batch-head');
       head.appendChild(el('span', 'tt-batch-sec', sec));
+      // 便数 stepper
+      const step = el('span', 'tt-batch-step');
+      const minus = el('button', 'tt-batch-stepbtn', '−'); minus.title = '便を減らす';
+      minus.onclick = () => setBatchCount(sec, rows.length - 1);
+      const count = el('span', 'tt-batch-count', `${rows.length}便`);
+      const plus = el('button', 'tt-batch-stepbtn', '＋'); plus.title = '便を増やす';
+      plus.onclick = () => setBatchCount(sec, rows.length + 1);
+      step.appendChild(minus); step.appendChild(count); step.appendChild(plus);
+      head.appendChild(step);
       // presets
       const presets = el('span', 'tt-solver-presets');
       for (const [label, def] of Object.entries(BATCH_PRESETS[sec] || {})) {
@@ -383,42 +450,40 @@ export function mountTimetable(targetEl, opts = {}) {
       head.appendChild(presets);
       block.appendChild(head);
 
-      // editable rows
+      // slider rows (hour + range + live %). Dragging one rebalances the others.
       const grid = el('div', 'tt-batch-grid');
+      const sliders = []; const pcts = [];
       rows.forEach((r, i) => {
-        const row = el('div', 'tt-batch-row');
+        const row = el('div', 'tt-batch-srow');
         const hIn = el('input', 'tt-mini'); hIn.type = 'number'; hIn.min = '0'; hIn.max = '30';
-        hIn.value = String(r.hour); hIn.setAttribute('aria-label', `${sec} 時刻`);
+        hIn.value = String(r.hour); hIn.setAttribute('aria-label', `${sec} 便${i + 1} 時刻`);
         hIn.oninput = () => { r.hour = parseInt(hIn.value, 10) || 0; scheduleBatchSolve(); };
-        const pIn = el('input', 'tt-mini'); pIn.type = 'number'; pIn.min = '0'; pIn.max = '100';
-        pIn.value = String(r.pct); pIn.setAttribute('aria-label', `${sec} 割合(%)`);
-        pIn.oninput = () => { r.pct = parseFloat(pIn.value) || 0; scheduleBatchSolve(); };
+        const slider = el('input', 'tt-batch-slider'); slider.type = 'range';
+        slider.min = '0'; slider.max = '100'; slider.step = '1'; slider.value = String(r.pct);
+        slider.setAttribute('aria-label', `${sec} 便${i + 1} 割合`);
+        const pct = el('span', 'tt-batch-pct', `${Math.round(r.pct)}%`);
+        slider.oninput = () => {
+          rebalance(rows, i, parseFloat(slider.value) || 0);
+          sliders.forEach((s, k) => { s.value = String(rows[k].pct); });
+          pcts.forEach((p, k) => { p.textContent = `${rows[k].pct}%`; });
+          scheduleBatchSolve();
+        };
         const del = el('button', 'tt-batch-del', '×'); del.title = 'この便を削除';
         del.onclick = () => {
-          solverState.batches[sec].splice(i, 1);
-          if (!solverState.batches[sec].length) delete solverState.batches[sec];
+          rows.splice(i, 1);
+          if (!rows.length) delete solverState.batches[sec];
+          else { equalSplit(rows); solverState.batches[sec] = rows; }
           renderBatchEditor(); runSolver();
         };
-        row.appendChild(hIn); row.appendChild(el('span', 'tt-batch-x', '時 →'));
-        row.appendChild(pIn); row.appendChild(el('span', 'tt-batch-x', '%'));
-        row.appendChild(del);
+        row.appendChild(el('span', 'tt-batch-blabel', `便${i + 1}`));
+        row.appendChild(hIn); row.appendChild(el('span', 'tt-batch-x', '時'));
+        row.appendChild(slider); row.appendChild(pct); row.appendChild(del);
+        sliders.push(slider); pcts.push(pct);
         grid.appendChild(row);
       });
-      const add = el('button', 'tt-chip', '＋便を追加');
-      add.onclick = () => {
-        (solverState.batches[sec] = solverState.batches[sec] || []).push({ hour: 12, pct: 0 });
-        renderBatchEditor();
-      };
-      grid.appendChild(add);
-      // sum hint
-      const sum = rows.reduce((a, r) => a + (Number(r.pct) || 0), 0);
-      if (rows.length) {
-        block.appendChild(grid);
-        const note = el('div', 'tt-batch-note',
-          `合計 ${r1(sum)}%（合計で正規化するので端数でも可）`);
-        block.appendChild(note);
-      } else {
-        block.appendChild(grid);
+      block.appendChild(grid);
+      if (!rows.length) {
+        block.appendChild(el('div', 'tt-batch-note', '随時（バッチなし）。＋で便を追加すると比率を割り当てられます。'));
       }
       elSolverBatches.appendChild(block);
     }
