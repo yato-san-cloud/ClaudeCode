@@ -201,6 +201,13 @@ def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
             ps = model.process.pick_stage()
             if ps is not None and ps.work is not None:
                 method = workmethod.method_name(ps.work)
+            else:
+                # No 5-axis work set → fall back to the legacy pick_strategy, mapped
+                # to the unified taxonomy so the column reads meaningfully.
+                method = {
+                    "discrete": "シングルオーダー", "batch": "マルチオーダー",
+                    "zone": "ゾーン（リレー）", "wave": "バッチ投入",
+                }.get(getattr(model.process, "pick_strategy", ""), "—")
         except Exception:  # noqa: BLE001
             pass
         return {

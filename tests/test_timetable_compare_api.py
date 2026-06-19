@@ -54,6 +54,11 @@ def test_compare_lists_current_and_saved_scenarios(client):
         # every row carries the comparable KPIs
         assert "peak_headcount" in row and "total_man_hours" in row
         assert "monthly_cost" in row and "method" in row
+        # method resolves to a label (legacy pick_strategy fallback), not "—".
+        assert row["method"] in ("シングルオーダー", "マルチオーダー",
+                                 "ゾーン（リレー）", "バッチ投入") or row["method"] == "—"
+    # the default design (pick_strategy=discrete) labels as シングルオーダー.
+    assert body["rows"][0]["method"] == "シングルオーダー"
 
 
 def test_compare_reflects_batch_difference(client):
