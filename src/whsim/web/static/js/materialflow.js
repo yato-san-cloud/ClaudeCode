@@ -490,7 +490,7 @@ export function mountMaterialFlow(el, opts = {}) {
 
   function enterEdit() {
     editFlow = flow.map((p) => ({
-      id: p.id, section: p.section || '出荷', driver: p.driver || 'out_lines',
+      id: p.id, _origId: p.id, section: p.section || '出荷', driver: p.driver || 'out_lines',
       productivity: p.productivity || 60, unit: p.unit || '行/h',
       depends: [...(p.depends || [])],
     }));
@@ -537,10 +537,18 @@ export function mountMaterialFlow(el, opts = {}) {
   async function saveProcesses() {
     const name = getProject();
     if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
-    // sync any in-flight id/section text inputs (they update editFlow live).
+    // Renames: a process whose id changed in-edit must have downstream depends that
+    // referenced its OLD id remapped to the new one, else the save-side prune would
+    // silently orphan that precedence edge. Build old→new from _origId.
+    const rename = {};
+    (editFlow || []).forEach((p) => {
+      const id = (p.id || '').trim();
+      if (p._origId && id && p._origId !== id) rename[p._origId] = id;
+    });
     const payload = (editFlow || []).map((p) => ({
       id: (p.id || '').trim(), section: p.section || '出荷', driver: p.driver || 'out_lines',
-      prod: p.productivity || 60, unit: p.unit || '行/h', depends: p.depends || [],
+      prod: p.productivity || 60, unit: p.unit || '行/h',
+      depends: (p.depends || []).map((d) => rename[d] || d),
     })).filter((p) => p.id);
     setBusy(true);
     try {

@@ -77,3 +77,13 @@ def test_save_prunes_bad_ids_and_dangling_deps(client):
     assert [p["id"] for p in procs] == ["A", "B"]
     assert next(p for p in procs if p["id"] == "A")["depends"] == []
     assert next(p for p in procs if p["id"] == "B")["depends"] == ["A"]
+
+
+def test_save_coerces_unknown_driver(client):
+    name = _make(client)
+    # An unknown driver would silently yield 0 volume/cost → coerce to out_lines.
+    r = client.post(f"/api/projects/{name}/work-processes", json={"processes": [
+        {"id": "謎工程", "section": "出荷", "driver": "made_up_driver", "prod": 50},
+    ]})
+    procs = r.json()["processes"]
+    assert procs[0]["driver"] == "out_lines"

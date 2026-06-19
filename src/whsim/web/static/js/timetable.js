@@ -479,12 +479,18 @@ export function mountTimetable(targetEl, opts = {}) {
     others.forEach((i) => {
       rows[i].pct = otherSum > 0 ? (rows[i].pct / otherSum) * rest : rest / others.length;
     });
-    // integer round, then push the residual onto the largest OTHER bar so Σ=100.
+    // integer round, then distribute the residual across the OTHER bars one unit at
+    // a time (never below 0) so Σ stays EXACTLY 100 even when the largest other bar
+    // is smaller than the drift.
     rows.forEach((r) => { r.pct = Math.round(r.pct); });
-    const drift = 100 - rows.reduce((a, r) => a + r.pct, 0);
-    if (drift && others.length) {
-      const big = others.reduce((b, i) => (rows[i].pct > rows[b].pct ? i : b), others[0]);
-      rows[big].pct = Math.max(0, rows[big].pct + drift);
+    let drift = 100 - rows.reduce((a, r) => a + r.pct, 0);
+    const ring = [...others].sort((a, b) => rows[b].pct - rows[a].pct);
+    let guard = 0;
+    while (drift !== 0 && ring.length && guard < 1000) {
+      const i = ring[guard % ring.length];
+      if (drift > 0) { rows[i].pct += 1; drift -= 1; }
+      else if (rows[i].pct > 0) { rows[i].pct -= 1; drift += 1; }
+      guard += 1;
     }
   }
   function equalSplit(rows) {

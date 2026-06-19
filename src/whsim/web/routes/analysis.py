@@ -140,6 +140,9 @@ def api_work_processes_save(name: str, payload: dict | None = None):
     proj = _open(name)
     model = proj.load_model()
     rows = (payload or {}).get("processes")
+    # Only these drivers map to a volume母数 (cost._DRIVER_VOL / the solver). An
+    # unknown driver would silently yield 0 volume → 0 cost, so coerce to out_lines.
+    known_drivers = {"in_lines", "in_qty", "out_lines", "out_orders"}
     wps: list[WorkProcess] = []
     if isinstance(rows, list):
         seen: set[str] = set()
@@ -154,10 +157,13 @@ def api_work_processes_save(name: str, payload: dict | None = None):
                 prod = float(r.get("prod", r.get("productivity", 60)) or 60)
             except (TypeError, ValueError):
                 prod = 60.0
+            drv = str(r.get("driver") or "out_lines")
+            if drv not in known_drivers:
+                drv = "out_lines"
             wps.append(WorkProcess(
                 id=pid,
                 section=str(r.get("section") or "出荷"),
-                driver=str(r.get("driver") or "out_lines"),
+                driver=drv,
                 prod=prod if prod > 0 else 60.0,
                 unit=str(r.get("unit") or "行/h"),
                 depends=[str(u) for u in (r.get("depends") or [])],
@@ -188,10 +194,14 @@ def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
 
     def kpis_for(model, label, sid):
         batches = getattr(model.settings, "batch_schedule", {}) or {}
-        res = (staffing.solve_staffing(
-            vols, model=model, start_hour=int(start_hour), end_hour=int(end_hour),
-            cap=(int(cap) or None), placement=str(placement), batches=batches)
-            if avail else {})
+        res = {}
+        if avail:
+            try:  # one pathological scenario must not 500 the whole comparison
+                res = staffing.solve_staffing(
+                    vols, model=model, start_hour=int(start_hour), end_hour=int(end_hour),
+                    cap=(int(cap) or None), placement=str(placement), batches=batches)
+            except Exception:  # noqa: BLE001 — degrade this row, keep the rest
+                res = {}
         try:
             c = cost_mod.estimate_cost(model)
         except Exception:  # noqa: BLE001 — cost is best-effort in a compare row
@@ -222,14 +232,14 @@ def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
             "batch_counts": {k: len(v) for k, v in batches.items() if v},
         }
 
-    rows = [kpis_for(proj.load_model(), "現在の設計", "__current__")]
+    base = proj.load_model()
+    base_md = base.model_dump()   # load once, overlay each scenario's frozen sections
+    rows = [kpis_for(base, "現在の設計", "__current__")]
     for hdr in scenariostore.list_scenarios(proj):
         doc = scenariostore.get_scenario(proj, hdr["id"])
         if not doc:
             continue
-        md = proj.load_model().model_dump()
-        for k, v in (doc.get("sections") or {}).items():
-            md[k] = v
+        md = {**base_md, **{k: v for k, v in (doc.get("sections") or {}).items()}}
         try:
             m = WarehouseModel.model_validate(md)
         except Exception:  # noqa: BLE001 — a bad overlay is skipped, never fatal

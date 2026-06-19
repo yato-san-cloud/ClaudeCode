@@ -240,3 +240,22 @@ def test_cost_honours_custom_process_list():
     assert detail[0]["prod"] == 25.0
     # 50 orders/day ÷ 25 = 2.0 man-hours/day flows to the day total.
     assert abs(r["mh_per_day"] - 2.0) < 1e-6
+
+
+def test_batch_outside_window_is_clamped_not_stranded():
+    # A batch hour at/after end_hour (or before start) must be clamped into the
+    # window so the cumulative curve still reaches 1.0 — never strands volume.
+    hours = list(range(9, 18))
+    after = staffing.batch_arrival_curve([{"hour": 20, "pct": 100}], hours)
+    assert after is not None and abs(after[-1] - 1.0) < 1e-9   # not all-zero
+    split = staffing.batch_arrival_curve([{"hour": 9, "pct": 50}, {"hour": 22, "pct": 50}], hours)
+    assert abs(split[-1] - 1.0) < 1e-9                          # both halves land
+    before = staffing.batch_arrival_curve([{"hour": 3, "pct": 100}], hours)
+    assert abs(before[0] - 1.0) < 1e-9                          # pre-open → at open
+    # End to end: an out-of-window 出荷 batch must NOT strand outbound volume —
+    # outbound is still scheduled (clamped into the window), not zeroed out.
+    res = staffing.solve_staffing(
+        VOLS, start_hour=9, end_hour=20, placement="front",
+        batches={"出荷": [{"hour": 23, "pct": 100}]})
+    pick = _proc(res, "ピッキング")
+    assert pick["man_hours"] > 0 and any(pick["headcount_by_hour"])

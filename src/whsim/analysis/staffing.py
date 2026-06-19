@@ -389,9 +389,14 @@ def batch_arrival_curve(batch_list: list[dict], hours: list[int]) -> list[float]
     once that batch has landed, so this returns the cumulative fraction that has
     arrived by the END of each hour in `hours` (a batch landing AT hour H is usable
     during hour H). Percentages are normalised by their own total so the day always
-    clears (never-blocks); a batch landing after the window simply never arrives.
-    Returns None when there is no usable schedule (→ caller imposes no arrival gate,
-    i.e. all volume is available from the start, as before)."""
+    clears (never-blocks). A batch whose hour falls OUTSIDE the window is clamped
+    into it (before-start → arrives at open; at/after-close → the last hour), so the
+    cumulative ALWAYS reaches 1.0 and a misplaced batch never strands volume / fakes
+    infeasibility. Returns None when there is no usable schedule (→ caller imposes no
+    arrival gate, i.e. all volume is available from the start, as before)."""
+    if not hours:
+        return None
+    lo, hi = hours[0], hours[-1]
     pts: list[tuple[int, float]] = []
     for b in batch_list or []:
         try:
@@ -400,7 +405,7 @@ def batch_arrival_curve(batch_list: list[dict], hours: list[int]) -> list[float]
         except (TypeError, ValueError):
             continue
         if p > 0:
-            pts.append((h, p))
+            pts.append((min(max(h, lo), hi), p))   # clamp into [open, close]
     if not pts:
         return None
     total = sum(p for _, p in pts) or 1.0
