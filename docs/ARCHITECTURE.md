@@ -30,6 +30,7 @@
 10. **新テンプレ＝データのみ**。`templates/<id>/{template.json,manifest.json}` を足すだけ、**コード変更不要**。
 11. **ミラー定数は parity を保つ**。Python↔JS のミラー（`timetable`）は parity テスト有り。新たなミラーも同様に守るか、**一つの源から配る**（例 `/api/racktypes` を fetch）。ハードコピー増殖は禁止。
 12. **オプション依存**：web app は `[web]`（fastapi/uvicorn）、CAD/PPTX/PDF は `[docs]`（ezdxf/python-pptx/reportlab）。全部入りは `pip install -e ".[dev,web,docs]"`。
+13. **作業工程は単一の源 `staffing.process_master(model)`**。固定 `GENERIC_PROCESSES` を直接 import せず、必ず `process_master`/`process_deps` 経由（モデルの編集済 `process.work_processes` があればそれ、無ければ既定6工程）。これでソルバー/原価/生産性/BI/提案出力が**リネーム・追加・削除に一斉追従**する（完全フリー工程）。新規消費側も同規約を守る（直 import 禁止）。
 
 ---
 
@@ -52,7 +53,8 @@
 - ※ `design`/`slotting`/`datagen` は小モジュール群。将来 `design/` パッケージへ統合候補。
 
 ### 分析 / BI（2系統）
-- `bi.py`（DuckDB **物量集計**：`base_volumes(model, nonworking)` は稼働日で日平均化＝**稼働日カレンダ**（非稼働曜日の物量を稼働日へ振分け）＋`derive_volumes` 仮値派生：パレット/オリコン/カゴ台車の荷姿変換。`bi/apply`→`bi.json`→`timetable/from-bi` が **BI→タイムチャートの橋**）/ `analysis/`（WMSデータ分析：`analyses` `insights` `staffing` `data_io`〔`ITEM_FIELDS`含む〕 `report` `sample` ＋ `ingest.py`＝出荷CSV→model.orders の **ETL**＋`item_master`〔商品マスタ→入数/名前/ABC〕、`POST /import/shipments`〔mapping 返却〕）/ `analytic.py`（M/M/c oracle）/ `kpis.py`（イベント→KPI＋日本語verdict＋`_picker_breakdown` 要素作業分解）/ `timetable.py`（人員タイムチャート、**JSミラー parity test 有り**）/ `workmethod.py`。
+- `bi.py`（DuckDB **物量集計**：`base_volumes(model, nonworking)` は稼働日で日平均化＝**稼働日カレンダ**（非稼働曜日の物量を稼働日へ振分け）＋`derive_volumes` 仮値派生：パレット/オリコン/カゴ台車の荷姿変換。`bi/apply`→`bi.json`→`timetable/from-bi` が **BI→タイムチャートの橋**）/ `analysis/`（WMSデータ分析：`analyses` `insights` `staffing` `data_io`〔`ITEM_FIELDS`含む〕 `report` `sample` ＋ `ingest.py`＝出荷CSV→model.orders の **ETL**＋`item_master`〔商品マスタ→入数/名前/ABC〕、`POST /import/shipments`〔mapping 返却〕）/ `analytic.py`（M/M/c oracle）/ `kpis.py`（イベント→KPI＋日本語verdict＋`_picker_breakdown` 要素作業分解）/ `timetable.py`（人員タイムチャート、**JSミラー parity test 有り**）/ `workmethod.py`（作業方式は4名統一：シングルオーダー/マルチオーダー/トータル/ゾーン（リレー）。ウェーブは廃し投入は「バッチ」）。
+- `analysis/staffing.py` 追補：`process_master`/`process_deps`（編集可能工程の単一源）／`solve_staffing(... batches=)` の**バッチ投入ゲート**（区間先頭工程を着荷曲線で律速、窓外バッチは窓内クランプ＝never-blocks）＋`batch_arrival_curve`。`settings.batch_schedule`={section:[{hour,pct}]} に永続。API：`GET/POST /api/projects/{n}/work-processes`（工程CRUD、未知driverはout_lines矯正）／`GET /timetable/compare`（現在＋保存シナリオを同一物量で再解＝peak人数/総工数/終了/原価/方式の比較、行毎にsolveをガード）。
 
 ### レンダ
 - `render/`：`replay.py`（**replay契約**）/ `png2d.py` / `shelves.py`（ロケ→棚ラン；authored shelf は1棚=1ラン、name/facing/cell sku-qty 付き）/ `anim2d.py` / `fonts.py` / `heatmap.py`。
@@ -67,7 +69,7 @@
 - 分析/BI：`bianalytics.js` `dataanalysis.js` `bi.js` `materialflow.js`（**ECharts**描画＝`vendor/echarts`、テーマ追従・toolbox・dispose）・`analysis.js`（KPI・判定）・`storage.js`（③設計「保管設計」：試算つまみ＋レイアウト配置CTA）・`pickrate.js`（③設計「生産性試算」：解析的な動作時間で移動vs仕分け散布図＋推奨、GET /pickrate）。`materialflow.js` は②分析に在籍（基礎物量＝物量作成）。
 - ジャーニー写像（SLC壁打ち）：①基礎物量(②分析: materialflow/bi)→②単機能生産性sim(③設計: pickrate=解析・動作時間)→③DES(④検証)。マテリアルフローの工程→エリアは `whsim:flow-changed` でdesigner↔materialflowをライブ同期。designerフロータブの「工程フローからエリアを配置」が工程連鎖を図面へ落とし込む（フロー順に左→右でゾーン自動配置＋割当）。
 - **基礎物量チェーン**（②分析→③設計の背骨）：`bi.js` 仮値→`bi/apply`保存→`from-bi`→`whsim:load-timetable`（タイムチャート）；`materialflow.js` は「物量シミュの基礎物量を取込」で同じ from-bi を取り込む。モデル変更後は `whsim:model-changed` イベントで再オープン＋遷移。
-- その他：`compare.js` `export.js` `timetable.js`(+`timetable_solver.js`) `settings.js` `notes.js` `cody.js`(+`chat.js`)。
+- その他：`compare.js` `export.js` `timetable.js`(+`timetable_solver.js`：ソルバーUIに**バッチ投入エディタ**〔便数ステッパー＋比率スライダー＝合計100%自動調整〕・**工程依存DAG**・各工程の物量/生産性インライン＋クリックで設定へジャンプ・**シナリオ保存/比較**) `settings.js` `notes.js` `cody.js`(+`chat.js`)。`materialflow.js` には**完全フリー工程エディタ**（追加/リネーム/並べ替え/削除/依存チップ、`/work-processes` に保存）。
 
 ---
 
