@@ -194,18 +194,42 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
 def _measured_productivity(res: RunResult, model: WarehouseModel | None,
                            picker_busy: float, packer_busy: float, completed: int) -> dict:
     """実測生産性 for the processes the DES actually simulates, in the SAME units as
-    the analytic benchmark (staffing.GENERIC_PROCESSES): ピッキング 行/h, 梱包 件/h.
-    Rate = work done ÷ that resource's busy person-hours. Only populated where the
-    sim provides it (busy>0); inbound/格納/出荷 keep the benchmark. The 想定→実測
-    swap (生産性フィードバック) consumes this."""
+    the analytic benchmark: the picking resource (行/h) and the packing resource
+    (件/h). Rate = work done ÷ that resource's busy person-hours. Only populated
+    where the sim provides it (busy>0); inbound/格納/出荷 keep the benchmark. The
+    想定→実測 swap (生産性フィードバック) consumes this.
+
+    The DES only models two staffed roles — pickers and packers — so we attach the
+    two measured rates to the matching process ids in the editable master: the
+    out_lines-driven 行/h process (default id ピッキング) and the out_orders-driven
+    件/h process (default id 梱包). With no custom process list this resolves to the
+    canonical ids, so output is byte-identical to the hardcoded version."""
+    from whsim.analysis import staffing
+
+    pick_id, pack_id = "ピッキング", "梱包"
+    try:
+        master = staffing.process_master(model)
+        # Picking role: first 出荷-section process measured in 行/h driven by lines.
+        for p in master:
+            if p.get("driver") == "out_lines" and p.get("unit") == "行/h":
+                pick_id = p["id"]
+                break
+        # Packing role: 件/h process driven by completed orders.
+        for p in master:
+            if p.get("driver") == "out_orders" and p.get("unit") == "件/h":
+                pack_id = p["id"]
+                break
+    except Exception:  # noqa: BLE001 — never block; fall back to canonical ids.
+        pick_id, pack_id = "ピッキング", "梱包"
+
     out: dict[str, float] = {}
     orders = (model.orders.outbound if model else []) or []
     avg_lines = (sum(len(o.lines) for o in orders) / len(orders)) if orders else 1.0
     if picker_busy > 0 and completed > 0:
         lines_picked = completed * avg_lines
-        out["ピッキング"] = round(lines_picked / (picker_busy / 3600.0), 1)  # 行/h
+        out[pick_id] = round(lines_picked / (picker_busy / 3600.0), 1)  # 行/h
     if packer_busy > 0 and completed > 0:
-        out["梱包"] = round(completed / (packer_busy / 3600.0), 1)            # 件/h
+        out[pack_id] = round(completed / (packer_busy / 3600.0), 1)     # 件/h
     return out
 
 

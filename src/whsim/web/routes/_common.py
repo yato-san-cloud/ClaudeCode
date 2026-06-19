@@ -512,14 +512,16 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
 
     # (d) 生産性フィードバック: per-process 想定(benchmark) vs 実測(this layout),
     # with whether the 実測 has been adopted into the cost build-up.
-    from whsim.analysis.staffing import GENERIC_PROCESSES
+    from whsim.analysis import staffing
     measured = metrics.get("measured_productivity") or {}
     overrides = {}
     try:
         overrides = getattr(model.settings, "productivity_overrides", {}) or {}
     except Exception:  # noqa: BLE001
         overrides = {}
-    bench = {p["id"]: p for p in GENERIC_PROCESSES}
+    # Resolve processes through the editable master (renamed/added/removed flow
+    # through; empty custom list → engine default = byte-identical to before).
+    bench = {p["id"]: p for p in staffing.process_master(model)}
     bench_prod = {}
     try:
         bench_prod = getattr(model.settings, "benchmark_productivity", {}) or {}
