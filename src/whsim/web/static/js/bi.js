@@ -37,7 +37,10 @@ function biPalette() {
 
 // Productivity standards mirror analysis/staffing GENERIC_PROCESSES (editable
 // JP-warehouse defaults). 格納 is driven by *pallets* here — the live link.
-const PROCS = [
+// Used ONLY as a fallback when there is no project / the work-process master
+// fetch fails; otherwise the project's editable master drives the list (so a
+// renamed/added/removed process flows through here too). See loadProcs().
+const DEFAULT_PROCS = [
   { id: '入荷検品', sec: '入荷', driver: 'in_cases', prod: 40, unit: 'ケース/h' },
   { id: '格納', sec: '入荷', driver: 'in_pallets', prod: null, unit: 'PL/h', derived: true },
   { id: 'ピッキング', sec: '出荷', driver: 'out_lines', prod: 60, unit: '行/h' },
@@ -46,6 +49,34 @@ const PROCS = [
   { id: '梱包', sec: '出荷', driver: 'out_orikon', prod: 25, unit: 'OC/h' },
   { id: '出荷', sec: '出荷', driver: 'out_cages', prod: 12, unit: '台車/h' },
 ];
+
+// BI-specific overrides keyed by process id. The work-process master drives
+// processes off the analysis driver catalogue (in_lines/in_qty/out_lines/
+// out_orders), but this 基礎物量 view runs the 仮値派生 chain (ケース→パレット→
+// オリコン→カゴ台車) and pegs 格納 to *pallets* (the live putaway link). So when
+// we adopt the master's list we re-map known process ids onto these BI drivers/
+// productivities/units; unknown (custom) processes keep the master's own
+// driver/prod/unit. This keeps the default 6-process case byte-identical to
+// DEFAULT_PROCS while still reflecting renames/additions/removals.
+const BI_OVERRIDES = Object.fromEntries(
+  DEFAULT_PROCS.map((p) => [p.id, { driver: p.driver, prod: p.prod, unit: p.unit, derived: !!p.derived }]),
+);
+
+// Map a work-process master row → the {id,sec,driver,prod,unit,derived} shape
+// this view consumes. Honours BI_OVERRIDES by id; falls back to the master's own
+// fields (the API gives section/driver, and prod or productivity, and unit).
+function biShape(p) {
+  const ov = BI_OVERRIDES[p.id];
+  const base = {
+    id: p.id,
+    sec: p.section || p.sec || '出荷',
+    driver: p.driver || 'out_lines',
+    prod: (p.prod != null ? p.prod : p.productivity) ?? null,
+    unit: p.unit || '行/h',
+    derived: !!p.derived,
+  };
+  return ov ? { ...base, ...ov } : base;
+}
 
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -164,6 +195,7 @@ export function mountBI(el, opts = {}) {
   document.addEventListener('themechange', onThemeChange);
 
   let vol = null;       // base volumes from DuckDB
+  let procs = DEFAULT_PROCS.slice();  // work-process master (project's editable list; DEFAULT_PROCS = fallback)
   let loadErr = null;   // last load() failure (null = none); drives the retry state
   let cpp = 40;         // 仮値: cases per pallet
   let palletProd = 18;  // 仮値: 格納 productivity (PL/h)
@@ -225,7 +257,7 @@ export function mountBI(el, opts = {}) {
       out_orikon: d.outOrikon,
       out_cages: d.outCages,
     };
-    return PROCS.map((p) => {
+    return procs.map((p) => {
       const v = drv[p.driver] || 0;
       const prod = p.derived ? palletProd : p.prod;
       const mh = prod > 0 ? v / prod : 0;
@@ -702,9 +734,28 @@ export function mountBI(el, opts = {}) {
     on('#bi-peak-tog', 'onchange', updateToggle);
   }
 
+  // Pull the project's editable work-process master and adopt it as the process
+  // list (re-mapped onto this view's 仮値派生 drivers via biShape). On no project
+  // or any failure, fall back to the hardcoded DEFAULT_PROCS so the view never
+  // blocks. Tolerant: an empty/oddly-shaped list also falls back.
+  async function loadProcs() {
+    const name = getProject();
+    if (!name) { procs = DEFAULT_PROCS.slice(); return; }
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/work-processes`);
+      if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+      const data = await r.json();
+      const list = Array.isArray(data.processes) ? data.processes.filter((p) => p && p.id) : [];
+      procs = list.length ? list.map(biShape) : DEFAULT_PROCS.slice();
+    } catch (_e) {
+      procs = DEFAULT_PROCS.slice();  // never blocks
+    }
+  }
+
   async function load() {
     const name = getProject();
-    if (!name) { render(); return; }
+    if (!name) { procs = DEFAULT_PROCS.slice(); render(); return; }
+    await loadProcs();
     try {
       const nw = Array.from(nonworking).sort((a, b) => a - b).join(',');
       const r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/volumes`
