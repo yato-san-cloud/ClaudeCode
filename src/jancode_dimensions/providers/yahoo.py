@@ -22,6 +22,7 @@ _ENDPOINT = "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch"
 
 class YahooProvider(DimensionProvider):
     name = "yahoo"
+    is_remote = True
 
     def __init__(self, app_id: Optional[str] = None, timeout: float = 10.0) -> None:
         self.app_id = app_id or os.environ.get("YAHOO_APP_ID")

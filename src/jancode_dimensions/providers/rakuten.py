@@ -22,6 +22,7 @@ _ENDPOINT = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
 
 class RakutenProvider(DimensionProvider):
     name = "rakuten"
+    is_remote = True
 
     def __init__(self, app_id: Optional[str] = None, timeout: float = 10.0) -> None:
         self.app_id = app_id or os.environ.get("RAKUTEN_APP_ID")

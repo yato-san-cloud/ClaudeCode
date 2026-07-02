@@ -77,7 +77,7 @@ python -m jancode_dimensions process 在庫.xlsx \
 | `--master PATH` | 自社マスタCSV（`local` 用） |
 | `--cache PATH` | キャッシュDBのパス |
 | `--no-cache` | キャッシュを使わない |
-| `--sleep SEC` | API呼び出し間の待機秒 |
+| `--sleep SEC` | リモートAPI呼び出しの最小間隔（秒）。ローカル参照・キャッシュヒットでは待たない |
 | `--limit N` | 処理する最大件数（動作確認用） |
 | `--dry-run` | 保存せず結果だけ表示 |
 

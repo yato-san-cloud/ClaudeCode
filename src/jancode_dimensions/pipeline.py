@@ -43,7 +43,17 @@ class LookupPipeline:
     ) -> None:
         self.providers: List[DimensionProvider] = list(providers)
         self.cache = cache
+        # リモートプロバイダ(is_remote=True)呼び出しの最小間隔(秒)。
         self.sleep_between = sleep_between
+        self._last_remote_ts = float("-inf")
+
+    def _throttle(self) -> None:
+        """前回のリモート呼び出しから sleep_between 秒経つまで待つ。"""
+        if not self.sleep_between:
+            return
+        wait = self._last_remote_ts + self.sleep_between - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
 
     def lookup(self, jan_raw: object) -> LookupResult:
         jan = normalize_jan(jan_raw)
@@ -57,9 +67,15 @@ class LookupPipeline:
                 return self._result(jan, cached, from_cache=True)
 
         # 2) プロバイダを順に試す。サイズが取れた時点で確定。
+        # リモートAPIは結果の成否によらず呼び出し間隔を保証する(レート制限対策)。
         last_seen: Optional[ProductInfo] = None
         for provider in self.providers:
+            remote = getattr(provider, "is_remote", False)
+            if remote:
+                self._throttle()
             info = provider.lookup(jan)
+            if remote:
+                self._last_remote_ts = time.monotonic()
             if info is None:
                 continue
             last_seen = info
@@ -67,8 +83,6 @@ class LookupPipeline:
                 if self.cache is not None:
                     self.cache.put(info)
                 return self._result(jan, info, from_cache=False)
-            if self.sleep_between:
-                time.sleep(self.sleep_between)
 
         # 3) どこからもサイズが取れなかった。商品名等が拾えていれば記録する。
         if self.cache is not None and last_seen is not None:

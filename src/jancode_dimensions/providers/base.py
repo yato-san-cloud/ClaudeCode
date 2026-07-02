@@ -14,6 +14,10 @@ class DimensionProvider(ABC):
     #: ログ/転記の「取得元」欄に出す識別名。
     name: str = "base"
 
+    #: リモートAPIを叩くプロバイダは True にする。
+    #: True の場合、pipeline が呼び出し間隔(sleep_between)のスロットリングを行う。
+    is_remote: bool = False
+
     @abstractmethod
     def lookup(self, jan: str) -> Optional[ProductInfo]:
         """JANに対応する商品情報を返す。

@@ -21,12 +21,13 @@ from ..models import Dimensions, ProductInfo
 from ..parser import parse_dimensions
 from .base import DimensionProvider
 
-_JAN_KEYS = {"jan", "jancode", "jan_code", "janコード", "商品コード", "バーコード", "gtin", "ean"}
-_WIDTH_KEYS = {"幅", "width", "w", "width_cm", "幅cm", "横"}
-_DEPTH_KEYS = {"奥行", "奥行き", "depth", "d", "depth_cm", "奥行cm", "長さ"}
-_HEIGHT_KEYS = {"高さ", "height", "h", "height_cm", "高さcm", "高"}
-_TEXT_KEYS = {"サイズ", "size", "size_text", "寸法", "三辺"}
-_TITLE_KEYS = {"商品名", "title", "name", "品名"}
+# 候補は優先順(タプル)。複数マッチ時に先頭側が確定的に選ばれる。
+_JAN_KEYS = ("jan", "jancode", "jan_code", "janコード", "商品コード", "バーコード", "gtin", "ean")
+_WIDTH_KEYS = ("幅", "width", "横", "width_cm", "幅cm", "幅(cm)", "width_mm", "幅mm", "幅(mm)", "w")
+_DEPTH_KEYS = ("奥行", "奥行き", "depth", "長さ", "depth_cm", "奥行cm", "奥行(cm)", "depth_mm", "奥行mm", "奥行(mm)", "d")
+_HEIGHT_KEYS = ("高さ", "height", "高", "height_cm", "高さcm", "高さ(cm)", "height_mm", "高さmm", "高さ(mm)", "h")
+_TEXT_KEYS = ("サイズ", "size", "size_text", "寸法", "三辺")
+_TITLE_KEYS = ("商品名", "title", "name", "品名")
 
 
 def _norm_key(s: str) -> str:
@@ -80,7 +81,7 @@ class LocalMasterProvider(DimensionProvider):
                 )
 
     @staticmethod
-    def _pick(field_map: Dict[str, str], keys: set) -> Optional[str]:
+    def _pick(field_map: Dict[str, str], keys: tuple) -> Optional[str]:
         for k in keys:
             if k in field_map:
                 return field_map[k]

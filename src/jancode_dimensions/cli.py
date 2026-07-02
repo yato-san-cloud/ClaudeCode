@@ -115,7 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--yahoo-app-id", help="Yahoo アプリID(未指定時は環境変数 YAHOO_APP_ID)")
     p.add_argument("--cache", default=".jancode_cache.sqlite", help="キャッシュDBのパス")
     p.add_argument("--no-cache", action="store_true", help="キャッシュを使わない")
-    p.add_argument("--sleep", type=float, default=0.0, help="API呼び出し間の待機秒(レート制限対策)")
+    p.add_argument("--sleep", type=float, default=0.0,
+                   help="リモートAPI呼び出しの最小間隔(秒)。ローカル参照やキャッシュヒットでは待たない")
     p.add_argument("--limit", type=int, default=0, help="処理する最大件数(0=無制限)")
     p.add_argument("--dry-run", action="store_true", help="保存せず結果のみ表示")
     p.set_defaults(func=cmd_process)

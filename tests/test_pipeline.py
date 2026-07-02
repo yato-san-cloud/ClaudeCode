@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -77,3 +78,46 @@ def test_cache_normalizes_jan():
     # 表記ゆれでもキャッシュに当たる
     res = pipe.lookup("4901234567894.0")
     assert res.from_cache
+
+
+def test_verified_cache_beats_providers():
+    # 人手確認済み(verified)の行は、サイズ無しでもオンライン再検索しない
+    cache = Cache(":memory:")
+    cache.put(ProductInfo("111", "manual", title="確認済み商品", dimensions=None), verified=True)
+    provider = FakeProvider("p1", {"111": ProductInfo("111", "p1", dimensions=Dimensions(9, 9, 9))})
+    pipe = LookupPipeline([provider], cache=cache)
+
+    res = pipe.lookup("111")
+    assert res.from_cache
+    assert not res.found
+    assert provider.calls == 0
+
+
+class RemoteFakeProvider(FakeProvider):
+    is_remote = True
+
+
+def test_remote_calls_are_throttled():
+    provider = RemoteFakeProvider("r", {})  # 常に未発見でもスロットリングされる
+    pipe = LookupPipeline([provider], sleep_between=0.08)
+
+    t0 = time.monotonic()
+    pipe.lookup("111")
+    pipe.lookup("222")
+    elapsed = time.monotonic() - t0
+
+    assert provider.calls == 2
+    assert elapsed >= 0.07  # 2回目の呼び出しまで最低間隔が空く
+
+
+def test_local_calls_are_not_throttled():
+    provider = FakeProvider("p1", {})  # is_remote=False
+    pipe = LookupPipeline([provider], sleep_between=0.5)
+
+    t0 = time.monotonic()
+    pipe.lookup("111")
+    pipe.lookup("222")
+    elapsed = time.monotonic() - t0
+
+    assert provider.calls == 2
+    assert elapsed < 0.4  # ローカル参照では待たない
