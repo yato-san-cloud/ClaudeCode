@@ -231,8 +231,31 @@ def _proposal_extras(proj: Project, model, metrics: dict) -> dict:
             storage = None
     except Exception:  # noqa: BLE001 — storage section is an enhancement, optional
         storage = None
+    # 提案書ブランドテーマ (宛先/自社名/アクセント/ロゴ) for a client-ready cover.
+    try:
+        brand = _resolve_brand(proj, model)
+    except Exception:  # noqa: BLE001 — brand is an enhancement, never required
+        brand = None
     return {"scenarios": scenarios, "insights": insights,
-            "provenance": provenance, "storage": storage}
+            "provenance": provenance, "storage": storage, "brand": brand}
+
+
+def _resolve_brand(proj: Project, model) -> dict | None:
+    """Extract the proposal brand theme from ``model.settings.brand`` and resolve
+    a project-relative ``logo_path`` against the project directory so the export
+    can embed it. Returns the brand dict (fields may be empty) or None on any
+    failure. Never raises — a broken brand must not sink the export."""
+    brand = getattr(getattr(model, "settings", None), "brand", None)
+    if brand is None:
+        return None
+    data = brand.model_dump() if hasattr(brand, "model_dump") else dict(brand)
+    lp = str(data.get("logo_path") or "").strip()
+    if lp:
+        p = Path(lp)
+        if not p.is_absolute():
+            p = proj.root / lp
+        data["logo_path"] = str(p)
+    return data
 
 
 def _call_export(builder, kpis, model_name, prov, png, out, extras: dict):
@@ -245,10 +268,11 @@ def _call_export(builder, kpis, model_name, prov, png, out, extras: dict):
                        scenarios=extras.get("scenarios"),
                        insights=extras.get("insights"),
                        provenance=extras.get("provenance"),
-                       storage=extras.get("storage"))
+                       storage=extras.get("storage"),
+                       brand=extras.get("brand"))
     except TypeError:
         # Builder predates one of the optional params — retry without the newest
-        # (storage), then fall back to the original positional signature.
+        # (brand/storage), then fall back to the original positional signature.
         try:
             return builder(kpis, model_name, prov, png, out,
                            scenarios=extras.get("scenarios"),

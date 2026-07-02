@@ -9,7 +9,6 @@ from ._data import (
     GREEN,
     INK,
     LIGHT,
-    NOTION_BLUE,
     PPTX_FONT,
     PRODUCT_NAME,
     RED,
@@ -18,6 +17,7 @@ from ._data import (
     _SCENARIO_METRICS,
     _SEV_COLOR,
     _assumptions_lines,
+    _brand_section,
     _date_str,
     _delta_str,
     _detail_rows,
@@ -38,7 +38,7 @@ from ._data import (
 
 def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                png_path, out_path, *, scenarios=None, insights=None,
-               provenance=None, storage=None, model=None) -> Path:
+               provenance=None, storage=None, model=None, brand=None) -> Path:
     """Build an editable, multi-section proposal deck and write it to `out_path`.
 
     Sections (slides): cover -> executive summary -> layout & congestion -> KPI
@@ -56,6 +56,11 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                           「人員配置と工程フロー」slide is added (総工数/ピーク人数/
                           終了時刻タイル・充足判定・バッチ投入要約・工程フロー表).
                           Fully guarded: no demand / any failure → slide omitted.
+      * ``brand``       -- optional 提案書ブランドテーマ (Brand model / dict): the
+                          cover shows 宛先「〇〇御中」+ 提案元 + optional logo, and the
+                          accent colour drives the title bars/strips. Defaults to
+                          the built-in accent, so a default/absent brand is a
+                          no-op. When None, ``model.settings.brand`` is used.
     Robust: missing/None inputs degrade to graceful placeholders, never raise.
     """
     from pptx import Presentation
@@ -71,6 +76,12 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
     scen = _normalize_scenarios(scenarios)
     recs = _normalize_insights(insights)
     staff = _staffing_section(model)  # None when no demand / any failure
+    # 提案書ブランドテーマ: `accent` is the brand accent (defaulting to the
+    # built-in Notion-blue) used for every title bar / strip / table header, and
+    # the cover adds 宛先/提案元/ロゴ. A default/absent brand keeps the built-in
+    # colour, so an unbranded deck is colour-identical to before.
+    bstyle = _brand_section(brand, model)
+    accent = bstyle["accent"]
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -126,7 +137,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     def _header_band(slide, title):
         """Branded blue band + section title, reused on every content slide."""
-        _rect(slide, 0, 0, SW, Inches(0.85), NOTION_BLUE)
+        _rect(slide, 0, 0, SW, Inches(0.85), accent)
         tf = _textbox(slide, Inches(0.5), Inches(0.12), Inches(12.3), Inches(0.6))
         _para(tf, title, size=24, bold=True, color=WHITE, first=True)
 
@@ -137,18 +148,45 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Slide 1: Cover -------------------------------------------------------
     s1 = prs.slides.add_slide(blank)
-    _rect(s1, 0, 0, SW, Inches(2.1), NOTION_BLUE)            # top brand band
+    _rect(s1, 0, 0, SW, Inches(2.1), accent)            # top brand band
     _rect(s1, 0, SH - Inches(0.25), SW, Inches(0.25), INK)   # bottom ink rule
     ptf = _textbox(s1, Inches(1.0), Inches(0.55), Inches(11.3), Inches(0.6))
     _para(ptf, PRODUCT_NAME, size=20, bold=True, color=WHITE, first=True)
     badge = _textbox(s1, Inches(1.0), Inches(1.25), Inches(6.0), Inches(0.6))
     _para(badge, "提案書 / PROPOSAL", size=16, color=(0xDD, 0xEC, 0xFB), first=True)
+    # Brand logo, top-right of the band. Guarded: a missing/corrupt image is
+    # skipped silently (the cover still renders).
+    if bstyle["logo_path"]:
+        try:
+            from PIL import Image
+            with Image.open(bstyle["logo_path"]) as im:
+                iw, ih = im.size
+            lh = 1.1
+            lw = lh * (iw / ih) if ih else lh
+            lw = min(lw, 3.2)
+            lh = lw * (ih / iw) if iw else lh
+            s1.shapes.add_picture(
+                str(bstyle["logo_path"]),
+                SW - Inches(lw + 0.7), Inches(0.5),
+                width=Inches(lw), height=Inches(lh))
+        except Exception:  # noqa: BLE001 — brand logo is optional, never fatal
+            pass
+    # 宛先「〇〇御中」 above the deck title (only when a client is named).
+    if bstyle["client_name"]:
+        atf = _textbox(s1, Inches(1.0), Inches(2.35), Inches(11.3), Inches(0.6))
+        _para(atf, f"{bstyle['client_name']} 御中", size=24, bold=True,
+              color=INK, first=True)
     tf = _textbox(s1, Inches(1.0), Inches(3.0), Inches(11.3), Inches(2.0))
     _para(tf, f"{model_name}", size=46, bold=True, color=INK, first=True)
-    _para(tf, "倉庫運用シミュレーション提案", size=24, color=NOTION_BLUE)
-    sub = _textbox(s1, Inches(1.0), Inches(5.4), Inches(11.3), Inches(1.0))
+    _para(tf, "倉庫運用シミュレーション提案", size=24, color=accent)
+    sub = _textbox(s1, Inches(1.0), Inches(5.4), Inches(11.3), Inches(1.4))
     _para(sub, f"{_date_str()} ・ 概算見積り", size=18, color=SUBTLE, first=True)
+    if bstyle["company_name"]:
+        _para(sub, f"提案元：{bstyle['company_name']}", size=16, bold=True,
+              color=INK)
     _para(sub, _methodology_footer(prov), size=11, color=SUBTLE)
+    if bstyle["footer_note"]:
+        _para(sub, bstyle["footer_note"], size=11, color=SUBTLE)
 
     # --- Slide 2: Executive summary (verdict + 4 hero tiles) -----------------
     s2 = prs.slides.add_slide(blank)
@@ -165,7 +203,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
     for i, (label, value, unit) in enumerate(tiles):
         left = Inches(0.5 + i * (2.95 + 0.18))
         _rect(s2, left, top, tile_w, th, LIGHT)
-        _rect(s2, left, top, tile_w, Inches(0.12), NOTION_BLUE)  # accent strip
+        _rect(s2, left, top, tile_w, Inches(0.12), accent)  # accent strip
         ltf = _textbox(s2, left, top + Inches(0.3), tile_w, Inches(0.6))
         _para(ltf, label, size=14, bold=True, color=SUBTLE, first=True)
         vtf2 = _textbox(s2, left, top + Inches(0.95), tile_w, Inches(1.2))
@@ -221,8 +259,8 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         run.text = text
         _set_run(run, size=size, bold=bold, color=color)
 
-    _cell(0, 0, "指標", size=14, bold=True, color=WHITE, fill=NOTION_BLUE)
-    _cell(0, 1, "値", size=14, bold=True, color=WHITE, fill=NOTION_BLUE)
+    _cell(0, 0, "指標", size=14, bold=True, color=WHITE, fill=accent)
+    _cell(0, 1, "値", size=14, bold=True, color=WHITE, fill=accent)
     for i, (label, value) in enumerate(rows, start=1):
         zebra = LIGHT if i % 2 == 0 else WHITE
         _cell(i, 0, label, size=12, bold=True, fill=zebra)
@@ -242,7 +280,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         st_tbl = st_shape.table
         for ci, htext in enumerate(header):
             _cell_in(st_tbl, 0, ci, htext, size=12, bold=True, color=WHITE,
-                     fill=NOTION_BLUE)
+                     fill=accent)
         for ri, row in enumerate(srows, start=1):
             zebra = LIGHT if ri % 2 == 0 else WHITE
             for ci, val in enumerate(row):
@@ -275,7 +313,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         for i, (label, value, unit) in enumerate(stiles):
             left = Inches(0.5 + i * (3.9 + 0.25))
             _rect(s4c, left, ttop, tw, tth, LIGHT)
-            _rect(s4c, left, ttop, tw, Inches(0.1), NOTION_BLUE)  # accent strip
+            _rect(s4c, left, ttop, tw, Inches(0.1), accent)  # accent strip
             ltf = _textbox(s4c, left, ttop + Inches(0.22), tw, Inches(0.4))
             _para(ltf, label, size=13, bold=True, color=SUBTLE, first=True)
             vtf3 = _textbox(s4c, left, ttop + Inches(0.62), tw, Inches(0.7))
@@ -308,7 +346,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         ft.columns[3].width = Inches(3.7)
         for ci, htext in enumerate(header):
             _cell_in(ft, 0, ci, htext, size=12, bold=True, color=WHITE,
-                     fill=NOTION_BLUE)
+                     fill=accent)
         for ri, row in enumerate(frows, start=1):
             zebra = LIGHT if ri % 2 == 0 else WHITE
             for ci, val in enumerate(row):
@@ -337,11 +375,11 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
             run.text = text
             _set_run(run, size=size, bold=bold, color=color)
 
-        _scell(0, 0, "指標", size=13, bold=True, color=WHITE, fill=NOTION_BLUE)
+        _scell(0, 0, "指標", size=13, bold=True, color=WHITE, fill=accent)
         for ci, sc in enumerate(scen, start=1):
             tag = "（現行）" if sc["is_baseline"] else ""
             _scell(0, ci, f"{sc['name']}{tag}", size=13, bold=True,
-                   color=WHITE, fill=NOTION_BLUE)
+                   color=WHITE, fill=accent)
         for ri, (label, key, digits, money) in enumerate(metrics, start=1):
             zebra = LIGHT if ri % 2 == 0 else WHITE
             _scell(ri, 0, label, size=12, bold=True, fill=zebra)

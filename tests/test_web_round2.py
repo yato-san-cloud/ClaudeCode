@@ -108,6 +108,63 @@ def test_settings_put_unknown_key_ignored(client):
     assert r.json()["settings"]["currency"] == "¥"
 
 
+# ---- settings: 提案書ブランドテーマ (brand) ---------------------------------
+
+def test_settings_put_brand_roundtrip(client):
+    _make(client, "b1")
+    r = client.put("/api/projects/b1/settings", json={
+        "labor_cost_per_hour": 2100,
+        "brand": {"client_name": "アクメ物流", "company_name": "提案元ロジ",
+                  "accent_color": "#E2231A", "footer_note": "担当 山田"},
+    })
+    assert r.status_code == 200, r.text
+    brand = r.json()["settings"]["brand"]
+    assert brand["client_name"] == "アクメ物流"
+    assert brand["accent_color"] == "#E2231A"
+    # Coexists with the numeric knobs.
+    assert r.json()["settings"]["labor_cost_per_hour"] == 2100
+    # Survives a reload (round-trips on disk).
+    got = client.get("/api/projects/b1/settings").json()
+    assert got["brand"]["company_name"] == "提案元ロジ"
+
+
+def _png_bytes(color=(0xE2, 0x23, 0x1A)):
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGBA", (200, 60), (*color, 255)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_brand_logo_upload_and_persist(client):
+    _make(client, "b2")
+    r = client.post("/api/projects/b2/brand/logo",
+                    files={"file": ("logo.png", _png_bytes(), "image/png")})
+    assert r.status_code == 200, r.text
+    assert r.json()["logo_path"] == "brand/logo.png"
+    # The path is written into settings.brand.logo_path.
+    got = client.get("/api/projects/b2/settings").json()
+    assert got["brand"]["logo_path"] == "brand/logo.png"
+
+
+def test_brand_logo_upload_rejects_non_image(client):
+    _make(client, "b3")
+    r = client.post("/api/projects/b3/brand/logo",
+                    files={"file": ("notes.txt", b"just text, not an image", "text/plain")})
+    assert r.status_code == 400
+
+
+def test_brand_logo_survives_text_only_settings_save(client):
+    _make(client, "b4")
+    client.post("/api/projects/b4/brand/logo",
+                files={"file": ("logo.png", _png_bytes(), "image/png")})
+    # A later brand save that omits logo_path must not clear it (backend merges).
+    client.put("/api/projects/b4/settings", json={"brand": {"client_name": "客先"}})
+    got = client.get("/api/projects/b4/settings").json()
+    assert got["brand"]["logo_path"] == "brand/logo.png"
+    assert got["brand"]["client_name"] == "客先"
+
+
 # ---- sample / demo project --------------------------------------------------
 
 def test_sample_create_and_listed(client):

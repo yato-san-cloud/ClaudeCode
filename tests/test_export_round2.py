@@ -205,6 +205,101 @@ def test_scenarios_accepts_plain_list(tmp_path, layout_png):
     assert "シナリオ比較" in "".join(_pptx_text_runs(out))
 
 
+# --- 提案書ブランドテーマ (brand theme) -------------------------------------
+
+def _png_logo(path, color=(0xE2, 0x23, 0x1A)):
+    """A tiny real PNG to embed as a brand logo."""
+    from PIL import Image
+    Image.new("RGBA", (200, 60), (*color, 255)).save(path)
+    return path
+
+
+def test_brand_default_is_a_noop(tmp_path, layout_png):
+    """An absent/empty brand must export exactly the (colour-identical) baseline."""
+    plain = export_doc.build_pptx(FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png,
+                                  tmp_path / "plain.pptx")
+    default_brand = export_doc.build_pptx(
+        FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png, tmp_path / "brand0.pptx",
+        brand={"accent_color": "#2383E2"})  # the built-in accent
+    assert plain.is_file() and default_brand.is_file()
+    # Same text content (no 御中 / 提案元 added), and both are valid decks.
+    j = "".join(_pptx_text_runs(default_brand))
+    assert "御中" not in j and "提案元" not in j
+    assert _pptx_slide_count(default_brand) == _pptx_slide_count(plain)
+
+
+def test_brand_name_and_color_pptx(tmp_path, layout_png):
+    brand = {"company_name": "提案元ロジ", "client_name": "アクメ物流",
+             "accent_color": "#E2231A", "footer_note": "担当 山田 / 03-0000"}
+    out = export_doc.build_pptx(FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png,
+                                tmp_path / "brand.pptx", brand=brand)
+    assert out.is_file() and out.stat().st_size > 20_000
+    j = "".join(_pptx_text_runs(out))
+    assert "アクメ物流 御中" in j        # 宛先
+    assert "提案元：提案元ロジ" in j       # 提案元
+    assert "担当 山田 / 03-0000" in j      # footer note
+
+
+def test_brand_name_and_color_pdf(tmp_path, layout_png):
+    brand = {"company_name": "提案元ロジ", "client_name": "アクメ物流",
+             "accent_color": "#E2231A"}
+    out = export_doc.build_pdf(FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png,
+                               tmp_path / "brand.pdf", brand=brand)
+    assert out.is_file() and out.stat().st_size > 8_000
+
+
+def test_brand_logo_embeds_on_cover_pptx(tmp_path, layout_png):
+    logo = _png_logo(tmp_path / "logo.png")
+    out = export_doc.build_pptx(FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png,
+                                tmp_path / "logo.pptx",
+                                brand={"logo_path": str(logo)})
+    from pptx import Presentation
+    cover = Presentation(str(out)).slides[0]
+    pics = [sh for sh in cover.shapes if sh.shape_type == 13]  # 13 = PICTURE
+    assert len(pics) == 1  # the brand logo landed on the cover
+
+
+def test_brand_bogus_logo_does_not_crash(tmp_path, layout_png):
+    """A missing path and a corrupt image must both degrade silently."""
+    missing = export_doc.build_pptx(
+        FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png, tmp_path / "miss.pptx",
+        brand={"logo_path": "/no/such/logo.png", "accent_color": "not-a-color"})
+    assert missing.is_file()
+    # a real file whose *content* is not an image
+    corrupt = tmp_path / "corrupt.png"
+    corrupt.write_bytes(b"this is not a png")
+    out_pptx = export_doc.build_pptx(
+        FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png, tmp_path / "corrupt.pptx",
+        brand={"logo_path": str(corrupt)})
+    out_pdf = export_doc.build_pdf(
+        FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png, tmp_path / "corrupt.pdf",
+        brand={"logo_path": str(corrupt)})
+    assert out_pptx.is_file() and out_pdf.is_file()
+    from pptx import Presentation
+    pics = [sh for sh in Presentation(str(out_pptx)).slides[0].shapes
+            if sh.shape_type == 13]
+    assert len(pics) == 0  # corrupt image skipped, cover still renders
+
+
+def test_brand_from_model_settings(tmp_path, layout_png):
+    """When no explicit brand is passed, model.settings.brand is honoured."""
+    m = WarehouseModel(meta={"name": MODEL_NAME})
+    m.settings.brand.client_name = "モデル客先"
+    m.settings.brand.company_name = "モデル提案元"
+    out = export_doc.build_pptx(FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png,
+                                tmp_path / "model_brand.pptx", model=m)
+    j = "".join(_pptx_text_runs(out))
+    assert "モデル客先 御中" in j and "提案元：モデル提案元" in j
+
+
+def test_brand_xml_special_chars_pdf(tmp_path, layout_png):
+    """Brand text with reportlab-markup metacharacters must not break the PDF."""
+    out = export_doc.build_pdf(
+        FULL_KPIS, MODEL_NAME, PROVENANCE, layout_png, tmp_path / "xml.pdf",
+        brand={"company_name": "A & B <Corp>", "client_name": 'C<>&"D'})
+    assert out.is_file() and out.stat().st_size > 5_000
+
+
 # --- png2d tests -------------------------------------------------------------
 
 def test_png2d_renders_legible_normal_geometry(tmp_path):

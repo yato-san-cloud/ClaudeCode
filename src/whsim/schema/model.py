@@ -382,6 +382,23 @@ class Simulation(BaseModel):
     shift_hours_per_day: float = 8.0  # a work-day's length; makes cost robust to duration
 
 
+class Brand(BaseModel):
+    """提案書ブランドテーマ (proposal brand theme).
+
+    Lets the salesperson swap the exported PPTX/PDF proposal's brand so it is
+    client-ready ("そのまま出せる"): 宛先/自社名/アクセントカラー/ロゴ. Every field
+    defaults, so an unbranded model exports exactly as before ("never blocks on
+    missing data"); the default ``accent_color`` matches the built-in accent so a
+    default brand re-draws identical colours.
+    """
+
+    company_name: str = ""            # 自社名 (提案元) — shown as 提案元 on the cover
+    client_name: str = ""             # 宛先/顧客名 — shown as 「〇〇御中」 on the cover
+    accent_color: str = "#2383E2"     # hex accent; defaults to the built-in Notion-blue
+    logo_path: str = ""               # project-relative or absolute image path; "" = no logo
+    footer_note: str = ""             # optional cover footer line (会社情報/連絡先など)
+
+
 class Settings(BaseModel):
     """First-class cost / operations settings.
 
@@ -416,6 +433,8 @@ class Settings(BaseModel):
     # a section (入荷/出荷) arrives in batches at given hours (e.g. 08:00→70%/12:00→
     # 20%/15:00→10%, or a single noon batch). Empty = all volume from window start.
     batch_schedule: dict[str, list[dict]] = Field(default_factory=dict)
+    # 提案書ブランドテーマ: cover 宛先/自社名/アクセント/ロゴ for a client-ready export.
+    brand: Brand = Field(default_factory=Brand)
 
 
 class Scenario(BaseModel):

@@ -114,6 +114,43 @@
                      min="0" step="1000" inputmode="numeric" />
               <span class="unit">¥/月</span>
             </div>
+
+            <div class="settings-subhead" style="margin-top:10px;font-weight:600">
+              提案書ブランド
+            </div>
+            <p class="settings-hint" style="margin:2px 0 6px;font-size:12px;opacity:.7">
+              提案書（PPTX / PDF）の表紙に反映します。
+            </p>
+            <div class="settings-field">
+              <label for="set_brand_client">宛先（顧客名）</label>
+              <input id="set_brand_client" name="client_name" type="text"
+                     maxlength="80" placeholder="〇〇物流株式会社" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_company">自社名（提案元）</label>
+              <input id="set_brand_company" name="company_name" type="text"
+                     maxlength="80" placeholder="貴社名" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_accent">アクセント色</label>
+              <input id="set_brand_accent" name="accent_color" type="color"
+                     value="#2383E2" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_footer">表紙フッター</label>
+              <input id="set_brand_footer" name="footer_note" type="text"
+                     maxlength="120" placeholder="担当・連絡先など（任意）" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_logo">ロゴ画像</label>
+              <input id="set_brand_logo" type="file"
+                     accept="image/png,image/jpeg,image/gif" />
+            </div>
+            <button id="set_brand_logo_btn" type="button" style="width:100%;margin-top:2px">
+              ロゴをアップロード
+            </button>
+            <div id="set_brand_logo_status" class="status" role="status" aria-live="polite"></div>
+
             <button id="settingsSave" type="submit" class="primary" style="width:100%;margin-top:6px">保存</button>
             <div id="settingsStatus" class="status" role="status" aria-live="polite"></div>
           </form>

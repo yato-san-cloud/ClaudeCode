@@ -29,6 +29,15 @@ const NUMERIC = {
   set_agv: 'agv_cost_per_month',
 };
 const CURRENCY_FIELD = { set_currency: 'currency' };
+// 提案書ブランドテーマ (settings.brand): text fields + an accent colour input.
+// These nest under a `brand` object on save (the backend merges it).
+const BRAND_TEXT = {
+  set_brand_client: 'client_name',
+  set_brand_company: 'company_name',
+  set_brand_footer: 'footer_note',
+};
+const BRAND_ACCENT_ID = 'set_brand_accent';
+const DEFAULT_ACCENT = '#2383E2'; // matches the built-in export accent
 
 export function mountSettings(opts = {}) {
   const o = opts && typeof opts === 'object' ? opts : {};
@@ -50,6 +59,8 @@ export function mountSettings(opts = {}) {
   let project = null;
   let saving = false;
   let confirmRow = null; // inline re-run confirm (replaces window.confirm)
+  let logoPath = '';     // brand logo path (set by the upload endpoint); re-sent
+                         // on save so a text-only edit never clears the logo.
 
   // Inline, token-styled confirm row to replace the blocking native
   // window.confirm() — keeps the dark-Void aesthetic and is dismissible.
@@ -132,6 +143,42 @@ export function mountSettings(opts = {}) {
     if (status) status.textContent = msg || '';
   }
 
+  function setLogoStatus(msg) {
+    const el = $('set_brand_logo_status');
+    if (el) el.textContent = msg || '';
+  }
+
+  // Upload the selected brand logo. The backend stores it under the project and
+  // sets settings.brand.logo_path; we mirror that path locally so the next save
+  // (text edits) re-sends it rather than clearing it.
+  async function uploadLogo() {
+    if (!project) { toast('先にプロジェクトを開いてください。', 'info'); return; }
+    const input = $('set_brand_logo');
+    const f = input && input.files && input.files[0];
+    if (!f) { setLogoStatus('画像ファイルを選択してください。'); return; }
+    setLogoStatus('アップロード中…');
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch(`/api/projects/${encodeURIComponent(project)}/brand/logo`, {
+        method: 'POST', body: fd,
+      });
+      if (!res.ok) {
+        let detail = `アップロードに失敗しました (${res.status})`;
+        try { const j = await res.json(); if (j && j.detail) detail = j.detail; } catch (_e) { /* ignore */ }
+        throw new Error(detail);
+      }
+      const data = await res.json().catch(() => ({}));
+      logoPath = (data && typeof data.logo_path === 'string') ? data.logo_path : logoPath;
+      if (input) input.value = '';
+      setLogoStatus('ロゴを保存しました（表紙に表示）。');
+      toast('ロゴをアップロードしました。', 'ok');
+    } catch (err) {
+      setLogoStatus('エラー: ' + (err && err.message ? err.message : ''));
+      toast('ロゴのアップロードに失敗しました: ' + (err && err.message ? err.message : ''), 'error');
+    }
+  }
+
   function fillForm(data) {
     const d = data && typeof data === 'object' ? data : {};
     const cur = (typeof d.currency === 'string' && d.currency) ? d.currency : '¥';
@@ -152,6 +199,19 @@ export function mountSettings(opts = {}) {
       const v = d[key];
       el.value = (typeof v === 'number' && Number.isFinite(v)) ? String(v) : '';
     }
+    // 提案書ブランドテーマ (nested `brand` object).
+    const brand = (d.brand && typeof d.brand === 'object') ? d.brand : {};
+    for (const [id, key] of Object.entries(BRAND_TEXT)) {
+      const el = $(id);
+      if (el) el.value = (typeof brand[key] === 'string') ? brand[key] : '';
+    }
+    const accentEl = $(BRAND_ACCENT_ID);
+    if (accentEl) {
+      const c = (typeof brand.accent_color === 'string') ? brand.accent_color.trim() : '';
+      accentEl.value = /^#[0-9a-fA-F]{6}$/.test(c) ? c : DEFAULT_ACCENT;
+    }
+    logoPath = (typeof brand.logo_path === 'string') ? brand.logo_path : '';
+    setLogoStatus(logoPath ? 'ロゴ設定済み（表紙に表示）。' : '');
   }
 
   function collect() {
@@ -166,6 +226,16 @@ export function mountSettings(opts = {}) {
       const n = parseFloat(el.value);
       if (Number.isFinite(n)) out[key] = n;
     }
+    // 提案書ブランドテーマ → nested `brand` object (logo_path preserved as-is).
+    const brand = {};
+    for (const [id, key] of Object.entries(BRAND_TEXT)) {
+      const el = $(id);
+      if (el) brand[key] = el.value;
+    }
+    const accentEl = $(BRAND_ACCENT_ID);
+    if (accentEl && accentEl.value) brand.accent_color = accentEl.value;
+    if (logoPath) brand.logo_path = logoPath;
+    out.brand = brand;
     return out;
   }
 
@@ -191,9 +261,11 @@ export function mountSettings(opts = {}) {
 
   function clear() {
     project = null;
+    logoPath = '';
     enabled(false);
     fillForm({});
     setStatus('');
+    setLogoStatus('');
   }
 
   async function save(e) {
@@ -247,11 +319,14 @@ export function mountSettings(opts = {}) {
   }
   toggle.addEventListener('click', onToggleClick);
   form.addEventListener('submit', save);
+  const logoBtn = $('set_brand_logo_btn');
+  if (logoBtn) logoBtn.addEventListener('click', uploadLogo);
 
   // Remove listeners + any inline confirm (parity with cody's destroy()).
   function dispose() {
     toggle.removeEventListener('click', onToggleClick);
     form.removeEventListener('submit', save);
+    if (logoBtn) logoBtn.removeEventListener('click', uploadLogo);
     removeConfirmRow();
   }
 

@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+from xml.sax.saxutils import escape as _xml_escape
 
 from ._data import (
     DASH,
     GREEN,
     INK,
     LIGHT,
-    NOTION_BLUE,
     PRODUCT_NAME,
     RED,
     SUBTLE,
     _SCENARIO_METRICS,
     _SEV_COLOR,
     _assumptions_lines,
+    _brand_section,
     _date_str,
     _delta_str,
     _detail_rows,
@@ -36,14 +37,17 @@ from .fonts import _register_cjk_font
 
 def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
               png_path, out_path, *, scenarios=None, insights=None,
-              provenance=None, storage=None, model=None) -> Path:
+              provenance=None, storage=None, model=None, brand=None) -> Path:
     """Build a multi-section A4 proposal PDF and write it to `out_path`.
 
     Mirrors the PPTX sections: cover header -> executive summary (verdict + hero
     tiles) -> layout & congestion -> KPI detail -> 人員配置と工程フロー (if the
     optional ``model`` carries demand) -> scenario comparison (if any) ->
     recommendations (if any) -> methodology / provenance. Optional params are the
-    same as :func:`build_pptx`; missing inputs degrade gracefully.
+    same as :func:`build_pptx` — including ``brand`` (提案書ブランドテーマ): the cover
+    shows 宛先「〇〇御中」+ 提案元 + optional logo and the accent colour drives every
+    heading rule / table header. A default/absent brand keeps the built-in accent.
+    Missing inputs degrade gracefully.
     """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -68,13 +72,18 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     recs = _normalize_insights(insights)
     staff = _staffing_section(model)  # None when no demand / any failure
     font = _register_cjk_font()
+    # 提案書ブランドテーマ: `accent` (defaulting to the built-in Notion-blue) drives
+    # every heading rule / table header; the cover adds 宛先/提案元/ロゴ. A default/
+    # absent brand keeps the built-in colour, so an unbranded PDF is unchanged.
+    bstyle = _brand_section(brand, model)
+    accent = bstyle["accent"]
 
     def _rgb(t):
         return colors.Color(t[0] / 255, t[1] / 255, t[2] / 255)
 
     product_style = ParagraphStyle(
         "product", fontName=font, fontSize=11, leading=15,
-        textColor=_rgb(NOTION_BLUE),
+        textColor=_rgb(accent),
     )
     title_style = ParagraphStyle(
         "title", fontName=font, fontSize=24, leading=30, textColor=_rgb(INK),
@@ -82,9 +91,12 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     sub_style = ParagraphStyle(
         "sub", fontName=font, fontSize=11, leading=16, textColor=_rgb(SUBTLE),
     )
+    client_style = ParagraphStyle(  # 宛先「〇〇御中」 above the deck title
+        "client", fontName=font, fontSize=15, leading=20, textColor=_rgb(INK),
+    )
     section_style = ParagraphStyle(
         "section", fontName=font, fontSize=14, leading=20,
-        textColor=_rgb(NOTION_BLUE), spaceBefore=4, spaceAfter=4,
+        textColor=_rgb(accent), spaceBefore=4, spaceAfter=4,
     )
     verdict_ok = _is_ok(kpis)
     verdict_style = ParagraphStyle(
@@ -122,15 +134,41 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         # thin brand rule under the heading
         rule = Table([[""]], colWidths=[avail_w], rowHeights=[1.2])
         rule.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.2,
-                                   _rgb(NOTION_BLUE))]))
+                                   _rgb(accent))]))
         story.append(rule)
         story.append(Spacer(1, 2 * mm))
 
     # --- Cover header ---------------------------------------------------------
+    # Brand logo at the top of the cover. Guarded: a missing/corrupt image is
+    # skipped silently (the cover still renders).
+    if bstyle["logo_path"]:
+        try:
+            from PIL import Image as PILImage
+            with PILImage.open(bstyle["logo_path"]) as im:
+                iw, ih = im.size
+            lh = 16 * mm
+            lw = lh * (iw / ih) if ih else lh
+            if lw > 60 * mm:
+                lw = 60 * mm
+                lh = lw * (ih / iw) if iw else lh
+            story.append(RLImage(str(bstyle["logo_path"]), width=lw, height=lh))
+            story.append(Spacer(1, 2 * mm))
+        except Exception:  # noqa: BLE001 — brand logo is optional, never fatal
+            pass
     story.append(Paragraph(f"{PRODUCT_NAME} ・ 提案書 / PROPOSAL", product_style))
     story.append(Spacer(1, 1.5 * mm))
+    # 宛先「〇〇御中」 above the deck title (only when a client is named).
+    if bstyle["client_name"]:
+        story.append(Paragraph(f"{_xml_escape(bstyle['client_name'])} 御中",
+                               client_style))
+        story.append(Spacer(1, 1 * mm))
     story.append(Paragraph(f"{model_name} 倉庫運用シミュレーション提案", title_style))
     story.append(Paragraph(f"{_date_str()} ・ 概算見積り", sub_style))
+    if bstyle["company_name"]:
+        story.append(Paragraph(f"提案元：{_xml_escape(bstyle['company_name'])}",
+                               sub_style))
+    if bstyle["footer_note"]:
+        story.append(Paragraph(_xml_escape(bstyle["footer_note"]), foot_style))
     story.append(Spacer(1, 4 * mm))
 
     # --- Executive summary ----------------------------------------------------
@@ -149,7 +187,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         mt = Table([[cell[0]], [cell[1]]], colWidths=[avail_w / 4 - 3])
         mt.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), _rgb(LIGHT)),
-            ("LINEABOVE", (0, 0), (-1, 0), 2.5, _rgb(NOTION_BLUE)),
+            ("LINEABOVE", (0, 0), (-1, 0), 2.5, _rgb(accent)),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -184,7 +222,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     table.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), font),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("BACKGROUND", (0, 0), (-1, 0), _rgb(NOTION_BLUE)),
+        ("BACKGROUND", (0, 0), (-1, 0), _rgb(accent)),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("TEXTCOLOR", (0, 1), (-1, -1), _rgb(INK)),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _rgb(LIGHT)]),
@@ -209,7 +247,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         stbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("BACKGROUND", (0, 0), (-1, 0), _rgb(NOTION_BLUE)),
+            ("BACKGROUND", (0, 0), (-1, 0), _rgb(accent)),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("TEXTCOLOR", (0, 1), (-1, -1), _rgb(INK)),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _rgb(LIGHT)]),
@@ -240,7 +278,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
                        colWidths=[avail_w / 3 - 3])
             mt.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), _rgb(LIGHT)),
-                ("LINEABOVE", (0, 0), (-1, 0), 2.5, _rgb(NOTION_BLUE)),
+                ("LINEABOVE", (0, 0), (-1, 0), 2.5, _rgb(accent)),
                 ("TOPPADDING", (0, 0), (-1, -1), 5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -271,7 +309,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         ftbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("BACKGROUND", (0, 0), (-1, 0), _rgb(NOTION_BLUE)),
+            ("BACKGROUND", (0, 0), (-1, 0), _rgb(accent)),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("TEXTCOLOR", (0, 1), (-1, -1), _rgb(INK)),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _rgb(LIGHT)]),
@@ -317,7 +355,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         stbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("BACKGROUND", (0, 0), (-1, 0), _rgb(NOTION_BLUE)),
+            ("BACKGROUND", (0, 0), (-1, 0), _rgb(accent)),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _rgb(LIGHT)]),
             ("GRID", (0, 0), (-1, -1), 0.4, _rgb((0xD0, 0xDC, 0xEC))),

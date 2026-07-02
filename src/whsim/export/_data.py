@@ -263,6 +263,68 @@ def _png_exists(png_path) -> Path | None:
     return p if p.is_file() else None
 
 
+def _hex_to_rgb(value, default):
+    """Parse a ``#RRGGBB`` / ``RRGGBB`` (or short ``#RGB``) hex string to an
+    ``(r, g, b)`` tuple. Returns ``default`` for anything unparseable; never
+    raises, so a bogus brand colour degrades to the built-in accent."""
+    try:
+        s = str(value or "").strip().lstrip("#")
+    except (TypeError, ValueError):
+        return default
+    if len(s) == 3:  # short form (#abc → #aabbcc)
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6:
+        return default
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return default
+
+
+def _brand_section(brand=None, model=None) -> dict:
+    """Normalize proposal brand-theme settings into render-ready cover values.
+
+    ``brand`` may be a ``Brand`` pydantic model, a plain dict, or None; when None
+    and a ``model`` is given, ``model.settings.brand`` is used. Returns::
+
+        {"company_name", "client_name", "footer_note": str,   # may be empty
+         "accent": (r, g, b),                                   # never None
+         "logo_path": str}                                      # existing file, else ""
+
+    Pure and defensive: any bad/missing input degrades to the built-in accent and
+    an empty (skipped) logo — never raises. The logo file's *existence* is checked
+    here; a corrupt image is guarded at draw time by the builders."""
+    data: dict = {}
+    b = brand
+    if b is None and model is not None:
+        b = getattr(getattr(model, "settings", None), "brand", None)
+    if b is not None:
+        if hasattr(b, "model_dump"):
+            try:
+                data = b.model_dump()
+            except Exception:  # noqa: BLE001 — never let brand break an export
+                data = {}
+        elif isinstance(b, dict):
+            data = dict(b)
+    accent = _hex_to_rgb(data.get("accent_color"), NOTION_BLUE)
+    logo = ""
+    lp = data.get("logo_path")
+    if lp:
+        try:
+            p = Path(str(lp))
+            if p.is_file():
+                logo = str(p)
+        except (TypeError, ValueError, OSError):
+            logo = ""
+    return {
+        "company_name": str(data.get("company_name") or ""),
+        "client_name": str(data.get("client_name") or ""),
+        "footer_note": str(data.get("footer_note") or ""),
+        "accent": accent,
+        "logo_path": logo,
+    }
+
+
 def _storage_table(storage: dict | None):
     """設備機器数の取りまとめ for the proposal 保管設計 slide. Returns
     ``(header, rows, summary)`` or ``None`` when there's no storage estimate.

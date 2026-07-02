@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import shutil
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from whsim import templates
@@ -19,6 +19,7 @@ from ._common import (
     _headline_values,
     _open,
     _project_dir,
+    _read_upload,
     _safe_name,
     _sample_zip_path,
     _set_by_path,
@@ -371,6 +372,18 @@ def api_put_settings(name: str, payload: dict):
                     if f > 0:
                         ov[str(pk)] = f
             merged[key] = ov
+        elif key == "brand":
+            # 提案書ブランドテーマ: merge known string fields into the existing brand
+            # (so a logo_path set by the upload endpoint survives a text-only save);
+            # anything else is ignored. All values are coerced to strings.
+            cur_brand = merged.get("brand")
+            b = dict(cur_brand) if isinstance(cur_brand, dict) else {}
+            if isinstance(value, dict):
+                for bk in ("company_name", "client_name", "accent_color",
+                           "logo_path", "footer_note"):
+                    if bk in value and value[bk] is not None:
+                        b[bk] = str(value[bk])
+            merged["brand"] = b
         # Unknown keys: ignored (forward-compatible, never fatal).
     md["settings"] = merged
 
@@ -389,6 +402,53 @@ def api_put_settings(name: str, payload: dict):
     prov.mark("settings", Source.INTERVIEW)
     proj.save_provenance(prov)
     return {"ok": True, "settings": merged}
+
+
+# Accepted brand-logo image signatures (magic bytes). PNG/JPEG/GIF are what
+# python-pptx and reportlab reliably embed; a non-image upload is rejected here
+# so a bad file never reaches the export cover (which also guards it).
+_LOGO_SIGNATURES = (
+    b"\x89PNG\r\n\x1a\n",  # PNG
+    b"\xff\xd8\xff",       # JPEG
+    b"GIF87a", b"GIF89a",  # GIF
+)
+
+
+@router.post("/api/projects/{name}/brand/logo")
+async def api_upload_brand_logo(name: str, file: UploadFile):
+    """Store a proposal brand logo under ``projects/<name>/brand/logo.png`` and
+    point ``settings.brand.logo_path`` at it so the PPTX/PDF cover picks it up.
+
+    Tolerant: a non-image (or oversized) upload is a friendly 400/413, never a
+    500. The bytes are stored verbatim (the export sniffs image type by content,
+    not the filename), so a JPEG/GIF is fine even though the file is named .png."""
+    proj = _open(name)
+    data = await _read_upload(file)
+    if not any(data.startswith(sig) for sig in _LOGO_SIGNATURES):
+        raise HTTPException(400, "画像ファイル（PNG / JPEG / GIF）を指定してください。")
+    brand_dir = proj.root / "brand"
+    brand_dir.mkdir(parents=True, exist_ok=True)
+    rel = "brand/logo.png"
+    (proj.root / rel).write_bytes(data)
+
+    # Persist the project-relative path into settings.brand.logo_path (create the
+    # settings/brand subtrees as needed). Written straight to disk so it survives
+    # whether or not save_model would round-trip the key.
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    settings = md.get("settings")
+    if not isinstance(settings, dict):
+        settings = {}
+    brand = settings.get("brand")
+    if not isinstance(brand, dict):
+        brand = {}
+    brand["logo_path"] = rel
+    settings["brand"] = brand
+    md["settings"] = settings
+    proj.model_file.write_text(json.dumps(md, ensure_ascii=False, indent=2), "utf-8")
+    prov = proj.load_provenance()
+    prov.mark("settings", Source.INTERVIEW)
+    proj.save_provenance(prov)
+    return {"ok": True, "logo_path": rel}
 
 
 @router.get("/api/projects/{name}/workmethod/recommend")
