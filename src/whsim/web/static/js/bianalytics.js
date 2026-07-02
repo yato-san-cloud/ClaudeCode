@@ -1158,17 +1158,15 @@ export function mountBIAnalytics(el, opts = {}) {
         ${chipsRow()}
         <div class="bia-empty">
           <b>分析できる実データがまだありません。</b><br>
-          受注・出荷の明細を取り込むと、ABC・曜日・時間帯の分析がここに表示されます。
+          ①取込で受注・出荷の明細を取り込むと、ABC・曜日・時間帯の分析がここに表示されます。
           <div class="bia-empty-acts">
-            <span class="bia-cta primary" data-bia="import">← データを取込む</span>
-            <span class="bia-cta" data-bia="cta">① 取込へ</span>
+            <span class="bia-cta primary" data-bia="cta">①取込へ →</span>
           </div>
         </div>`;
       wireAsk();
-      const imp = root.querySelector('[data-bia="import"]');
-      if (imp) imp.onclick = () => nav('dataanalysis');
+      // Single, consistent route to the ETL home (matches 物量サマリ's goto-intake).
       const cta = root.querySelector('[data-bia="cta"]');
-      if (cta) cta.onclick = () => { window.location.hash = '#/取込'; toast('①取込でデータを取り込んでください。', 'info'); };
+      if (cta) cta.onclick = () => nav('overview');
       return;
     }
 

@@ -1,12 +1,17 @@
 // dataanalysis.js — 物量サマリタブ: WMS 実データ分析 (3PL エンジン統合のフロント)。
 // ②分析の着地点（分析ホーム）: 事実チップ＋「対話分析」「基礎物量」へのドリルを先頭に表示.
-// サンプル or アップロード → /api/analysis/* → KPI・インサイト・チャートを描画.
+// 導線は PROJECT-FIRST (B3): 既定で①取込済みのプロジェクト出荷データを自動分析
+// (/api/projects/<name>/analysis/bundle)。手元ファイル単体の下見は明示的な副導線
+// 「ファイル単体でためす（保存しません）」に格下げし、そこから reviewShipments()
+// で①取込へワンクリックで橋渡しする (import ロジックは複製しない)。
 // チャートは ECharts (市販BI級): 物量推移(エリア+dataZoom)・ABCパレート(棒+累積%)・
 // 曜日別ピーク(棒)・時間帯ピーク(棒)・時間帯別必要人員(エリア). 自己完結 (テーマは
 // CSS 変数を getComputedStyle で参照し、themechange で再描画).
 import { esc } from './util.js';
 import * as echarts from 'echarts';
 import { ABC_COLOR } from './constants.js';
+// ①取込の出荷ETL seam (副導線「このデータをプロジェクトへ取込」で再利用; 複製しない).
+import { reviewShipments } from './imports.js';
 
 // Insight-card border colours, keyed by severity (resolved from theme tokens).
 const SEV = {
@@ -211,6 +216,30 @@ function injectStyle() {
   .da-inv-rank{display:inline-block;min-width:16px;text-align:center;font-weight:700;font-size:var(--fs-micro,10.5px)}
   .da-inv-note{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);line-height:1.5}
   .da-inv-empty{padding:18px;text-align:center;color:var(--ink-tertiary,#8195a8);font-size:var(--fs-sm,12.5px)}
+  /* ── purpose line: this view's single explicit job (project-first) ── */
+  .da-purpose{font-size:var(--fs-xs,12px);color:var(--ink-secondary,#52677c);line-height:1.55;padding:0 2px}
+  .da-purpose b{color:var(--ink-primary,#16202e);font-weight:700}
+  /* ── 副導線: ファイル単体でためす (a clearly-secondary, collapsed sandbox) ── */
+  .da-try{border:1px dashed var(--line-strong,rgba(120,140,170,.3));border-radius:12px;
+    background:var(--bg-panel,#f7f6f3)}
+  .da-try>summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;user-select:none;
+    padding:9px 14px;font-size:var(--fs-sm,12.5px);font-weight:600;color:var(--ink-secondary,#52677c)}
+  .da-try>summary::-webkit-details-marker{display:none}
+  .da-try>summary::before{content:"🧪";font-size:var(--fs-sm,12.5px)}
+  .da-try>summary::after{content:"▸";margin-left:auto;color:var(--ink-tertiary,#8195a8);
+    transition:transform var(--dur-1,.12s) var(--ease-out,ease)}
+  .da-try[open]>summary::after{transform:rotate(90deg)}
+  .da-try-body{padding:2px 14px 14px;display:flex;flex-direction:column;gap:10px}
+  .da-try-note{font-size:var(--fs-xs,12px);color:var(--ink-tertiary,#8195a8);line-height:1.55}
+  .da-try-acts{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  /* ── standalone-result banner: this bundle is NOT saved to the project ── */
+  .da-standalone{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:color-mix(in srgb,var(--warn,#f5b05a) 12%,var(--bg-panel,#f7f6f3));
+    border:1px solid var(--warn,#f5b05a);border-radius:12px;padding:9px 14px}
+  .da-standalone .t{font-size:var(--fs-sm,12.5px);font-weight:700;color:var(--ink-primary,#16202e)}
+  .da-standalone .d{font-size:var(--fs-xs,12px);color:var(--ink-secondary,#52677c);min-width:0}
+  .da-standalone .sp{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  @media(prefers-reduced-motion:reduce){.da-try>summary::after{transition:none}}
   `;
   document.head.appendChild(s);
 }
@@ -501,6 +530,48 @@ function homeHeader(b) {
   </div>`;
 }
 
+// The view's single, explicit purpose line (project-first). Keeps the page's
+// job unambiguous per the phasehint/journey copy work — analyse the project's
+// own imported 出荷 data; the file-single sandbox is the labelled exception.
+function purposeLine() {
+  return `<div class="da-purpose"><b>②物量サマリ</b>：①取込で取り込んだ<b>出荷実績</b>を`
+    + `自動分析します（物量推移・ABC・ピーク・在庫）。データの追加・差し替えは<b>①取込</b>で。</div>`;
+}
+
+// 副導線: the demoted, clearly-labelled "try a file without saving" sandbox.
+// Collapsed by default so the project path stays front-and-centre. Offers both a
+// throwaway file analysis (/api/analysis/upload) and the bundled sample.
+function tryPanel() {
+  return `<details class="da-try">
+    <summary>ファイル単体でためす（プロジェクトに保存しません）</summary>
+    <div class="da-try-body">
+      <div class="da-try-note">手元の出荷CSV/Excelを、プロジェクトに取り込まずにその場で分析します。
+        気に入ったら結果画面の「このデータをプロジェクトへ取込」で①取込へ渡せます。</div>
+      <div class="da-try-acts">
+        <label class="da-btn" style="cursor:pointer">出荷ファイルを選ぶ
+          <input type="file" data-act="try-file" accept=".csv,.tsv,.txt,.xls,.xlsx,.json" hidden></label>
+        <button class="da-btn" data-act="sample">サンプルで試す</button>
+        <span class="da-hint">CSV / Excel（出荷実績）</span>
+      </div>
+    </div>
+  </details>`;
+}
+
+// Banner shown when the on-screen bundle is a file-single试算 (NOT project data).
+// Its primary CTA bridges into the existing ①取込 flow (reuses reviewShipments).
+function standaloneBanner(hasFile, fileName) {
+  const importLabel = hasFile
+    ? 'このデータをプロジェクトへ取込 →' : '①取込で実データを取り込む →';
+  return `<div class="da-standalone" role="status">
+    <span class="t">🧪 ファイル単体の試算</span>
+    <span class="d">「${esc(fileName)}」を分析中 — この結果は<b>プロジェクトに保存されていません</b>。</span>
+    <span class="sp">
+      <button class="da-btn primary" data-act="to-project">${importLabel}</button>
+      <button class="da-btn" data-act="back-project">プロジェクトのデータに戻る</button>
+    </span>
+  </div>`;
+}
+
 // A chart card whose body is an ECharts mount node (id) or a friendly empty
 // note. `span` is the grid track class (sp4/sp2/full); heights follow the
 // viewport so the dashboard reads at a glance (全体感) without scrolling.
@@ -543,6 +614,9 @@ export function mountDataAnalysis(el, opts = {}) {
   el.appendChild(root);
   let bundle = null;
   let projState = 'none'; // 'none' (no project) | 'nodata' (project, no demand yet) | 'data'
+  // File-single sandbox: the File currently analysed standalone (null = none /
+  // sample). Held so 「このデータをプロジェクトへ取込」 can hand the same file to ①取込.
+  let standaloneFile = null;
   const toast = opts.toast || (() => {});
   const getProject = opts.getProject || (() => null);
   // 在庫最適化 card state: query-only params (never persisted), cached last
@@ -606,38 +680,53 @@ export function mountDataAnalysis(el, opts = {}) {
   function render(b) {
     disposeCharts();
     const isProj = b && String(b.source || '').startsWith('project');
-    root.innerHTML =
-      homeHeader(b) +
-      `<div class="da-bar">
-         ${isProj
-    ? (b.orders_imported
-      ? `<span class="da-hint">①取込のデータを分析中${b.meta && b.meta.shipments && b.meta.shipments.filename
-        ? `: <b>${esc(b.meta.shipments.filename)}</b>` : ''}（データの追加・差替は①取込で）</span>`
-      : `<span class="da-hint">テンプレの<b>仮データ</b>を表示中 — ①取込で実データに差し替えられます</span>
-         <button class="da-btn" data-act="goto-intake">①取込へ →</button>`)
-    : '<button class="da-btn primary" data-act="sample">▶ サンプルで試す</button>' +
-      '<span class="da-hint">出荷WMSデータ(CSV/Excel)から物量推移・ABC・ピーク・在庫を分析</span>'}
-         ${b && b.source ? `<span class="da-src" style="margin-left:auto">source: ${b.source}</span>` : ''}
-       </div>` +
-      (b
-        ? kpiCards(b.kpis) +
-          insightsStrip(b.insights) +
-          mapPanel(b) +
-          `<div class="da-cards">
-             ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length), 'sp4')}
-             ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length), 'sp2')}
-             ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4')}
-             ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2')}
-             ${staffingCard(b.staffing)}
-             ${isProj ? invCardShell(invParams) : ''}
-           </div>`
-        : projState === 'nodata'
-          ? `<div class="da-empty"><b>まだ実データがありません</b>
-               <div>①取込で出荷実績（CSV / Excel）を取り込むと、ここに物量推移・ABC・ピークの全体像が表示されます。</div>
-               <button class="da-btn primary" data-act="goto-intake">①取込でデータを取り込む →</button></div>`
-          : `<div class="da-empty"><b>WMSデータを分析</b>
-               <div>「サンプルで試す」ですぐ確認できます。実データの取り込みは①取込から。</div>
-               <button class="da-btn" data-act="goto-intake">①取込へ →</button></div>`);
+    const isStandalone = b && !isProj;   // 'upload' / 'sample' — not project data
+
+    let html = purposeLine() + homeHeader(b);
+
+    // Context strip: a standalone試算 gets the 未保存 banner (+ import bridge);
+    // project data gets the slim provenance hint. No competing sample button.
+    if (isStandalone) {
+      html += standaloneBanner(!!standaloneFile, standaloneFile ? standaloneFile.name : 'サンプルデータ');
+    } else if (isProj) {
+      html += `<div class="da-bar">
+         ${b.orders_imported
+    ? `<span class="da-hint">①取込のデータを分析中${b.meta && b.meta.shipments && b.meta.shipments.filename
+      ? `: <b>${esc(b.meta.shipments.filename)}</b>` : ''}（データの追加・差替は①取込で）</span>`
+    : `<span class="da-hint">テンプレの<b>仮データ</b>を表示中 — ①取込で実データに差し替えられます</span>
+         <button class="da-btn" data-act="goto-intake">①取込へ →</button>`}
+         ${b.source ? `<span class="da-src" style="margin-left:auto">source: ${b.source}</span>` : ''}
+       </div>`;
+    }
+
+    if (b) {
+      html +=
+        kpiCards(b.kpis) +
+        insightsStrip(b.insights) +
+        mapPanel(b) +
+        `<div class="da-cards">
+           ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length), 'sp4')}
+           ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length), 'sp2')}
+           ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4')}
+           ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2')}
+           ${staffingCard(b.staffing)}
+           ${isProj ? invCardShell(invParams) : ''}
+         </div>`;
+    } else if (projState === 'nodata') {
+      html += `<div class="da-empty"><b>まだ実データがありません</b>
+           <div>①取込で出荷実績（CSV / Excel）を取り込むと、ここに物量推移・ABC・ピークの全体像が表示されます。</div>
+           <button class="da-btn primary" data-act="goto-intake">①取込でデータを取り込む →</button></div>`;
+    } else {
+      html += `<div class="da-empty"><b>WMSデータを分析</b>
+           <div>①取込で出荷実績を取り込むと、ここに全体像が表示されます。下の「ファイル単体でためす」で下見もできます。</div>
+           <button class="da-btn primary" data-act="goto-intake">①取込へ →</button></div>`;
+    }
+
+    // 副導線 sandbox — always available EXCEPT while a standalone result is on
+    // screen (the banner already owns that context, so no duplicate picker).
+    if (!isStandalone) html += tryPanel();
+
+    root.innerHTML = html;
     wire();
     mountAllCharts(b);
     mountInventory();
@@ -713,18 +802,62 @@ export function mountDataAnalysis(el, opts = {}) {
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     return r.json();
   }
+  const nav = (view) => document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view } }));
+
+  // 副導線: analyse a hand-picked file WITHOUT saving to the project. Keeps the
+  // File so 「このデータをプロジェクトへ取込」 can hand it to the ①取込 ETL later.
+  function analyzeFile(file) {
+    if (!file) return;
+    standaloneFile = file;
+    load(() => {
+      const fd = new FormData();
+      fd.append('shipments', file);
+      return getJSON('/api/analysis/upload', { method: 'POST', body: fd });
+    }, `「${file.name}」を分析中…`);
+  }
+  // Bridge the standalone試算 into the real project via the existing ①取込 seam
+  // (reviewShipments opens the 取込プレビュー dock; commit runs the normal ETL).
+  // No project ⇒ send the user to ①取込 to make one. Sample試算 has no file, so it
+  // just routes to ①取込 where real data is imported.
+  function importToProject() {
+    if (!getProject()) {
+      toast('先にプロジェクトを作成してください（①取込）。', 'error');
+      nav('overview');
+      return;
+    }
+    if (standaloneFile) {
+      reviewShipments(standaloneFile);   // reuse ①取込 ETL; no duplicated import logic
+      nav('overview');
+      toast('①取込のプレビューで取込を確定してください。', 'info');
+    } else {
+      nav('overview');
+      toast('①取込で実データ（CSV/Excel）を取り込んでください。', 'info');
+    }
+  }
+
   function wire() {
     // 分析ホーム drill links → sibling ② views (the shell listens for whsim:nav).
     root.querySelectorAll('.da-home-link[data-nav]').forEach((btn) => {
-      btn.onclick = () => document.dispatchEvent(
-        new CustomEvent('whsim:nav', { detail: { view: btn.dataset.nav } }));
+      btn.onclick = () => nav(btn.dataset.nav);
     });
+    // 副導線 sandbox: file picker + sample (both throwaway, never saved).
+    const tryFile = root.querySelector('[data-act="try-file"]');
+    if (tryFile) tryFile.onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) analyzeFile(f);
+    };
     const sample = root.querySelector('[data-act="sample"]');
-    if (sample) sample.onclick = () => load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
-    // 取込はここではしない: import lives in ①取込 (the single ETL home).
+    if (sample) sample.onclick = () => {
+      standaloneFile = null;   // sample bundle has no backing file
+      load(() => getJSON('/api/analysis/sample'), 'サンプルデータを分析中…');
+    };
+    // Standalone-result banner: bridge to ①取込 / return to project data.
+    const toProj = root.querySelector('[data-act="to-project"]');
+    if (toProj) toProj.onclick = importToProject;
+    const backProj = root.querySelector('[data-act="back-project"]');
+    if (backProj) backProj.onclick = () => loadProject();
     const intake = root.querySelector('[data-act="goto-intake"]');
-    if (intake) intake.onclick = () => document.dispatchEvent(
-      new CustomEvent('whsim:nav', { detail: { view: 'overview' } }));
+    if (intake) intake.onclick = () => nav('overview');
     const ttBtn = root.querySelector('[data-act="to-timetable"]');
     if (ttBtn) ttBtn.onclick = () => document.dispatchEvent(new CustomEvent(
       'whsim:load-timetable', { detail: { scenario: bundle && bundle.timetable_scenario } }));
@@ -756,6 +889,7 @@ export function mountDataAnalysis(el, opts = {}) {
   async function loadProject() {
     const proj = getProject();
     invData = null;   // a project switch / fresh import must re-derive 在庫最適化
+    standaloneFile = null;   // returning to project data clears the sandbox context
     if (!proj) { projState = 'none'; render(null); return; }
     await load(async () => {
       const b = await getJSON(`/api/projects/${encodeURIComponent(proj)}/analysis/bundle`);
