@@ -21,10 +21,16 @@ jobs:
         include:
           - os: windows-latest
             artifact: ChiroApp-Windows-x64
-          - os: macos-13
+            python-arch: x64
+          # Intel Mac 用: 専用Intelランナー(macos-13)は退役済みのため、
+          # Apple Silicon ランナー上で x86_64 Python (Rosetta 2) を使って
+          # x86_64 バイナリをクロスビルドする
+          - os: macos-latest
             artifact: ChiroApp-macOS-Intel
+            python-arch: x64
           - os: macos-latest
             artifact: ChiroApp-macOS-AppleSilicon
+            python-arch: arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -33,6 +39,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          architecture: ${{ matrix.python-arch }}
 
       - name: Install dependencies
         run: |
