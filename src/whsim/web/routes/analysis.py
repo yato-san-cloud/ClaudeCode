@@ -587,18 +587,53 @@ def api_analysis(name: str):
 
 
 @router.get("/api/projects/{name}/slotting")
-def api_slotting(name: str):
+def api_slotting(name: str, affinity_weight: float = 0.0, include_seasonality: int = 0):
     """棚割り: current weighted pick-distance, the optimisation preview (BEFORE vs
     AFTER + top SKU moves), and the storage-strategy recommendation — all analytic
     (no sim, no mutation). 'never blocks': a bare model returns placed=0 / strategy
-    available=false rather than an error."""
+    available=false rather than an error.
+
+    Additive knobs: ``affinity_weight`` (0–1) blends a 併買 co-pick pull into the
+    greedy (0 = the legacy result, byte-identical); ``include_seasonality=1`` adds a
+    月次 ABC-drift 入替候補リスト from the saved shipments table (recommendation only)."""
     from whsim import slottingopt, storagestrategy
-    model = _open(name).load_model()
-    plan = slottingopt.optimize(model)
-    return {
+    proj = _open(name)
+    model = proj.load_model()
+    aff = min(1.0, max(0.0, float(affinity_weight)))
+    base = slottingopt.optimize(model, affinity_weight=0.0)
+    plan = base if aff <= 0.0 else slottingopt.optimize(model, affinity_weight=aff)
+    out = {
         "optimization": slottingopt.plan_summary(plan),
         "strategy": storagestrategy.recommend(model),
+        "affinity": slottingopt.affinity_report(model, aff, baseline=base, plan=plan),
     }
+    if include_seasonality:
+        out["seasonality"] = _seasonality_block(proj)
+    return out
+
+
+def _seasonality_block(proj) -> dict:
+    """季節性: read the saved shipments table and hand (month, sku, qty) rows to the
+    analytic seasonality solver. Tolerant — a missing table / dateless data returns
+    the ``available=false`` shape rather than raising (never blocks)."""
+    from whsim import slottingopt
+    from whsim.analysis import tablestore
+    df = tablestore.load_saved_table(proj, "shipments")
+    if df is None or "date" not in df.columns or "sku" not in df.columns:
+        return {"available": False, "months_observed": 0, "rows": [],
+                "message": "月次の入替候補には、日付つき出荷データの取込が必要です。"}
+    try:
+        import pandas as pd
+        d = df.dropna(subset=["date"]).copy()
+        d["month"] = pd.to_datetime(d["date"], errors="coerce").dt.strftime("%Y-%m")
+        d = d.dropna(subset=["month"])
+        qty = d["qty"] if "qty" in d.columns else 1
+        records = list(zip(d["month"], d["sku"].astype(str),
+                           qty if "qty" in d.columns else [1] * len(d)))
+    except Exception:  # noqa: BLE001 — a malformed table must not block the view
+        return {"available": False, "months_observed": 0, "rows": [],
+                "message": "出荷データの日付を解釈できませんでした。"}
+    return slottingopt.seasonality(records)
 
 
 @router.post("/api/projects/{name}/slotting/apply")
@@ -609,7 +644,8 @@ def api_slotting_apply(name: str, payload: dict | None = None):
     from whsim import slottingopt
     proj = _open(name)
     model = proj.load_model()
-    plan = slottingopt.optimize(model)
+    aff = min(1.0, max(0.0, float((payload or {}).get("affinity_weight", 0.0) or 0.0)))
+    plan = slottingopt.optimize(model, affinity_weight=aff)
     placed = slottingopt.apply_plan(model, plan)
     proj.save_model(model)
     prov = proj.load_provenance()

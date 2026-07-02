@@ -59,6 +59,17 @@ function injectStyle() {
   .sl-btn[disabled]{opacity:.5;cursor:default}
   .sl-empty{padding:16px;border:1px dashed var(--line-strong);border-radius:12px;background:var(--bg-panel);
     color:var(--ink-secondary);font-size:13px}
+  .sl-aff{background:var(--bg-panel);border:1px solid var(--line-hair);border-radius:12px;padding:12px 16px;
+    display:flex;flex-direction:column;gap:8px}
+  .sl-aff .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .sl-aff input[type=range]{flex:1 1 180px;accent-color:var(--accent,#16C0DE)}
+  .sl-aff .wv{font-variant-numeric:tabular-nums;font-weight:800;min-width:44px;text-align:right;color:var(--ink-primary)}
+  .sl-aff .metric{font-size:12.5px;color:var(--ink-secondary)}
+  .sl-aff .metric b{color:var(--good,#2f9e44)}
+  .sl-note{font-size:11px;color:var(--ink-tertiary);line-height:1.5}
+  .sl-cls{font-size:10px;font-weight:800;color:#fff;border-radius:5px;padding:1px 6px}
+  .sl-spark{display:inline-flex;align-items:flex-end;gap:2px;height:20px}
+  .sl-spark i{display:block;width:6px;background:var(--accent,#16C0DE);border-radius:1px;opacity:.85}
   `;
   document.head.appendChild(s);
 }
@@ -74,12 +85,14 @@ export function mountSlotting(el, opts = {}) {
 
   let data = null;
   let busy = false;
+  let affinity = 0;  // 併買アフィニティ 0-1 (slider)
 
   async function load() {
     const name = getProject();
     if (!name) { renderEmpty('プロジェクトを開くと、棚割りを最適化します。'); return; }
     try {
-      data = await api(`/api/projects/${encodeURIComponent(name)}/slotting`);
+      const q = `affinity_weight=${affinity}&include_seasonality=1`;
+      data = await api(`/api/projects/${encodeURIComponent(name)}/slotting?${q}`);
       render();
     } catch (e) {
       renderEmpty('試算に失敗しました: ' + (e && e.message ? e.message : e));
@@ -120,6 +133,56 @@ export function mountSlotting(el, opts = {}) {
       ${rows}
     </table></div>
     <div class="sub" style="font-size:11px;color:var(--ink-tertiary)">上位${o.moves.length}件 / 全${fmt(o.moves_total)}件。Δ距離が負＝歩行短縮。</div>`;
+  }
+
+  function affinityBlock(a) {
+    const wv = Math.round(affinity * 100);
+    const slider = `<div class="sl-aff">
+      <div class="row">
+        <span style="font-weight:700;color:var(--ink-primary)">併買アフィニティ</span>
+        <input type="range" min="0" max="100" step="5" value="${wv}" data-act="aff"${busy ? ' disabled' : ''}>
+        <span class="wv">${wv}%</span>
+      </div>`;
+    let body;
+    if (!a || !a.available) {
+      body = `<div class="sl-note">${esc((a && a.message) || '出荷オーダー（明細）を取り込むと、同一オーダーで一緒に取られるSKUを近接配置します。')}</div>`;
+    } else {
+      const red = a.tour_reduction_pct || 0;
+      body = `<div class="metric">同時ピック距離（推定）：
+        <b>${fmt(a.tour_before_est)}</b> → <b>${fmt(a.tour_after_est)}</b> m・件
+        （<b>${pct(red)}</b> 短縮 ・ Δ ${fmt(a.tour_delta_est)}）</div>
+        <div class="sl-note">併買ペア ${fmt(a.pairs_considered)} 組を考慮。0% は従来のCOI/ABC結果と一致します。
+        ツアー距離は同一オーダー内SKU間の隣接性に基づく推定値です。</div>`;
+    }
+    return slider + body + '</div>';
+  }
+
+  function spark(trend) {
+    if (!trend || !trend.length) return '';
+    const max = Math.max(...trend.map((t) => t.qty), 1);
+    const bars = trend.map((t) => `<i style="height:${Math.max(2, t.qty / max * 20).toFixed(0)}px" title="${esc(t.month)}: ${fmt(t.qty)}"></i>`).join('');
+    return `<span class="sl-spark">${bars}</span>`;
+  }
+
+  function seasonalityBlock(se) {
+    if (!se || !se.available) {
+      return `<div class="sl-empty">${esc((se && se.message) || '季節入替候補：日付つき出荷データを取り込むと、月次のABC変動を提案します。')}</div>`;
+    }
+    if (!se.rows || !se.rows.length) {
+      return `<div class="sl-empty">観測 ${fmt(se.months_observed)} ヶ月：ABCクラスが変動したSKUはありません。</div>`;
+    }
+    const cls = (k) => `<span class="sl-cls" style="background:${k === 'A' ? '#e6550d' : k === 'B' ? '#3182bd' : '#9aa4b0'}">${k}</span>`;
+    const rows = se.rows.map((r) => `<tr>
+      <td class="l">${esc(r.sku)}</td>
+      <td class="l">${cls(r.old_class)} → ${cls(r.new_class)}</td>
+      <td class="l">${r.direction === 'up' ? '▲ 昇格（要ゴールデンゾーン）' : '▼ 降格（前面を空けられる）'}</td>
+      <td class="l">${spark(r.trend)}</td>
+    </tr>`).join('');
+    return `<h3 style="margin:6px 0 0;font-size:14px;color:var(--ink-primary)">季節入替候補（${esc(se.first_month)}→${esc(se.last_month)}）</h3>
+      <div style="overflow-x:auto"><table class="sl-tbl">
+      <tr><th class="l">SKU</th><th>クラス変化</th><th class="l">傾向</th><th class="l">月次</th></tr>
+      ${rows}</table></div>
+      <div class="sl-note">観測期間の月次傾向に基づく候補です（自動では入れ替えません）。</div>`;
   }
 
   function strategyBlock(s) {
@@ -168,12 +231,20 @@ export function mountSlotting(el, opts = {}) {
         ${o.unplaced ? `<div class="sl-card"><div class="k">容量不足・未割付</div><div class="v">${fmt(o.unplaced)}<span class="u">SKU</span></div></div>` : ''}
       </div>
       ${barsBlock(o)}
+      ${affinityBlock(data.affinity)}
       <div><button class="sl-btn" data-act="apply"${busy ? ' disabled' : ''}>${busy ? '適用中…' : '最適化して適用'}</button></div>
       <h3 style="margin:6px 0 0;font-size:14px;color:var(--ink-primary)">上位の棚割り変更</h3>
       ${movesTable(o)}
+      ${seasonalityBlock(data.seasonality)}
       ${strategyBlock(s)}`;
     const btn = root.querySelector('[data-act=apply]');
     if (btn) btn.addEventListener('click', apply);
+    const sl = root.querySelector('[data-act=aff]');
+    if (sl) {
+      const wv = sl.parentElement.querySelector('.wv');
+      sl.addEventListener('input', () => { if (wv) wv.textContent = sl.value + '%'; });
+      sl.addEventListener('change', () => { affinity = Number(sl.value) / 100; load(); });
+    }
   }
 
   async function apply() {
@@ -182,7 +253,8 @@ export function mountSlotting(el, opts = {}) {
     busy = true; render();
     try {
       const r = await api(`/api/projects/${encodeURIComponent(name)}/slotting/apply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ affinity_weight: affinity }),
       });
       toast(r.message || '最適化を適用しました。', 'ok');
       document.dispatchEvent(new CustomEvent('whsim:design-changed', { detail: { source: 'slotting' } }));
