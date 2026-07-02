@@ -42,6 +42,15 @@ RACK_TYPES: dict[str, dict] = {
     "asrs":      {"label": "自動倉庫(AS/RS)",  "bay": 0.8, "depth": 1.20, "levels": 12,
                   "capacity": 2000, "color": "#5cebff", "bays_per_unit": 1,
                   "unit_price": 600000, "life_months": 120,
+                  # Crane cycle-time knobs (FEM 9.851 / Bozer-White; see whsim.asrs).
+                  # Storage sizing uses these to size 台数(=クレーン) from throughput
+                  # demand instead of a flat capacity split. All overridable via the
+                  # 保管試算 params; defaulted so an AS/RS estimate never blocks.
+                  "crane_vx": 2.5,        # クレーン水平速度 (m/s)
+                  "crane_vy": 0.5,        # 昇降(ホイスト)速度 (m/s)
+                  "crane_tfix": 8.0,      # 1回のP/D(荷役)固定時間 (s)
+                  "crane_rack_len_m": 45.0,     # 1アイル ラック長 L (m)
+                  "crane_rack_height_m": 18.0,  # ラック高さ H (m)
                   "desc": "高層自動倉庫。クレーン入出庫。"},
     # ---- catalog round 2 (LOGISTEED 保管機器事例: メザニン/移動ラック/ハンガー) ----
     "mezzanine": {"label": "メザニン",          "bay": 2.0, "depth": 2.00, "levels": 2,

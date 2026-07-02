@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from whsim import racktypes
+from whsim import asrs, racktypes
 from whsim.schema.model import WarehouseModel
 
 TSUBO_M2 = 3.305785  # 1坪 = 3.305785 ㎡ (deck: 1坪≒3.3㎡)
@@ -27,17 +27,63 @@ DEFAULTS = {
     "aisle_factor": 1.9,    # 通路・荷役の余裕 (設備占有坪 × これ = 必要坪)
     "office_tsubo": 0.0,    # 事務所など固定坪 (任意)
     "bulk_cases": 24,       # この保管ケース数を超えると bulk 扱い → パレット保管
+    # bulk C品の受け皿ラック: 既定はパレット。"asrs" を選ぶと大ロット低頻度品を
+    # 自動倉庫に寄せ、クレーン台数を FEM 9.851 サイクルタイムで算出する。
+    "bulk_rack_type": "pallet",
+    "working_hours_per_day": 8.0,   # 稼働時間/日 (AS/RS スループット換算に使用)
+    # AS/RS クレーン諸元。None → racktypes の asrs プリセット既定にフォールバック。
+    "crane_vx": None, "crane_vy": None, "crane_tfix": None,
+    "crane_rack_len_m": None, "crane_rack_height_m": None,
+    "asrs_command": "dual",         # クレーン台数の算定基準: "dual" | "single"
 }
 
-def _pick_rack(abc: str, cases: int, bulk_cases: float) -> str:
+_BULK_ALLOWED = {"pallet", "nestainer", "asrs"}  # bulk C品を寄せてよい保管方法
+
+
+def _pick_rack(abc: str, cases: int, bulk_cases: float,
+               bulk_rack: str = "pallet") -> str:
     """保管方法の選定 (出荷形態/頻度ベース、説明可能なルール):
     A品=高頻度→流動棚(FIFO ピック面)、B品=中量棚、C品=低頻度で大ロットなら
-    パレット(bulk)・小ロットなら中量棚。頻度(ABC)を主、ロット(cases)を従にする。"""
+    bulk保管(既定パレット、任意で自動倉庫)・小ロットなら中量棚。頻度(ABC)を主、
+    ロット(cases)を従にする。"""
     if abc == "A":
         return "flow"
     if abc == "B":
         return "medium"
-    return "pallet" if cases >= bulk_cases else "medium"  # C品
+    bulk = bulk_rack if bulk_rack in _BULK_ALLOWED else "pallet"
+    return bulk if cases >= bulk_cases else "medium"  # C品
+
+
+def _asrs_crane_sizing(p: dict, out_cases_total: float, wdays: int) -> dict:
+    """FEM 9.851 crane cycle model → sizing dict for the AS/RS bucket.
+
+    Reads the crane諸元 from the params (falling back to the racktypes ``asrs``
+    preset), turns the bucket's outbound case flow into a retrieval demand
+    (unit-loads/h over the working day) and returns ``whsim.asrs.size_asrs``.
+    Pure; every field defaulted so it never blocks."""
+    preset = racktypes.get("asrs")
+
+    def _num(key: str, fallback: float) -> float:
+        v = p.get(key)
+        if v is None:
+            v = preset.get(key, fallback)
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return float(fallback)
+
+    vx = max(0.01, _num("crane_vx", 2.5))
+    vy = max(0.01, _num("crane_vy", 0.5))
+    t_fix = max(0.0, _num("crane_tfix", 8.0))
+    L = max(0.0, _num("crane_rack_len_m", 45.0))
+    H = max(0.0, _num("crane_rack_height_m", 18.0))
+    hours = max(0.1, float(p.get("working_hours_per_day") or 8.0))
+    command = "single" if p.get("asrs_command") == "single" else "dual"
+
+    # Retrieval demand: outbound unit-loads (≈ cases) per operating hour. Steady
+    # inventory ⇒ put-away balances retrieval, so in ≈ out (size_asrs default).
+    out_per_h = (out_cases_total / max(1, wdays)) / hours
+    return asrs.size_asrs(L, H, vx, vy, t_fix, out_per_h, command=command)
 
 
 def _working_days(model: WarehouseModel) -> int:
@@ -62,6 +108,7 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
     tsubo_rate = max(0.0, float(p["tsubo_rate"]))
     aisle = max(1.0, float(p["aisle_factor"]))
     bulk_cases = max(1.0, float(p["bulk_cases"]))
+    bulk_rack = p.get("bulk_rack_type") or "pallet"
 
     wdays = _working_days(model)
     shipped = _shipped_by_sku(model)
@@ -85,22 +132,27 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
 
         # 保管方法: ABC(頻度)を主、ロット(cases)を従に選ぶ。
         abc = it.abc_class if it.abc_class in ("A", "B", "C") else "C"
-        rack_id = _pick_rack(abc, cases, bulk_cases)
+        rack_id = _pick_rack(abc, cases, bulk_cases, bulk_rack)
 
         rt = racktypes.get(rack_id)
         cap = max(1, int(rt.get("capacity", 1)))
         cells = max(1, math.ceil(pieces / cap))   # 間口 needed for this SKU
+        # 出庫フロー: SKUの総出荷ピース→ケース換算 (AS/RS スループット算定に使う)。
+        out_cases = shipped.get(it.sku, 0.0) / case_qty
 
-        b = buckets.setdefault(rack_id, {"items": 0, "pieces": 0.0, "cases": 0, "cells": 0})
+        b = buckets.setdefault(rack_id, {"items": 0, "pieces": 0.0, "cases": 0,
+                                         "cells": 0, "out_cases": 0.0})
         b["items"] += 1
         b["pieces"] += pieces
         b["cases"] += cases
         b["cells"] += cells
+        b["out_cases"] += out_cases
 
     # Finalise each bucket: 台数 / 坪数 / pallets, in racktypes ORDER.
     by_method = []
     tsubo_storage = 0.0
     equip_yen = 0.0
+    asrs_block = None
     for rack_id in racktypes.ORDER:
         b = buckets.get(rack_id)
         if not b:
@@ -110,6 +162,15 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
         levels = max(1, int(rt.get("levels", 1)))
         cells_per_unit = bays_per_unit * levels
         units = max(1, math.ceil(b["cells"] / cells_per_unit))   # 台数(基)
+        crane = None
+        if rack_id == "asrs":
+            # 自動倉庫の 台数 = クレーン(=アイル)数。保管容量で決まる台数と、
+            # FEM 9.851 サイクルタイムのスループットで決まる台数の大きい方が律速。
+            crane = _asrs_crane_sizing(p, b.get("out_cases", 0.0), wdays)
+            crane["cranes_capacity"] = units          # 容量律速のアイル数
+            crane["cranes_throughput"] = crane["cranes"]  # スループット律速
+            units = max(units, crane["cranes"])
+            crane["cranes"] = units                   # 最終採用台数
         unit_m2 = float(rt["bay"]) * bays_per_unit * float(rt["depth"])
         unit_tsubo = unit_m2 / TSUBO_M2
         footprint_tsubo = units * unit_tsubo * aisle
@@ -118,7 +179,7 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
         life = max(1, int(rt.get("life_months", 60)))
         method_yen = units * unit_price / life
         equip_yen += method_yen
-        by_method.append({
+        row = {
             "rack_type": rack_id,
             "label": rt.get("label", rack_id),
             "color": rt.get("color", "#888"),
@@ -130,7 +191,11 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
             "footprint_tsubo": round(footprint_tsubo, 1),
             "unit_price": int(unit_price),
             "monthly_yen": round(method_yen),
-        })
+        }
+        if crane is not None:
+            row["asrs"] = crane           # E(SC)/E(DC)・cycles/h・クレーン台数
+            asrs_block = crane
+        by_method.append(row)
 
     tsubo_total = tsubo_storage + max(0.0, float(p["office_tsubo"]))
     warehouse_yen = tsubo_total * tsubo_rate
@@ -140,9 +205,11 @@ def estimate_storage(model: WarehouseModel, params: dict | None = None) -> dict:
         "has_data": sized_skus > 0,
         "params": {"stock_days": stock_days, "tsubo_rate": int(tsubo_rate),
                    "aisle_factor": aisle, "office_tsubo": float(p["office_tsubo"]),
-                   "bulk_cases": int(bulk_cases)},
+                   "bulk_cases": int(bulk_cases), "bulk_rack_type": bulk_rack},
         "working_days": wdays,
         "by_method": by_method,
+        # AS/RS を使う構成のときだけ埋まる (FEM 9.851 クレーンサイクル)。それ以外は None。
+        "asrs": asrs_block,
         "totals": {
             "skus": sized_skus,
             "cells": sum(m["cells"] for m in by_method),

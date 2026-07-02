@@ -205,6 +205,7 @@ export function mountStorage(el, opts = {}) {
       <div class="st-sec"><h3>設備機器数 取りまとめ
         <button type="button" class="st-csv" data-csv>⤓ CSV出力</button></h3>
         <div data-tbl></div></div>
+      ${asrsSection()}
       <div class="st-apply">
         <div class="st-apply-t">この什器構成を保管ゾーンに自動配置します（既存の棚は置き換え。配置後はレイアウトで自由に調整できます）。</div>
         <button type="button" class="st-apply-btn" data-apply>⛏ この設備をレイアウトに配置 →</button>
@@ -294,6 +295,31 @@ export function mountStorage(el, opts = {}) {
           <td class="m">${fmt(t.cells)}</td><td class="m">${fmt(t.units)}</td>
           <td class="m">${fmt(t.tsubo_storage, 1)}</td><td class="m">${yen(c.equipment_yen)}</td></tr>
       </tbody></table>`;
+  }
+
+  // AS/RS crane cycle-time panel — only when the estimate used 自動倉庫 (data.asrs
+  // present). Surfaces the FEM 9.851 / Bozer-White E(SC)/E(DC), throughput and the
+  // crane count (capacity-bound vs throughput-bound). Additive: absent ⇒ ''.
+  function asrsSection() {
+    const a = data && data.asrs;
+    if (!a) return '';
+    const cells = [
+      ['単一命令 E(SC)', `${fmt(a.e_sc_s, 1)} 秒`, `${fmt(a.sc_cycles_per_h, 1)} 回/h`],
+      ['複合命令 E(DC)', `${fmt(a.e_dc_s, 1)} 秒`, `${fmt(a.dc_cycles_per_h, 1)} 回/h（${fmt(a.dc_pallets_per_h, 1)} P/h）`],
+      ['出庫デマンド', `${fmt(a.demand_out_per_h, 1)} P/h`, `稼働換算`],
+      ['必要クレーン', `${fmt(a.cranes)} 基`, `容量${fmt(a.cranes_capacity)}／能力${fmt(a.cranes_throughput)}`],
+    ];
+    const rows = cells.map((r) => `<tr><td>${esc(r[0])}</td>
+      <td class="m">${esc(r[1])}</td><td class="m">${esc(r[2])}</td></tr>`).join('');
+    return `<div class="st-sec"><h3>自動倉庫 クレーンサイクル（FEM 9.851 / Bozer-White）</h3>
+      <table class="st-tbl">
+        <thead><tr><th>指標</th><th>時間/台数</th><th>スループット</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      <div class="st-vt-note" style="padding:8px 14px">
+        形状係数 T=${fmt(a.shape_T_s, 1)}s・b=${fmt(a.shape_b, 2)}（L=${fmt(a.L_m, 1)}m×H=${fmt(a.H_m, 1)}m、
+        水平${fmt(a.vx_mps, 2)}／昇降${fmt(a.vy_mps, 2)} m/s、P/D ${fmt(a.t_fix_s, 1)}s）。
+        台数は 保管容量 と クレーン能力(${esc(a.command === 'single' ? '単一命令' : '複合命令')})の大きい方。
+      </div></div>`;
   }
 
   function exportCsv() {
