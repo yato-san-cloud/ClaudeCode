@@ -15,9 +15,11 @@ class FakeProvider(DimensionProvider):
         self.name = name
         self.table = table
         self.calls = 0
+        self.hints = []
 
-    def lookup(self, jan):
+    def lookup(self, jan, title_hint=None):
         self.calls += 1
+        self.hints.append(title_hint)
         return self.table.get(jan)
 
 
@@ -108,6 +110,23 @@ def test_remote_calls_are_throttled():
 
     assert provider.calls == 2
     assert elapsed >= 0.07  # 2回目の呼び出しまで最低間隔が空く
+
+
+def test_title_hint_flows_to_providers():
+    p1 = FakeProvider("p1", {})
+    pipe = LookupPipeline([p1])
+    pipe.lookup("111", title_hint="うちの商品A")
+    assert p1.hints == ["うちの商品A"]
+
+
+def test_earlier_provider_title_becomes_hint():
+    # ヒント無しで開始 → p1が商品名だけ発見 → p2にはその商品名がヒントとして渡る
+    p1 = FakeProvider("p1", {"111": ProductInfo("111", "p1", title="発見商品名", dimensions=None)})
+    p2 = FakeProvider("p2", {})
+    pipe = LookupPipeline([p1, p2])
+    pipe.lookup("111")
+    assert p1.hints == [None]
+    assert p2.hints == ["発見商品名"]
 
 
 def test_local_calls_are_not_throttled():

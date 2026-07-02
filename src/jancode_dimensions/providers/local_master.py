@@ -100,5 +100,5 @@ class LocalMasterProvider(DimensionProvider):
             return parse_dimensions(row.get(text_col))
         return None
 
-    def lookup(self, jan: str) -> Optional[ProductInfo]:
+    def lookup(self, jan: str, title_hint: Optional[str] = None) -> Optional[ProductInfo]:
         return self._table.get(_normalize_jan(jan))

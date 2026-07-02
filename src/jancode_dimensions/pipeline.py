@@ -55,8 +55,10 @@ class LookupPipeline:
         if wait > 0:
             time.sleep(wait)
 
-    def lookup(self, jan_raw: object) -> LookupResult:
+    def lookup(self, jan_raw: object, title_hint: Optional[str] = None) -> LookupResult:
         jan = normalize_jan(jan_raw)
+        hint = str(title_hint).strip() if title_hint is not None else ""
+        hint = hint or None
 
         # 1) キャッシュ。verified(人手確認済み)、もしくはサイズ取得済みなら再利用。
         if self.cache is not None:
@@ -68,17 +70,21 @@ class LookupPipeline:
 
         # 2) プロバイダを順に試す。サイズが取れた時点で確定。
         # リモートAPIは結果の成否によらず呼び出し間隔を保証する(レート制限対策)。
+        # 商品名ヒントが無い場合、先行プロバイダで判明した商品名を後続へ引き継ぐ
+        # (例: 楽天で商品名だけ取れた → AI推定プロバイダがそれを使う)。
         last_seen: Optional[ProductInfo] = None
         for provider in self.providers:
             remote = getattr(provider, "is_remote", False)
             if remote:
                 self._throttle()
-            info = provider.lookup(jan)
+            info = provider.lookup(jan, title_hint=hint)
             if remote:
                 self._last_remote_ts = time.monotonic()
             if info is None:
                 continue
             last_seen = info
+            if hint is None and info.title:
+                hint = info.title
             if info.dimensions is not None:
                 if self.cache is not None:
                     self.cache.put(info)

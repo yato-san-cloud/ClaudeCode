@@ -32,7 +32,7 @@ class RakutenProvider(DimensionProvider):
                 "楽天アプリIDが未設定です。環境変数 RAKUTEN_APP_ID を設定してください。"
             )
 
-    def lookup(self, jan: str) -> Optional[ProductInfo]:
+    def lookup(self, jan: str, title_hint: Optional[str] = None) -> Optional[ProductInfo]:
         import requests  # 遅延import: APIを使うときだけ依存を要求する
 
         params = {

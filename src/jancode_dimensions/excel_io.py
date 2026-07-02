@@ -61,6 +61,14 @@ class ExcelSheet:
             f" 既存ヘッダ: {self.header_names()}"
         )
 
+    def find_column(self, *names: str) -> Optional[int]:
+        """候補名のいずれかに一致するヘッダの列番号を返す。無ければ None。"""
+        for name in names:
+            col = self._headers.get(_norm(name))
+            if col is not None:
+                return col
+        return None
+
     def header_names(self) -> List[str]:
         labels = []
         for col in range(1, self._ws.max_column + 1):

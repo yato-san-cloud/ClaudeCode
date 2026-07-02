@@ -1,6 +1,7 @@
 # 実行に必要な依存
 openpyxl>=3.1     # Excel(.xlsx) の読み書き
 requests>=2.31    # 楽天/Yahoo API 呼び出し(local プロバイダのみなら不要)
+anthropic>=0.40   # AI推定プロバイダ(--providers ai)使用時のみ必要
 
 # 開発・テスト用
 pytest>=7.0

@@ -21,11 +21,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 処理の流れ: Excel(JAN列) → `LookupPipeline` → SQLiteキャッシュ → プロバイダ群(指定順にフォールバック) → 出力列へ転記。
 
 - `src/jancode_dimensions/cli.py` — argparse CLI(`process` サブコマンド)。行ごとに pipeline を呼び、出力列へ書き込む
-- `pipeline.py` — 探索順序(キャッシュ→プロバイダ)、JAN正規化(`normalize_jan`: Excel由来の`.0`/空白/ハイフンを吸収)、リモート呼び出しのスロットリング(`--sleep`)
+- `pipeline.py` — 探索順序(キャッシュ→プロバイダ)、JAN正規化(`normalize_jan`: Excel由来の`.0`/空白/ハイフンを吸収)、リモート呼び出しのスロットリング(`--sleep`)、商品名ヒント(title_hint)の引き継ぎ(入力Excelの`商品名`列→先行プロバイダで判明した商品名→後続プロバイダの順)
 - `cache.py` — SQLiteキャッシュ。`verified`(人手確認済み)の行はサイズ無しでもオンライン再検索より優先される
 - `providers/` — 取得元。`base.DimensionProvider` の `lookup(jan) -> ProductInfo | None` を実装して追加する。リモートAPIを叩くものは `is_remote = True` を立てるとスロットリング対象になる。通信エラーは握りつぶして None を返す(バッチを止めない)契約
   - `local_master.py` — 自社マスタCSV(個別列 or サイズ文字列列、mm列名はcmへ換算)
   - `rakuten.py` / `yahoo.py` — 商品検索APIの説明文からテキスト抽出(要APIキー、環境変数 `RAKUTEN_APP_ID` / `YAHOO_APP_ID`)
+  - `ai_estimate.py` — Claude API(structured outputs)で商品名から推定。商品名(title_hint)必須、無ければ推定しない。結果は備考列で「AI推定(要確認)」と明示。テストはクライアントをスタブ注入して行う(実API呼び出し禁止)
 - `parser.py` — 「幅30×奥行20×高さ10cm」等の自由テキストから寸法抽出。ラベル付き表記を3連表記より優先
 - `excel_io.py` — .xlsx読み書き。JAN列ヘッダの自動判定と、出力列の冪等な確保(同名列は再利用し、再実行しても列が増えない)
 

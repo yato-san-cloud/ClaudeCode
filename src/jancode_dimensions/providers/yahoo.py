@@ -32,7 +32,7 @@ class YahooProvider(DimensionProvider):
                 "Yahoo アプリIDが未設定です。環境変数 YAHOO_APP_ID を設定してください。"
             )
 
-    def lookup(self, jan: str) -> Optional[ProductInfo]:
+    def lookup(self, jan: str, title_hint: Optional[str] = None) -> Optional[ProductInfo]:
         import requests  # 遅延import
 
         params = {"appid": self.app_id, "jan_code": jan, "results": 1}

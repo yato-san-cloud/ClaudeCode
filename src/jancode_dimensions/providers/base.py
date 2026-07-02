@@ -19,8 +19,11 @@ class DimensionProvider(ABC):
     is_remote: bool = False
 
     @abstractmethod
-    def lookup(self, jan: str) -> Optional[ProductInfo]:
+    def lookup(self, jan: str, title_hint: Optional[str] = None) -> Optional[ProductInfo]:
         """JANに対応する商品情報を返す。
+
+        title_hint には入力データや先行プロバイダで判明した商品名が渡される。
+        JANだけでは解決できないプロバイダ(AI推定など)が利用する。不要なら無視してよい。
 
         - 商品が見つかりサイズも取れた場合: dimensions 付きの ProductInfo
         - 商品は見つかったがサイズ不明: dimensions=None の ProductInfo

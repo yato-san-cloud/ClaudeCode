@@ -21,12 +21,18 @@ from typing import List
 from .cache import Cache
 from .excel_io import ExcelSheet
 from .pipeline import LookupPipeline
-from .providers import LocalMasterProvider, RakutenProvider, YahooProvider
+from .providers import (
+    AiEstimateProvider,
+    LocalMasterProvider,
+    RakutenProvider,
+    YahooProvider,
+)
 
 _PROVIDER_FACTORIES = {
     "local": lambda args: LocalMasterProvider(args.master),
     "rakuten": lambda args: RakutenProvider(args.rakuten_app_id),
     "yahoo": lambda args: YahooProvider(args.yahoo_app_id),
+    "ai": lambda args: AiEstimateProvider(model=args.ai_model),
 }
 
 
@@ -50,6 +56,8 @@ def cmd_process(args) -> int:
 
     sheet = ExcelSheet(args.input, sheet=args.sheet)
     jan_col = sheet.find_jan_column(args.jan_column)
+    # AI推定などのヒントとして入力の商品名列を使う(照合商品名は対象外)。
+    title_col = sheet.find_column("商品名", "品名", "title", "name")
     out_cols = sheet.ensure_output_columns()
     now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -61,7 +69,14 @@ def cmd_process(args) -> int:
         if args.limit and processed >= args.limit:
             break
         processed += 1
-        result = pipeline.lookup(jan_value)
+        title_hint = sheet.get(row, title_col) if title_col else None
+        result = pipeline.lookup(jan_value, title_hint=title_hint)
+
+        notes = []
+        if result.from_cache:
+            notes.append("キャッシュ")
+        if result.source == "ai_estimate":
+            notes.append("AI推定(要確認)")
 
         # 取得元・照合商品名・取得日時は成否によらず記録する。
         sheet.set(row, out_cols["取得元"], result.source or "")
@@ -74,7 +89,7 @@ def cmd_process(args) -> int:
             sheet.set(row, out_cols["奥行(cm)"], dims.depth_cm)
             sheet.set(row, out_cols["高さ(cm)"], dims.height_cm)
             sheet.set(row, out_cols["三辺合計(cm)"], dims.total_cm)
-            sheet.set(row, out_cols["備考"], "キャッシュ" if result.from_cache else "")
+            sheet.set(row, out_cols["備考"], "/".join(notes))
         else:
             sheet.set(row, out_cols["備考"], "サイズ取得できず")
 
@@ -113,6 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--master", help="自社マスタCSVのパス(local プロバイダ用)")
     p.add_argument("--rakuten-app-id", help="楽天アプリID(未指定時は環境変数 RAKUTEN_APP_ID)")
     p.add_argument("--yahoo-app-id", help="Yahoo アプリID(未指定時は環境変数 YAHOO_APP_ID)")
+    p.add_argument("--ai-model", default="claude-opus-4-8",
+                   help="ai プロバイダで使うClaudeモデルID(既定: claude-opus-4-8。"
+                        "安価にするなら claude-haiku-4-5)")
     p.add_argument("--cache", default=".jancode_cache.sqlite", help="キャッシュDBのパス")
     p.add_argument("--no-cache", action="store_true", help="キャッシュを使わない")
     p.add_argument("--sleep", type=float, default=0.0,
