@@ -386,8 +386,8 @@ export function mountOverview(el, opts = {}) {
       return { label: '出荷実績を取り込む ↓', act: 'focus', cat: 'actual' };
     }
     if (!d.hasItems) return { label: '不足データを生成', act: 'generate' };
-    if (!d.hasRun) return { label: '設計を始める →', nav: 'design' };
-    return { label: '結果を確認 →', nav: 'analysis' };
+    if (!d.hasRun) return { label: '③設計を始める →', nav: 'design' };
+    return { label: '④検証で結果を確認 →', nav: 'analysis' };
   }
 
   // ---- build: empty state ----------------------------------------------------
@@ -396,7 +396,7 @@ export function mountOverview(el, opts = {}) {
     root.innerHTML =
       `<div class="ihub-empty">
          <div class="ihub-empty-h">はじめましょう</div>
-         <p>手元にデータが無くても大丈夫。サンプルの倉庫で、取込→分析→検証→提案までを今すぐ試せます。</p>
+         <p>手元にデータが無くても大丈夫。サンプルの倉庫で、①取込→②分析→③設計→④検証→⑤提案までを今すぐ試せます。</p>
          ${createSample ? '<button class="ihub-empty-sample" data-act="sample">✨ サンプルでためす</button>' : ''}
          <p class="ihub-empty-or">または左サイドバーの「プロジェクト」で、名前とテンプレートを選んで新規作成。</p>
        </div>`;

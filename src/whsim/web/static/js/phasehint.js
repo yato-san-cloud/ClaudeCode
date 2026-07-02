@@ -5,36 +5,40 @@
 // Code/comments in English; user-facing strings in Japanese.
 import { esc } from './util.js';
 
+// Per-phase banner copy. `subtitle` = the page's purpose in one plain sentence
+// ("why am I here"); `ctaText` = the concrete next move that NAMES the next phase
+// so the 動線 (where this leads) is obvious; `empty` = what to do first when the
+// phase has no data yet.
 const PHASES = {
   intake: {
-    subtitle: '案件を作り顧客データを取り込む',
-    ctaText: 'データを分析する →',
+    subtitle: '案件を作り、顧客の出荷データを取り込む',
+    ctaText: '②分析でデータを読み解く →',
     ctaTargetView: 'dataanalysis',
-    empty: 'プロジェクトを作成し、出荷データ（CSV/Excel）を取り込んでください。',
+    empty: 'まず案件（プロジェクト）を作り、出荷データ（CSV/Excel）を取り込みましょう。ここが提案づくりの出発点です。',
   },
   analyze: {
-    subtitle: '物量・波動・ABCを把握する',
-    ctaText: 'レイアウトを設計 →',
+    subtitle: '物量・波動・ABCを読み解き、設計の根拠をつかむ',
+    ctaText: '③設計でレイアウトを描く →',
     ctaTargetView: 'design',
-    empty: '出荷データがまだありません。①取込でデータを読み込むと自動分析が始まります。',
+    empty: '出荷データがまだありません。①取込で読み込むと、ここで自動分析が始まります。',
   },
   design: {
-    subtitle: 'レイアウトと工程・人員を組む',
-    ctaText: 'シミュレーションを実行 →',
+    subtitle: 'レイアウト・工程・人員を組み立てる',
+    ctaText: '④検証へ：シミュレーションを実行 →',
     ctaTargetView: null, // run action → opts.onRun()
-    empty: '「棚」モードで保管棚を配置（棚を描く／一括生成／面積オート生成）。設備パレットで棚種別を選べます。①取込でMapMakerレイアウトを読み込めば、そのまま編集できます。',
+    empty: '「棚」モードで保管棚を配置しましょう（棚を描く／一括生成／面積オート生成、設備パレットで棚種別を選択）。①取込でMapMakerレイアウトを読み込めば、そのまま編集できます。',
   },
   validate: {
-    subtitle: '捌けるかをKPIと動きで確認',
-    ctaText: '提案をまとめる →',
+    subtitle: '設計で本当に捌けるかを、KPIと動きで確かめる',
+    ctaText: '⑤提案へ：結果をまとめる →',
     ctaTargetView: 'viewpng',
-    empty: 'まだ実行結果がありません。下の『▶ シミュレーション実行』を押すと、ここで結果を確認できます。',
+    empty: 'まだ実行結果がありません。下の『▶ シミュレーション実行』を押すと、ここで捌けるかを確認できます。',
   },
   propose: {
-    subtitle: '提案書とシナリオ比較を出す',
-    ctaText: '提案書を書き出す →',
+    subtitle: '提案PNG・シナリオ比較・提案書で顧客に見せる',
+    ctaText: '提案書（PPTX/PDF）を書き出す →',
     ctaTargetView: 'export',
-    empty: '検証が完了すると、提案PNG・シナリオ比較・提案書を出力できます。',
+    empty: '④検証が完了すると、提案PNG・シナリオ比較・提案書を出力できます。',
   },
 };
 

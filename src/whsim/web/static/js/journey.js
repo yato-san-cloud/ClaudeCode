@@ -10,21 +10,21 @@ import { esc } from './util.js';
 // Each phase: id, ordinal label, short title, goal subtitle, ordered view list.
 // The first view in `views` is the phase's landing sub-view (clicked on the pill).
 const PHASES = [
-  { id: 'intake', no: '①', title: '取込', goal: '案件を作り顧客データを取り込む', views: ['overview'] },
+  { id: 'intake', no: '①', title: '取込', goal: '案件を作り、出荷データを取り込む', views: ['overview'] },
   // ②分析 is the single "analysis home": 物量サマリ (facts) lands first, 対話分析
   // (ask/drill), 基礎物量 (仮値 what-if volume calculator), then マテリアルフロー
   // (荷役物量の工程フロー = the "step ①: 基礎物量" deliverable — volume creation
   // belongs to 分析, not 設計; the chain it defines then drops into the drawing).
-  { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを把握する', views: ['dataanalysis', 'bianalytics', 'bi', 'materialflow'] },
+  { id: 'analyze', no: '②', title: '分析', goal: '物量・波動・ABCを読み解く', views: ['dataanalysis', 'bianalytics', 'bi', 'materialflow'] },
   // ③設計 adds 生産性試算 (pickrate): analytic motion-time productivity from the
   // MapMaker距離 — the SLC-style "step ②" that picks オーダー/マルチ/トータル
   // before any heavyweight DES run.
   // 保管設計・棚割り は「レイアウト」内のサイドパネルに集約（designer/sidepanel.js）。
-  { id: 'design', no: '③', title: '設計', goal: 'レイアウトと工程・人員を組む', views: ['design', 'pickrate', 'timetable'] },
+  { id: 'design', no: '③', title: '設計', goal: 'レイアウト・工程・人員を組み立てる', views: ['design', 'pickrate', 'timetable'] },
   // ④検証 = DESで裏取りするレーン。原価は「判定」内、ピック順序は「作業方法比較」内、
   // 2Dと3Dは1つの「ビュー」内トグルに集約（in-view toggle, app.js が #viewToggle で描画）。
-  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確認', views: ['analysis', 'view2d', 'workcompare'] },
-  { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較を出す', views: ['viewpng', 'compare', 'export'] },
+  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確かめる', views: ['analysis', 'view2d', 'workcompare'] },
+  { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較で見せる', views: ['viewpng', 'compare', 'export'] },
 ];
 
 // Cross-cutting views: available in every phase, pinned separately (own lane).
@@ -44,25 +44,25 @@ const VIEW_LABEL = {
 // One-line "what this view does" — surfaced as a sub-tab tooltip (title) so the
 // now-many views are recognisable without clicking (recognition over recall).
 const VIEW_DESC = {
-  overview: '案件の概要・準備状況チェック',
-  dataanalysis: '取込データのKPI・チャート（物量サマリ）',
-  bianalytics: '言葉で問う：ABC・曜日×時間・SKU構成',
-  bi: '仮値で荷姿変換し基礎物量を作る（→人員配置）',
-  design: 'レイアウト・ゾーン・棚を配置/編集',
-  storage: '物量から必要保管設備・坪数を試算→配置',
-  timetable: '工程別の必要人員を時間帯で配置',
-  materialflow: '工程フローの荷役物量（基礎物量・→人員配置）',
-  pickrate: 'MapMaker距離×動作時間で生産性を解析（オーダー/マルチ/トータル）',
+  overview: '案件の概要と準備状況を確認し、次の一手を決める（→②分析）',
+  dataanalysis: '取込データのKPI・チャートで物量の全体像をつかむ',
+  bianalytics: '言葉で問う：ABC・曜日×時間・SKU構成を深掘り',
+  bi: '仮値で荷姿変換して基礎物量を作る（→人員タイムチャート）',
+  design: 'レイアウト・ゾーン・棚を配置/編集（→④検証で実行）',
+  storage: '物量から必要な保管設備・坪数を試算し配置',
+  timetable: '工程別の必要人員を時間帯ごとに配置',
+  materialflow: '工程フローの荷役物量を組む基礎物量（→人員タイムチャート）',
+  pickrate: 'MapMaker距離×動作時間で生産性を即算（オーダー/マルチ/トータル）',
   slotting: 'スロッティング最適化＋保管戦略（加重歩行距離を最小化）',
   pickseq: 'ピック順序を2-optで最適化（オーダー/マルチ/トータル比較）',
-  cost: '解析的に6費目を積み上げ（実行不要・爆速）',
-  analysis: '捌けるかの判定・KPI・改善提案（原価もここ）',
+  cost: '6費目を解析的に積み上げ（実行不要・爆速）',
+  analysis: '捌けるかを判定：KPI・改善提案（原価もここ）',
   view2d: '動きを2D/3Dで可視化（切替）＋混雑ヒート',
   view3d: '3Dで設備・人・搬送を可視化',
-  workcompare: 'DESで4方式を裏取り＋ピック順序の最適化',
-  viewpng: '提案PNG（①課題→⑤裏付け）',
-  compare: '現行 vs 代替案の比較（投資回収）',
-  export: '提案書(PPTX/PDF)を書き出す',
+  workcompare: 'DESで4方式を裏取り＋ピック順序を最適化',
+  viewpng: '課題→裏付けを1枚にまとめた提案PNG',
+  compare: '現行 vs 代替案を比較（投資回収）',
+  export: '提案書（PPTX/PDF）を書き出す',
   chat: 'OCTA（横断アシスタント）',
   notes: '知見ボード（横断メモ）',
 };
