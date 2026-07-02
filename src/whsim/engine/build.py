@@ -78,6 +78,13 @@ class World:
     release: str = "continuous"             # E: "continuous" | "wave"
     wave_interval_s: float = 1800.0
     sort_time_s: float = 6.0                # 種まき: put-wall seconds per line
+    # 自動仕分機(sorter): when a sorter Equipment is placed AND consolidation=="sort",
+    # the sort phase runs an AUTOMATIC piece sorter (induction channels + destination
+    # chutes with back-pressure) instead of the manual put wall. None = no sorter
+    # (legacy manual wall path, byte-identical). Keys: xy, rate_per_hr, sort_s,
+    # chutes, chute_capacity, channels, release_s, induction (Resource),
+    # chute_containers (list[Container]). See _sorter_phase in processes.py.
+    sorter: dict | None = None
     n_zones: int = 1                        # picking zones for C (spatial bands)
     # Pick-sequence policy (ADDITIVE; default keeps the legacy greedy/S-shape).
     # "default" = nearest-neighbour (discrete/batch/wave) or S-shape (zone);
@@ -310,6 +317,34 @@ def build(
     # real DAS / put-to-light wall. One station per pack station by default.
     put_wall_cap = max(1, n_packers)
 
+    # --- 自動仕分機(sorter): an automatic piece sorter for total picking (D=="sort").
+    # When a sorter Equipment is placed, the sort phase inducts the swept lines onto
+    # the machine (capacitated by its induction channels) and routes each line to a
+    # destination chute (a finite buffer that back-pressures when full) — instead of
+    # the manual put wall. Built whenever a sorter exists; the sort phase only uses
+    # it when consolidation=="sort", so no sorter => the World.sorter stays None and
+    # the legacy manual-wall path is byte-identical.
+    sorters = [e for e in model.resources.equipment if e.type == "sorter" and e.count > 0]
+    sorter: dict | None = None
+    if sorters:
+        se = sorters[0]
+        rate = max(float(se.sorter_rate_per_hr), 1e-9)
+        n_chutes = max(1, int(se.chutes))
+        chute_cap = max(1, int(se.chute_capacity))
+        channels = max(1, int(se.induction_workers))
+        sorter = {
+            "xy": (se.x, se.y) if (se.x or se.y) else None,
+            "rate_per_hr": rate,
+            "sort_s": 3600.0 / rate,               # seconds per line on the sorter
+            "chutes": n_chutes,
+            "chute_capacity": chute_cap,
+            "channels": channels,
+            "release_s": max(0.0, float(se.chute_release_s)),
+            "induction": simpy.Resource(env, capacity=channels),
+            "chute_containers": [simpy.Container(env, capacity=chute_cap, init=0)
+                                 for _ in range(n_chutes)],
+        }
+
     # 仮置き(staging) buffer: only the manual non-conveyor path uses it (the AGV
     # and conveyor paths already model their own buffering/back-pressure). A finite
     # simpy.Store blocks put() when full, giving real pick->pack back-pressure.
@@ -345,6 +380,7 @@ def build(
         zoning=zoning, consolidation=work.consolidation, release=work.release,
         wave_interval_s=max(work.wave_interval_s, 1.0),
         sort_time_s=max(model.process.sort_time_s, 0.0),
+        sorter=sorter,
         n_zones=n_zones, zone_edges=zone_edges,
         home=home, agv_home=agv_home,
         fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),

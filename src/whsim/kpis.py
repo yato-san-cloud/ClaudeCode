@@ -158,6 +158,19 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     sort_util = (sort_busy / max(res.n_put_wall * res.duration_s, 1e-9)
                  if res.n_put_wall else 0.0)
 
+    # 自動仕分機(sorter) stage: throughput + utilisation + chute back-pressure.
+    # Utilisation is busy vs the induction channels' capacity·duration (like any
+    # capacitated resource). Populated only when an automatic sorter was active;
+    # the manual put-wall KPIs above stay untouched.
+    sorter_events = [e for e in res.events if e["event"] == "sorter_done"]
+    sorter_busy = sum(e.get("busy", 0.0) for e in sorter_events)
+    sorter_waits = [e.get("wait", 0.0) for e in sorter_events]
+    sorter_channels = getattr(res, "sorter_channels", 0)
+    sorter_util = (sorter_busy / max(sorter_channels * res.duration_s, 1e-9)
+                   if sorter_channels else 0.0)
+    sorter_lines = len(sorter_events)
+    sorter_blocks = sum(e.get("blocked", 0) for e in sorter_events)
+
     on_time = sum(
         1 for e in completes if e.get("due") is None or e["t"] <= e["due"]
     )
@@ -229,6 +242,13 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "sort_busy_s": sort_busy,   # 種まき仕分けの総busy秒 (作業方法比較の y軸)
         "sort_wait_mean_s": statistics.fmean(sort_waits) if sort_waits else 0.0,
         "n_put_wall": res.n_put_wall,
+        "sorter_utilization": sorter_util,
+        "sorter_busy_s": sorter_busy,
+        "sorter_throughput_per_hr": sorter_lines / hours,  # 仕分け能力 (行/時)
+        "sorter_wait_mean_s": statistics.fmean(sorter_waits) if sorter_waits else 0.0,
+        "sorter_chute_blocks": sorter_blocks,              # シュート閉塞(back-pressure)発生回数
+        "sorter_lines": sorter_lines,
+        "sorter_channels": sorter_channels,
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
         "pick_wait_mean_s": statistics.fmean(pick_waits) if pick_waits else 0.0,
@@ -349,10 +369,13 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         stages["agv"] = agg["agv_utilization"]
     if agg.get("n_put_wall"):
         stages["sort"] = agg["sort_utilization"]
+    if agg.get("sorter_channels"):
+        stages["sorter"] = agg["sorter_utilization"]
     agg["bottleneck"] = max(stages, key=stages.get)
     agg["bottleneck_utilization"] = stages[agg["bottleneck"]]
     agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包",
-                            "agv": "AGV搬送", "sort": "種まき仕分け"}[agg["bottleneck"]]
+                            "agv": "AGV搬送", "sort": "種まき仕分け",
+                            "sorter": "ソーター仕分け"}[agg["bottleneck"]]
 
     # --- Monte-Carlo robustness across replications -------------------------
     def _rep_bottleneck(p):
@@ -361,6 +384,8 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
             s["agv"] = p["agv_utilization"]
         if p.get("n_put_wall"):
             s["sort"] = p["sort_utilization"]
+        if p.get("sorter_channels"):
+            s["sorter"] = p["sorter_utilization"]
         return max(s.values())
 
     rep_ok = [1.0 if (p["completion_rate"] >= 0.98 and _rep_bottleneck(p) < 0.95)

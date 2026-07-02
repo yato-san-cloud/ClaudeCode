@@ -320,6 +320,15 @@ class Equipment(BaseModel):
     y: float = 0.0
     capex_each: float = 4000000.0  # ¥ per unit (AGV default ~4M JPY)
     opex_per_hr: float = 150.0     # ¥/hr per unit (power, maintenance)
+    # --- Sorter params (type=="sorter"): the トータルピッキング＆店舗別仕分け core.
+    # All defaulted (never blocks); ignored for other equipment types. When a
+    # sorter is placed and consolidation=="sort", the sort phase becomes an
+    # AUTOMATIC piece sorter instead of the manual put-wall (see engine).
+    sorter_rate_per_hr: float = 3600.0   # induction+sort capacity (pieces/h per channel)
+    chutes: int = 40                      # 出荷先シュート数 (destination chutes)
+    chute_capacity: int = 50              # lines a chute holds before it back-pressures
+    induction_workers: int = 2            # concurrent induction channels (投入口)
+    chute_release_s: float = 30.0         # a sorted line dwells here before the carton is pulled
 
 
 class Conveyor(BaseModel):

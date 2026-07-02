@@ -53,6 +53,7 @@ class RunResult:
     duration_s: float
     n_agvs: int = 0
     n_put_wall: int = 0                     # 種まき put-wall stations (consolidation=="sort")
+    sorter_channels: int = 0               # 自動仕分機 induction channels (0 = no active sorter)
     consolidation: str = "pick"
     pick_method: str = "manual"
     workers: list[Worker] = field(default_factory=list)
@@ -178,7 +179,12 @@ def run_once(
         n_pickers=world.n_pickers, n_packers=world.n_packers,
         duration_s=model.simulation.duration_s,
         n_agvs=world.n_agvs,
-        n_put_wall=(world.put_wall.capacity if world.consolidation == "sort" else 0),
+        # An active automatic sorter replaces the manual put wall for this run, so
+        # the manual-wall stage reports 0 (only one of the two is ever used).
+        n_put_wall=(world.put_wall.capacity
+                    if (world.consolidation == "sort" and world.sorter is None) else 0),
+        sorter_channels=(world.sorter["channels"]
+                         if (world.consolidation == "sort" and world.sorter is not None) else 0),
         consolidation=world.consolidation, pick_method=world.pick_method,
         workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
         packers=packers, inspectors=inspectors, n_inspectors=world.n_inspectors,

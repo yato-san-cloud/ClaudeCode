@@ -14,6 +14,7 @@ Two operating modes share the same pack stage:
 from __future__ import annotations
 
 import random
+import zlib
 
 from whsim.engine.build import Worker, World
 from whsim.engine.routing import leg_cells, manhattan, nearest_neighbor_route
@@ -360,6 +361,74 @@ def _sort_phase(world: World, w: Worker, orders, pos):
               n_lines=n_lines, resource="put_wall", worker=w.id)
 
 
+def _chute_of(order: Order, n_chutes: int) -> int:
+    """Destination chute for an order = a stable hash of its id modulo the chute
+    count. crc32 (not Python's salted hash) keeps chute assignment reproducible
+    across processes so runs are deterministic."""
+    return zlib.crc32((order.order_id or "").encode("utf-8")) % max(1, n_chutes)
+
+
+def _chute_release(world: World, cont, release_s: float):
+    """A sorted line dwells in its chute, then the store carton is pulled and the
+    line departs (the chute frees one slot). Runs as its own process so chutes
+    drain concurrently with induction — that is what makes a full chute a genuine
+    (temporary) back-pressure rather than a deadlock."""
+    if release_s > 0:
+        yield world.env.timeout(release_s)
+    yield cont.get(1)
+
+
+def _sorter_phase(world: World, w: Worker, orders, pos):
+    """自動仕分け stage (D, consolidation=="sort" WITH a sorter Equipment placed):
+    after a total pick the picker walks the tote to the sorter induction point and
+    inducts the swept lines onto the machine, which routes each line to its
+    destination chute. The sorter is capacitated by its induction channels
+    (induction_workers); each line rides the sorter for 3600/rate seconds; each
+    destination chute is a finite buffer (chute_capacity lines) that back-pressures
+    induction when full — the RaLC-style トータルピッキング＆店舗別仕分け core.
+
+    Emits one ``sorter_done`` event per line (busy=sort time, wait=induction-channel
+    queue, chute_wait=chute back-pressure, chute index, blocked flag). Returns the
+    picker's end position (the induction point)."""
+    env = world.env
+    s = world.sorter
+    speed = max(world.model.process.walk_speed_mps, 0.1)
+    # Walk the tote to the sorter induction point (its placed position, else here).
+    induct = s["xy"] if s["xy"] is not None else pos
+    if induct != pos:
+        yield from _walk(world, w, pos, induct, speed, "carry")
+        pos = induct
+    n_lines = sum(len(o.lines) for o in orders)
+    if n_lines <= 0 or s["sort_s"] <= 0:
+        return pos
+    if world.recording():
+        w.kf(env.now, pos[0], pos[1], "sort")
+    n_chutes = s["chutes"]
+    containers = s["chute_containers"]
+    induction = s["induction"]
+    sort_s = s["sort_s"]
+    release_s = s["release_s"]
+    for o in orders:
+        chute = _chute_of(o, n_chutes)
+        cont = containers[chute]
+        for _line in o.lines:
+            req = induction.request()
+            wait_t = env.now
+            yield req                       # queue for a free induction channel
+            seize_t = env.now
+            yield env.timeout(sort_s)       # ride the sorter to the chute
+            block_t = env.now
+            yield cont.put(1)               # arrive at chute; blocks when full (back-pressure)
+            chute_wait = env.now - block_t
+            induction.release(req)          # channel held through the block => real back-pressure
+            env.process(_chute_release(world, cont, release_s))
+            world.log(t=env.now, event="sorter_done", order_id=o.order_id,
+                      wait=seize_t - wait_t, busy=sort_s, chute=chute,
+                      chute_wait=chute_wait, blocked=1 if chute_wait > 1e-6 else 0,
+                      resource="sorter", worker=w.id)
+    return pos
+
+
 def picker_agent(world: World, w: Worker, rng: random.Random):
     env = world.env
     speed = max(world.model.process.walk_speed_mps, 0.1)
@@ -406,9 +475,15 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             # Pick phase honours the C axis (none / sequential relay / parallel).
             pos, total_dist = yield from _pick_phase(
                 world, w, pos, points, qtys, tss, vss, speed)
-            # 種まき: distribute the totals to destination orders at the put wall.
+            # 種まき: distribute the totals to destination orders. An automatic
+            # sorter (when a sorter Equipment is placed) inducts the lines onto the
+            # machine and routes them to destination chutes; otherwise the manual
+            # put wall is used (byte-identical legacy path when no sorter exists).
             if world.consolidation == "sort":
-                yield from _sort_phase(world, w, orders, pos)
+                if world.sorter is not None:
+                    pos = yield from _sorter_phase(world, w, orders, pos)
+                else:
+                    yield from _sort_phase(world, w, orders, pos)
             # carry to pack: a conveyor (if present) takes the long haul, so the
             # picker only walks to the nearest conveyor pickup point.
             conv = _nearest_conveyor(world, pos)
