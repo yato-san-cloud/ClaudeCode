@@ -12,7 +12,7 @@ from whsim.engine.build import Worker, build
 from whsim.engine.graph import AisleGraph
 from whsim.engine.processes import (
     agv_agent, forklift_agent, inspector_agent, order_source, packer_agent,
-    picker_agent, putaway_source,
+    picker_agent, putaway_source, replenisher_agent,
 )
 from whsim.schema.model import WarehouseModel
 
@@ -63,6 +63,7 @@ class RunResult:
     packers: list[Worker] = field(default_factory=list)  # dedicated packer agents (staging mode)
     inspectors: list[Worker] = field(default_factory=list)  # 入荷検品 agents
     n_inspectors: int = 0
+    n_replenishers: int = 0                 # 補充要員 servers (0 = replenishment off)
     staging_capacity: int = 0               # 仮置き buffer capacity (0 = disabled)
     replay_window_s: float = 0.0
     cost: dict = field(default_factory=dict)
@@ -150,6 +151,14 @@ def run_once(
             ins = Worker(id=f"inspector-{i+1}", role="inspector")
             inspectors.append(ins)
             env.process(inspector_agent(world, ins, world.fork_home))
+    # Dedicated 補充要員(replenishers): drain the replenishment queue (top up pick
+    # faces). When replenishment shares the forklift fleet, no dedicated agents are
+    # spawned. They render as forklift tracks (putaway state) in the replay.
+    if world.replen_faces is not None and world.replen_dedicated > 0:
+        for i in range(world.replen_dedicated):
+            rp = Worker(id=f"replenisher-{i+1}", role="forklift")
+            forklifts.append(rp)
+            env.process(replenisher_agent(world, rp))
     # Dedicated packer agents drain the 仮置き(staging) buffer (manual staged mode).
     packers: list[Worker] = []
     if world.staging is not None and world.pick_method != "agv":
@@ -188,6 +197,7 @@ def run_once(
         consolidation=world.consolidation, pick_method=world.pick_method,
         workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
         packers=packers, inspectors=inspectors, n_inspectors=world.n_inspectors,
+        n_replenishers=world.n_replenishers,
         staging_capacity=world.staging_capacity,
         replay_window_s=window, cost=_cost_inputs(model),
     )

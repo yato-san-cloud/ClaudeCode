@@ -109,10 +109,34 @@ class World:
     inbound_store: simpy.Store | None = None
     n_inspectors: int = 0
     inspect_time_s: float = 0.0
+    # 在庫補充連鎖 (DES-internal inventory). None = disabled (pick faces have
+    # infinite stock, byte-identical legacy path). When present:
+    #   * replen_faces  — {face_key: dict(qty/trigger/refill_to/pending/event/xy)}
+    #     per slotted pick face; picks decrement it and empty faces block pickers.
+    #   * replen_store  — the replenishment task queue (each item is a face dict).
+    #   * replen_shared_forklift — the forklift agents also drain replen_store
+    #     (no dedicated replenishers); else dedicated replenisher agents do.
+    replen_faces: dict | None = None
+    replen_store: simpy.Store | None = None
+    replen_place_s: float = 0.0
+    replen_dedicated: int = 0               # dedicated replenisher agents to spawn
+    n_replenishers: int = 0                 # effective servers (for utilisation denom)
+    replen_shared_forklift: bool = False
     _helper_seq: int = 0                    # monotonic id source for helper tracks
 
     def log(self, **kw) -> None:
         self.events.append(kw)
+
+    @staticmethod
+    def _face_key(xy) -> tuple[float, float]:
+        """Round a pick position to a stable key for the inventory-face map."""
+        return (round(xy[0], 3), round(xy[1], 3))
+
+    def face_at(self, xy) -> dict | None:
+        """The inventory pick face at position ``xy`` (or None = infinite stock)."""
+        if self.replen_faces is None:
+            return None
+        return self.replen_faces.get(self._face_key(xy))
 
     def helper_for(self, w: "Worker", zone: int) -> "Worker":
         """A lightweight replay-only sub-worker track for one concurrent zone leg
@@ -223,15 +247,18 @@ def build(
 
     sku_xy: dict[str, tuple[float, float]] = {}
     sku_pick: dict[str, tuple] = {}
+    sku_loc: dict[str, "object"] = {}       # sku -> the Location backing its pick face
     for it in model.items:
         if it.default_location and it.default_location in loc_by_id:
             loc = loc_by_id[it.default_location]
             sku_xy[it.sku] = (loc.x, loc.y)
             sku_pick[it.sku] = _pick_meta(loc)
+            sku_loc[it.sku] = loc
     for loc in model.locations:
         if loc.sku and loc.sku not in sku_xy:
             sku_xy[loc.sku] = (loc.x, loc.y)
             sku_pick[loc.sku] = _pick_meta(loc)
+            sku_loc[loc.sku] = loc
 
     sku_ts = {it.sku: it.ts_per_unit for it in model.items}
     by_sku = model.item_by_sku()
@@ -358,6 +385,54 @@ def build(
     inbound_store = simpy.Store(env) if n_inspectors > 0 else None
     inspect_time_s = max(0.0, float(model.process.inbound_inspection_time_s))
 
+    # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
+    # Opt-in (Process.replenishment_enabled). Build one inventory face per slotted
+    # pick position from its Location's qty/capacity. A SKU with no finite-capacity
+    # location gets no face => effectively infinite stock (never blocks). Faces are
+    # keyed by ROUNDED position so the picker's arrival point (== sku_xy coord)
+    # resolves them in O(1) without threading the sku through the pick pipeline.
+    replen_faces: dict | None = None
+    replen_store = None
+    replen_place_s = 0.0
+    replen_dedicated = 0
+    n_replenishers = 0
+    replen_shared_forklift = False
+    if model.process.replenishment_enabled:
+        trig = max(0.0, float(model.process.replenish_trigger_frac))
+        qfrac = max(0.0, float(model.process.replenish_qty_frac))
+        replen_place_s = max(0.0, float(model.process.replenish_place_s))
+        faces: dict[tuple[float, float], dict] = {}
+        for sku, loc in sku_loc.items():
+            cap = max(0, int(getattr(loc, "capacity", 0) or 0))
+            if cap <= 0:
+                continue                     # no finite capacity => infinite stock
+            key = World._face_key((loc.x, loc.y))
+            if key in faces:
+                continue                     # one face per pick position
+            q0 = int(loc.qty) if int(getattr(loc, "qty", 0) or 0) > 0 else cap
+            faces[key] = {
+                "xy": (loc.x, loc.y), "loc_id": loc.id, "sku": sku,
+                "qty": q0, "capacity": cap,
+                "trigger": cap * trig,
+                "refill_to": max(1.0, cap * qfrac),
+                "pending": False, "event": None,
+            }
+        replen_faces = faces
+        replen_store = simpy.Store(env)
+        # Who services replenishment: dedicated agents if asked, else the forklift
+        # fleet shares the work, else auto-spawn one dedicated agent so an empty
+        # face can never deadlock the picker (never-blocks).
+        dedicated = max(0, int(model.process.replenishers))
+        if dedicated > 0:
+            replen_dedicated = dedicated
+            n_replenishers = dedicated
+        elif n_forklifts > 0:
+            replen_shared_forklift = True
+            n_replenishers = n_forklifts
+        else:
+            replen_dedicated = 1
+            n_replenishers = 1
+
     has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
     cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
                 if model.resources.conveyors else 0.5) or 0.5
@@ -392,4 +467,7 @@ def build(
         staging=staging, staging_capacity=staging_cap, pack_xy=pack_xy,
         inbound_store=inbound_store, n_inspectors=n_inspectors,
         inspect_time_s=inspect_time_s,
+        replen_faces=replen_faces, replen_store=replen_store,
+        replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
+        n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,
     )

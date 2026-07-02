@@ -171,6 +171,16 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     sorter_lines = len(sorter_events)
     sorter_blocks = sum(e.get("blocked", 0) for e in sorter_events)
 
+    # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
+    # Populated only when replenishment was enabled (replenish_done / stockout_wait
+    # events exist); otherwise every field is 0 — additive, no legacy KPI shifts.
+    replen_events = [e for e in res.events if e["event"] == "replenish_done"]
+    replen_busy = sum(e.get("busy", 0.0) for e in replen_events)
+    n_repl = getattr(res, "n_replenishers", 0)
+    replen_util = (replen_busy / max(n_repl * res.duration_s, 1e-9)) if n_repl else 0.0
+    stockout_events = [e for e in res.events if e["event"] == "stockout_wait"]
+    stockout_wait_times = [e.get("wait", 0.0) for e in stockout_events]
+
     on_time = sum(
         1 for e in completes if e.get("due") is None or e["t"] <= e["due"]
     )
@@ -252,6 +262,15 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
         "pick_wait_mean_s": statistics.fmean(pick_waits) if pick_waits else 0.0,
+        # 在庫補充連鎖: 補充タスク数 / 補充稼働 / 補充要員稼働率 / 欠品待ち.
+        "replenish_tasks": len(replen_events),
+        "replenish_busy_s": replen_busy,
+        "replenisher_utilization": replen_util,
+        "n_replenishers": n_repl,
+        "stockout_waits": len(stockout_events),
+        "stockout_wait_mean_s": (statistics.fmean(stockout_wait_times)
+                                 if stockout_wait_times else 0.0),
+        "stockout_wait_total_s": sum(stockout_wait_times),
         "wip_avg": wip_avg,
         "wip_max": wip_max,
         "staging_dwell_mean_s": staging_dwell_mean,
@@ -371,11 +390,13 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         stages["sort"] = agg["sort_utilization"]
     if agg.get("sorter_channels"):
         stages["sorter"] = agg["sorter_utilization"]
+    if agg.get("n_replenishers"):
+        stages["replenish"] = agg["replenisher_utilization"]
     agg["bottleneck"] = max(stages, key=stages.get)
     agg["bottleneck_utilization"] = stages[agg["bottleneck"]]
     agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包",
                             "agv": "AGV搬送", "sort": "種まき仕分け",
-                            "sorter": "ソーター仕分け"}[agg["bottleneck"]]
+                            "sorter": "ソーター仕分け", "replenish": "補充"}[agg["bottleneck"]]
 
     # --- Monte-Carlo robustness across replications -------------------------
     def _rep_bottleneck(p):
@@ -386,6 +407,8 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
             s["sort"] = p["sort_utilization"]
         if p.get("sorter_channels"):
             s["sorter"] = p["sorter_utilization"]
+        if p.get("n_replenishers"):
+            s["replenish"] = p["replenisher_utilization"]
         return max(s.values())
 
     rep_ok = [1.0 if (p["completion_rate"] >= 0.98 and _rep_bottleneck(p) < 0.95)
@@ -417,4 +440,15 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         f"要注意 — {agg['bottleneck_jp']}がボトルネック（稼働率 {util_pct}%）。"
         f"オーダーの {done_pct}% しか出荷完了しません{conf}"
     )
+    # 在庫補充連鎖: when pickers spent meaningful time BLOCKED on empty pick faces
+    # (欠品待ち that the picking cycle can feel), append an honest advisory — the
+    # under-estimated replenishment-labour risk this feature exists to surface.
+    if agg.get("n_replenishers") and agg.get("stockout_waits"):
+        picker_secs = max(agg.get("picker_presence_s", 0.0), 1e-9)
+        stockout_share = agg.get("stockout_wait_total_s", 0.0) / picker_secs
+        if stockout_share >= 0.02:  # ≥2% of picker presence lost to 欠品待ち
+            agg["verdict"] += (
+                "。補充が追いつかずピッキングが待たされています"
+                "（補充要員/間口在庫の見直し）"
+            )
     return agg

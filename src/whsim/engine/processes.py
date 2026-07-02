@@ -129,29 +129,133 @@ def inspector_agent(world: World, ins: Worker, station_xy):
             ins.kf(env.now, sx, sy, "idle")
 
 
+def _do_putaway(world: World, f: Worker, slot):
+    """One inbound putaway trip: ferry a pallet dock -> storage slot -> dock."""
+    env = world.env
+    trip_start = env.now
+    d1 = world.dist(world.fork_home, slot)
+    _accumulate_heat(world, world.fork_home, slot)
+    if world.recording():
+        f.kf(env.now, world.fork_home[0], world.fork_home[1], "putaway")
+    yield env.timeout(d1 / world.fork_speed)
+    if world.recording():
+        f.kf(env.now, slot[0], slot[1], "putaway")
+    yield env.timeout(8.0)  # place the pallet
+    _accumulate_heat(world, slot, world.fork_home)
+    yield env.timeout(world.dist(slot, world.fork_home) / world.fork_speed)
+    if world.recording():
+        f.kf(env.now, world.fork_home[0], world.fork_home[1], "idle")
+    world.log(t=env.now, event="forklift_done", busy=env.now - trip_start,
+              resource="forklift", worker=f.id)
+
+
 def forklift_agent(world: World, f: Worker, rng: random.Random):
-    """Inbound putaway: pull a task, ferry a pallet dock -> storage slot -> dock."""
+    """Inbound putaway: pull a task, ferry a pallet dock -> storage slot -> dock.
+
+    When replenishment is enabled WITHOUT dedicated replenishers, the same
+    forklift fleet also drains the replenishment queue. We wait on BOTH stores
+    with ``any_of`` and cancel the untaken get (SimPy's clean two-queue idiom);
+    replenishment is serviced first when both fire at once, so an empty pick face
+    (a picker blocked) takes priority over decorative inbound putaway."""
     env = world.env
     pos = world.fork_home
     if world.recording():
         f.kf(env.now, pos[0], pos[1], "idle")
+    if world.replen_shared_forklift:
+        while True:
+            gr = world.replen_store.get()
+            gf = world.fork_store.get()
+            res = yield env.any_of([gr, gf])
+            if gr in res:
+                yield from _do_replenish(world, f, res[gr])
+            else:
+                gr.cancel()
+            if gf in res:
+                yield from _do_putaway(world, f, res[gf])
+            else:
+                gf.cancel()
+        return
     while True:
         slot = yield world.fork_store.get()   # waits when there is no inbound work
-        trip_start = env.now
-        d1 = world.dist(world.fork_home, slot)
-        _accumulate_heat(world, world.fork_home, slot)
-        if world.recording():
-            f.kf(env.now, world.fork_home[0], world.fork_home[1], "putaway")
-        yield env.timeout(d1 / world.fork_speed)
-        if world.recording():
-            f.kf(env.now, slot[0], slot[1], "putaway")
-        yield env.timeout(8.0)  # place the pallet
-        _accumulate_heat(world, slot, world.fork_home)
-        yield env.timeout(world.dist(slot, world.fork_home) / world.fork_speed)
-        if world.recording():
-            f.kf(env.now, world.fork_home[0], world.fork_home[1], "idle")
-        world.log(t=env.now, event="forklift_done", busy=env.now - trip_start,
-                  resource="forklift", worker=f.id)
+        yield from _do_putaway(world, f, slot)
+
+
+def _do_replenish(world: World, w: Worker, face: dict):
+    """Service one replenishment task: travel reserve(fork_home) -> face, place,
+    top the face up to its refill target, release any blocked picker (fire the
+    face's replenished event), then return. Emits a ``replenish_done`` event."""
+    env = world.env
+    home = world.fork_home
+    dest = face["xy"]
+    fspeed = max(world.fork_speed, 0.1)
+    start = env.now
+    d1 = world.dist(home, dest)
+    _accumulate_heat(world, home, dest)
+    if world.recording():
+        w.kf(env.now, home[0], home[1], "putaway")
+    yield env.timeout(d1 / fspeed)
+    if world.recording():
+        w.kf(env.now, dest[0], dest[1], "putaway")
+    yield env.timeout(world.replen_place_s)   # top-up / place time
+    # Refill the face and wake any pickers blocked on it BEFORE the return trip.
+    face["qty"] = max(face["qty"], face["refill_to"])
+    face["pending"] = False
+    ev = face["event"]
+    if ev is not None and not ev.triggered:
+        face["event"] = None
+        ev.succeed()
+    _accumulate_heat(world, dest, home)
+    yield env.timeout(world.dist(dest, home) / fspeed)
+    if world.recording():
+        w.kf(env.now, home[0], home[1], "idle")
+    world.log(t=env.now, event="replenish_done", busy=env.now - start,
+              dist=d1, loc=face["loc_id"], sku=face["sku"],
+              resource="replenisher", worker=w.id)
+
+
+def replenisher_agent(world: World, w: Worker):
+    """A dedicated 補充要員: pull replenishment tasks and top the pick faces up.
+    One process per replenisher, so the replenisher headcount is the stage's real
+    constraint. Uses the forklift dock (``fork_home``) as the reserve source."""
+    env = world.env
+    if world.recording():
+        w.kf(env.now, world.fork_home[0], world.fork_home[1], "idle")
+    while True:
+        face = yield world.replen_store.get()   # waits when no replenishment work
+        yield from _do_replenish(world, w, face)
+
+
+def _enqueue_replen(world: World, face: dict) -> None:
+    """Queue ONE replenishment task for a face at/below its trigger. The
+    ``pending`` flag dedups: no second task is queued for the same face until the
+    current one completes (avoids a flood of tasks as qty crosses the trigger)."""
+    if not face["pending"] and face["qty"] <= face["trigger"]:
+        face["pending"] = True
+        world.replen_store.put(face)   # unbounded store => put is synchronous
+
+
+def _consume_face(world: World, w: Worker, xy, qty: int):
+    """Decrement the pick face at ``xy`` by ``qty`` (真の在庫). An EMPTY face
+    BLOCKS the picker on that face's replenished event (emitting a ``stockout_wait``
+    with the wait seconds) until a replenishment tops it up. A position with no
+    tracked face is infinite stock and returns immediately (never blocks)."""
+    face = world.face_at(xy)
+    if face is None:
+        return
+    env = world.env
+    while face["qty"] <= 0:
+        _enqueue_replen(world, face)
+        ev = face["event"]
+        if ev is None:
+            ev = env.event()
+            face["event"] = ev
+        wait_start = env.now
+        yield ev
+        world.log(t=env.now, event="stockout_wait", wait=env.now - wait_start,
+                  loc=face["loc_id"], sku=face["sku"],
+                  resource="picker", worker=w.id)
+    face["qty"] -= qty
+    _enqueue_replen(world, face)
 
 
 _GROUND = (0.0, 1, "manual", 0.0)  # default pick meta: ground 段, no vertical time
@@ -255,6 +359,10 @@ def _walk_route(world: World, w: Worker, start, points, qtys, tss, vss, speed):
         dest = points[idx]
         total += yield from _walk(world, w, pos, dest, speed, "travel")
         pos = dest
+        # 在庫補充連鎖: decrement this face's on-hand and BLOCK here if it is empty
+        # (waits for a replenishment). No-op when replenishment is disabled.
+        if world.replen_faces is not None:
+            yield from _consume_face(world, w, dest, qtys[idx])
         vert_s, lv, by, h = vss[idx]
         if world.recording():
             # Upper 段 carry a meta dict so the 2D/3D replay raise the picker/forklift

@@ -265,6 +265,17 @@ class Process(BaseModel):
     # before forklift putaway (an explicit upstream stage with its own WIP).
     inspector_count: int = 0
     inbound_inspection_time_s: float = 8.0   # seconds to inspect one inbound receipt
+    # 在庫補充連鎖 (DES-internal inventory & replenishment). False = disabled
+    # (legacy: pick faces have infinite stock, never deplete). When True the
+    # engine tracks each slotted pick face's on-hand qty: every pick DECREMENTS
+    # it, a face at/below capacity×trigger_frac generates ONE replenishment task
+    # (a forklift/replenisher tops it up to capacity×qty_frac), and an EMPTY face
+    # BLOCKS the picker until replenished (真の欠品挙動). Off ⇒ byte-identical.
+    replenishment_enabled: bool = False
+    replenish_trigger_frac: float = 0.3   # face qty ≤ capacity×this ⇒ enqueue a task
+    replenish_qty_frac: float = 1.0       # refill the face up to capacity×this
+    replenish_place_s: float = 12.0       # seconds to place/top-up a face
+    replenishers: int = 0                 # dedicated replenishers (0 = forklifts do it)
     # 段(level)からのピック垂直アクセス時間: picking an upper 段 costs vertical time on
     # top of the handle. lift_speed_mps = forklift/order-picker hoist speed (m/s,
     # up+down); manual_reach_s_per_m = the ergonomic reach/ladder penalty per metre
@@ -544,6 +555,10 @@ class WarehouseModel(BaseModel):
         clamp_f(self.process, "walk_speed_mps", 0.1, "歩行速度", "（0以下は不可）")
         clamp_f(self.process, "pack_time_s", 0.0, "梱包時間")
         clamp_f(self.process, "sort_time_s", 0.0, "仕分け時間")
+        clamp_f(self.process, "replenish_trigger_frac", 0.0, "補充発注点(容量比)")
+        clamp_f(self.process, "replenish_qty_frac", 0.0, "補充目標(容量比)")
+        clamp_f(self.process, "replenish_place_s", 0.0, "補充配置時間")
+        clamp_i(self.process, "replenishers", 0, "補充要員数")
 
         prof = self.orders.profile
         clamp_f(prof, "rate_per_hr", 0.0, "オーダー到着率")
