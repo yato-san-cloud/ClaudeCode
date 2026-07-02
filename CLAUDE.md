@@ -47,7 +47,19 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   dotted-path edits for what-if comparison (+ `payback_months` from operating-cost savings).
 - `kpis.py` includes cost: ¥/order, monthly_cost/opex, headcount, AGV utilisation.
 - `analytic.py` — closed-form M/M/c estimate; also the engine's sanity oracle in tests.
-- `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict.
+- `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict. Multi-rep runs
+  add `kpis.ci` (95% t-CI per headline metric + n_recommended for a ±5% target);
+  the KPI view shows 「±X (95%CI, n=N)」 and an honest n=1 disclosure.
+- `asrs.py` — FEM 9.851 / Bozer-White クレーンサイクル解析 (E(SC)/E(DC) → cycles/h →
+  必要クレーン台数). 保管設計 (`storage.py`) の自動倉庫サイジングと GET /storage payload
+  の additive `asrs` ブロック; クレーンつまみは /api/racktypes 配信 (no hardcode).
+- `analysis/inventoryopt.py` — 在庫最適化 (安全在庫・発注点). SKU別 日次需要 (需要ゼロ日
+  含む) から μ/σ を実測で直接算出; SS = z·σ·√(LT+R), ROP = μ·LT+SS; 低頻度SKUは
+  ポアソン切替 (scipy不使用). GET /inventory-opt → ②分析「物量サマリ」カード
+  (`js/dataanalysis.js`); 理論値の注記付き (never oversell).
+- `export/` — brand theme: `Settings.brand` (宛先/自社名/accent/logo/footer, all
+  defaulted) → PPTX/PDF 表紙とアクセント色に反映; POST /brand/logo でロゴ保存;
+  設定タブ「ブランド」(js/settings.js). Default brand is colour-identical (no-op).
 - `design.py` — design-side helpers: `materialize_racks` expands a storage zone's
   parametric rack params (or authored MapMaker-style shelves) into the concrete
   `locations` grid, propagating shelf names to location names and re-pegging SKUs.
@@ -58,7 +70,13 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   uses the **3-tier productivity**: 実測採用値(settings.productivity_overrides) >
   物流形態ベンチマーク(settings.benchmark_productivity) > エンジン既定. ⑤提案前の
   ③設計「原価試算」 (`js/cost.js`, GET /cost). Same 3-tier in `analysis/staffing.py`
-  `resolve_productivity` so the 人員タイムチャート honours it too.
+  `resolve_productivity` so the 人員タイムチャート honours it too. ピッキングの既定層は
+  作業方式連動 (pickrate の動作時間モデルから導出; override/benchmark があれば不変).
+- `analysis/staffing.py` — 人員タイムチャートの解析ソルバー。工程は編集可能マスタ
+  `process_master(model)` 経由 (完全フリー工程; GENERIC_PROCESSES を直接 import しない),
+  バッチ投入ゲート (`settings.batch_schedule`, 窓外は窓内クランプ=never-blocks), 入荷の
+  時間形状はタイムスタンプがあればデータ駆動 (無ければ従来の 8-16 固定窓と同一)。
+  シナリオ保存 + GET /timetable/compare で 作業方式/バッチ別の比較。
 - `benchmarks.py` — 生産性ベンチマークライブラリ (物流形態別 想定生産性プリセット;
   the company's 集合知の箱, seeds replaceable). GET /api/benchmarks, POST
   /benchmark/{id}/apply. The 想定 tier of the productivity stack.
