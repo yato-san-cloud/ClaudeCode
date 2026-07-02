@@ -404,6 +404,30 @@ def api_project_analysis_bundle(name: str):
     return bundle
 
 
+@router.get("/api/projects/{name}/inventory-opt")
+def api_inventory_opt(name: str, lead_time: float = 3.0, review: float = 0.0,
+                      service_level: float = 0.95):
+    """在庫最適化: SKU 別の 安全在庫・発注点 を出荷実績から解析的に試算する。
+
+    ①取込で永続化した出荷テーブル (analysis/shipments.csv) を優先し、無ければ
+    model.orders から復元 (物量サマリと同じ二段構え)。パラメータは query のみ
+    (lead_time=LT日 / review=発注間隔R日〔0=発注点方式〕 / service_level=サービス率)
+    で、スキーマには保存しない。需要データがまだ無ければ {available:false} を返す
+    ── never-blocks。σ は観測期間の需要ゼロ日も含めて実測から直接求める。"""
+    import pandas as pd  # noqa: F401 — inventoryopt / ingest need pandas importable
+
+    from whsim.analysis import ingest, inventoryopt, tablestore
+    proj = _open(name)
+    ship = tablestore.load_saved_table(proj, "shipments")
+    if ship is None:
+        ship = ingest.orders_to_frame(proj.load_model().orders.outbound)
+    if ship is None or ship.empty:
+        return {"available": False,
+                "message": "出荷データがまだありません。①取込で出荷実績を取り込んでください。"}
+    return inventoryopt.analyze(ship, lead_time_days=lead_time, review_days=review,
+                                service_level=service_level)
+
+
 @router.get("/api/projects/{name}/storage")
 def api_storage(name: str, stock_days: float | None = None, tsubo_rate: float | None = None,
                 aisle_factor: float | None = None, bulk_cases: int | None = None,

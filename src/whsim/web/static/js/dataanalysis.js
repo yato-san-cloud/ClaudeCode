@@ -177,12 +177,52 @@ function injectStyle() {
     transition:filter var(--dur-1,.12s) var(--ease-out,ease)}
   .da-err .da-retry:hover{filter:brightness(1.07)}
   @media(prefers-reduced-motion:reduce){.da-err .da-retry{transition:none}}
+  /* ── 在庫最適化 (安全在庫・発注点) card ── */
+  .da-inv{display:flex;flex-direction:column;gap:12px}
+  .da-inv-ctrls{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+  .da-inv-f{display:flex;flex-direction:column;gap:4px}
+  .da-inv-f label{font-size:var(--fs-micro,10.5px);letter-spacing:.04em;
+    color:var(--ink-tertiary,#8195a8);text-transform:uppercase}
+  .da-inv-f input,.da-inv-f select{font:inherit;font-size:var(--fs-sm,12.5px);
+    color:var(--ink-primary,#16202e);background:var(--bg-app,#fff);
+    border:1px solid var(--line,rgba(120,140,170,.18));border-radius:8px;padding:5px 9px}
+  .da-inv-f input{width:88px;font-variant-numeric:tabular-nums}
+  .da-inv-f input:focus,.da-inv-f select:focus{outline:2px solid var(--accent,#16C0DE);outline-offset:1px}
+  .da-inv-sum{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .da-inv-chip{display:inline-flex;align-items:baseline;gap:6px;font-size:var(--fs-xs,12px);
+    color:var(--ink-secondary,#52677c);background:var(--bg-app,#fff);
+    border:1px solid var(--line,rgba(120,140,170,.18));border-radius:999px;padding:3px 11px}
+  .da-inv-chip i{font-style:normal;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8)}
+  .da-inv-chip b{font-weight:700;color:var(--ink-primary,#16202e);font-variant-numeric:tabular-nums}
+  .da-inv-tbl-wrap{max-height:360px;overflow:auto;border:1px solid var(--line,rgba(120,140,170,.18));border-radius:10px}
+  table.da-inv-tbl{width:100%;border-collapse:collapse;font-size:var(--fs-xs,12px)}
+  table.da-inv-tbl th,table.da-inv-tbl td{padding:6px 10px;text-align:right;white-space:nowrap}
+  table.da-inv-tbl th:first-child,table.da-inv-tbl td:first-child{text-align:left}
+  table.da-inv-tbl thead th{position:sticky;top:0;z-index:1;background:var(--bg-panel,#f7f6f3);
+    color:var(--ink-tertiary,#8195a8);font-weight:600;
+    border-bottom:1px solid var(--line-strong,rgba(120,140,170,.3))}
+  table.da-inv-tbl td{color:var(--ink-secondary,#52677c);font-variant-numeric:tabular-nums;
+    border-bottom:1px solid var(--line,rgba(120,140,170,.12))}
+  table.da-inv-tbl td:first-child{color:var(--ink-primary,#16202e);font-weight:600}
+  table.da-inv-tbl tbody tr:hover td{background:color-mix(in srgb,var(--accent,#16C0DE) 6%,transparent)}
+  .da-inv-badge{display:inline-block;font-size:var(--fs-micro,10.5px);font-weight:700;
+    border-radius:6px;padding:1px 7px;border:1px solid currentColor}
+  .da-inv-badge.normal{color:var(--info,#2f7ec4)} .da-inv-badge.poisson{color:var(--warn,#b7791f)}
+  .da-inv-rank{display:inline-block;min-width:16px;text-align:center;font-weight:700;font-size:var(--fs-micro,10.5px)}
+  .da-inv-note{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);line-height:1.5}
+  .da-inv-empty{padding:18px;text-align:center;color:var(--ink-tertiary,#8195a8);font-size:var(--fs-sm,12.5px)}
   `;
   document.head.appendChild(s);
 }
 
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const pct = (n) => (n == null ? '—' : (n * 100).toFixed(0) + '%');
+
+// 在庫最適化: モデル表示ラベルと サービス率(=欠品許容の裏返し) の選択肢。
+const INV_MODEL = { normal: '正規', poisson: 'ポアソン' };
+const SERVICE_OPTS = [[0.9, '90'], [0.95, '95'], [0.975, '97.5'], [0.99, '99'], [0.999, '99.9']];
+// service level → percent label without trailing zeros (0.975 → "97.5").
+const slPct = (v) => String(+(Number(v) * 100).toFixed(1));
 
 // ── ECharts option builders. Each returns an option object (or null when the
 // data array is empty, so the caller can show a friendly placeholder). ──────
@@ -375,6 +415,64 @@ function staffingCard(s) {
   </div>`;
 }
 
+// ── 在庫最適化 (安全在庫・発注点) ─────────────────────────────────────────
+// 実測需要 σ から安全在庫・発注点を試算する 分析ホームのカード。純ビルダー2つ
+// (シェル + 本体) で、本体は制御変更のたびに /inventory-opt を叩いて差し替える。
+// The card body: totals chips + a scrollable per-SKU table + the honest caveat.
+function invBodyHtml(data, params) {
+  if (!data) return '<div class="da-inv-empty">計算中…</div>';
+  if (data.available === false) {
+    return `<div class="da-inv-empty">${esc(data.message || '出荷データがありません。①取込で取り込んでください。')}</div>`;
+  }
+  const rows = data.rows || [];
+  const t = data.totals || {};
+  const periodic = Number(params.review) > 0;     // 定期発注 → 目標在庫列を追加
+  const head = ['SKU', 'ABC', 'モデル', '日平均', 'σ', '安全在庫', '発注点']
+    .concat(periodic ? ['目標在庫'] : []);
+  const body = rows.map((r) => {
+    const cls = r.model === 'poisson' ? 'poisson' : 'normal';
+    const badge = `<span class="da-inv-badge ${cls}">${INV_MODEL[r.model] || esc(r.model)}</span>`;
+    const rank = r.abc
+      ? `<span class="da-inv-rank" style="color:${RANK_C[r.abc] || 'inherit'}">${esc(r.abc)}</span>` : '—';
+    const cells = [esc(r.sku), rank, badge, fmt(r.mu_d), fmt(r.sigma_d),
+      fmt(r.safety_stock), fmt(r.rop)].concat(periodic ? [fmt(r.target_level)] : []);
+    return `<tr>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
+  }).join('');
+  const chips = [
+    ['総安全在庫', `${fmt(t.total_safety_stock)} 点`],
+    ['対象SKU', fmt(t.skus)],
+    ['サービス率', `${slPct(t.service_level)}%`],
+    ['z値', fmt(t.z)],
+    ['観測日数', `${fmt(t.days_observed)} 日`],
+  ];
+  return `<div class="da-inv-sum">${chips.map(([l, v]) =>
+    `<span class="da-inv-chip"><i>${l}</i><b>${v}</b></span>`).join('')}</div>
+    <div class="da-inv-tbl-wrap"><table class="da-inv-tbl">
+      <thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${body || `<tr><td colspan="${head.length}" class="da-inv-empty">対象SKUがありません</td></tr>`}</tbody>
+    </table></div>
+    ${data.truncated ? `<div class="da-inv-note">物量上位 ${rows.length} SKU を表示（全 ${fmt(t.skus)} SKU 中）。</div>` : ''}
+    <div class="da-inv-note">※ ${esc(data.note || '')}</div>`;
+}
+
+function invCardShell(params) {
+  const opts = SERVICE_OPTS.map(([v, lbl]) =>
+    `<option value="${v}"${Math.abs(v - params.service_level) < 1e-9 ? ' selected' : ''}>`
+    + `サービス率 ${lbl}%（欠品許容 ${+(100 - v * 100).toFixed(1)}%）</option>`).join('');
+  return `<div class="da-card full"><h3>在庫最適化（安全在庫・発注点）</h3>
+    <div class="da-inv">
+      <div class="da-inv-ctrls">
+        <div class="da-inv-f"><label for="inv-lt">リードタイム(日)</label>
+          <input id="inv-lt" type="number" min="0" step="0.5" value="${params.lead_time}" data-inv-ctl="lead_time"></div>
+        <div class="da-inv-f"><label for="inv-rv">発注間隔(日 · 0=発注点方式)</label>
+          <input id="inv-rv" type="number" min="0" step="1" value="${params.review}" data-inv-ctl="review"></div>
+        <div class="da-inv-f"><label for="inv-sl">欠品許容率（サービス率）</label>
+          <select id="inv-sl" data-inv-ctl="service_level">${opts}</select></div>
+      </div>
+      <div data-inv-body>${invBodyHtml(null, params)}</div>
+    </div></div>`;
+}
+
 // ②分析 landing header (分析ホーム): a slim strip of fact chips derived from the
 // already-fetched bundle (「—」 when absent) + drill links to the sibling ② views
 // (対話分析 / 基礎物量) via the shell's `whsim:nav` CustomEvent. Pure render;
@@ -447,6 +545,11 @@ export function mountDataAnalysis(el, opts = {}) {
   let projState = 'none'; // 'none' (no project) | 'nodata' (project, no demand yet) | 'data'
   const toast = opts.toast || (() => {});
   const getProject = opts.getProject || (() => null);
+  // 在庫最適化 card state: query-only params (never persisted), cached last
+  // response, and a debounce handle for the control inputs.
+  const invParams = { lead_time: 3, review: 0, service_level: 0.95 };
+  let invData = null;
+  let invTimer = null;
 
   // ── ECharts registry: id → instance; disposed each render so no leaks. ──
   const charts = new Map();
@@ -526,6 +629,7 @@ export function mountDataAnalysis(el, opts = {}) {
              ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4')}
              ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2')}
              ${staffingCard(b.staffing)}
+             ${isProj ? invCardShell(invParams) : ''}
            </div>`
         : projState === 'nodata'
           ? `<div class="da-empty"><b>まだ実データがありません</b>
@@ -536,6 +640,46 @@ export function mountDataAnalysis(el, opts = {}) {
                <button class="da-btn" data-act="goto-intake">①取込へ →</button></div>`);
     wire();
     mountAllCharts(b);
+    mountInventory();
+  }
+
+  // 在庫最適化 card: wire its controls, then paint from cache or fetch fresh.
+  // Only present on a project bundle (the endpoint reads the project's shipments).
+  function mountInventory() {
+    const host = root.querySelector('[data-inv-body]');
+    if (!host) return;
+    wireInvControls();
+    if (invData) host.innerHTML = invBodyHtml(invData, invParams);
+    else loadInventory();
+  }
+  function wireInvControls() {
+    root.querySelectorAll('[data-inv-ctl]').forEach((ctl) => {
+      const key = ctl.dataset.invCtl;
+      const isSelect = ctl.tagName === 'SELECT';
+      const apply = () => {
+        const v = parseFloat(ctl.value);
+        invParams[key] = (!isFinite(v) || v < 0) ? (isSelect ? invParams[key] : 0) : v;
+        clearTimeout(invTimer);
+        invTimer = setTimeout(loadInventory, isSelect ? 0 : 350);   // debounce typing
+      };
+      ctl.addEventListener(isSelect ? 'change' : 'input', apply);
+    });
+  }
+  async function loadInventory() {
+    const proj = getProject();
+    if (!proj) return;
+    let host = root.querySelector('[data-inv-body]');
+    if (host) host.innerHTML = invBodyHtml(null, invParams);   // 計算中…
+    try {
+      const q = `lead_time=${encodeURIComponent(invParams.lead_time)}`
+        + `&review=${encodeURIComponent(invParams.review)}`
+        + `&service_level=${encodeURIComponent(invParams.service_level)}`;
+      invData = await getJSON(`/api/projects/${encodeURIComponent(proj)}/inventory-opt?${q}`);
+    } catch (e) {
+      invData = { available: false, message: '在庫最適化を取得できませんでした: ' + (e.message || e) };
+    }
+    host = root.querySelector('[data-inv-body]');   // re-query (render may have re-run)
+    if (host) host.innerHTML = invBodyHtml(invData, invParams);
   }
 
   // `makePromise` is a thunk so the same fetch can be re-invoked by 再試行.
@@ -611,6 +755,7 @@ export function mountDataAnalysis(el, opts = {}) {
   // ①取込 ETL). available:false ⇒ no demand yet → point at ①取込.
   async function loadProject() {
     const proj = getProject();
+    invData = null;   // a project switch / fresh import must re-derive 在庫最適化
     if (!proj) { projState = 'none'; render(null); return; }
     await load(async () => {
       const b = await getJSON(`/api/projects/${encodeURIComponent(proj)}/analysis/bundle`);
