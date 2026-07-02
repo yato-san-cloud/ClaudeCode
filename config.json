@@ -1,0 +1,19 @@
+{
+  "departmentUrl": "https://medicalpass.jp/departments/2860",
+
+  "targetTimeJst": "06:00:00",
+  "preOpenLeadMinutes": 5,
+
+  "menuText": "一般診察",
+  "proceedButtonTexts": ["次へ", "確認", "予約する", "受付する", "この内容で予約", "予約を確定"],
+  "successTexts": ["受付番号", "受付が完了", "予約が完了", "予約を受け付けました"],
+  "closedTexts": ["受付時間外", "受付を開始していません", "受付しておりません"],
+
+  "retry": {
+    "intervalSeconds": 3,
+    "maxAttempts": 40
+  },
+
+  "headless": false,
+  "screenshotsDir": "screenshots"
+}
