@@ -30,6 +30,7 @@ from ._data import (
     _normalize_insights,
     _normalize_scenarios,
     _png_exists,
+    _staffing_section,
     _storage_table,
     _verdict_text,
 )
@@ -37,7 +38,7 @@ from ._data import (
 
 def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                png_path, out_path, *, scenarios=None, insights=None,
-               provenance=None, storage=None) -> Path:
+               provenance=None, storage=None, model=None) -> Path:
     """Build an editable, multi-section proposal deck and write it to `out_path`.
 
     Sections (slides): cover -> executive summary -> layout & congestion -> KPI
@@ -51,6 +52,10 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                           (the analysis tab's "指摘->提案").
       * ``provenance``  -- alias for ``provenance_summary``; ``provenance_summary``
                           wins when both are supplied.
+      * ``model``       -- optional ``WarehouseModel``; when it carries demand a
+                          「人員配置と工程フロー」slide is added (総工数/ピーク人数/
+                          終了時刻タイル・充足判定・バッチ投入要約・工程フロー表).
+                          Fully guarded: no demand / any failure → slide omitted.
     Robust: missing/None inputs degrade to graceful placeholders, never raise.
     """
     from pptx import Presentation
@@ -65,6 +70,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
     png = _png_exists(png_path)
     scen = _normalize_scenarios(scenarios)
     recs = _normalize_insights(insights)
+    staff = _staffing_section(model)  # None when no demand / any failure
 
     prs = Presentation()
     prs.slide_width = Inches(13.333)
@@ -256,6 +262,58 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
             _para(tf, value, size=16, bold=True)
             ty += 1.15
         _footer(s4b)
+
+    # --- Slide 4c: Staffing & process flow (人員配置と工程フロー) — model-driven -
+    if staff is not None:
+        s4c = prs.slides.add_slide(blank)
+        _header_band(s4c, "③ 設計：人員配置と工程フロー")
+        # Summary tiles: 総工数 / ピーク人数 / 終了時刻.
+        stiles = staff["tiles"]
+        tw = Inches(3.9)
+        ttop = Inches(1.15)
+        tth = Inches(1.35)
+        for i, (label, value, unit) in enumerate(stiles):
+            left = Inches(0.5 + i * (3.9 + 0.25))
+            _rect(s4c, left, ttop, tw, tth, LIGHT)
+            _rect(s4c, left, ttop, tw, Inches(0.1), NOTION_BLUE)  # accent strip
+            ltf = _textbox(s4c, left, ttop + Inches(0.22), tw, Inches(0.4))
+            _para(ltf, label, size=13, bold=True, color=SUBTLE, first=True)
+            vtf3 = _textbox(s4c, left, ttop + Inches(0.62), tw, Inches(0.7))
+            vp = _para(vtf3, value, size=24, bold=True, color=INK, first=True)
+            if unit:
+                r_u = vp.add_run()
+                r_u.text = f" {unit}"
+                _set_run(r_u, size=13, color=SUBTLE)
+        # 判定 line (充足/不足).
+        jtf = _textbox(s4c, Inches(0.5), Inches(2.75), Inches(12.3), Inches(0.5))
+        _para(jtf, staff["verdict"], size=16, bold=True,
+              color=(GREEN if staff["verdict_ok"] else RED), first=True)
+        # Optional バッチ投入 one-line summary.
+        flow_top = 3.4
+        if staff["batch_line"]:
+            btf = _textbox(s4c, Inches(0.5), Inches(3.25), Inches(12.3), Inches(0.4))
+            _para(btf, staff["batch_line"], size=12, color=SUBTLE, first=True)
+            flow_top = 3.75
+        # 工程フロー table (工程 / 区分 / 生産性 / 依存).
+        header = staff["flow_header"]
+        frows = staff["flow_rows"]
+        nrow = len(frows) + 1
+        ncol = len(header)
+        ft_shape = s4c.shapes.add_table(nrow, ncol, Inches(0.5), Inches(flow_top),
+                                        Inches(12.3), Inches(0.4 * nrow + 0.2))
+        ft = ft_shape.table
+        ft.columns[0].width = Inches(3.3)
+        ft.columns[1].width = Inches(2.0)
+        ft.columns[2].width = Inches(3.3)
+        ft.columns[3].width = Inches(3.7)
+        for ci, htext in enumerate(header):
+            _cell_in(ft, 0, ci, htext, size=12, bold=True, color=WHITE,
+                     fill=NOTION_BLUE)
+        for ri, row in enumerate(frows, start=1):
+            zebra = LIGHT if ri % 2 == 0 else WHITE
+            for ci, val in enumerate(row):
+                _cell_in(ft, ri, ci, val, size=11, bold=(ci == 0), fill=zebra)
+        _footer(s4c)
 
     # --- Slide 5: Scenario comparison (only if provided) ---------------------
     if scen:

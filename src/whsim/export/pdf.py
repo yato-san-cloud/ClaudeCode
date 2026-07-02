@@ -27,6 +27,7 @@ from ._data import (
     _normalize_insights,
     _normalize_scenarios,
     _png_exists,
+    _staffing_section,
     _storage_table,
     _verdict_text,
 )
@@ -35,13 +36,14 @@ from .fonts import _register_cjk_font
 
 def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
               png_path, out_path, *, scenarios=None, insights=None,
-              provenance=None, storage=None) -> Path:
+              provenance=None, storage=None, model=None) -> Path:
     """Build a multi-section A4 proposal PDF and write it to `out_path`.
 
     Mirrors the PPTX sections: cover header -> executive summary (verdict + hero
-    tiles) -> layout & congestion -> KPI detail -> scenario comparison (if any)
-    -> recommendations (if any) -> methodology / provenance. Optional params are
-    the same as :func:`build_pptx`; missing inputs degrade gracefully.
+    tiles) -> layout & congestion -> KPI detail -> 人員配置と工程フロー (if the
+    optional ``model`` carries demand) -> scenario comparison (if any) ->
+    recommendations (if any) -> methodology / provenance. Optional params are the
+    same as :func:`build_pptx`; missing inputs degrade gracefully.
     """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -64,6 +66,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     png = _png_exists(png_path)
     scen = _normalize_scenarios(scenarios)
     recs = _normalize_insights(insights)
+    staff = _staffing_section(model)  # None when no demand / any failure
     font = _register_cjk_font()
 
     def _rgb(t):
@@ -224,6 +227,62 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
             f"合計：必要坪数 {summary['tsubo']}・什器 {summary['units']}台"
             f"（{summary['cells']}間口）・対象 {summary['skus']}品目"
             f"／参考保管費 {summary['cost']}/月", body_style))
+
+    # --- Staffing & process flow (人員配置と工程フロー) — model-driven ---------
+    if staff is not None:
+        _section("③ 設計：人員配置と工程フロー")
+        # Summary tiles: 総工数 / ピーク人数 / 終了時刻.
+        minis = []
+        for label, value, unit in staff["tiles"]:
+            vtxt = f"{value} {unit}".strip()
+            mt = Table([[Paragraph(label, tile_label)],
+                        [Paragraph(vtxt, tile_value)]],
+                       colWidths=[avail_w / 3 - 3])
+            mt.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), _rgb(LIGHT)),
+                ("LINEABOVE", (0, 0), (-1, 0), 2.5, _rgb(NOTION_BLUE)),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]))
+            minis.append(mt)
+        stiles_tbl = Table([minis], colWidths=[avail_w / 3] * 3)
+        stiles_tbl.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(stiles_tbl)
+        story.append(Spacer(1, 2 * mm))
+        # 判定 line (充足/不足).
+        staff_verdict_style = ParagraphStyle(
+            "staffv", fontName=font, fontSize=11, leading=15,
+            textColor=_rgb(GREEN if staff["verdict_ok"] else RED),
+        )
+        story.append(Paragraph(staff["verdict"], staff_verdict_style))
+        # Optional バッチ投入 one-line summary.
+        if staff["batch_line"]:
+            story.append(Paragraph(staff["batch_line"], body_style))
+        story.append(Spacer(1, 1.5 * mm))
+        # 工程フロー table (工程 / 区分 / 生産性 / 依存).
+        fdata = [staff["flow_header"]] + staff["flow_rows"]
+        ftbl = Table(fdata, colWidths=[avail_w * 0.27, avail_w * 0.16,
+                                       avail_w * 0.27, avail_w * 0.30])
+        ftbl.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), font),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), _rgb(NOTION_BLUE)),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), _rgb(INK)),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _rgb(LIGHT)]),
+            ("GRID", (0, 0), (-1, -1), 0.4, _rgb((0xD0, 0xDC, 0xEC))),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(ftbl)
 
     # --- Scenario comparison (only if provided) ------------------------------
     if scen:

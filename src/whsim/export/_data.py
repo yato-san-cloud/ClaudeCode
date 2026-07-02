@@ -298,6 +298,115 @@ def _storage_table(storage: dict | None):
     return header, rows, summary
 
 
+def _batch_summary_line(batches) -> str | None:
+    """バッチ投入スケジュール({section: [{hour, pct}]})を1行に要約する。
+
+    有効な投入が無ければ None（呼び出し側はバッチ行ごと省略する）。
+    """
+    if not isinstance(batches, dict) or not batches:
+        return None
+    parts: list[str] = []
+    for sec, blist in batches.items():
+        if not isinstance(blist, list) or not blist:
+            continue
+        chunks: list[str] = []
+        for b in blist:
+            if not isinstance(b, dict):
+                continue
+            try:
+                h = int(b.get("hour", b.get("time")))
+                pct = float(b.get("pct", b.get("percent", 0)) or 0)
+            except (TypeError, ValueError):
+                continue
+            if pct <= 0:
+                continue
+            chunks.append(f"{h:02d}:00→{_fmt_num(pct, 0)}%")
+        if chunks:
+            parts.append(f"{sec} " + " / ".join(chunks))
+    if not parts:
+        return None
+    return "バッチ投入：" + " ／ ".join(parts)
+
+
+def _staffing_section(model) -> dict | None:
+    """人員配置と工程フローのセクション用データを ``model`` から導出する。
+
+    受注(物量)を持たない bare モデルや、導出中の任意の失敗時には ``None`` を返し、
+    呼び出し側はセクションごと省略する（never-blocks）。返り値は描画非依存の
+    整形済み文字列のみ（summary tiles / 判定 / バッチ要約 / 工程フロー表）。
+
+    導出手順:
+      1. モデル自身の出荷/入荷受注 → ``ingest.orders_to_frame`` でフレーム化。
+      2. ``staffing.staffing_profile`` で工程別の日次物量を得る。
+      3. ``staffing.solve_staffing`` で総工数・ピーク人数・終了時刻・充足判定。
+      4. ``staffing.flow_seed`` で工程フロー(工程/区分/生産性/依存)を得る。
+    """
+    if model is None:
+        return None
+    try:
+        from whsim.analysis import ingest, staffing
+
+        orders = getattr(model, "orders", None)
+        ship = ingest.orders_to_frame(getattr(orders, "outbound", []) or [])
+        if ship is None or ship.empty:
+            return None
+        inb = ingest.orders_to_frame(getattr(orders, "inbound", []) or [])
+        prof = staffing.staffing_profile(
+            ship, inb if inb is not None and not inb.empty else None, model=model)
+        volumes = {p["id"]: p["daily_volume"] for p in prof.get("processes", [])}
+        if not any(float(v or 0) > 0 for v in volumes.values()):
+            return None
+        batches = getattr(getattr(model, "settings", None), "batch_schedule", {}) or {}
+        if not isinstance(batches, dict):
+            batches = {}
+        result = staffing.solve_staffing(
+            volumes, model=model, start_hour=9, end_hour=18,
+            placement="level", batches=batches)
+        flow = staffing.flow_seed(model)
+    except Exception:  # noqa: BLE001 — never blocks; skip the section on any failure
+        return None
+
+    feasible = bool(result.get("feasible"))
+    peak = result.get("peak_headcount") or 0
+    total_mh = result.get("total_man_hours") or 0
+    finish = result.get("makespan_hour") or result.get("finish_hour") \
+        or result.get("end_hour")
+    tiles = [
+        ("総工数", _fmt_num(total_mh, 1), "人時"),
+        ("ピーク人数", _fmt_num(peak, 0), "名"),
+        ("終了時刻", f"{int(finish)}:00" if finish is not None else DASH, ""),
+    ]
+    if feasible:
+        verdict = "判定：現行の人員配置で当日物量を充足できます。"
+    else:
+        short = result.get("shortfall_man_hours") or 0
+        verdict = f"判定：当日物量に対し人員が不足します（不足 {_fmt_num(short, 1)} 人時）。"
+
+    flow_rows: list[list[str]] = []
+    for f in flow or []:
+        unit = str(f.get("unit") or "")
+        try:
+            prod_txt = f"{float(f.get('productivity')):g} {unit}".strip()
+        except (TypeError, ValueError):
+            prod_txt = unit or DASH
+        deps = [str(d) for d in (f.get("depends") or [])]
+        flow_rows.append([
+            str(f.get("id", "工程")),
+            str(f.get("section", "")),
+            prod_txt,
+            "、".join(deps) if deps else DASH,
+        ])
+
+    return {
+        "tiles": tiles,
+        "verdict": verdict,
+        "verdict_ok": feasible,
+        "batch_line": _batch_summary_line(batches),
+        "flow_header": ["工程", "区分", "生産性", "依存"],
+        "flow_rows": flow_rows,
+    }
+
+
 # Shared scenario-comparison metric spec, used by both builders.
 _SCENARIO_METRICS = [
     ("処理能力 (件/時)", "throughput_per_hr", 1, False),
