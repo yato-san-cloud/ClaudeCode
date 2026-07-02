@@ -277,8 +277,92 @@ def _order_points(world: World, order: Order):
     return pts, qtys, tss, vss
 
 
+def _agv_seg_key(a, b) -> tuple[int, int, bool]:
+    """A COARSE aisle-segment id for one corner-to-corner AGV leg: the midpoint
+    cell quantised to ~3 m plus the leg orientation. Coarse enough to be cheap
+    (few distinct keys), fine enough that two AGVs in the same aisle stretch map
+    to the SAME key and therefore contend on the same capacity-1 mutex."""
+    midx = (a[0] + b[0]) / 2.0
+    midy = (a[1] + b[1]) / 2.0
+    horizontal = abs(b[0] - a[0]) >= abs(b[1] - a[1])
+    return (round(midx / 3.0), round(midy / 3.0), horizontal)
+
+
+def _agv_travel(world: World, a: Worker, frm, to, depart_state: str, arrive_state: str):
+    """One AGV travel move frm→to. Returns the travel distance.
+
+    Interference OFF (``world.aisle_locks is None``): the legacy single-timeout
+    move — byte-identical to the pre-feature engine (same distance, same two
+    keyframes). Interference ON: walk the real aisle-graph waypoints, and for each
+    corner-to-corner leg seize that leg's coarse segment mutex, hold it for the
+    leg's traversal time, then release — so two AGVs can never occupy the same
+    aisle stretch at once (extra AGVs queue). Waiting on a lock accumulates an
+    ``agv_conflict`` event; a wait past ``agv_deadlock_s`` emits a one-shot
+    ``agv_deadlock_warning`` and FORCE-PROCEEDS without the lock (an honest escape
+    hatch — detection only, no resolution). Total travel time is still ≥ the
+    unencumbered ``d / speed`` (the leg timeouts sum to it, plus any lock waits)."""
+    env = world.env
+    d = world.dist(frm, to)
+    _accumulate_heat(world, frm, to)
+    speed = world.agv_speed
+    total_t = (d / speed) if speed > 0 else 0.0
+
+    if world.aisle_locks is None:
+        # Legacy path (byte-identical): one departure kf, one arrival kf.
+        if world.recording():
+            a.kf(env.now, frm[0], frm[1], depart_state)
+        yield env.timeout(total_t)
+        if world.recording():
+            a.kf(env.now, to[0], to[1], arrive_state)
+        return d
+
+    # --- interference ON: walk waypoints under per-segment mutexes ------------
+    pts = world.path(frm, to)
+    seglens = [((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2) ** 0.5
+               for i in range(1, len(pts))]
+    pathlen = sum(seglens)
+    if world.recording():
+        a.kf(env.now, pts[0][0], pts[0][1], depart_state)
+    if pathlen <= 1e-9 or total_t <= 0.0:
+        yield env.timeout(total_t)
+        if world.recording():
+            a.kf(env.now, to[0], to[1], arrive_state)
+        return d
+    for i in range(1, len(pts)):
+        p0, p1 = pts[i - 1], pts[i]
+        leg_t = total_t * seglens[i - 1] / pathlen
+        seg = _agv_seg_key(p0, p1)
+        lock = world.aisle_lock(seg)
+        req = lock.request()
+        wait_start = env.now
+        # Reneging request: race the lock against the deadlock threshold.
+        result = yield req | env.timeout(world.agv_deadlock_s)
+        waited = env.now - wait_start
+        acquired = req in result
+        if not acquired:
+            # Deadlock detected: give up the request and force-proceed WITHOUT the
+            # lock (honest escape hatch — no resolution/replanning). One warning.
+            req.cancel()
+            world.log(t=env.now, event="agv_deadlock_warning", seg=repr(seg),
+                      wait=waited, resource="agv", worker=a.id)
+        elif waited > 1e-9:
+            world.log(t=env.now, event="agv_conflict", seg=repr(seg),
+                      wait=waited, resource="agv", worker=a.id)
+        yield env.timeout(leg_t)                 # traverse the leg
+        if acquired:
+            lock.release(req)
+        if world.recording():
+            state = arrive_state if i == len(pts) - 1 else "travel"
+            a.kf(env.now, p1[0], p1[1], state)
+    return d
+
+
 def agv_agent(world: World, a: Worker):
-    """AGV: pull an order, fetch its totes (move!), drop into the ready queue."""
+    """AGV: pull an order, fetch its totes (move!), drop into the ready queue.
+
+    Travel is delegated to :func:`_agv_travel`, which is byte-identical to the
+    legacy move when AGV通路干渉 is off and seizes coarse aisle-segment mutexes
+    (so extra AGVs queue in shared corridors) when it is on."""
     env = world.env
     pos = world.agv_home
     if world.recording():
@@ -291,21 +375,9 @@ def agv_agent(world: World, a: Worker):
         trip_start = env.now
         cur = world.agv_home
         for dest in route:
-            d = world.dist(cur, dest)
-            _accumulate_heat(world, cur, dest)
-            if world.recording():
-                a.kf(env.now, cur[0], cur[1], "travel")
-            yield env.timeout(d / world.agv_speed)
-            if world.recording():
-                a.kf(env.now, dest[0], dest[1], "pickup")
+            yield from _agv_travel(world, a, cur, dest, "travel", "pickup")
             cur = dest
-        d = world.dist(cur, world.agv_home)
-        _accumulate_heat(world, cur, world.agv_home)
-        if world.recording():
-            a.kf(env.now, cur[0], cur[1], "dropoff")
-        yield env.timeout(d / world.agv_speed)
-        if world.recording():
-            a.kf(env.now, world.agv_home[0], world.agv_home[1], "idle")
+        yield from _agv_travel(world, a, cur, world.agv_home, "dropoff", "idle")
         world.log(t=env.now, event="agv_done", busy=env.now - trip_start,
                   resource="agv", worker=a.id)
         yield world.ready_store.put(item)

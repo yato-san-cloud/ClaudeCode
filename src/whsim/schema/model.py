@@ -276,6 +276,14 @@ class Process(BaseModel):
     replenish_qty_frac: float = 1.0       # refill the face up to capacity×this
     replenish_place_s: float = 12.0       # seconds to place/top-up a face
     replenishers: int = 0                 # dedicated replenishers (0 = forklifts do it)
+    # AGV通路相互排他・簡易干渉モデル. False = disabled (legacy: AGVs never contend for
+    # aisle space — byte-identical). When True AND the wall-aware graph is active AND
+    # there is more than one AGV, each AGV travel leg seizes a coarse aisle-segment
+    # mutex (one AGV per ~3 m stretch), so extra AGVs queue in shared corridors and
+    # throughput saturates. Deadlock is DETECTED (a lock wait past ~120 sim-seconds
+    # emits a one-shot warning) and escaped by force-proceeding — detection+warning
+    # only, no resolution/replanning. Opt-in ⇒ off is byte-identical.
+    agv_interference: bool = False
     # 段(level)からのピック垂直アクセス時間: picking an upper 段 costs vertical time on
     # top of the handle. lift_speed_mps = forklift/order-picker hoist speed (m/s,
     # up+down); manual_reach_s_per_m = the ergonomic reach/ladder penalty per metre

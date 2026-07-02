@@ -181,6 +181,14 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     stockout_events = [e for e in res.events if e["event"] == "stockout_wait"]
     stockout_wait_times = [e.get("wait", 0.0) for e in stockout_events]
 
+    # --- AGV通路相互排他・簡易干渉モデル ---------------------------------------
+    # Populated only when the feature was enabled (agv_conflict / agv_deadlock_warning
+    # events exist); otherwise every field is 0 — additive, no legacy KPI shifts.
+    agv_conflict_events = [e for e in res.events if e["event"] == "agv_conflict"]
+    agv_deadlock_events = [e for e in res.events if e["event"] == "agv_deadlock_warning"]
+    agv_wait_s = (sum(e.get("wait", 0.0) for e in agv_conflict_events)
+                  + sum(e.get("wait", 0.0) for e in agv_deadlock_events))
+
     on_time = sum(
         1 for e in completes if e.get("due") is None or e["t"] <= e["due"]
     )
@@ -245,6 +253,11 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "picker_utilization": pick_util,
         "packer_utilization": pack_util,
         "agv_utilization": agv_util,
+        "agv_busy_s": agv_busy,
+        # AGV通路相互排他: aisle-contention waiting + deadlock detection counters.
+        "agv_wait_s": agv_wait_s,
+        "agv_conflicts": len(agv_conflict_events),
+        "agv_deadlock_warnings": len(agv_deadlock_events),
         "inspector_utilization": inspect_util,
         "n_inspectors": n_insp,
         "n_agvs": res.n_agvs,
@@ -451,4 +464,10 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
                 "。補充が追いつかずピッキングが待たされています"
                 "（補充要員/間口在庫の見直し）"
             )
+    # AGV通路相互排他: when AGV aisle-contention waiting is material (>5% of the AGV
+    # fleet's busy time), surface the honest "頭打ち" advisory. Off ⇒ agv_wait_s==0
+    # ⇒ no fragment ⇒ byte-identical verdict.
+    agv_busy_s = agg.get("agv_busy_s", 0.0)
+    if agv_busy_s > 0 and agg.get("agv_wait_s", 0.0) > 0.05 * agv_busy_s:
+        agg["verdict"] += "。AGVの通路待ちが発生しています（台数/レイアウトの見直し余地）"
     return agg

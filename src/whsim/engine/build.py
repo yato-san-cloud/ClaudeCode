@@ -122,6 +122,15 @@ class World:
     replen_dedicated: int = 0               # dedicated replenisher agents to spawn
     n_replenishers: int = 0                 # effective servers (for utilisation denom)
     replen_shared_forklift: bool = False
+    # AGV通路相互排他・簡易干渉モデル (opt-in). None = disabled (AGVs never contend for
+    # aisle space — byte-identical legacy travel). When present it is a dict of
+    # lazily-created SimPy Resource(capacity=1) mutexes keyed by a COARSE aisle
+    # segment id, so at most one AGV occupies a ~3 m aisle stretch at a time and
+    # extra AGVs queue in shared corridors. See agv_agent / _agv_travel in
+    # processes.py. Only built when agv_interference AND the graph is active AND
+    # n_agvs > 1.
+    aisle_locks: dict | None = None
+    agv_deadlock_s: float = 120.0           # lock wait past this ⇒ warn + force-proceed
     _helper_seq: int = 0                    # monotonic id source for helper tracks
 
     def log(self, **kw) -> None:
@@ -194,6 +203,15 @@ class World:
 
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s
+
+    def aisle_lock(self, seg) -> "simpy.Resource":
+        """The mutex (capacity-1 Resource) for a coarse aisle segment, created on
+        first use. Only reached when ``aisle_locks`` is not None (interference on)."""
+        lk = self.aisle_locks.get(seg)
+        if lk is None:
+            lk = simpy.Resource(self.env, capacity=1)
+            self.aisle_locks[seg] = lk
+        return lk
 
 
 def build(
@@ -433,6 +451,13 @@ def build(
             replen_dedicated = 1
             n_replenishers = 1
 
+    # AGV通路相互排他: build the aisle-segment mutex map only when the feature is
+    # opt-in enabled, the wall-aware graph is active (segments are meaningful), and
+    # more than one AGV can actually contend. Otherwise None ⇒ AGVs travel the
+    # legacy way and the run is byte-identical.
+    aisle_locks = ({} if (model.process.agv_interference and use_graph and n_agvs > 1)
+                   else None)
+
     has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
     cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
                 if model.resources.conveyors else 0.5) or 0.5
@@ -470,4 +495,5 @@ def build(
         replen_faces=replen_faces, replen_store=replen_store,
         replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
         n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,
+        aisle_locks=aisle_locks,
     )
