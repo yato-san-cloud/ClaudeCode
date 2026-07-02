@@ -28,7 +28,9 @@ GENERIC_PROCESSES: list[dict] = [
     {"id": "梱包",     "section": "出荷", "driver": "out_orders", "prod": 30, "unit": "件/h"},
     {"id": "出荷",     "section": "出荷", "driver": "out_orders", "prod": 120, "unit": "件/h"},
 ]
-# Inbound rarely carries hour stamps; spread it across a morning receiving window.
+# Fallback receiving window: when the inbound frame carries no usable hour stamps
+# we spread inbound volume evenly across this morning window. When a real 入荷実績
+# DOES carry timestamps, the shape is data-driven instead (see _inbound_shape).
 _INBOUND_WINDOW = list(range(8, 16))
 
 
@@ -86,7 +88,58 @@ def _hour_shape(shipments: pd.DataFrame | None) -> list[float]:
     return [f / tot for f in frac]
 
 
-def _inbound_shape() -> list[float]:
+def _measured_inbound_shape(inbound: pd.DataFrame | None) -> list[float] | None:
+    """Normalised 24-hour inbound shape from the frame's own clock time, or None
+    when the frame carries no usable time-of-day (so the caller falls back to the
+    fixed receiving window).
+
+    The inbound side historically has no hour stamps, but a real 入荷実績 can now
+    arrive with a ``timestamp`` (出荷日時-style) column — or with a ``date`` column
+    that itself carries a clock component (``pd.to_datetime`` preserves it). We
+    mirror the outbound ``_hour_shape``: weight each hour by its line count, then
+    normalise to fractions summing to 1.
+
+    "Usable" is detected exactly like ``ingest.build_orders`` — a stamp counts only
+    if it is non-NaT and NOT exactly 00:00:00 (a date-only value normalises to
+    midnight, which is *unknown* time, not a genuine midnight arrival). If no row
+    carries such a stamp (all NaT / all midnight / no time column) we return None,
+    which keeps the fixed 8–16 window byte-identical to the pre-timestamp behaviour.
+    Rows without a real clock time are ignored rather than piled onto hour 0."""
+    if inbound is None or getattr(inbound, "empty", True):
+        return None
+    cols = getattr(inbound, "columns", [])
+    stamps = None
+    for col in ("timestamp", "date"):  # prefer an explicit timestamp over the date
+        if col in cols:
+            cand = pd.to_datetime(inbound[col], errors="coerce")
+            has_clock = cand.notna() & ~(
+                (cand.dt.hour == 0) & (cand.dt.minute == 0) & (cand.dt.second == 0)
+            )
+            if bool(has_clock.any()):
+                stamps = cand[has_clock]
+                break
+    if stamps is None or stamps.empty:
+        return None
+    frac = [0.0] * 24
+    for h, n in stamps.dt.hour.value_counts().items():
+        hi = int(h)
+        if 0 <= hi < 24:
+            frac[hi] += float(n)
+    tot = sum(frac)
+    if tot <= 0:
+        return None
+    return [f / tot for f in frac]
+
+
+def _inbound_shape(inbound: pd.DataFrame | None = None) -> list[float]:
+    """24-hour inbound shape (fractions summing to 1).
+
+    Data-driven from the imported 入荷実績's own timestamps when it carries usable
+    time-of-day (see ``_measured_inbound_shape``); otherwise the fixed 8–16 morning
+    receiving window, byte-identical to the historical fixed behaviour."""
+    measured = _measured_inbound_shape(inbound)
+    if measured is not None:
+        return measured
     return [1.0 / len(_INBOUND_WINDOW) if h in _INBOUND_WINDOW else 0.0 for h in range(24)]
 
 
@@ -115,7 +168,7 @@ def staffing_profile(shipments: pd.DataFrame | None,
     daily = {"out_lines": out_lines, "out_qty": out_qty, "out_orders": out_orders,
              "in_lines": in_lines, "in_qty": in_qty}
     out_shape = _hour_shape(shipments)
-    in_shape = _inbound_shape()
+    in_shape = _inbound_shape(inbound)
 
     procs = []
     total_hourly = [0.0] * 24
