@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import simpy
 
-from whsim.engine.graph import AisleGraph
+from whsim.engine.graph import AisleGraph, simplify_collinear
 from whsim.engine.routing import manhattan
 from whsim.schema.model import WarehouseModel
 
@@ -144,6 +144,22 @@ class World:
         if self.use_graph and self.graph is not None:
             return self.graph.distance(a, b)
         return manhattan(a, b)
+
+    def path(self, a, b) -> list[tuple[float, float]]:
+        """Corner waypoints a→b along the REAL route (wall-aware aisle graph), for
+        replay/動線 viz. The viewer lerps between keyframes, so emitting the route's
+        turns makes agents follow aisles instead of cutting straight through
+        shelves. Collinear runs are collapsed to the few corner vertices. Falls back
+        to the straight segment [a, b] when no graph is active or it cannot route —
+        viz must never break the run."""
+        if self.use_graph and self.graph is not None:
+            try:
+                wp = self.graph.path(a, b)
+                if wp and len(wp) >= 2:
+                    return simplify_collinear(wp)
+            except Exception:  # noqa: BLE001 — fall back to the straight segment
+                pass
+        return [tuple(a), tuple(b)]
 
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s

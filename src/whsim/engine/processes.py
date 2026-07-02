@@ -30,11 +30,28 @@ def _accumulate_heat(world: World, a, b) -> None:
 def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
     d = world.dist(frm, to)            # measured override > wall-aware graph > Manhattan
     _accumulate_heat(world, frm, to)
-    if world.recording():
-        w.kf(world.env.now, frm[0], frm[1], state)
-    yield world.env.timeout(d / speed)
-    if world.recording():
-        w.kf(world.env.now, to[0], to[1], state)
+    total_t = (d / speed) if speed > 0 else 0.0
+    if not world.recording():
+        yield world.env.timeout(total_t)
+        return d
+    # Emit the REAL aisle route as intermediate keyframes so the viewer (which lerps
+    # between keyframes) makes the worker FOLLOW the aisles instead of cutting
+    # straight through shelves. Total travel time is unchanged (d/speed): each
+    # segment takes its share of the time, proportional to its on-route length.
+    pts = world.path(frm, to)
+    seglens = [((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2) ** 0.5
+               for i in range(1, len(pts))]
+    pathlen = sum(seglens)
+    w.kf(world.env.now, pts[0][0], pts[0][1], state)
+    if pathlen <= 1e-9:
+        yield world.env.timeout(total_t)
+        if world.recording():
+            w.kf(world.env.now, to[0], to[1], state)
+        return d
+    for i in range(1, len(pts)):
+        yield world.env.timeout(total_t * seglens[i - 1] / pathlen)
+        if world.recording():
+            w.kf(world.env.now, pts[i][0], pts[i][1], state)
     return d
 
 
