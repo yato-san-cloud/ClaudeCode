@@ -59,6 +59,7 @@ from whsim.web.routes import (
     misc as misc_routes,
     projects as projects_routes,
     run_render as run_render_routes,
+    viewer as viewer_routes,
 )
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -422,6 +423,7 @@ app.include_router(projects_routes.router)
 app.include_router(imports_routes.router)
 app.include_router(analysis_routes.router)
 app.include_router(run_render_routes.router)
+app.include_router(viewer_routes.router)
 
 # ---- static frontend (mounted last so /api/* wins) --------------------------
 app.mount("/", StaticFiles(directory=str(STATIC), html=True), name="static")

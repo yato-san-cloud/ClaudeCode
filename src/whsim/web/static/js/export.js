@@ -667,6 +667,7 @@ export class ExportView {
     docs.appendChild(this._docBtn('提案書をダウンロード (PPTX)', 'pptx', name, true));
     docs.appendChild(this._docBtn('提案書をダウンロード (PDF)', 'pdf', name, false));
     docs.appendChild(this._pngBtn('提案PNGを保存', name));
+    docs.appendChild(this._viewerBtn(name));
     panel.appendChild(docs);
 
     // Secondary: data exports + print.
@@ -763,6 +764,56 @@ export class ExportView {
       }
     });
     return btn;
+  }
+
+  // 共有ビューアHTML: a single self-contained, read-only HTML file the salesperson
+  // can mail to the 荷主 — KPI cards, proposal PNG, scorecard, and a 2D replay
+  // player, all inlined (no server, opens from file://).
+  _viewerBtn(name) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'export-doc-btn';
+    const label = '🔗 共有ビューアHTML';
+    btn.textContent = label;
+    btn.title = '単一HTMLファイル。メール添付でそのまま開けます（読み取り専用）';
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.busy === '1') return;
+      btn.dataset.busy = '1';
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span>生成中…';
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(name)}/export/viewer`);
+        if (!res.ok) throw new Error(`生成に失敗しました (${res.status})`);
+        const blob = await res.blob();
+        const dl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = dl;
+        a.download = `${name}_共有ビューア.html`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => { try { URL.revokeObjectURL(dl); } catch (_e) { /* ignore */ } }, 4000);
+        this._toast('共有ビューアHTMLを作成しました。', 'ok');
+      } catch (err) {
+        this._toast('共有ビューアの作成に失敗しました: ' + (err && err.message ? err.message : ''), 'error');
+      } finally {
+        btn.dataset.busy = '';
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.textContent = label;
+      }
+    });
+    // Descriptive note beneath the button (mail-attachable, read-only).
+    const note = document.createElement('p');
+    note.className = 'export-desc';
+    note.style.margin = '2px 2px 0';
+    note.textContent = '単一HTMLファイル。メール添付でそのまま開けます（読み取り専用）。';
+    const wrap = document.createElement('div');
+    wrap.appendChild(btn);
+    wrap.appendChild(note);
+    return wrap;
   }
 
   _linkBtn(label, handler) {
