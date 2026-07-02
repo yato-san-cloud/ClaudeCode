@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# キャッシュDB
+*.sqlite
+.jancode_cache.sqlite
+
+# 生成物・作業ファイル
+*_転記済み.xlsx
+~$*.xlsx
+
+# pytest
+.pytest_cache/
