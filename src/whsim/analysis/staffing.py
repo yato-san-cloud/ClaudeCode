@@ -163,9 +163,81 @@ def flow_seed(model=None) -> list[dict]:
     ]
 
 
+# The canonical PICKING process. Its engine-default (3rd-tier) productivity is the
+# only one that is method-sensitive: シングル/マルチ/ゾーン/トータル staff differently,
+# which the flat GENERIC_PROCESSES 行/h cannot express (see _method_picking_default).
+_PICK_PROCESS_ID = "ピッキング"
+# goods-to-person transports: the pickrate walk-time model describes 人が歩いて採る,
+# not 物が作業者に来る — so those keep the flat engine default.
+_GOODS_TO_PERSON = frozenset({"agv", "conveyor", "asrs"})
+# Legacy pick_strategy → 作業方式 label, used only when a model exposes no
+# effective_work() (old/duck-typed models). Mirrors workmethod.legacy_strategy's
+# taxonomy; 'wave' is a release-timing, not a picking method, so it is omitted
+# (→ unmatched → today's default).
+_LEGACY_STRATEGY_LABEL = {
+    "discrete": "シングルオーダー",
+    "batch": "マルチオーダー",
+    "zone": "ゾーン（リレー）",
+}
+
+
+def _method_picking_default(model, process_id: str, default: float) -> float:
+    """Engine-default (3rd tier) picking productivity DERIVED from the analytic
+    pickrate for the model's selected 作業方式.
+
+    Two designs that differ ONLY in method (シングル/マルチ/ゾーン/トータル) must staff
+    differently, but the flat engine default (GENERIC_PROCESSES 行/h) is method-blind.
+    We REUSE the existing analytic move-vs-sort motion-time model
+    (`pickrate.estimate_pickrate`) — no new physics — and take the row whose label
+    matches the model's method (`workmethod.method_name(effective_work())`),
+    returning its lines/hour.
+
+    Conservative by construction: returns `default` UNCHANGED on every path that
+    doesn't cleanly apply, so the 3-tier (override > benchmark > default) and all
+    non-picking / model-less flows stay byte-identical:
+      * model is None, or process_id is not the PICKING process,
+      * the model exposes no usable pick method,
+      * transport is goods-to-person (AGV/コンベア/自動倉庫),
+      * pickrate errors / returns nothing, the label can't be matched, or rate ≤ 0.
+    Imports are lazy to avoid an import cycle (pickrate/workmethod import the schema;
+    staffing is imported widely)."""
+    if model is None or process_id != _PICK_PROCESS_ID:
+        return float(default)
+    try:
+        from whsim import pickrate, workmethod  # lazy: avoid import cycle
+        # The model's selected 5-axis pick method — effective_work() also derives it
+        # from the legacy pick_strategy when no explicit work is set. Fall back to a
+        # direct legacy-strategy mapping only if the method is unavailable.
+        eff = getattr(getattr(model, "process", None), "effective_work", None)
+        if callable(eff):
+            work = eff()
+            transport = str(getattr(work, "transport", "manual"))
+            if transport in _GOODS_TO_PERSON:
+                return float(default)
+            label = workmethod.method_name(work)
+        else:
+            strat = str(getattr(getattr(model, "process", None), "pick_strategy", ""))
+            label = _LEGACY_STRATEGY_LABEL.get(strat)
+            if label is None:
+                return float(default)
+        est = pickrate.estimate_pickrate(model)
+        rows = (est or {}).get("methods") or []
+        row = next((r for r in rows if r.get("label") == label), None)
+        if row is None:
+            return float(default)
+        rate = float(row.get("lines_per_hour", 0.0) or 0.0)
+        return rate if rate > 0 else float(default)
+    except Exception:  # noqa: BLE001 — any failure → today's value (never blocks)
+        return float(default)
+
+
 def resolve_productivity(model, process_id: str, default: float) -> float:
     """生産性の3層 (cost と同じ): 実測採用値(override) > 物流形態ベンチマーク(想定) >
-    エンジン既定. `model` may be None (→ default)."""
+    エンジン既定. `model` may be None (→ default).
+
+    The エンジン既定 tier is method-aware for PICKING only: with no override/benchmark
+    it derives the default from the analytic pickrate for the model's 作業方式 (see
+    _method_picking_default); every other process/path keeps its flat default."""
     if model is None:
         return float(default)
     try:
@@ -177,7 +249,7 @@ def resolve_productivity(model, process_id: str, default: float) -> float:
             return float(bp)
     except Exception:  # noqa: BLE001 — settings may be absent; fall back
         pass
-    return float(default)
+    return _method_picking_default(model, process_id, float(default))
 
 
 def scenario_from_volumes(volumes_by_process: dict, model=None) -> dict:
