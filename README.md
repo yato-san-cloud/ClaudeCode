@@ -1,98 +1,80 @@
-# カイロ紹介状アプリ
+# カイロ骨盤分析アプリ (ChiroApp)
 
-整体・カイロプラクティック院向けの **紹介状自動生成** + **レントゲン骨盤分析** をひとつにまとめたデスクトップアプリ。
+カイロプラクティック院向けの **レントゲン骨盤分析** + **整形外科への紹介状自動生成** デスクトップアプリ。
+
+- 使う人向けの導入手順・操作ガイド → **[docs/INSTALL_ja.md](docs/INSTALL_ja.md)**
+- 配布物: GitHub Actions が Windows / macOS(Intel) / macOS(Apple Silicon) の3種を自動ビルド
+
+![分析画面](docs/images/xray_02_detected.png)
 
 ## 機能
 
-### 1. 紹介状の自動生成
-- 院内のWebフォームから患者情報を入力 → 紹介状PDFを即ダウンロード
-- Google Form連携用のWebhook API (`/api/google-form-webhook`)
-- 日本語の全角/半角を考慮した自動折り返しと、長文時の自動改ページ
-- X線注釈画像を紹介状に添付可能
+### 1. レントゲン骨盤分析（ヒューマン・イン・ザ・ループ）
+- **骨盤総合（Gonstead式）**: 大腿骨頭ライン(FHL)を基準線に、腸骨稜高・大腿骨頭高低差・
+  恥骨結合/S2の側方偏位を一括計測（6基準点）。ほか骨盤傾斜・脚長差・脊椎アライメントの簡易モード
+- 自動検出（Hough円検出=大腿骨頭 / 上縁走査=腸骨稜）→ **施術者がドラッグ/矢印キーで補正** →
+  計測値は即時再計算。Ctrl+Zで取り消し
+- ズーム/パン、コントラスト・明るさ・ネガ反転（表示用フィルタ、出力にも同一適用）
+- **スケール設定**: 画像内の既知長からmm換算。未設定時は px のみ表示（架空のmmを出さない）
+- **左右表記**: AP標準（画面左=患者右）。PA/反転画像用の切替あり、R/Lマーカー連動
+- 出力: **分析レポートPDF**（患者名・計測表・所見・免責）/ 注釈入りPNG / 紹介状への添付 /
+  **セッション保存(.json)** による作業の再開
 
-### 2. レントゲン骨盤分析（ヒューマン・イン・ザ・ループ）
-- 骨盤傾斜・脚長差・脊椎アライメントの3種類
-- OpenCVで基準点（ランドマーク）を自動検出 → **施術者がドラッグで補正**
-- 補正に合わせて計測値をリアルタイム再計算
-- スケール設定で **mm 換算**（未設定なら px のみ表示）
-- 補正後の注釈画像をダウンロード／紹介状に添付
+### 2. 紹介状の自動生成
+- 院内Webフォーム入力 → 紹介状PDFを即ダウンロード（X線注釈画像の添付可）
+- Google Form連携用Webhook API (`/api/google-form-webhook`)
+- 日本語の文字幅を考慮した折り返し・自動改ページ
 
-## 起動方法（3通り）
+## 配布用ビルド（Mac / Windows）
 
-### A. ダブルクリックで起動（先生向け・最も簡単）
-- **Windows**: `start.bat` をダブルクリック
-- **macOS**: `start.command` をダブルクリック
-  - 初回のみ「開発元未確認」警告 → 右クリック→「開く」で許可
+GitHub Actions の **Build desktop apps** ワークフローが push のたびに3種を自動ビルドします
+（手動実行も可: Actions → Build desktop apps → Run workflow）。
 
-初回起動時は仮想環境を作成し、依存パッケージを自動でインストールします。
-2回目以降はそのまま立ち上がります。
+| 成果物 | 対象 |
+|---|---|
+| `ChiroApp-Windows-x64.zip` | Windows 10/11（単一 `ChiroApp.exe`） |
+| `ChiroApp-macOS-AppleSilicon.zip` | M1/M2/M3/M4 Mac（`ChiroApp.app`） |
+| `ChiroApp-macOS-Intel.zip` | Intel Mac（`ChiroApp.app`） |
 
-### B. 単一実行ファイルとして配布する
+ローカルでビルドする場合（ビルドしたいOS上で）:
 ```bash
-pip install pyinstaller
+pip install -r requirements.txt pywebview pyinstaller
 pyinstaller chiro_app.spec
-# 成果物: dist/ChiroReferralApp(.exe)
+# Windows: dist/ChiroApp.exe / macOS: dist/ChiroApp.app
 ```
-USB等で先生のPCにコピーして、ダブルクリックで起動できます。
 
-### C. 開発用（ターミナルから）
+## 開発
+
 ```bash
 pip install -r requirements.txt
-python desktop.py     # ネイティブウィンドウで起動
-# または
-python app.py         # 通常のFlask（ブラウザでアクセス）
+python app.py          # ブラウザで http://localhost:5000
+python desktop.py      # ネイティブウィンドウ起動（pywebview、無ければブラウザに自動フォールバック）
+python tests/test_basic.py   # テスト
 ```
 
-## PWAとしてインストール
-
-ブラウザで開いた状態（`python app.py`等）なら、Chrome/Edge から「アプリとしてインストール」できます。
-- ナビバーの「アプリとしてインストール」ボタン、またはアドレスバーの＋アイコン
-- インストール後はホーム画面/スタートメニューから単体アプリのように起動
-
-## テスト
-
-```bash
-python tests/test_basic.py
-```
+`python app.py` で開いた場合は Chrome/Edge から PWA としてインストールも可能。
 
 ## 構成
 
 ```
-desktop.py                  デスクトップアプリ起動 (pywebview)
-app.py                      Flaskアプリ本体
+desktop.py                  デスクトップ起動 (pywebview / ブラウザfallback / PyInstaller対応)
+app.py                      Flask本体 (検出 / エクスポート / レポート / 紹介状 API)
 modules/
-  referral_letter.py        紹介状PDF生成 (CJK折返し・改ページ・画像添付)
-  xray_analyzer.py          ランドマーク検出 / 計測 / 注釈描画
+  xray_analyzer.py          ランドマーク検出・計測・注釈描画 (幾何計算の正)
+  xray_report.py            分析レポートPDF
+  referral_letter.py        紹介状PDF (CJK折返し・改ページ・画像添付)
+static/js/xray_editor.js    分析エディタ (SVG, ズーム/ドラッグ/undo, 計測ミラー実装)
 templates/                  画面 (ホーム・紹介状・X線分析)
-static/
-  css/style.css
-  manifest.webmanifest      PWAマニフェスト
-  sw.js                     Service Worker (オフライン対応)
-  icons/                    アプリアイコン
-  sample/                   テスト用サンプル画像
-tests/test_basic.py         動作確認テスト
-chiro_app.spec              PyInstaller 設定 (単一実行ファイル化)
-start.bat / start.command   ワンクリック起動スクリプト
+tests/test_basic.py         テスト
+chiro_app.spec              PyInstaller設定 (Win=単一exe / mac=.app)
+.github/workflows/build-desktop.yml   3プラットフォーム自動ビルド
+docs/INSTALL_ja.md          利用者向けガイド
 ```
 
-## Google Form連携
-
-Google FormのApps Scriptから、フォーム送信時に以下を呼びます：
-
-```javascript
-function onFormSubmit(e) {
-  var data = {};
-  for (var key in e.namedValues) data[key] = e.namedValues[key][0];
-  UrlFetchApp.fetch("https://<デプロイ先>/api/google-form-webhook", {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify(data)
-  });
-}
-```
-
-院内のPCで使うだけならGoogle Form連携は不要で、内蔵のWebフォームでOK。
+計測ロジックはサーバ(`xray_analyzer.py`)が正で、フロント(`xray_editor.js`)は
+ライブ表示用に同一式をミラーしています。変更時は両方を更新してください。
 
 ## 注意
 
-X線の計測値はあくまで参考値です。臨床判断は必ず専門家（医師）が行ってください。
+X線の計測値は画像上の基準点に基づく参考値です。診断は医師の判断によります。
+本アプリは施術方針検討の補助ツールです。

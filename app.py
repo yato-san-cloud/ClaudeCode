@@ -1,13 +1,25 @@
-import io
+import os
+import sys
 import base64
-import json
 from datetime import datetime
 from flask import Flask, render_template, request, send_file, jsonify
-from modules.referral_letter import generate_referral_pdf
-from modules.xray_analyzer import detect_landmarks, compute_measurements, render_annotated
 
-app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+from modules.referral_letter import generate_referral_pdf
+from modules.xray_analyzer import detect_landmarks, render_annotated
+from modules.xray_report import generate_xray_report_pdf
+
+APP_VERSION = "1.0.0"
+
+# PyInstaller で固めた場合は展開先 (_MEIPASS) にテンプレート/静的ファイルが入る
+BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(BASE_DIR, "templates"),
+    static_folder=os.path.join(BASE_DIR, "static"),
+)
+# 高解像度X線の base64 往復を見込んで大きめに確保
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 PATIENT_FIELDS = [
     "patient_name", "patient_name_kana", "patient_dob", "patient_gender",
@@ -18,9 +30,33 @@ PATIENT_FIELDS = [
 ]
 
 
+@app.context_processor
+def inject_globals():
+    return {"app_version": APP_VERSION}
+
+
 def _download_name(form_data):
     name = form_data.get("patient_name") or "不明"
     return f"紹介状_{name}_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+
+def _decode_data_url(data_url: str) -> bytes:
+    return base64.b64decode(data_url.split(",")[-1])
+
+
+def _parse_filters(obj) -> dict:
+    if not isinstance(obj, dict):
+        return {}
+    out = {}
+    try:
+        if "contrast" in obj:
+            out["contrast"] = float(obj["contrast"])
+        if "brightness" in obj:
+            out["brightness"] = float(obj["brightness"])
+    except (TypeError, ValueError):
+        pass
+    out["invert"] = bool(obj.get("invert"))
+    return out
 
 
 @app.route("/")
@@ -38,7 +74,7 @@ def referral():
         b64 = request.form.get("xray_attachment_b64", "")
         if b64:
             try:
-                xray_bytes = base64.b64decode(b64.split(",")[-1])
+                xray_bytes = _decode_data_url(b64)
             except Exception:
                 xray_bytes = None
         elif "xray_attachment" in request.files and request.files["xray_attachment"].filename:
@@ -57,21 +93,23 @@ def referral():
 
 @app.route("/xray", methods=["GET", "POST"])
 def xray():
-    """画像をアップロードし、ランドマークを自動検出して返す(描画はフロント側)。"""
+    """画像をアップロードし、ランドマーク初期位置を自動検出して返す(描画はフロント側)。"""
     if request.method == "POST":
         if "xray_image" not in request.files or not request.files["xray_image"].filename:
             return jsonify({"error": "画像がアップロードされていません"}), 400
 
-        image_bytes = request.files["xray_image"].read()
-        analysis_type = request.form.get("analysis_type", "pelvis_tilt")
+        f = request.files["xray_image"]
+        image_bytes = f.read()
+        analysis_type = request.form.get("analysis_type", "pelvis_full")
 
         try:
             detection = detect_landmarks(image_bytes, analysis_type)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
+        mimetype = f.mimetype if (f.mimetype or "").startswith("image/") else "image/png"
         detection["image"] = (
-            "data:image/png;base64," + base64.b64encode(image_bytes).decode("utf-8")
+            f"data:{mimetype};base64," + base64.b64encode(image_bytes).decode("utf-8")
         )
         return jsonify(detection)
 
@@ -83,25 +121,74 @@ def xray_export():
     """補正後のランドマークで注釈画像を確定描画し、計測値とともに返す。"""
     data = request.get_json(silent=True) or {}
     image_b64 = data.get("image", "")
-    analysis_type = data.get("analysis_type", "pelvis_tilt")
+    analysis_type = data.get("analysis_type", "pelvis_full")
     landmarks = data.get("landmarks", [])
     mm_per_px = data.get("mm_per_px")
+    filters = _parse_filters(data.get("filters"))
+    ap_standard = bool(data.get("ap_standard", True))
 
     if not image_b64 or not landmarks:
         return jsonify({"error": "画像またはランドマークがありません"}), 400
 
     try:
-        image_bytes = base64.b64decode(image_b64.split(",")[-1])
+        image_bytes = _decode_data_url(image_b64)
     except Exception:
         return jsonify({"error": "画像のデコードに失敗しました"}), 400
 
-    annotated, measurements = render_annotated(
-        image_bytes, analysis_type, landmarks, mm_per_px
-    )
+    try:
+        annotated, measurements = render_annotated(
+            image_bytes, analysis_type, landmarks, mm_per_px,
+            filters=filters, ap_standard=ap_standard,
+        )
+    except (ValueError, KeyError) as e:
+        return jsonify({"error": f"描画に失敗しました: {e}"}), 400
+
     return jsonify({
         "image": "data:image/png;base64," + base64.b64encode(annotated).decode("utf-8"),
         "measurements": measurements,
     })
+
+
+@app.route("/xray/report", methods=["POST"])
+def xray_report():
+    """補正後の状態から分析レポートPDFを生成して返す。"""
+    data = request.get_json(silent=True) or {}
+    image_b64 = data.get("image", "")
+    analysis_type = data.get("analysis_type", "pelvis_full")
+    landmarks = data.get("landmarks", [])
+    mm_per_px = data.get("mm_per_px")
+    filters = _parse_filters(data.get("filters"))
+    ap_standard = bool(data.get("ap_standard", True))
+    patient = data.get("patient") or {}
+    clinic = data.get("clinic") or {}
+
+    if not image_b64 or not landmarks:
+        return jsonify({"error": "画像またはランドマークがありません"}), 400
+
+    try:
+        image_bytes = _decode_data_url(image_b64)
+        annotated, measurements = render_annotated(
+            image_bytes, analysis_type, landmarks, mm_per_px,
+            filters=filters, ap_standard=ap_standard,
+        )
+    except (ValueError, KeyError) as e:
+        return jsonify({"error": f"分析に失敗しました: {e}"}), 400
+
+    pdf = generate_xray_report_pdf({
+        "patient": patient,
+        "clinic": clinic,
+        "analysis_type": analysis_type,
+        "measurements": measurements,
+        "image_png": annotated,
+    })
+
+    name = patient.get("name") or "無記名"
+    return send_file(
+        pdf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"X線分析レポート_{name}_{datetime.now().strftime('%Y%m%d')}.pdf",
+    )
 
 
 @app.route("/api/google-form-webhook", methods=["POST"])

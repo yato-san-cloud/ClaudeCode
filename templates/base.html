@@ -14,16 +14,19 @@
 </head>
 <body>
     <nav class="navbar">
-        <h1>Chiro Referral</h1>
+        <h1>カイロ骨盤分析</h1>
         <a href="/" class="{% if request.path == '/' %}active{% endif %}">ホーム</a>
-        <a href="/referral" class="{% if request.path == '/referral' %}active{% endif %}">紹介状作成</a>
         <a href="/xray" class="{% if request.path == '/xray' %}active{% endif %}">X線分析</a>
+        <a href="/referral" class="{% if request.path == '/referral' %}active{% endif %}">紹介状作成</a>
         <span id="installPrompt" class="install-prompt" style="display:none;">
             <button class="btn-install" onclick="installApp()">アプリとしてインストール</button>
         </span>
     </nav>
     <div class="container">
         {% block content %}{% endblock %}
+        <footer class="app-footer">
+            カイロ骨盤分析アプリ v{{ app_version }} ｜ 計測値は参考値です。診断は医師の判断によります。
+        </footer>
     </div>
     {% block scripts %}{% endblock %}
     <script>

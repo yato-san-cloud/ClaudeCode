@@ -1,0 +1,77 @@
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/chiro-referral-automation-UQwhE
+    paths:
+      - "**.py"
+      - "templates/**"
+      - "static/**"
+      - "chiro_app.spec"
+      - "requirements.txt"
+      - ".github/workflows/build-desktop.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ChiroApp-Windows-x64
+          - os: macos-13
+            artifact: ChiroApp-macOS-Intel
+          - os: macos-latest
+            artifact: ChiroApp-macOS-AppleSilicon
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pywebview pyinstaller
+
+      - name: Run tests
+        run: python tests/test_basic.py
+
+      - name: Build .icns icon (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p build/icon.iconset
+          for s in 16 32 64 128 256 512; do
+            sips -z $s $s static/icons/icon-512.png --out build/icon.iconset/icon_${s}x${s}.png
+            d=$((s*2))
+            sips -z $d $d static/icons/icon-512.png --out build/icon.iconset/icon_${s}x${s}@2x.png
+          done
+          iconutil -c icns build/icon.iconset -o static/icons/icon.icns
+
+      - name: Build with PyInstaller
+        run: pyinstaller chiro_app.spec --noconfirm
+
+      - name: Package (macOS .app zip)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent ChiroApp.app ${{ matrix.artifact }}.zip
+
+      - name: Package (Windows exe zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/ChiroApp.exe -DestinationPath dist/${{ matrix.artifact }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.zip
+          retention-days: 30

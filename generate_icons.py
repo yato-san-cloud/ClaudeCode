@@ -50,3 +50,18 @@ for s in (192, 512):
     path = os.path.join(OUT_DIR, f"icon-{s}.png")
     cv2.imwrite(path, make_icon(s))
     print("wrote", path)
+
+# Windows 用 .ico (PyInstaller の exe アイコン)
+try:
+    from PIL import Image
+
+    src = Image.open(os.path.join(OUT_DIR, "icon-512.png"))
+    ico_path = os.path.join(OUT_DIR, "icon.ico")
+    src.save(ico_path, sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
+                              (64, 64), (128, 128), (256, 256)])
+    print("wrote", ico_path)
+except ImportError:
+    print("Pillow が無いため .ico はスキップ")
+
+# macOS 用 .icns は CI (macOSランナー) 上で iconutil により生成する
+# → .github/workflows/build-desktop.yml を参照
