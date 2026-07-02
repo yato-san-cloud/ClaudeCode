@@ -110,31 +110,42 @@ export const flowMethods = {
     const order = this._orderedStages();
     const cursorStage = this.flowMode ? order[this.flowCursor] : null;
 
-    // zones (clickable). Highlight the one bound to the open/cursor stage.
+    // zones (clickable). Flat low-saturation tint + crisp hue border + rounded
+    // corners, matching the 配置 tool; the open/cursor zone lifts with a glow.
     for (const z of this.model.layout.zones) {
       const color = z.color || ZONE_DEFAULT_COLOR[z.type] || '#cccccc';
       const isCursorTarget = this.flowMode && cursorStage != null;
       const boundStage = order.find((st) => st.zone === z.id);
       const isOpen = this.flowMethodStage && boundStage && boundStage.id === this.flowMethodStage;
-      ctx.fillStyle = hexA(color, isOpen ? 0.5 : (boundStage ? 0.34 : 0.18));
-      ctx.fillRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
-      ctx.strokeStyle = isOpen ? P.sel : (isCursorTarget ? P.accent : hexA(color, 0.8));
-      ctx.lineWidth = (isOpen || isCursorTarget) ? 2.5 : 1;
+      const zx = this._X(z.x), zt = this._Y(z.y + z.h), zw = z.w * sc, zh = z.h * sc;
+      const rr = Math.min(6, zw / 2, zh / 2);
+      ctx.save();
+      if (isOpen) { ctx.shadowColor = hexA(P.sel, 0.5); ctx.shadowBlur = 14; }
+      ctx.fillStyle = hexA(color, isOpen ? 0.18 : (boundStage ? 0.12 : 0.07));
+      this._roundRectPath(zx, zt, zw, zh, rr); ctx.fill();
+      ctx.restore();
+      // faint rack hint inside storage so the biggest area doesn't read as empty.
+      if (z.type === 'storage') {
+        if (z.shelves && z.shelves.length) this._drawShelves(z, { hint: true });
+        else if (z.rack) this._drawRack(z, { hint: true });
+      }
+      ctx.strokeStyle = isOpen ? P.sel : (isCursorTarget ? P.accent : hexA(color, 0.85));
+      ctx.lineWidth = (isOpen || isCursorTarget) ? 2.4 : 1.5;
       if (isCursorTarget) ctx.setLineDash([6, 4]);
-      ctx.strokeRect(this._X(z.x), this._Y(z.y + z.h), z.w * sc, z.h * sc);
+      this._roundRectPath(zx, zt, zw, zh, rr); ctx.stroke();
       ctx.setLineDash([]);
-      // label: zone type + bound stage name(s)
-      ctx.fillStyle = P.ink; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const cx = this._X(z.x + z.w / 2), cy = this._Y(z.y + z.h / 2);
-      ctx.fillText(ZONE_JP[z.type] || z.type, cx, cy - 7);
+      // type chip at top-left; bound stage name(s) centred below the step badge.
+      this._zoneChip(z.x, z.y + z.h, ZONE_JP[z.type] || z.type, color, false);
       const bound = order.filter((st) => st.zone === z.id).map((st) => st.label || st.id);
       if (bound.length) {
-        ctx.fillStyle = P.sel; ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(bound.join('・'), cx, cy + 9);
+        const cx = this._X(z.x + z.w / 2), cy = this._Y(z.y + z.h / 2);
+        ctx.fillStyle = P.ink; ctx.font = '600 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(bound.join('・'), cx, cy + 6);
       }
     }
 
-    // directed arrows along the flow, between consecutive bound zones.
+    // directed flow ribbons along the process order, between consecutive bound
+    // zones (curved + glowing so the chain reads as a material flow).
     for (let i = 0; i < order.length - 1; i++) {
       const za = this._zoneById(order[i].zone), zb = this._zoneById(order[i + 1].zone);
       if (!za || !zb || za.id === zb.id) continue;
@@ -142,20 +153,28 @@ export const flowMethods = {
       this._drawArrow(this._X(ax), this._Y(ay), this._X(bx), this._Y(by), P.accent);
     }
 
-    // numbered step badges on each bound stage's zone, in flow order
+    // numbered step badges on each bound stage's zone, tinted by the zone hue so
+    // the badge, the ribbon and the area all read as one step.
     let step = 0;
     for (const st of order) {
       if (!st.zone) continue;
       const z = this._zoneById(st.zone);
       if (!z) continue;
       step += 1;
+      const color = z.color || ZONE_DEFAULT_COLOR[z.type] || P.accent;
       const [zx, zy] = this._zoneCenter(z);
-      const px = this._X(zx), py = this._Y(zy);
-      ctx.fillStyle = P.accent; ctx.strokeStyle = P.markerStroke; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(px - 1, py - 24, 10, 0, 7); ctx.fill(); ctx.stroke();
+      const px = this._X(zx), py = this._Y(zy) - 24;
+      ctx.save();
+      ctx.shadowColor = hexA(color, 0.55); ctx.shadowBlur = 8;
+      ctx.fillStyle = color; ctx.strokeStyle = P.markerStroke; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(px, py, 11, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.restore();
       ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(String(step), px - 1, py - 24);
+      ctx.fillText(String(step), px, py);
     }
+    // legend line: name the diagram so the numbered badges + ribbons read at a
+    // glance as the material flow (入荷→…→出荷), not a debug overlay.
+    this._flowLegend();
 
     if (this._flowStatus) this._flowStatus.textContent = this._flowStatusText();
     if (!this.model.layout.zones.length) {
@@ -163,17 +182,68 @@ export const flowMethods = {
       ctx.fillText('レイアウトにゾーンがありません。「レイアウト」タブで配置してください。', w / 2, h / 2);
     }
   },
+  // A flow ribbon: a gently bowed quadratic curve with a soft glow and a filled
+  // arrowhead on the tangent — reads as マテリアルフロー, not a debug zigzag.
   _drawArrow(ax, ay, bx, by, color) {
     const ctx = this.ctx;
-    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-    const ang = Math.atan2(by - ay, bx - ax);
-    const hl = 11, mx = ax + (bx - ax) * 0.6, my = ay + (by - ay) * 0.6;  // arrowhead at 60%
+    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy) || 1;
+    // control point bowed perpendicular to the chord (~14% of its length).
+    const bow = Math.min(48, len * 0.14);
+    const nx = -dy / len, ny = dx / len;
+    const cxp = (ax + bx) / 2 + nx * bow, cyp = (ay + by) / 2 + ny * bow;
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.shadowColor = color; ctx.shadowBlur = 7;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo(cxp, cyp, bx, by); ctx.stroke();
+    ctx.restore();
+    // arrowhead at ~62% along the curve, oriented along the local tangent.
+    const t = 0.62, mt = 1 - t;
+    const px = mt * mt * ax + 2 * mt * t * cxp + t * t * bx;
+    const py = mt * mt * ay + 2 * mt * t * cyp + t * t * by;
+    const tx = 2 * mt * (cxp - ax) + 2 * t * (bx - cxp);
+    const ty = 2 * mt * (cyp - ay) + 2 * t * (by - cyp);
+    const ang = Math.atan2(ty, tx), hl = 12;
+    ctx.save();
+    ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(mx, my);
-    ctx.lineTo(mx - hl * Math.cos(ang - 0.4), my - hl * Math.sin(ang - 0.4));
-    ctx.lineTo(mx - hl * Math.cos(ang + 0.4), my - hl * Math.sin(ang + 0.4));
+    ctx.moveTo(px + hl * 0.5 * Math.cos(ang), py + hl * 0.5 * Math.sin(ang));
+    ctx.lineTo(px - hl * Math.cos(ang - 0.42), py - hl * Math.sin(ang - 0.42));
+    ctx.lineTo(px - hl * Math.cos(ang + 0.42), py - hl * Math.sin(ang + 0.42));
     ctx.closePath(); ctx.fill();
+    ctx.restore();
+  },
+  // one-line legend pill anchored bottom-left of the flow canvas (a solid pill so
+  // it stays legible over whatever zone happens to sit in the corner).
+  _flowLegend() {
+    const ctx = this.ctx, { w, h } = this._view;
+    const P = this.pal;
+    const text = 'マテリアルフロー（工程順 ①→⑤）';
+    ctx.save();
+    ctx.font = '600 11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    const tw = ctx.measureText(text).width;
+    const padX = 9, pillH = 22, swatch = 26, gap = 8;
+    const pw = padX * 2 + swatch + gap + tw;
+    const x = 10, y = h - 10 - pillH;
+    if (pw > w - 20) { ctx.restore(); return; }   // too narrow: skip rather than clip
+    // pill background
+    ctx.fillStyle = P.badgeBg;
+    this._roundRectPath(x, y, pw, pillH, 7); ctx.fill();
+    // sample ribbon swatch
+    const cy = y + pillH / 2;
+    ctx.strokeStyle = P.accent; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.shadowColor = P.accent; ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.moveTo(x + padX, cy); ctx.lineTo(x + padX + swatch, cy); ctx.stroke();
+    ctx.shadowBlur = 0;
+    // small arrowhead on the swatch
+    ctx.fillStyle = P.accent;
+    ctx.beginPath();
+    ctx.moveTo(x + padX + swatch + 3, cy);
+    ctx.lineTo(x + padX + swatch - 3, cy - 3);
+    ctx.lineTo(x + padX + swatch - 3, cy + 3);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = P.selInk;
+    ctx.fillText(text, x + padX + swatch + gap, cy + 0.5);
+    ctx.restore();
   },
   // --- flow canvas click: place flow (assign zone) OR open the method popover ---
   _flowDown(px, py) {

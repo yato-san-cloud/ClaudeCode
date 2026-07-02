@@ -230,6 +230,7 @@ export const routeMethods = {
       ctx.save();
       ctx.strokeStyle = this.pal.accent; ctx.lineWidth = 3.5;
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.shadowColor = this.pal.accent; ctx.shadowBlur = 8;
       ctx.setLineDash([9, 6]);
       ctx.beginPath();
       ctx.moveTo(this._X(p.points[0][0]), this._Y(p.points[0][1]));
@@ -239,7 +240,7 @@ export const routeMethods = {
       ctx.restore();
       const mid = p.points[Math.floor(p.points.length / 2)];
       const t = p.distance_m / Math.max(0.1, +this.routeSpeed || 1.2);
-      this._label(this._X(mid[0]), this._Y(mid[1]) - 14, `${p.distance_m.toFixed(1)} m / ${t.toFixed(0)} 秒`);
+      this._chipLabel(this._X(mid[0]), this._Y(mid[1]) - 14, `${p.distance_m.toFixed(1)} m / ${t.toFixed(0)} 秒`, 'center');
     }
     if (this._measureA) pin(this._measureA, '#1db954', 'A');
     if (this._measureB) pin(this._measureB, '#e3401c', 'B');
@@ -438,7 +439,11 @@ export const routeMethods = {
   _drawRoute(pts, color, draft, name) {
     if (!pts || pts.length === 0) return;
     const ctx = this.ctx;
-    ctx.strokeStyle = color; ctx.lineWidth = draft ? 3 : 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.save();
+    // accent ribbon: a soft outer glow under a rounded stroke reads as a routed
+    // path rather than a debug polyline.
+    if (!draft) { ctx.shadowColor = color; ctx.shadowBlur = 8; }
+    ctx.strokeStyle = color; ctx.lineWidth = draft ? 2.6 : 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     if (draft) ctx.setLineDash([7, 5]);
     if (pts.length >= 2) {
       ctx.beginPath();
@@ -446,12 +451,35 @@ export const routeMethods = {
       for (let i = 1; i < pts.length; i++) ctx.lineTo(this._X(pts[i][0]), this._Y(pts[i][1]));
       ctx.stroke();
     }
+    ctx.restore();
     ctx.setLineDash([]);
+    // endpoint dots (start + end only — no per-vertex noise on long auto paths).
     ctx.fillStyle = color;
-    for (const p of pts) { ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3.2, 0, 7); ctx.fill(); }
-    if (name && pts.length) {
-      ctx.fillStyle = color; ctx.font = '12px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-      ctx.fillText(name, this._X(pts[0][0]) + 6, this._Y(pts[0][1]) - 4);
+    for (const p of [pts[0], pts[pts.length - 1]]) {
+      ctx.beginPath(); ctx.arc(this._X(p[0]), this._Y(p[1]), 3.4, 0, 7); ctx.fill();
     }
+    // direction arrowhead on the final segment.
+    if (pts.length >= 2 && !draft) {
+      const a = pts[pts.length - 2], b = pts[pts.length - 1];
+      this._routeArrow(this._X(a[0]), this._Y(a[1]), this._X(b[0]), this._Y(b[1]), color);
+    }
+    // name + distance chip at the route start (reuses the shared pill label).
+    if (name && pts.length) {
+      const dist = this._routeLength(pts);
+      this._chipLabel(this._X(pts[0][0]) + 8, this._Y(pts[0][1]) - 10,
+        `${name} · ${dist.toFixed(1)}m`, 'left');
+    }
+  },
+  // small filled arrowhead pointing from (ax,ay)→(bx,by), tip at (bx,by).
+  _routeArrow(ax, ay, bx, by, color) {
+    const ctx = this.ctx, ang = Math.atan2(by - ay, bx - ax), hl = 9;
+    ctx.save();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx - hl * Math.cos(ang - 0.42), by - hl * Math.sin(ang - 0.42));
+    ctx.lineTo(bx - hl * Math.cos(ang + 0.42), by - hl * Math.sin(ang + 0.42));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
   },
 };
