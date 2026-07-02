@@ -85,10 +85,21 @@ def api_timetable_solve_staffing(name: str, payload: dict | None = None):
     # the payload carries one we persist it so the plan survives a reload. A payload
     # key present-but-empty ({}) intentionally clears the schedule.
     batches = p.get("batches")
+    dirty = False
     if not isinstance(batches, dict):
         batches = getattr(model.settings, "batch_schedule", {}) or {}
     elif batches != (getattr(model.settings, "batch_schedule", {}) or {}):
         model.settings.batch_schedule = batches
+        dirty = True
+    # シフト・休憩モデル: same persistence pattern as the batch schedule — explicit
+    # payload wins and is saved so the plan survives a reload; an explicit {} clears.
+    shift_plan = p.get("shift_plan")
+    if not isinstance(shift_plan, dict):
+        shift_plan = getattr(model.settings, "shift_plan", {}) or {}
+    elif shift_plan != (getattr(model.settings, "shift_plan", {}) or {}):
+        model.settings.shift_plan = shift_plan
+        dirty = True
+    if dirty:
         proj.save_model(model)
     try:
         result = staffing.solve_staffing(
@@ -100,6 +111,7 @@ def api_timetable_solve_staffing(name: str, payload: dict | None = None):
             dependencies=p.get("dependencies"),
             placement=str(p.get("placement", "level")),
             batches=batches,
+            shift_plan=shift_plan,
         )
     except (TypeError, ValueError) as e:
         raise HTTPException(400, f"ソルバー入力が不正です: {e}") from e
@@ -194,12 +206,16 @@ def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
 
     def kpis_for(model, label, sid):
         batches = getattr(model.settings, "batch_schedule", {}) or {}
+        # The scenario's frozen シフト・休憩 overlay (settings.shift_plan) flows here so
+        # 休憩帯/シフト caps + labour cost participate in the comparison.
+        shift_plan = getattr(model.settings, "shift_plan", {}) or {}
         res = {}
         if avail:
             try:  # one pathological scenario must not 500 the whole comparison
                 res = staffing.solve_staffing(
                     vols, model=model, start_hour=int(start_hour), end_hour=int(end_hour),
-                    cap=(int(cap) or None), placement=str(placement), batches=batches)
+                    cap=(int(cap) or None), placement=str(placement), batches=batches,
+                    shift_plan=shift_plan)
             except Exception:  # noqa: BLE001 — degrade this row, keep the rest
                 res = {}
         try:
@@ -228,6 +244,7 @@ def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
             "feasible": res.get("feasible"),
             "monthly_cost": c.get("total_yen_month"),
             "cost_per_order": c.get("cost_per_order"),
+            "labour_cost_day": res.get("labour_cost_day"),
             "method": method,
             "batch_counts": {k: len(v) for k, v in batches.items() if v},
         }

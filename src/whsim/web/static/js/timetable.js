@@ -139,6 +139,13 @@ function injectStyle() {
     font-size:14px;line-height:1;cursor:pointer;padding:0 2px}
   .tt-batch-del:hover{color:var(--bad,#ff6b7d)}
   .tt-batch-note{font-size:var(--fs-micro,11px);color:var(--muted,var(--ink-tertiary))}
+  /* シフト・休憩 editor */
+  .tt-solver-shift{display:flex;flex-direction:column;gap:var(--sp-2,8px);
+    margin-top:var(--sp-2,8px);padding-top:var(--sp-2,8px);border-top:1px solid var(--line-hair,var(--line))}
+  .tt-shift-brow,.tt-shift-srow{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .tt-shift-brow .tt-mini,.tt-shift-srow .tt-mini{width:52px}
+  .tt-shift-lab{width:74px !important}
+  .tt-shift-wage{width:62px !important}
   /* scenario save + compare */
   .tt-cmp-bar{display:flex;gap:var(--sp-2,8px);flex-wrap:wrap;margin-top:var(--sp-2,8px);
     padding-top:var(--sp-2,8px);border-top:1px solid var(--line-hair,var(--line))}
@@ -196,15 +203,32 @@ export function mountTimetable(targetEl, opts = {}) {
   let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
 
   // ---- analytic staffing solver (稼働窓 + 上限 + 依存 + 前詰め/均等) ----------
-  let elSolver, elSolverDeps, elSolverBatches, elSolverSummary, elSolverCurve, elSolverCompare;
+  let elSolver, elSolverDeps, elSolverBatches, elSolverShift, elSolverSummary,
+    elSolverCurve, elSolverCompare;
   let solverResult = null;
   const solverState = {
     start: 9, end: 18, cap: 0, placement: 'front',
     deps: {}, defaultDeps: {}, processIds: [], _seededDeps: false,
     batches: {}, _seededBatches: false,  // {section: [{hour, pct}]} バッチ投入
+    // シフト・休憩モデル: breaks (no-work bands) + shifts (max人数/時給) + 既定時給.
+    shiftPlan: { breaks: [], shifts: [], default_wage_per_hr: 1200 },
+    _seededShift: false,
   };
   // Sections that can carry a batch-release schedule (入荷=arrivals, 出荷=order cutoffs).
   const BATCH_SECTIONS = ['入荷', '出荷'];
+  // One-click シフト・休憩 presets the planner can drop instead of typing rows.
+  const SHIFT_PRESETS = {
+    'なし': { breaks: [], shifts: [], default_wage_per_hr: 1200 },
+    '昼休憩12-13': { breaks: [{ start: 12, end: 13 }], shifts: [], default_wage_per_hr: 1200 },
+    '2交代(8-17,17-22)': {
+      breaks: [{ start: 12, end: 13 }],
+      shifts: [
+        { label: '日勤', start: 8, end: 17, max_workers: 20, wage_per_hr: 1200 },
+        { label: '遅番', start: 17, end: 22, max_workers: 12, wage_per_hr: 1400 },
+      ],
+      default_wage_per_hr: 1200,
+    },
+  };
   // Presets the planner can one-click instead of typing rows.
   const BATCH_PRESETS = {
     入荷: { 'なし（随時）': [], '昼1便': [{ hour: 12, pct: 100 }],
@@ -361,6 +385,10 @@ export function mountTimetable(targetEl, opts = {}) {
     elSolverBatches = el('div', 'tt-solver-batches');
     body.appendChild(elSolverBatches);
 
+    // シフト・休憩 editor (休憩帯 + シフトパターン + 時間帯別時給).
+    elSolverShift = el('div', 'tt-solver-shift');
+    body.appendChild(elSolverShift);
+
     // Summary + per-hour curve render targets.
     elSolverSummary = el('div', 'tt-solver-summary');
     body.appendChild(elSolverSummary);
@@ -382,6 +410,7 @@ export function mountTimetable(targetEl, opts = {}) {
     root.appendChild(elSolver);
     renderDepEditor();
     renderBatchEditor();
+    renderShiftEditor();
   }
 
   // ---- scenario save + compare (作業バッチ/方式) ------------------------------
@@ -441,7 +470,8 @@ export function mountTimetable(targetEl, opts = {}) {
     html += '<div class="tt-matrix-scroll"><table class="tt-table tt-cmp-tbl"><thead><tr>'
       + '<th class="tt-rowhead">シナリオ</th><th>作業方式</th><th>バッチ</th>'
       + '<th class="tt-num-h">ピーク人数</th><th class="tt-num-h">総工数</th>'
-      + '<th class="tt-num-h">終了</th><th class="tt-num-h">月額原価</th></tr></thead><tbody>';
+      + '<th class="tt-num-h">終了</th><th class="tt-num-h">人件費/日</th>'
+      + '<th class="tt-num-h">月額原価</th></tr></thead><tbody>';
     data.rows.forEach((r, i) => {
       const cur = i === 0;
       html += `<tr class="${cur ? 'tt-cmp-cur' : ''}">`
@@ -451,6 +481,7 @@ export function mountTimetable(targetEl, opts = {}) {
         + `<td class="tt-num">${num(r.peak_headcount)}${cur ? '' : delta(r.peak_headcount, base.peak_headcount)}</td>`
         + `<td class="tt-num">${num(r.total_man_hours)}${cur ? '' : delta(r.total_man_hours, base.total_man_hours)}</td>`
         + `<td class="tt-num">${r.makespan_hour == null ? '—' : r.makespan_hour + '時'}</td>`
+        + `<td class="tt-num">${yen(r.labour_cost_day)}${cur ? '' : delta(r.labour_cost_day, base.labour_cost_day)}</td>`
         + `<td class="tt-num">${yen(r.monthly_cost)}${cur ? '' : delta(r.monthly_cost, base.monthly_cost)}</td>`
         + '</tr>';
     });
@@ -593,6 +624,134 @@ export function mountTimetable(targetEl, opts = {}) {
     batchSolveTimer = setTimeout(runSolver, DEBOUNCE_MS);
   }
 
+  // ---- シフト・休憩モデル editor -----------------------------------------------
+  // 休憩帯 (hours with no work), シフトパターン (named windows with a per-shift max
+  // 人数 + 時給) and a fallback 既定時給. The solver zeros break hours (volume shifts
+  // elsewhere), caps each hour's total by Σ max_workers of the covering shifts, and
+  // prices a 人件費/日 line. Empty plan = legacy behaviour.
+  function shiftDirty() { solverState._seededShift = true; }
+  let shiftSolveTimer = 0;
+  function scheduleShiftSolve() {
+    shiftDirty();
+    if (shiftSolveTimer) clearTimeout(shiftSolveTimer);
+    shiftSolveTimer = setTimeout(runSolver, DEBOUNCE_MS);
+  }
+  function shiftNum(value, min, max, onChange, cls) {
+    const inp = el('input', cls || 'tt-mini'); inp.type = 'number';
+    inp.min = String(min); inp.max = String(max); inp.value = String(value);
+    inp.oninput = () => onChange(parseFloat(inp.value) || 0);
+    return inp;
+  }
+
+  function renderShiftEditor() {
+    if (!elSolverShift) return;
+    const plan = solverState.shiftPlan;
+    elSolverShift.innerHTML = '';
+    elSolverShift.appendChild(el('div', 'tt-solver-deps-title',
+      'シフト・休憩（休憩帯は無配置、シフトは時間帯ごとの上限人数と時給。空＝従来どおり）'));
+
+    // Presets.
+    const presets = el('div', 'tt-solver-presets');
+    for (const [label, def] of Object.entries(SHIFT_PRESETS)) {
+      const chip = el('button', 'tt-chip', label);
+      chip.onclick = () => {
+        solverState.shiftPlan = {
+          breaks: (def.breaks || []).map((b) => ({ ...b })),
+          shifts: (def.shifts || []).map((s) => ({ ...s })),
+          default_wage_per_hr: def.default_wage_per_hr || 1200,
+        };
+        shiftDirty(); renderShiftEditor(); runSolver();
+      };
+      presets.appendChild(chip);
+    }
+    elSolverShift.appendChild(presets);
+
+    // 休憩帯 rows.
+    const bwrap = el('div', 'tt-batch-block');
+    const bhead = el('div', 'tt-batch-head');
+    bhead.appendChild(el('span', 'tt-batch-sec', '休憩'));
+    const baddBtn = el('button', 'tt-batch-stepbtn', '＋'); baddBtn.title = '休憩帯を追加';
+    baddBtn.onclick = () => {
+      plan.breaks.push({ start: 12, end: 13 });
+      shiftDirty(); renderShiftEditor(); runSolver();
+    };
+    bhead.appendChild(baddBtn);
+    bwrap.appendChild(bhead);
+    (plan.breaks || []).forEach((b, i) => {
+      const row = el('div', 'tt-shift-brow');
+      row.appendChild(el('span', 'tt-batch-blabel', `休憩${i + 1}`));
+      row.appendChild(shiftNum(b.start, 0, 30, (v) => { b.start = v; scheduleShiftSolve(); }));
+      row.appendChild(el('span', 'tt-batch-x', '〜'));
+      row.appendChild(shiftNum(b.end, 0, 30, (v) => { b.end = v; scheduleShiftSolve(); }));
+      row.appendChild(el('span', 'tt-batch-x', '時'));
+      const del = el('button', 'tt-batch-del', '×'); del.title = 'この休憩を削除';
+      del.onclick = () => { plan.breaks.splice(i, 1); shiftDirty(); renderShiftEditor(); runSolver(); };
+      row.appendChild(del);
+      bwrap.appendChild(row);
+    });
+    if (!(plan.breaks || []).length) {
+      bwrap.appendChild(el('div', 'tt-batch-note', '休憩帯なし。＋で 12〜13時 などの休憩を追加できます。'));
+    }
+    elSolverShift.appendChild(bwrap);
+
+    // シフトパターン rows.
+    const swrap = el('div', 'tt-batch-block');
+    const shead = el('div', 'tt-batch-head');
+    shead.appendChild(el('span', 'tt-batch-sec', 'シフト'));
+    const saddBtn = el('button', 'tt-batch-stepbtn', '＋'); saddBtn.title = 'シフトを追加';
+    saddBtn.onclick = () => {
+      plan.shifts.push({ label: `シフト${plan.shifts.length + 1}`, start: 9, end: 18,
+        max_workers: 20, wage_per_hr: plan.default_wage_per_hr || 1200 });
+      shiftDirty(); renderShiftEditor(); runSolver();
+    };
+    shead.appendChild(saddBtn);
+    swrap.appendChild(shead);
+    (plan.shifts || []).forEach((s, i) => {
+      const row = el('div', 'tt-shift-srow');
+      const lab = el('input', 'tt-mini tt-shift-lab'); lab.type = 'text'; lab.value = s.label || '';
+      lab.placeholder = '名称'; lab.setAttribute('aria-label', `シフト${i + 1} 名称`);
+      lab.oninput = () => { s.label = lab.value; scheduleShiftSolve(); };
+      row.appendChild(lab);
+      row.appendChild(shiftNum(s.start, 0, 30, (v) => { s.start = v; scheduleShiftSolve(); }));
+      row.appendChild(el('span', 'tt-batch-x', '〜'));
+      row.appendChild(shiftNum(s.end, 0, 30, (v) => { s.end = v; scheduleShiftSolve(); }));
+      row.appendChild(el('span', 'tt-batch-x', '時'));
+      row.appendChild(el('span', 'tt-batch-blabel', '上限'));
+      row.appendChild(shiftNum(s.max_workers, 0, 999, (v) => { s.max_workers = v; scheduleShiftSolve(); }));
+      row.appendChild(el('span', 'tt-batch-blabel', '¥/時'));
+      row.appendChild(shiftNum(s.wage_per_hr, 0, 99999, (v) => { s.wage_per_hr = v; scheduleShiftSolve(); }, 'tt-mini tt-shift-wage'));
+      const del = el('button', 'tt-batch-del', '×'); del.title = 'このシフトを削除';
+      del.onclick = () => { plan.shifts.splice(i, 1); shiftDirty(); renderShiftEditor(); runSolver(); };
+      row.appendChild(del);
+      swrap.appendChild(row);
+    });
+    if (!(plan.shifts || []).length) {
+      swrap.appendChild(el('div', 'tt-batch-note',
+        'シフトなし＝人数無制限（従来）。＋で 早番/遅番 などを追加すると各時間帯に上限人数がかかります。'));
+    }
+    elSolverShift.appendChild(swrap);
+
+    // 既定時給 (wage outside any shift band).
+    const wrow = el('div', 'tt-shift-brow');
+    wrow.appendChild(el('span', 'tt-batch-blabel', '既定時給 ¥/時'));
+    wrow.appendChild(shiftNum(plan.default_wage_per_hr, 0, 99999,
+      (v) => { plan.default_wage_per_hr = v; scheduleShiftSolve(); }, 'tt-mini tt-shift-wage'));
+    elSolverShift.appendChild(wrow);
+  }
+
+  // The plan to send: omit it until the user has touched it (so a saved plan stands).
+  function currentShiftPlan() {
+    const plan = solverState.shiftPlan || {};
+    return {
+      breaks: (plan.breaks || []).map((b) => ({ start: b.start, end: b.end })),
+      shifts: (plan.shifts || []).map((s) => ({
+        label: s.label || '', start: s.start, end: s.end,
+        max_workers: s.max_workers, wage_per_hr: s.wage_per_hr,
+      })),
+      default_wage_per_hr: plan.default_wage_per_hr || 0,
+    };
+  }
+
   function ctrlField(label, control) {
     const w = el('label', 'tt-solver-field');
     w.appendChild(el('span', 'tt-solver-flabel', label));
@@ -661,6 +820,8 @@ export function mountTimetable(targetEl, opts = {}) {
       // Send the batch schedule once the user has touched it (seeded flag set),
       // so the backend persists/applies it; before that, let the saved one stand.
       ...(solverState._seededBatches ? { batches: solverState.batches } : {}),
+      // Same for the シフト・休憩 plan (send only after the user edits it).
+      ...(solverState._seededShift ? { shift_plan: currentShiftPlan() } : {}),
     };
     let res;
     try {
@@ -691,6 +852,22 @@ export function mountTimetable(targetEl, opts = {}) {
       solverState._seededBatches = true;
       renderBatchEditor();
     }
+    // Seed the シフト・休憩 editor from the persisted plan on first solve.
+    if (res && !solverState._seededShift) {
+      const sp = res.shift_plan && typeof res.shift_plan === 'object' ? res.shift_plan : null;
+      if (sp && ((sp.breaks || []).length || (sp.shifts || []).length)) {
+        solverState.shiftPlan = {
+          breaks: (sp.breaks || []).map((b) => ({ start: b.start, end: b.end })),
+          shifts: (sp.shifts || []).map((s) => ({
+            label: s.label || '', start: s.start, end: s.end,
+            max_workers: s.max_workers, wage_per_hr: s.wage_per_hr,
+          })),
+          default_wage_per_hr: sp.default_wage_per_hr || 1200,
+        };
+        solverState._seededShift = true;
+        renderShiftEditor();
+      }
+    }
     renderSolver();
   }
 
@@ -710,6 +887,10 @@ export function mountTimetable(targetEl, opts = {}) {
       ['終了時刻', `${r.makespan_hour}時`, ''],
       ['判定', r.feasible ? '充足' : '不足', r.feasible ? '' : `${r1(r.shortfall_man_hours)}人時`, feasTone],
     ];
+    // 人件費/日 — only when a シフト・休憩 plan (with wage bands) is active.
+    if (r.labour_cost_day != null) {
+      cards.push(['人件費/日', '¥' + Math.round(Number(r.labour_cost_day)).toLocaleString(), '']);
+    }
     let html = '<div class="tt-kpis">';
     for (const [label, value, unit, tone] of cards) {
       html += `<div class="tt-kpi${tone ? ' ' + tone : ''}"><div class="tt-kpi-label">${esc(label)}</div>`

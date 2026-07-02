@@ -537,6 +537,80 @@ def batch_arrival_curve(batch_list: list[dict], hours: list[int]) -> list[float]
     return [min(1.0, sum(p for bh, p in pts if bh <= h) / total) for h in hours]
 
 
+def _shift_plan_caps(
+    shift_plan: dict | None, hours: list[int]
+) -> tuple[list[float], list[float], bool]:
+    """From a シフト・休憩 plan derive per-hour total-headcount ceilings and wages.
+
+    Returns ``(hour_caps, hour_wages, active)`` aligned to ``hours``:
+
+      * ``hour_caps[i]``  — the additional per-hour TOTAL headcount ceiling for
+        ``hours[i]`` (``math.inf`` = no shift-plan constraint that hour):
+          - a BREAK hour (any break's [start,end) covers it) → ``0`` (no work);
+          - SHIFTS defined → Σ ``max_workers`` of the shifts covering that hour
+            (``0`` when shifts exist but none cover it ⇒ the hour is closed);
+          - no shifts defined → ``math.inf`` (unlimited, legacy).
+      * ``hour_wages[i]`` — ¥/人時 for ``hours[i]``: the FIRST (list order) shift
+        covering it, else ``default_wage_per_hr``.
+      * ``active`` — True iff the plan carries any break or shift (so an empty/None
+        plan leaves the solver byte-identical: the caller skips every override).
+
+    Hours are compared as raw clock integers, so a window spilling past midnight
+    (``end_hour`` > 24) simply won't match a 0–23 shift band unless the band is
+    authored with the matching >24 hours — never blocks, just no coverage.
+    """
+    plan = shift_plan if isinstance(shift_plan, dict) else {}
+    breaks = plan.get("breaks") or []
+    shifts = plan.get("shifts") or []
+    active = bool(breaks or shifts)
+    default_wage = 0.0
+    try:
+        default_wage = float(plan.get("default_wage_per_hr") or 0) or 0.0
+    except (TypeError, ValueError):
+        default_wage = 0.0
+
+    def _rng(d: dict) -> tuple[float, float]:
+        try:
+            return float(d.get("start", 0) or 0), float(d.get("end", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0, 0.0
+
+    hour_caps: list[float] = []
+    hour_wages: list[float] = []
+    for h in hours:
+        # Break hours take no work regardless of shifts (capacity 0).
+        is_break = any(lo <= h < hi for lo, hi in (_rng(b) for b in breaks))
+        if not active:
+            cap_h: float = math.inf
+        elif is_break:
+            cap_h = 0.0
+        elif shifts:
+            cap_h = 0.0
+            for s in shifts:
+                lo, hi = _rng(s)
+                if lo <= h < hi:
+                    try:
+                        cap_h += float(s.get("max_workers", 0) or 0)
+                    except (TypeError, ValueError):
+                        pass
+        else:  # breaks-only plan: non-break hours stay unlimited (legacy)
+            cap_h = math.inf
+        hour_caps.append(cap_h)
+        # Wage: first covering shift's rate, else the default band.
+        wage = default_wage
+        for s in shifts:
+            lo, hi = _rng(s)
+            if lo <= h < hi:
+                try:
+                    w = float(s.get("wage_per_hr") or 0)
+                except (TypeError, ValueError):
+                    w = 0.0
+                wage = w if w > 0 else default_wage
+                break
+        hour_wages.append(wage)
+    return hour_caps, hour_wages, active
+
+
 def _toposort(ids: list[str], deps: dict[str, list[str]]) -> list[str]:
     """Order ids so every dependency precedes its dependents. A visited set both
     dedupes and breaks accidental cycles (a cyclic edge is simply dropped)."""
@@ -569,6 +643,7 @@ def solve_staffing(
     dependencies: dict | None = None,
     placement: str = "level",
     batches: dict | None = None,
+    shift_plan: dict | None = None,
 ) -> dict:
     """Analytic per-hour staffing solver over an operating window under a cap.
 
@@ -588,6 +663,15 @@ def solve_staffing(
                 hours, so the first process of that section cannot output more than
                 has arrived by each hour (a staggered start that follows the batch
                 profile). None = all volume available from the window start.
+      shift_plan: シフト・休憩モデル {breaks:[{start,end}], shifts:[{label,start,end,
+                max_workers,wage_per_hr}], default_wage_per_hr}. BREAK hours take no
+                work (capacity 0 → volume shifts to other hours; an infeasible day
+                stays honestly infeasible). SHIFTS additionally cap each hour's TOTAL
+                headcount by Σ max_workers of the shifts covering it (shifts defined
+                but none covering an hour ⇒ that hour is closed; NO shifts at all ⇒
+                unlimited). When the plan carries any break/shift the result gains
+                additive keys `labour_cost_day` (Σ headcount×hour×covering-shift wage,
+                else default wage) and `shift_plan` (echo). None/empty ⇒ byte-identical.
 
     Output (JSON-safe): hours[], per-process headcount_by_hour + man_hours +
     finish_hour + feasible/shortfall, plus day totals (man_hours, peak, makespan,
@@ -691,6 +775,21 @@ def solve_staffing(
     # level-load differ only in HOW the remaining volume is spread across the
     # still-open hours each hour; both clamp by precedence + cap every hour.
     gcap = int(cap) if cap else None  # global per-hour ceiling on TOTAL headcount
+    # シフト・休憩: per-hour TOTAL-headcount ceilings (break→0, shift Σmax, closed→0)
+    # and wages. When the plan is empty/None `plan_active` is False and every entry
+    # is math.inf, so hour_total_cap collapses to the scalar gcap (byte-identical).
+    plan_caps, plan_wages, plan_active = _shift_plan_caps(shift_plan, hours)
+
+    def hour_total_cap(hi: int) -> int | None:
+        """The effective per-hour TOTAL-headcount ceiling for hour-index `hi`:
+        min(global cap, shift-plan cap). None = unlimited (block is skipped so the
+        no-cap / no-plan path stays byte-identical)."""
+        pc = plan_caps[hi]
+        if gcap is None and pc == math.inf:
+            return None
+        c = math.inf if gcap is None else float(gcap)
+        return int(min(c, pc))
+
     for _ in range(_SOLVE_PASSES):
         for pid in order:
             rate = prod[pid]
@@ -719,9 +818,10 @@ def solve_staffing(
                 # Global cap: the SUM over all processes this hour cannot exceed
                 # `cap`; subtract what every OTHER process already takes this hour
                 # so the budget is shared (front-load especially leans on this).
-                if gcap is not None:
+                htc = hour_total_cap(hi)
+                if htc is not None:
                     used_by_others = sum(head[q][hi] for q in order if q != pid)
-                    budget = gcap - used_by_others
+                    budget = htc - used_by_others
                     need = min(need, max(0, budget))
                 # Precedence: a downstream process in hour `hi` can only handle
                 # what upstream had finished by the END of the PREVIOUS hour, so
@@ -763,10 +863,11 @@ def solve_staffing(
                 break
             # Headroom from the per-process cap.
             room = math.inf if cph is None else max(0, int(math.floor(cph)) - head[pid][hi])
-            # Headroom from the global cap (shared budget this hour).
-            if gcap is not None:
+            # Headroom from the global cap + shift-plan ceiling (shared this hour).
+            htc = hour_total_cap(hi)
+            if htc is not None:
                 used = sum(head[q][hi] for q in order)
-                room = min(room, max(0, gcap - used))
+                room = min(room, max(0, htc - used))
             if room <= 0:
                 continue
             # Precedence: cumulative output through this hour can't exceed what
@@ -839,6 +940,16 @@ def solve_staffing(
         sum(p["shortfall_volume"] / max(1.0, p["productivity"]) for p in procs_out), 1
     )
 
+    # シフト・休憩 labour-cost line (additive; only when a plan is active so an
+    # empty/None plan leaves the result dict byte-identical to legacy).
+    extra: dict = {}
+    if plan_active:
+        labour_cost_day = sum(
+            total_by_hour[hi] * plan_wages[hi] for hi in range(n_hours)
+        )
+        extra["labour_cost_day"] = round(labour_cost_day, 1)
+        extra["shift_plan"] = shift_plan if isinstance(shift_plan, dict) else {}
+
     return {
         "hours": hours,
         "start_hour": s,
@@ -857,4 +968,5 @@ def solve_staffing(
         "shortfall_man_hours": shortfall_mh,
         "dependencies": {pid: ups for pid, ups in (deps or {}).items() if pid in proc_by_id},
         "batches": batches if isinstance(batches, dict) else {},
+        **extra,
     }

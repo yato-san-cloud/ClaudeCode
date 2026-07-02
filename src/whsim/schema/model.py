@@ -453,6 +453,19 @@ class Settings(BaseModel):
     # a section (入荷/出荷) arrives in batches at given hours (e.g. 08:00→70%/12:00→
     # 20%/15:00→10%, or a single noon batch). Empty = all volume from window start.
     batch_schedule: dict[str, list[dict]] = Field(default_factory=dict)
+    # シフト・休憩モデル: staffing-solver overlay so 「昼休みは？」 no longer breaks the
+    # 人員タイムチャート. Shape (all keys optional; empty dict = legacy behaviour):
+    #   {
+    #     "breaks": [{"start": 12, "end": 13}],        # hours [start,end) with NO work
+    #     "shifts": [{"label": "早番", "start": 6, "end": 15,
+    #                 "max_workers": 20, "wage_per_hr": 1300}],  # named time windows
+    #     "default_wage_per_hr": 1200,                 # ¥/人時 outside any shift band
+    #   }
+    # Break hours allocate zero headcount (capacity 0); each shift additionally caps
+    # the per-hour TOTAL headcount by Σ max_workers of the shifts covering that hour
+    # (shifts defined but none covering an hour ⇒ that hour is closed; NO shifts at all
+    # ⇒ unlimited/legacy). wage bands drive a labour-cost line. Empty = no-op.
+    shift_plan: dict = Field(default_factory=dict)
     # 提案書ブランドテーマ: cover 宛先/自社名/アクセント/ロゴ for a client-ready export.
     brand: Brand = Field(default_factory=Brand)
 

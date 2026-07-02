@@ -63,3 +63,38 @@ def test_empty_batches_payload_clears_schedule(client):
     # And it stays cleared on a subsequent no-payload solve.
     again = _solve(client, name)
     assert again["batches"] == {}
+
+
+def test_solve_echoes_and_persists_shift_plan(client):
+    name = _make_project(client, "sp")
+    plan = {
+        "breaks": [{"start": 12, "end": 13}],
+        "shifts": [{"label": "日勤", "start": 8, "end": 18,
+                    "max_workers": 30, "wage_per_hr": 1300}],
+        "default_wage_per_hr": 1200,
+    }
+    body = _solve(client, name, shift_plan=plan)
+    assert body["available"] is True
+    assert body["shift_plan"] == plan
+    assert body["labour_cost_day"] > 0
+    # Break hour 12 takes no work.
+    idx12 = body["hours"].index(12)
+    assert body["total_headcount_by_hour"][idx12] == 0
+
+    # Persisted: a later solve WITHOUT the plan re-applies the saved one.
+    body2 = _solve(client, name)  # no shift_plan key
+    assert body2["shift_plan"] == plan
+    assert body2["labour_cost_day"] > 0
+
+
+def test_empty_shift_plan_payload_clears(client):
+    name = _make_project(client, "sp2")
+    _solve(client, name, shift_plan={"breaks": [{"start": 12, "end": 13}],
+                                     "default_wage_per_hr": 1200})
+    # An explicit empty dict clears the saved plan → legacy result (no additive keys).
+    cleared = _solve(client, name, shift_plan={})
+    assert "shift_plan" not in cleared
+    assert "labour_cost_day" not in cleared
+    # And it stays cleared on a subsequent no-payload solve.
+    again = _solve(client, name)
+    assert "shift_plan" not in again

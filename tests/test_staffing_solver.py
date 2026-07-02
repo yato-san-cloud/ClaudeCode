@@ -242,6 +242,100 @@ def test_cost_honours_custom_process_list():
     assert abs(r["mh_per_day"] - 2.0) < 1e-6
 
 
+# ---- シフト・休憩モデル (breaks / shifts / wage bands) --------------------------
+
+def test_empty_shift_plan_is_byte_identical():
+    # Regression bar: an empty/None plan must yield a byte-identical result dict,
+    # AND must NOT introduce the additive keys.
+    base = staffing.solve_staffing(VOLS, start_hour=8, end_hour=22, cap=20, placement="front")
+    none_plan = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=22, cap=20, placement="front", shift_plan=None)
+    empty_plan = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=22, cap=20, placement="front", shift_plan={})
+    empty_full = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=22, cap=20, placement="front",
+        shift_plan={"breaks": [], "shifts": [], "default_wage_per_hr": 1200})
+    assert base == none_plan == empty_plan == empty_full
+    assert "labour_cost_day" not in base
+    assert "shift_plan" not in base
+
+
+def test_break_hour_gets_zero_allocation_and_volume_shifts():
+    # A 12–13 break must leave hour 12 with ZERO headcount across every process,
+    # and the day's volume must still clear (it shifts to other hours).
+    plan = {"breaks": [{"start": 12, "end": 13}], "default_wage_per_hr": 1200}
+    no_break = staffing.solve_staffing(VOLS, start_hour=8, end_hour=24, placement="front")
+    with_break = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=24, placement="front", shift_plan=plan)
+    idx12 = with_break["hours"].index(12)
+    assert with_break["total_headcount_by_hour"][idx12] == 0
+    for p in with_break["processes"]:
+        assert p["headcount_by_hour"][idx12] == 0
+    # Same demand still fully staffed (feasible) — the break shifts work, not drops it.
+    assert with_break["feasible"] is True
+    # The plan is echoed and a labour cost line appears.
+    assert with_break["shift_plan"] == plan
+    assert with_break["labour_cost_day"] > 0
+    # No-break day is unaffected at hour 12 (sanity that the fixture has work there).
+    assert no_break["total_headcount_by_hour"][idx12] > 0
+
+
+def test_shift_max_caps_an_hour():
+    # A single shift 8–18 with max_workers=5 caps EVERY hour's total headcount at 5,
+    # and an hour with no covering shift (18–20) is closed.
+    plan = {"shifts": [
+        {"label": "日勤", "start": 8, "end": 18, "max_workers": 5, "wage_per_hr": 1000},
+    ]}
+    res = staffing.solve_staffing(
+        VOLS, start_hour=8, end_hour=20, placement="front", shift_plan=plan)
+    for hi, h in enumerate(res["hours"]):
+        if 8 <= h < 18:
+            assert res["total_headcount_by_hour"][hi] <= 5, (h, res["total_headcount_by_hour"][hi])
+        else:  # 18,19 — shifts defined but none cover ⇒ closed
+            assert res["total_headcount_by_hour"][hi] == 0, h
+
+
+def test_labour_cost_hand_check():
+    # A hand-verifiable case: one process, one shift covering the whole window at a
+    # known wage, so labour_cost_day = Σ headcount × wage exactly.
+    from whsim.schema.model import WarehouseModel, WorkProcess
+    m = WarehouseModel()
+    m.process.work_processes = [
+        WorkProcess(id="梱包", section="出荷", driver="out_orders", prod=10, unit="件/h"),
+    ]
+    # 100 件 ÷ 10/h = 10 man-hours; front-load with a max of 5/hr over 8–18.
+    plan = {"shifts": [
+        {"label": "A", "start": 8, "end": 18, "max_workers": 5, "wage_per_hr": 1000},
+    ]}
+    res = staffing.solve_staffing(
+        {"梱包": 100}, model=m, start_hour=8, end_hour=18, placement="level", shift_plan=plan)
+    total_head = sum(res["total_headcount_by_hour"])
+    # Every staffed hour is inside the 1000¥ shift → cost = total man-hours × 1000.
+    assert res["labour_cost_day"] == round(total_head * 1000.0, 1)
+    assert total_head == 10  # 100/10, integer buckets of ≤5
+
+
+def test_wage_bands_default_and_covering():
+    # Two hours: hour 9 covered by a 1500¥ shift, hour 17 uncovered → default 1200¥.
+    # One process, front-load so it staffs from the open.
+    from whsim.schema.model import WarehouseModel, WorkProcess
+    m = WarehouseModel()
+    m.process.work_processes = [
+        WorkProcess(id="出荷", section="出荷", driver="out_orders", prod=1, unit="件/h"),
+    ]
+    plan = {
+        "shifts": [{"label": "朝", "start": 9, "end": 10, "max_workers": 1, "wage_per_hr": 1500}],
+        "default_wage_per_hr": 1200,
+    }
+    # 2 units at prod=1/h, max 1/hr in the covered hour → 1 unit hour 9 (1500¥),
+    # but hour 10+ has shifts defined & uncovered ⇒ closed, so it can't finish.
+    res = staffing.solve_staffing(
+        {"出荷": 2}, model=m, start_hour=9, end_hour=18, placement="front", shift_plan=plan)
+    # Exactly 1 person-hour placed at hour 9 under the 1500¥ band.
+    assert res["labour_cost_day"] == 1500.0
+    assert res["feasible"] is False  # only 1 of 2 units clearable (rest is closed)
+
+
 def test_batch_outside_window_is_clamped_not_stranded():
     # A batch hour at/after end_hour (or before start) must be clamped into the
     # window so the cumulative curve still reaches 1.0 — never strands volume.
