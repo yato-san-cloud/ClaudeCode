@@ -47,7 +47,9 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter"],
+    # cryptography はアプリ未使用。壊れたシステムパッケージをフックが
+    # スキャンして失敗する環境があるため明示的に除外する (ビルドも軽くなる)
+    excludes=["tkinter", "cryptography"],
     cipher=block_cipher,
 )
 
