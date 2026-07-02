@@ -56,6 +56,17 @@ def patient_side(viewer_left: bool, ap_standard: bool = True) -> str:
     return "左" if viewer_left else "右"
 
 
+# 臨床的に意味のある丸め。X線の拡大率・ポジショニング・点の手置き誤差を
+# 考えると、角度0.01°やmm0.1のような桁は過剰精度（硬派な術者ほど嫌う）。
+# 角度は0.5°、長さは0.5mm刻みに丸め、道具が身の丈を分かっている状態にする。
+def round_angle(deg: float) -> float:
+    return round(deg * 2) / 2
+
+
+def round_mm(mm_val: float) -> float:
+    return round(mm_val * 2) / 2
+
+
 def apply_display_filters(img, filters):
     """明るさ/コントラスト/白黒反転。フロントの CSS filter と同一の式:
     out = brightness * (contrast * in + 127.5 * (1 - contrast)), その後 invert。
@@ -248,12 +259,14 @@ def compute_measurements(landmarks: list, analysis_type: str,
     pts = {lm["id"]: (float(lm["x"]), float(lm["y"])) for lm in landmarks}
 
     def mm(px):
-        return round(px * mm_per_px, 1) if mm_per_px else None
+        return round_mm(px * mm_per_px) if mm_per_px else None
 
     convention = "AP標準（画面左＝患者右）" if ap_standard else "反転表示（画面左＝患者左）"
-    note = "自動検出の初期値を施術者が確認・補正した結果を前提とした参考値です。"
-    if not mm_per_px:
-        note += " ※mm換算はスケール未設定のため未表示。"
+    note = "自動検出の初期値を施術者が確認・補正した前提の参考値です。"
+    if mm_per_px:
+        note += " mm値はフィルム面上の実測で、撮影拡大率は未補正です。"
+    else:
+        note += " スケール未設定のためpx表示です。"
 
     base = {"calibrated": bool(mm_per_px), "convention": convention, "analysis_note": note}
 
@@ -286,7 +299,7 @@ def compute_measurements(landmarks: list, analysis_type: str,
             "max_deviation_px": round(abs(max_dev), 1),
             "max_deviation_mm": mm(abs(max_dev)),
             "deviation_direction": patient_side(max_dev < 0, ap_standard),
-            "cobb_angle_approx_deg": round(cobb, 1),
+            "cobb_angle_approx_deg": round_angle(cobb),
             **base,
         }
 
@@ -296,7 +309,7 @@ def compute_measurements(landmarks: list, analysis_type: str,
     angle = math.degrees(math.atan2(dy, dx))
     diff_px = abs(dy)
     return {
-        "tilt_angle_deg": round(abs(angle), 2),
+        "tilt_angle_deg": round_angle(abs(angle)),
         "height_diff_px": round(diff_px, 1),
         "height_diff_mm": mm(diff_px),
         "higher_side": patient_side(l[1] < r[1], ap_standard),
@@ -336,16 +349,31 @@ def _compute_pelvis_full(pts, mm, mm_per_px, ap_standard):
     s_sym = float(np.dot(np.array(pts["symphysis"]) - M, u))
     s_s2 = float(np.dot(np.array(pts["s2"]) - M, u))
 
+    # 有意差のしきい値: 点の手置き誤差を踏まえ、これ未満は「差なし」扱い
+    thr_px = 3.0
+
     def shift(side_val):
         return {
             "px": round(abs(side_val), 1),
             "mm": mm(abs(side_val)),
-            "side": patient_side(side_val < 0, ap_standard) if abs(side_val) > 0.5 else "中央",
+            "side": patient_side(side_val < 0, ap_standard) if abs(side_val) > thr_px else "中央",
         }
 
+    iliac_high = (patient_side(iliac_higher_viewer_left, ap_standard)
+                  if iliac_diff > thr_px else "同高")
+    fhl_low = (patient_side(fem_lower_viewer_left, ap_standard)
+               if fem_diff > thr_px else "水平")
+
+    # ガンステッド的な一言サマリ: 腸骨稜高位側 = deficient側(PI寛骨の目安)。
+    # 断定はせず「示唆」に留める(硬派な術者は道具に診断させたがらない)。
+    if iliac_high in ("右", "左"):
+        summary = f"患者{iliac_high}側の腸骨稜高位（FHL基準）。同側寛骨のPI変位を示唆。"
+    else:
+        summary = "腸骨稜高は左右ほぼ同等。明らかな高低差なし。"
+
     result = {
-        "fhl_tilt_deg": round(abs(tilt), 2),
-        "fhl_lower_side": patient_side(fem_lower_viewer_left, ap_standard) if fem_diff > 0.5 else "水平",
+        "fhl_tilt_deg": round_angle(abs(tilt)),
+        "fhl_lower_side": fhl_low,
         "femur_diff_px": round(fem_diff, 1),
         "femur_diff_mm": mm(fem_diff),
         "iliac_height_px": {
@@ -354,9 +382,10 @@ def _compute_pelvis_full(pts, mm, mm_per_px, ap_standard):
         },
         "iliac_diff_px": round(iliac_diff, 1),
         "iliac_diff_mm": mm(iliac_diff),
-        "iliac_higher_side": patient_side(iliac_higher_viewer_left, ap_standard) if iliac_diff > 0.5 else "同高",
+        "iliac_higher_side": iliac_high,
         "symphysis_shift": shift(s_sym),
         "s2_shift": shift(s_s2),
+        "clinical_summary": summary,
     }
     if mm_per_px:
         result["iliac_height_mm"] = {
@@ -451,8 +480,8 @@ def _marker(img, p, color, sw, r=None):
 
 def _fmt(px_val, mm_val, unit_suffix=""):
     if mm_val is not None:
-        return f"{mm_val}mm{unit_suffix}"
-    return f"{px_val}px{unit_suffix}"
+        return f"{mm_val:g}mm{unit_suffix}"
+    return f"{px_val:g}px{unit_suffix}"
 
 
 def _render_pelvis_full(result, pts, m, h, w, sw, fs):
@@ -493,16 +522,16 @@ def _render_pelvis_full(result, pts, m, h, w, sw, fs):
         _dashed_line(result, _pt(P), _pt(foot), C_SYM, max(1, sw - 1))
         _marker(result, pts[key], C_SYM, sw)
 
-    # 数値ラベル
-    _label_text(result, f"FHL {m['fhl_tilt_deg']}deg",
+    # 数値ラベル (°記号・簡潔表記で読影者にそのまま通る形に)
+    _label_text(result, f"FHL {m['fhl_tilt_deg']:g}°",
                 M + u * w * 0.16 + n * h * 0.02, fs, C_FHL)
-    _label_text(result, "diff " + _fmt(m["iliac_diff_px"], m["iliac_diff_mm"]),
+    _label_text(result, "Crest " + _fmt(m["iliac_diff_px"], m["iliac_diff_mm"]),
                 npts["left_iliac"] + np.array([w * 0.02, -h * 0.015]), fs, C_ILIAC)
-    _label_text(result, "SP " + _fmt(m["symphysis_shift"]["px"], m["symphysis_shift"]["mm"]),
+    _label_text(result, "Sym " + _fmt(m["symphysis_shift"]["px"], m["symphysis_shift"]["mm"]),
                 npts["symphysis"] + np.array([w * 0.02, h * 0.03]), fs, C_SYM)
     _label_text(result, "S2 " + _fmt(m["s2_shift"]["px"], m["s2_shift"]["mm"]),
                 npts["s2"] + np.array([w * 0.02, -h * 0.01]), fs, C_SYM)
-    _label_text(result, "FH " + _fmt(m["femur_diff_px"], m["femur_diff_mm"]),
+    _label_text(result, "Head " + _fmt(m["femur_diff_px"], m["femur_diff_mm"]),
                 M + u * (-w * 0.24) + n * h * 0.02, fs, C_FEMORAL)
 
 
@@ -513,7 +542,7 @@ def _render_pelvis_tilt(result, pts, m, h, w, sw, fs):
     cv2.line(result, l, r, (0, 200, 0), sw, cv2.LINE_AA)
     _dashed_line(result, (0, l[1]), (w, l[1]), (0, 215, 255), max(1, sw - 1))
     cv2.line(result, (w // 2, 0), (w // 2, h), C_MIDLINE, max(1, sw - 1), cv2.LINE_AA)
-    txt = f"tilt {m['tilt_angle_deg']}deg  diff " + _fmt(m["height_diff_px"], m["height_diff_mm"])
+    txt = f"{m['tilt_angle_deg']:g}°  " + _fmt(m["height_diff_px"], m["height_diff_mm"])
     _label_text(result, txt,
                 ((l[0] + r[0]) // 2 - int(w * 0.12), min(l[1], r[1]) - int(h * 0.03)), fs)
 
@@ -525,7 +554,7 @@ def _render_leg_length(result, pts, m, h, w, sw, fs):
         cv2.drawMarker(result, p, C_FEMORAL, cv2.MARKER_CROSS, sw * 8, sw, cv2.LINE_AA)
         _dashed_line(result, p, (p[0], h), (255, 200, 0), max(1, sw - 1))
     cv2.line(result, l, r, (0, 165, 255), sw, cv2.LINE_AA)
-    txt = "FH diff " + _fmt(m["vertical_diff_px"], m["vertical_diff_mm"]) + f"  low:{m['lower_side']}"
+    txt = "Head " + _fmt(m["vertical_diff_px"], m["vertical_diff_mm"]) + f"  low:{m['lower_side']}"
     _label_text(result, txt,
                 ((l[0] + r[0]) // 2 - int(w * 0.14), max(l[1], r[1]) + int(h * 0.06)), fs)
 
@@ -538,7 +567,7 @@ def _render_spine(result, pts, landmarks, m, h, w, sw, fs):
             cv2.line(result, ordered[i - 1], p, C_SPINE, sw, cv2.LINE_AA)
     _dashed_line(result, ordered[0], ordered[-1], C_MIDLINE, max(1, sw - 1))
     txt = ("dev " + _fmt(m["max_deviation_px"], m["max_deviation_mm"])
-           + f"  Cobb~{m['cobb_angle_approx_deg']}deg")
+           + f"  Cobb~{m['cobb_angle_approx_deg']:g}°")
     _label_text(result, txt, (int(w * 0.05), h - int(h * 0.04)), fs)
 
 

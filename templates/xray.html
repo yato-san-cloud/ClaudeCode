@@ -27,23 +27,29 @@
 <div class="form-card">
     <h3>2. 分析タイプ</h3>
     <div class="analysis-options">
-        <div class="analysis-option selected" data-type="pelvis_full">
+        <div class="analysis-option selected primary-mode" data-type="pelvis_full">
+            <span class="mode-badge">標準</span>
             <h4>骨盤総合（Gonstead式）</h4>
-            <p>大腿骨頭ライン基準・6基準点</p>
-        </div>
-        <div class="analysis-option" data-type="pelvis_tilt">
-            <h4>骨盤傾斜（簡易）</h4>
-            <p>腸骨稜の左右差のみ</p>
-        </div>
-        <div class="analysis-option" data-type="leg_length">
-            <h4>脚長差</h4>
-            <p>大腿骨頭の高低差</p>
-        </div>
-        <div class="analysis-option" data-type="spine_alignment">
-            <h4>脊椎アライメント</h4>
-            <p>側弯・偏位の確認</p>
+            <p>大腿骨頭ライン基準・6基準点。通常はこれ一つで足ります。</p>
         </div>
     </div>
+    <details class="mode-more">
+        <summary>簡易モード（必要時のみ）</summary>
+        <div class="analysis-options">
+            <div class="analysis-option" data-type="pelvis_tilt">
+                <h4>骨盤傾斜</h4>
+                <p>腸骨稜の左右差のみ</p>
+            </div>
+            <div class="analysis-option" data-type="leg_length">
+                <h4>脚長差</h4>
+                <p>大腿骨頭の高低差</p>
+            </div>
+            <div class="analysis-option" data-type="spine_alignment">
+                <h4>脊椎アライメント</h4>
+                <p>側弯・偏位の確認</p>
+            </div>
+        </div>
+    </details>
     <div class="form-actions">
         <button class="btn btn-lg" id="analyzeBtn" disabled>基準点を自動検出</button>
     </div>

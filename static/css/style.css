@@ -676,6 +676,58 @@ body {
     text-align: center;
 }
 
+/* 所見サマリ (骨盤総合): 計測表の頭に一言 */
+.clinical-summary {
+    background: var(--accent);
+    border-left: 4px solid var(--primary);
+    border-radius: 6px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.8rem;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--primary);
+    line-height: 1.5;
+}
+
+/* 分析タイプ: 標準モードを主役に、簡易は折りたたみ */
+.primary-mode {
+    position: relative;
+    border-width: 2px;
+}
+
+.mode-badge {
+    position: absolute;
+    top: -10px;
+    left: 14px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.15rem 0.6rem;
+    border-radius: 10px;
+    letter-spacing: 0.05em;
+}
+
+.mode-more {
+    margin-top: 0.8rem;
+}
+
+.mode-more summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    padding: 0.4rem 0;
+    user-select: none;
+}
+
+.mode-more summary:hover {
+    color: var(--primary);
+}
+
+.mode-more .analysis-options {
+    margin-top: 0.6rem;
+}
+
 .calib-box {
     margin-top: 1rem;
     padding: 0.9rem;

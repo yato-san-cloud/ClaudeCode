@@ -21,7 +21,7 @@ const XE = (() => {
         landmarks: [],
         calib: { on: false, pts: null, mm: 100 },
         filters: { contrast: 1, brightness: 1, invert: false },
-        ap: true, showLines: true,
+        ap: true, showLines: true, summary: null,
         vb: { x: 0, y: 0, w: 1, h: 1 },
         sel: null,            // {kind:'lm'|'calib', idx}
         undo: [],
@@ -395,14 +395,21 @@ const XE = (() => {
         return S.ap ? (viewerLeft ? '右' : '左') : (viewerLeft ? '左' : '右');
     }
 
+    // 臨床的な丸め (analyzer.py と一致): 角度0.5°、長さ0.5mm刻み
+    function roundAngle(deg) { return Math.round(deg * 2) / 2; }
+    function roundMM(v) { return Math.round(v * 2) / 2; }
+
+    // 有意差しきい値 (px)。これ未満は「差なし」扱い
+    const THR_PX = 3.0;
+
     function fmtLen(px) {
         const k = mmPerPx();
-        return k ? `${(px * k).toFixed(1)} mm（${px.toFixed(0)}px）` : `${px.toFixed(1)} px`;
+        return k ? `${roundMM(px * k)} mm（${px.toFixed(0)}px）` : `${px.toFixed(0)} px`;
     }
 
     function fmtShort(px) {
         const k = mmPerPx();
-        return k ? `${(px * k).toFixed(1)}mm` : `${px.toFixed(0)}px`;
+        return k ? `${roundMM(px * k)}mm` : `${px.toFixed(0)}px`;
     }
 
     function fhlFrame() {
@@ -432,31 +439,37 @@ const XE = (() => {
             const sSym = dot(lm('symphysis'), f.ux, f.uy);
             const sS2 = dot(lm('s2'), f.ux, f.uy);
             const shiftRow = (label, s) => rows.push([label,
-                Math.abs(s) > 0.5 ? `${pside(s < 0)}方向へ ${fmtLen(Math.abs(s))}` : '中央']);
+                Math.abs(s) > THR_PX ? `${pside(s < 0)}方向へ ${fmtLen(Math.abs(s))}` : '中央']);
 
-            rows.push(['大腿骨頭ライン(FHL)傾斜', `${Math.abs(tilt).toFixed(2)}°`]);
-            rows.push(['低い側（大腿骨頭）', femDiff > 0.5 ? pside(f.L.y > f.R.y) : '水平']);
+            const iliacHigh = iliacDiff > THR_PX ? pside(hL > hR) : '同高';
+            rows.push(['大腿骨頭ライン(FHL)傾斜', `${roundAngle(Math.abs(tilt))}°`]);
+            rows.push(['低い側（大腿骨頭）', femDiff > THR_PX ? pside(f.L.y > f.R.y) : '水平']);
             rows.push(['大腿骨頭 高低差', fmtLen(femDiff)]);
             rows.push([`腸骨稜高（${pside(true)}）`, fmtLen(Math.abs(hL))]);
             rows.push([`腸骨稜高（${pside(false)}）`, fmtLen(Math.abs(hR))]);
             rows.push(['腸骨稜 高低差', fmtLen(iliacDiff)]);
-            rows.push(['高い側（腸骨稜）', iliacDiff > 0.5 ? pside(hL > hR) : '同高']);
+            rows.push(['高い側（腸骨稜）', iliacHigh]);
             shiftRow('恥骨結合 側方偏位', sSym);
             shiftRow('S2 側方偏位', sS2);
+            S.summary = (iliacHigh === '右' || iliacHigh === '左')
+                ? `患者${iliacHigh}側の腸骨稜高位（FHL基準）。同側寛骨のPI変位を示唆。`
+                : '腸骨稜高は左右ほぼ同等。明らかな高低差なし。';
         } else if (t === 'pelvis_tilt') {
             const L = lm('left_iliac'), R = lm('right_iliac');
             if (!L || !R) return rows;
             const angle = Math.atan2(R.y - L.y, R.x - L.x) * 180 / Math.PI;
             const diff = Math.abs(R.y - L.y);
-            rows.push(['骨盤傾斜角', `${Math.abs(angle).toFixed(2)}°`]);
+            rows.push(['骨盤傾斜角', `${roundAngle(Math.abs(angle))}°`]);
             rows.push(['腸骨稜 高低差', fmtLen(diff)]);
-            rows.push(['高い側', diff > 0.5 ? pside(L.y < R.y) : '同高']);
+            rows.push(['高い側', diff > THR_PX ? pside(L.y < R.y) : '同高']);
+            S.summary = null;
         } else if (t === 'leg_length') {
             const L = lm('left_femoral'), R = lm('right_femoral');
             if (!L || !R) return rows;
             const diff = Math.abs(L.y - R.y);
             rows.push(['大腿骨頭 高低差', fmtLen(diff)]);
-            rows.push(['低い側', diff > 0.5 ? pside(L.y > R.y) : '水平']);
+            rows.push(['低い側', diff > THR_PX ? pside(L.y > R.y) : '水平']);
+            S.summary = null;
         } else if (t === 'spine_alignment') {
             const pts = [...S.landmarks].sort((a, b) => a.y - b.y);
             if (pts.length < 3) return rows;
@@ -469,17 +482,20 @@ const XE = (() => {
             const cobb = Math.atan2(Math.abs(mid.x - axisX), halfH) * 180 / Math.PI;
             rows.push(['最大側方偏位', fmtLen(Math.abs(maxDev))]);
             rows.push(['偏位方向', pside(maxDev < 0)]);
-            rows.push(['Cobb角（概算）', `${cobb.toFixed(1)}°`]);
+            rows.push(['Cobb角（概算）', `${roundAngle(cobb)}°`]);
+            S.summary = null;
         }
 
-        rows.push(['スケール', mmPerPx() ? `${(1 / mmPerPx()).toFixed(2)} px/mm` : '未設定（px表示）']);
+        rows.push(['スケール', mmPerPx() ? 'mm換算（フィルム面）' : '未設定（px表示）']);
         rows.push(['左右表記', S.ap ? 'AP標準（画面左＝患者右）' : '反転（画面左＝患者左）']);
         return rows;
     }
 
     function recompute() {
         const rows = measures();
-        $('measurementsList').innerHTML = rows.map(([k, v]) =>
+        const summaryHtml = S.summary
+            ? `<div class="clinical-summary">${S.summary}</div>` : '';
+        $('measurementsList').innerHTML = summaryHtml + rows.map(([k, v]) =>
             `<div class="measurement"><span class="label">${k}</span><span class="value">${v}</span></div>`
         ).join('');
         renderLmList();

@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.referral_letter import generate_referral_pdf
 from modules.xray_analyzer import (
     detect_landmarks, compute_measurements, render_annotated, patient_side,
+    round_angle, round_mm,
 )
 from modules.xray_report import generate_xray_report_pdf, measurement_rows
 
@@ -63,10 +64,46 @@ def test_pelvis_full_measurements():
     lm = detect_landmarks(b, "pelvis_full")["landmarks"]
     m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
     for key in ("fhl_tilt_deg", "femur_diff_px", "iliac_diff_px",
-                "symphysis_shift", "s2_shift", "iliac_height_px"):
+                "symphysis_shift", "s2_shift", "iliac_height_px",
+                "clinical_summary"):
         assert key in m, key
     assert m["femur_diff_mm"] is not None
     assert m["symphysis_shift"]["side"] in ("右", "左", "中央")
+
+
+def test_clinical_rounding_helpers():
+    # 角度は0.5°刻み、長さは0.5mm刻み
+    assert round_angle(2.51) == 2.5
+    assert round_angle(2.8) == 3.0
+    assert round_mm(3.9) == 4.0
+    assert round_mm(3.1) == 3.0
+
+
+def test_measurements_use_clinical_rounding():
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
+    # 角度は0.5刻み → 2倍して整数になる
+    assert (m["fhl_tilt_deg"] * 2) == round(m["fhl_tilt_deg"] * 2)
+
+
+def test_film_plane_note_when_calibrated():
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
+    assert "フィルム面" in m["analysis_note"]
+
+
+def test_summary_flags_high_crest_side():
+    # 右腸骨稜を大きく上げると患者右高位のサマリになる (AP標準: 画面左=患者右)
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    by_id = {p["id"]: p for p in lm}
+    by_id["left_iliac"]["y"] -= 60   # 画面左を大きく上げる = 患者右が高位
+    by_id["right_iliac"]["y"] += 20
+    m = compute_measurements(lm, "pelvis_full")
+    assert m["iliac_higher_side"] == "右"
+    assert "右" in m["clinical_summary"]
 
 
 def test_measurement_changes_with_landmark_move():

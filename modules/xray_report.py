@@ -99,7 +99,7 @@ def measurement_rows(measurements: dict, analysis_type: str):
         for side, v in heights_px.items():
             rows.append((f"腸骨稜高（{side}）", f"{v} px"))
 
-    scale = "設定済み" if measurements.get("calibrated") else "未設定（px表示）"
+    scale = "mm換算（フィルム面・拡大率未補正）" if measurements.get("calibrated") else "未設定（px表示）"
     rows.append(("スケール", scale))
     rows.append(("左右表記", measurements.get("convention", "")))
     return rows
@@ -164,6 +164,16 @@ def generate_xray_report_pdf(payload: dict) -> io.BytesIO:
             doc.space(4 * MM)
         except Exception:
             doc.wrapped("（画像を読み込めませんでした）", MARGIN_X + 5 * MM, body_w)
+
+    # 所見サマリ (骨盤総合のみ): 表の前に一言で
+    summary = measurements.get("clinical_summary")
+    if summary:
+        doc.section("所見サマリ")
+        c.setFont(FONT, 11)
+        for seg in _split_by_width(summary, body_w - 4 * MM, 11):
+            doc._maybe_break(LINE)
+            c.drawString(MARGIN_X + 2 * MM, doc.y, seg)
+            doc.y -= LINE + 1 * MM
 
     # 計測値の表
     doc.section("計測結果")
