@@ -207,6 +207,11 @@ def _run_block(run_metrics: dict | None) -> dict:
     mp = m.get("measured_productivity")
     if isinstance(mp, dict) and mp:
         out["measured_productivity"] = mp
+    # 信頼区間: carry the run's Monte-Carlo 95% CI block through so the rail can
+    # show how solid the 実測 numbers are (additive; absent for a single run).
+    ci = m.get("ci")
+    if isinstance(ci, dict) and ci.get("metrics"):
+        out["ci"] = ci
     return out
 
 

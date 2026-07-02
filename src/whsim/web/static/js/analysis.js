@@ -122,6 +122,26 @@ function injectStyle() {
 }
 #analysis .an-view .kpi-hero-cell .kpi-value{letter-spacing:-.015em}
 
+/* 信頼区間 (95%CI ± half-width) under a hero value; quiet, tabular. */
+#analysis .an-view .an-ci{
+  margin-top:5px;font-size:var(--fs-xs,12px);line-height:1.3;
+  color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+}
+#analysis .an-view .an-ci .an-ci-pm{color:var(--ink-primary,#e6edf3);font-weight:700}
+/* replication guidance note (below the hero grid). */
+#analysis .an-view .an-ci-note{
+  margin:12px 0 0;padding:9px 12px;border-radius:8px;
+  font-size:var(--fs-xs,12px);line-height:1.5;
+  color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  border:1px solid var(--line-hair,rgba(255,255,255,.08));
+  background:var(--bg-sunken,rgba(255,255,255,.02));
+}
+#analysis .an-view .an-ci-note.single{
+  color:var(--warn,#F5B05A);
+  border-color:color-mix(in srgb,var(--warn,#F5B05A) 30%,transparent);
+}
+
 /* delta: arrow + sign + muted colour + 60px sparkline (triple-encoded) */
 #analysis .an-view .delta{display:inline-flex;align-items:center;gap:5px}
 #analysis .an-view .delta.up{color:var(--an-d-up)}
@@ -486,6 +506,50 @@ function deltaSparkline(dir) {
   return svg;
 }
 
+// ---- 信頼区間 (confidence interval) annotations -----------------------------
+//
+// The run payload carries a 95% t-CI over the Monte-Carlo replications
+// (`payload.ci`), reshaped by the backend into display-unit half-widths on the
+// hero KPIs (`h.ci`) — the trust signal a 荷主 asks for ("この数字はどれくらい
+// 堅いのか"). These helpers render the ± and the honest replication guidance.
+
+// A small "±half-width (95%CI, n=N)" annotation for a headline KPI. Returns null
+// when there is no interval (single run, or the thin analytic estimate).
+function ciBadge(ci) {
+  if (!ci || !isNum(ci.half_width)) return null;
+  const line = el('div', { class: 'an-ci' });
+  line.appendChild(el('span', { class: 'an-ci-pm' }, `±${group(ci.half_width)}`));
+  const nTxt = isNum(ci.n) ? `, n=${ci.n}` : '';
+  line.appendChild(document.createTextNode(` (95%CI${nTxt})`));
+  return line;
+}
+
+// Honest replication guidance from the run's CI block:
+//   n=1              → single-run disclosure (no width; auto-reduced for scale).
+//   n<n_recommended  → how many more reps reach the ±5% relative-error target.
+// Returns null when the run already meets the target (or there is no CI block —
+// e.g. the analytic estimate). `n_recommended` is a plain count, so it is read
+// straight off the raw per-metric CI entries (unit-independent).
+function buildCiNote(ci) {
+  if (!ci || typeof ci !== 'object') return null;
+  const n = ci.n;
+  if (n === 1) {
+    return el('p', { class: 'an-ci-note single' },
+      '単一実行（幅なし）— 大規模データのため反復1回に自動調整');
+  }
+  const metrics = ci.metrics && typeof ci.metrics === 'object' ? ci.metrics : {};
+  let need = 0;
+  for (const k in metrics) {
+    const e = metrics[k];
+    if (e && isNum(e.n_recommended)) need = Math.max(need, e.n_recommended);
+  }
+  if (isNum(n) && need > n) {
+    return el('p', { class: 'an-ci-note' },
+      `精度目安: ±5%にはあと ${need - n} 回のレプリケーションが必要（設定で反復数を上げられます）`);
+  }
+  return null;
+}
+
 function buildHero(heroItems) {
   const grid = el('div', { class: 'kpi-hero' });
   heroItems.forEach((h) => {
@@ -503,6 +567,9 @@ function buildHero(heroItems) {
       d.appendChild(deltaSparkline(h.delta.dir));
       cell.appendChild(d);
     }
+    // 95%CI ± half-width under the value (omitted when there is no interval).
+    const ci = ciBadge(h.ci);
+    if (ci) cell.appendChild(ci);
     grid.appendChild(cell);
   });
   return grid;
@@ -532,11 +599,14 @@ function buildKpiGroups(groups) {
   return frag;
 }
 
-function buildKpiSection(kpis) {
+function buildKpiSection(kpis, ci) {
   const sec = el('section', { class: 'an-section' });
   sec.appendChild(el('h2', { class: 'an-section-title' }, '主要KPI'));
   const hero = Array.isArray(kpis.hero) ? kpis.hero : [];
   if (hero.length) sec.appendChild(buildHero(hero));
+  // Replication guidance right below the hero (single-run note or ±5% target).
+  const note = buildCiNote(ci);
+  if (note) sec.appendChild(note);
   const groups = Array.isArray(kpis.groups) ? kpis.groups : [];
   if (groups.length) sec.appendChild(buildKpiGroups(groups));
   if (!hero.length && !groups.length) {
@@ -866,8 +936,13 @@ function buildProductivityCard(prod) {
   card.appendChild(el('div', { class: 'chart-title' }, '生産性の内訳（ピッカー1人・1時間あたり）'));
   const mins = (sh) => Math.round(sh * 60);
   const split = parts.map((p) => `${p.label}${mins(p.share)}分`).join('＋');
+  // Headline 件/人時 with its 95%CI ± half-width inline (e.g. 「142 ±6 件/人時
+  // (95%CI, n=5)」) when the run carries one; plain figure otherwise.
+  const pm = (prod.ci && isNum(prod.ci.half_width)) ? ` ±${group(prod.ci.half_width)}` : '';
+  const ciTail = (prod.ci && isNum(prod.ci.half_width) && isNum(prod.ci.n))
+    ? ` (95%CI, n=${prod.ci.n})` : '';
   card.appendChild(el('div', { class: 'chart-sub' },
-    `${prod.per_hr || 0} 件/人時 ＝ 在席60分のうち ${split}`));
+    `${prod.per_hr || 0}${pm} 件/人時${ciTail} ＝ 在席60分のうち ${split}`));
   // stacked bar (flexbox; theme-aware via CSS vars, no SVG needed)
   const bar = el('div', {
     style: 'display:flex;height:26px;border-radius:8px;overflow:hidden;margin:8px 0 4px',
@@ -1135,7 +1210,7 @@ function render(targetEl, payload) {
   }
 
   root.appendChild(buildInsightsSection(insights));
-  root.appendChild(buildKpiSection(kpis));
+  root.appendChild(buildKpiSection(kpis, data.ci));
   const chartsSec = buildChartsSection(charts, data.currency);
   if (chartsSec) root.appendChild(chartsSec);
   const prodSec = buildProdFeedback(data.productivity_compare, targetEl);

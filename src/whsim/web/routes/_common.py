@@ -407,24 +407,54 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
             "metric": f"{cur}{cost_per_order:,.1f}",
         })
 
+    # --- confidence intervals (信頼区間) -----------------------------------
+    # The run KPIs carry a 95% t-CI over the Monte-Carlo replications
+    # (``kpis.ci``). Reshape each metric into a display-ready ± half-width in the
+    # SAME unit as the hero value it annotates (util → %, so ×100), so the view
+    # can render e.g.「142 ±6 件/時 (95%CI, n=5)」without any unit maths of its own.
+    # Absent for a thin analytic estimate (no ``ci``) or a single run (n<2).
+    ci_all = metrics.get("ci") if isinstance(metrics.get("ci"), dict) else {}
+    ci_metrics = ci_all.get("metrics") if isinstance(ci_all.get("metrics"), dict) else {}
+    ci_n = ci_all.get("n")
+
+    def _ci(metric_key: str, scale: float = 1.0, decimals: int = 0) -> dict | None:
+        e = ci_metrics.get(metric_key)
+        if not isinstance(e, dict) or not isinstance(e.get("half_width"), (int, float)):
+            return None
+        out = {"half_width": round(e["half_width"] * scale, decimals),
+               "n": e.get("n", ci_n), "confidence": ci_all.get("confidence", 0.95)}
+        if isinstance(e.get("n_recommended"), (int, float)):
+            out["n_recommended"] = int(e["n_recommended"])
+        return out
+
+    # Map the bottleneck stage to its per-rep utilisation metric so the 稼働率
+    # hero gets the CI for the RIGHT stage.
+    _BN_UTIL_KEY = {"picking": "picker_utilization", "packing": "packer_utilization",
+                    "agv": "agv_utilization", "sort": "sort_utilization"}
+    bn_ci_key = _BN_UTIL_KEY.get(metrics.get("bottleneck"), "picker_utilization")
+
     # --- hero KPIs ----------------------------------------------------------
     hero: list[dict] = []
     tput = g("throughput_per_hr", g("capacity_orders_per_hr", 0.0))
     if tput:
         hero.append({"label": "処理能力", "value": round(tput),
-                     "unit": "件/時", "delta": None})
+                     "unit": "件/時", "delta": None,
+                     "ci": _ci("throughput_per_hr", 1.0, 0)})
     hero.append({"label": "出荷完了率", "value": round(completion * 100),
                  "unit": "%",
                  "delta": {"dir": "up" if completion >= 0.98 else "down",
-                           "text": "需要をさばけます" if can_handle else "要注意"}})
+                           "text": "需要をさばけます" if can_handle else "要注意"},
+                 "ci": _ci("completion_rate", 100.0, 1)})
     if bottleneck_jp:
         hero.append({"label": f"{bottleneck_jp}稼働率", "value": round(bn_util * 100),
                      "unit": "%",
                      "delta": {"dir": "down" if bn_util >= 0.85 else "up",
-                               "text": "高負荷" if bn_util >= 0.85 else "余力あり"}})
+                               "text": "高負荷" if bn_util >= 0.85 else "余力あり"},
+                     "ci": _ci(bn_ci_key, 100.0, 1)})
     if cost_per_order > 0:
         hero.append({"label": "1件あたりコスト", "value": round(cost_per_order, 1),
-                     "unit": cur, "delta": None})
+                     "unit": cur, "delta": None,
+                     "ci": _ci("total_cost_per_order", 1.0, 1)})
     if len(hero) < 4 and headcount:
         hero.append({"label": "必要人員", "value": headcount, "unit": "名", "delta": None})
 
@@ -503,6 +533,7 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
     if prod_total > 0:
         prod_chart = {
             "per_hr": round(g("orders_per_picker_hr"), 1),   # 件/人時
+            "ci": _ci("orders_per_picker_hr", 1.0, 1),       # 95%CI on 件/人時
             "parts": [
                 {"key": "walk", "label": "移動", "share": round(walk_s / prod_total, 3)},
                 {"key": "handle", "label": "手扱い", "share": round(handle_s / prod_total, 3)},
@@ -550,4 +581,8 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
         "charts": {"stages": stages_chart, "cost": cost_chart,
                    "productivity": prod_chart},
         "productivity_compare": prod_compare,
+        # Monte-Carlo 信頼区間 block (n / confidence / per-metric CIs). Present for
+        # a run, absent (None) for the thin analytic estimate. The view reads its
+        # `n` to render the single-run note and the ±5% replication recommendation.
+        "ci": ci_all or None,
     }
