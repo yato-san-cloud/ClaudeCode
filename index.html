@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f766e">
+<title>現場マニュアル作成ツール</title>
+<style>
+  :root{
+    --bg:#f1f5f9; --card:#ffffff; --ink:#0f172a; --sub:#64748b;
+    --line:#e2e8f0; --brand:#0f766e; --brand-d:#0d5f57;
+    --danger:#dc2626; --accent:#f59e0b; --shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.6;
+    padding-bottom:96px;
+  }
+  header{
+    position:sticky; top:0; z-index:20;
+    background:var(--brand); color:#fff;
+    padding:12px 16px; box-shadow:var(--shadow);
+    display:flex; align-items:center; gap:10px;
+  }
+  header .logo{font-size:22px}
+  header h1{font-size:17px; margin:0; font-weight:700; flex:1; letter-spacing:.02em}
+  header .count{font-size:12px; background:rgba(255,255,255,.2); padding:3px 9px; border-radius:999px; font-weight:600}
+  .wrap{max-width:760px; margin:0 auto; padding:16px}
+
+  /* --- meta card --- */
+  .meta{background:var(--card); border-radius:14px; box-shadow:var(--shadow); padding:16px; margin-bottom:16px}
+  .meta input{
+    width:100%; border:none; border-bottom:2px solid var(--line);
+    padding:8px 2px; font-size:15px; font-family:inherit; color:var(--ink);
+    background:transparent; transition:border-color .15s;
+  }
+  .meta input:focus{outline:none; border-color:var(--brand)}
+  .meta .title-in{font-size:20px; font-weight:700; margin-bottom:10px}
+  .meta .row{display:flex; gap:12px}
+  .meta .row input{flex:1}
+  .meta label{display:block; font-size:11px; color:var(--sub); margin-bottom:-2px; font-weight:600}
+
+  /* --- steps --- */
+  #steps{display:flex; flex-direction:column; gap:14px}
+  .step{
+    background:var(--card); border-radius:14px; box-shadow:var(--shadow);
+    overflow:hidden; position:relative;
+  }
+  .step-head{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 14px; border-bottom:1px solid var(--line); background:#f8fafc;
+  }
+  .step-num{
+    width:28px; height:28px; flex:none; border-radius:50%;
+    background:var(--brand); color:#fff; font-weight:700; font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .step-head .sp{flex:1}
+  .icon-btn{
+    border:none; background:transparent; font-size:18px; cursor:pointer;
+    width:34px; height:34px; border-radius:8px; color:var(--sub);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .icon-btn:hover{background:var(--line)}
+  .icon-btn.del:hover{background:#fee2e2; color:var(--danger)}
+  .icon-btn:disabled{opacity:.25; cursor:default}
+  .step-body{padding:14px}
+  .photo-slot{
+    position:relative; width:100%; aspect-ratio:4/3; border-radius:10px;
+    background:#f1f5f9; border:2px dashed var(--line);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:6px; color:var(--sub); cursor:pointer; overflow:hidden; margin-bottom:12px;
+    transition:border-color .15s,background .15s;
+  }
+  .photo-slot:hover{border-color:var(--brand); background:#f0fdfa}
+  .photo-slot .cam{font-size:38px}
+  .photo-slot .hint{font-size:13px; font-weight:600}
+  .photo-slot img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
+  .photo-slot .retake{
+    position:absolute; right:8px; bottom:8px; background:rgba(15,23,42,.72);
+    color:#fff; font-size:12px; padding:5px 10px; border-radius:999px; font-weight:600;
+    display:flex; align-items:center; gap:4px;
+  }
+  .step-body input.s-title{
+    width:100%; border:none; font-size:16px; font-weight:700; font-family:inherit;
+    padding:4px 2px; margin-bottom:6px; color:var(--ink);
+    border-bottom:2px solid transparent;
+  }
+  .step-body input.s-title:focus{outline:none; border-bottom-color:var(--brand)}
+  .step-body textarea{
+    width:100%; border:none; resize:vertical; min-height:52px; font-size:14px;
+    font-family:inherit; color:var(--ink); padding:4px 2px; line-height:1.6;
+  }
+  .step-body textarea:focus{outline:none}
+  .step-body .field-lbl{font-size:11px; color:var(--sub); font-weight:600; margin-top:8px}
+
+  .empty{text-align:center; color:var(--sub); padding:40px 20px; font-size:14px}
+  .empty .big{font-size:40px; margin-bottom:8px}
+
+  /* --- add button --- */
+  .add-step{
+    width:100%; margin-top:14px; padding:16px; border-radius:14px;
+    border:2px dashed var(--brand); background:#f0fdfa; color:var(--brand);
+    font-size:16px; font-weight:700; font-family:inherit; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .add-step:hover{background:#ccfbf1}
+
+  /* --- footer bar --- */
+  .bar{
+    position:fixed; bottom:0; left:0; right:0; z-index:20;
+    background:var(--card); border-top:1px solid var(--line);
+    padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px;
+    max-width:760px; margin:0 auto;
+  }
+  .bar button{
+    flex:1; padding:13px; border-radius:11px; border:none; font-size:15px;
+    font-weight:700; font-family:inherit; cursor:pointer; display:flex;
+    align-items:center; justify-content:center; gap:6px;
+  }
+  .btn-ghost{background:var(--bg); color:var(--ink)}
+  .btn-ghost:hover{background:var(--line)}
+  .btn-primary{background:var(--brand); color:#fff}
+  .btn-primary:hover{background:var(--brand-d)}
+
+  .toast{
+    position:fixed; left:50%; bottom:88px; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:11px 20px; border-radius:999px;
+    font-size:14px; font-weight:600; box-shadow:var(--shadow); opacity:0;
+    transition:opacity .25s,transform .25s; pointer-events:none; z-index:40;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+  .save-note{text-align:center; font-size:11px; color:var(--sub); margin-top:18px}
+  @media (max-width:480px){ .wrap{padding:12px} }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">📋</span>
+  <h1>現場マニュアル作成</h1>
+  <span class="count" id="count">0 手順</span>
+</header>
+
+<div class="wrap">
+  <div class="meta">
+    <input class="title-in" id="m-title" placeholder="マニュアルのタイトル（例：〇〇装置 始業点検）" autocomplete="off">
+    <div class="row">
+      <div style="flex:1">
+        <label for="m-place">現場・設備</label>
+        <input id="m-place" placeholder="例：第2工場 A棟" autocomplete="off">
+      </div>
+      <div style="flex:1">
+        <label for="m-author">作成者</label>
+        <input id="m-author" placeholder="例：山田" autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <div id="steps"></div>
+  <div id="empty" class="empty">
+    <div class="big">📸</div>
+    「手順を追加」を押して、写真を撮るところから始めましょう。<br>
+    入力内容はこの端末に自動保存されます。
+  </div>
+
+  <button class="add-step" id="add"><span>＋</span> 手順を追加</button>
+
+  <p class="save-note" id="savenote">— 未保存 —</p>
+</div>
+
+<div class="bar">
+  <button class="btn-ghost" id="btn-clear">🗑 全消去</button>
+  <button class="btn-ghost" id="btn-print">🖨 印刷 / PDF</button>
+  <button class="btn-primary" id="btn-export">⬇ HTML書き出し</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- hidden camera input -->
+<input type="file" id="filepick" accept="image/*" capture="environment" style="display:none">
+
+<script>
+"use strict";
+const KEY = "genba_manual_v1";
+const MAXW = 1280, JPEG_Q = 0.82;
+
+let state = { title:"", place:"", author:"", steps:[] };
+let pendingStepId = null;   // step waiting for a photo
+let uid = () => Math.random().toString(36).slice(2,9);
+
+const $ = s => document.querySelector(s);
+const stepsEl = $("#steps"), emptyEl = $("#empty");
+
+/* ---------- persistence ---------- */
+function load(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(raw){ state = JSON.parse(raw); }
+  }catch(e){ console.warn("load failed", e); }
+  if(!Array.isArray(state.steps)) state.steps = [];
+}
+let saveTimer=null;
+function save(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>{
+    try{
+      localStorage.setItem(KEY, JSON.stringify(state));
+      stampSaved();
+    }catch(e){
+      toast("⚠ 保存できません（容量オーバーの可能性）");
+    }
+  }, 250);
+}
+function stampSaved(){
+  const d = new Date();
+  const p = n => String(n).padStart(2,"0");
+  $("#savenote").textContent = `✓ 保存済み ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/* ---------- image downscale ---------- */
+function processImage(file, cb){
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      let {width:w, height:h} = img;
+      if(w > MAXW){ h = Math.round(h * MAXW / w); w = MAXW; }
+      const cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      cb(cv.toDataURL("image/jpeg", JPEG_Q));
+    };
+    img.onerror = () => cb(null);
+    img.src = e.target.result;
+  };
+  reader.onerror = () => cb(null);
+  reader.readAsDataURL(file);
+}
+
+/* ---------- render ---------- */
+function render(){
+  $("#m-title").value = state.title || "";
+  $("#m-place").value = state.place || "";
+  $("#m-author").value = state.author || "";
+  $("#count").textContent = state.steps.length + " 手順";
+  emptyEl.style.display = state.steps.length ? "none" : "block";
+
+  stepsEl.innerHTML = "";
+  state.steps.forEach((st, i) => {
+    const el = document.createElement("div");
+    el.className = "step"; el.dataset.id = st.id;
+    el.innerHTML = `
+      <div class="step-head">
+        <span class="step-num">${i+1}</span>
+        <span class="sp"></span>
+        <button class="icon-btn up"   title="上へ" ${i===0?"disabled":""}>▲</button>
+        <button class="icon-btn down" title="下へ" ${i===state.steps.length-1?"disabled":""}>▼</button>
+        <button class="icon-btn del"  title="削除">✕</button>
+      </div>
+      <div class="step-body">
+        <div class="photo-slot">
+          ${st.photo
+            ? `<img src="${st.photo}" alt=""><span class="retake">🔄 撮り直し</span>`
+            : `<span class="cam">📷</span><span class="hint">タップして写真を撮る</span>`}
+        </div>
+        <input class="s-title" placeholder="手順のタイトル（例：電源スイッチを確認）" value="${esc(st.title)}">
+        <div class="field-lbl">説明・注意点</div>
+        <textarea placeholder="やること、注意点、判断基準などを書く">${esc(st.desc)}</textarea>
+      </div>`;
+
+    // events
+    el.querySelector(".photo-slot").onclick = () => { pendingStepId = st.id; $("#filepick").value=""; $("#filepick").click(); };
+    el.querySelector(".s-title").oninput = e => { st.title = e.target.value; save(); };
+    el.querySelector("textarea").oninput = e => { st.desc = e.target.value; save(); };
+    el.querySelector(".up").onclick   = () => move(i, -1);
+    el.querySelector(".down").onclick = () => move(i, +1);
+    el.querySelector(".del").onclick  = () => {
+      if(confirm(`手順 ${i+1} を削除しますか？`)){ state.steps.splice(i,1); save(); render(); }
+    };
+    stepsEl.appendChild(el);
+  });
+}
+function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function move(i, dir){
+  const j = i + dir;
+  if(j<0 || j>=state.steps.length) return;
+  [state.steps[i], state.steps[j]] = [state.steps[j], state.steps[i]];
+  save(); render();
+}
+function addStep(){
+  state.steps.push({ id:uid(), title:"", desc:"", photo:null });
+  save(); render();
+  // jump to camera immediately for the new step
+  const last = state.steps[state.steps.length-1];
+  pendingStepId = last.id; $("#filepick").value=""; $("#filepick").click();
+  setTimeout(()=>window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}), 50);
+}
+
+/* ---------- toast ---------- */
+let toastTimer=null;
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+/* ---------- wire up ---------- */
+$("#m-title").oninput  = e => { state.title  = e.target.value; save(); $("#count"); };
+$("#m-place").oninput  = e => { state.place  = e.target.value; save(); };
+$("#m-author").oninput = e => { state.author = e.target.value; save(); };
+$("#add").onclick = addStep;
+
+$("#filepick").onchange = e => {
+  const file = e.target.files[0];
+  if(!file || !pendingStepId) return;
+  toast("画像を処理中…");
+  processImage(file, dataUrl => {
+    const st = state.steps.find(s => s.id === pendingStepId);
+    if(st && dataUrl){ st.photo = dataUrl; save(); render(); toast("✓ 写真を追加しました"); }
+    else toast("⚠ 画像を読み込めませんでした");
+    pendingStepId = null;
+  });
+};
+
+$("#btn-clear").onclick = () => {
+  if(state.steps.length===0 && !state.title){ toast("消去するものがありません"); return; }
+  if(confirm("すべての内容を消去します。よろしいですか？")){
+    state = { title:"", place:"", author:"", steps:[] };
+    localStorage.removeItem(KEY); render(); $("#savenote").textContent="— 未保存 —";
+    toast("消去しました");
+  }
+};
+
+$("#btn-print").onclick = () => {
+  if(state.steps.length===0){ toast("先に手順を追加してください"); return; }
+  const w = window.open("", "_blank");
+  w.document.write(buildDoc(true));
+  w.document.close();
+  w.onload = () => setTimeout(()=>w.print(), 300);
+};
+
+$("#btn-export").onclick = () => {
+  if(state.steps.length===0){ toast("先に手順を追加してください"); return; }
+  const blob = new Blob([buildDoc(false)], {type:"text/html;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const safe = (state.title||"現場マニュアル").replace(/[\\/:*?"<>|]/g,"_").slice(0,40);
+  a.href = url; a.download = `${safe}.html`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  toast("⬇ HTMLを書き出しました");
+};
+
+/* ---------- build standalone / print document ---------- */
+function buildDoc(forPrint){
+  const t = esc(state.title) || "現場マニュアル";
+  const meta = [];
+  if(state.place)  meta.push(`現場・設備：${esc(state.place)}`);
+  if(state.author) meta.push(`作成者：${esc(state.author)}`);
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
+  meta.push(`発行日：${dateStr}`);
+
+  const stepsHtml = state.steps.map((st,i)=>`
+    <section class="s">
+      <div class="s-h"><span class="s-n">${i+1}</span><h2>${esc(st.title)||"（無題）"}</h2></div>
+      ${st.photo?`<img src="${st.photo}" alt="手順${i+1}">`:""}
+      ${st.desc?`<p>${esc(st.desc).replace(/\n/g,"<br>")}</p>`:""}
+    </section>`).join("");
+
+  return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t}</title>
+<style>
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,sans-serif;
+    color:#0f172a; line-height:1.7; max-width:800px; margin:0 auto; padding:32px 24px; background:#fff}
+  header{border-bottom:4px solid #0f766e; padding-bottom:16px; margin-bottom:28px}
+  h1{font-size:26px; margin:0 0 8px}
+  .meta{color:#475569; font-size:13px}
+  .meta span{margin-right:16px; white-space:nowrap}
+  .s{margin-bottom:26px; page-break-inside:avoid; border:1px solid #e2e8f0; border-radius:12px; padding:18px; background:#fff}
+  .s-h{display:flex; align-items:center; gap:12px; margin-bottom:12px}
+  .s-n{width:32px; height:32px; flex:none; border-radius:50%; background:#0f766e; color:#fff;
+    font-weight:700; display:flex; align-items:center; justify-content:center; font-size:16px}
+  .s h2{font-size:18px; margin:0}
+  .s img{width:100%; max-width:520px; border-radius:8px; border:1px solid #e2e8f0; display:block; margin:6px 0 12px}
+  .s p{margin:0; white-space:normal; color:#1e293b}
+  footer{margin-top:32px; padding-top:14px; border-top:1px solid #e2e8f0; color:#94a3b8; font-size:12px; text-align:center}
+  @media print{ body{padding:0} .s{border-color:#cbd5e1} @page{margin:14mm} }
+</style></head><body>
+<header>
+  <h1>${t}</h1>
+  <div class="meta">${meta.map(m=>`<span>${m}</span>`).join("")}</div>
+</header>
+${stepsHtml}
+<footer>全 ${state.steps.length} 手順 ・ 現場マニュアル作成ツールで生成</footer>
+</body></html>`;
+}
+
+/* ---------- init ---------- */
+load(); render();
+if(state.steps.length || state.title) stampSaved();
+</script>
+</body>
+</html>
