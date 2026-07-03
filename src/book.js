@@ -138,6 +138,19 @@ async function selectPatientIfNeeded(page) {
   if (await clickByText(page, name)) log(`受診者「${name}」を選択。`);
 }
 
+/** 診察券番号の入力欄が出ていたら埋める（通常は不要。念のための保険） */
+async function fillCardNumberIfAsked(page) {
+  const card = config.patientCardNumber?.trim();
+  if (!card) return;
+  const input = page.locator(
+    'input[name*="card" i], input[name*="shindan" i], input[name*="patient" i], input[placeholder*="診察券"]'
+  ).first();
+  if (await input.isVisible().catch(() => false)) {
+    await input.fill(card).catch(() => {});
+    log('診察券番号を入力しました。');
+  }
+}
+
 /** メニュー候補から最善のものをキーワード一致で選んでクリック */
 async function clickBestMenu(page) {
   const items = await collectActionables(page);
@@ -158,6 +171,7 @@ async function advanceWizard(page, attemptNo) {
   let lastFingerprint = '';
   for (let step = 0; step < 8; step++) {
     if (looksLikeReceipt(await bodyText(page), config.successTexts)) return true;
+    await fillCardNumberIfAsked(page);
     const items = await collectActionables(page);
     const scored = items
       .map((it) => ({ ...it, score: rankProceedLabel(it.text, config.proceedButtonTexts) }))
@@ -193,6 +207,7 @@ async function attemptBooking(page, attemptNo) {
   }
 
   await selectPatientIfNeeded(page);
+  await fillCardNumberIfAsked(page);
 
   if (!(await clickBestMenu(page))) {
     log(`試行${attemptNo}: メニュー候補が見つかりません。`);

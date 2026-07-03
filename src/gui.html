@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>おおはしこどもクリニック 予約ツール</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --ink:#1f2430; --sub:#6b7280; --accent:#2563eb; --ok:#16a34a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+         background:var(--bg); color:var(--ink); line-height:1.6; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 8px 0 4px; }
+  p.sub { color: var(--sub); margin: 0 0 20px; font-size: 13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .card h2 { font-size: 14px; margin:0 0 12px; color:var(--sub); font-weight:600; letter-spacing:.02em; }
+  label { display:block; font-size:13px; margin:12px 0 4px; font-weight:600; }
+  .hint { font-weight:400; color:var(--sub); font-size:12px; }
+  input[type=text], input[type=email], input[type=password], input[type=time] {
+    width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:14px; background:#fff; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
+  button { border:0; border-radius:8px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; }
+  .primary { background:var(--accent); color:#fff; }
+  .ghost { background:#eef1f5; color:var(--ink); }
+  .stop { background:#ef4444; color:#fff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .save { background:var(--ok); color:#fff; }
+  .check { display:flex; align-items:center; gap:8px; font-weight:400; font-size:13px; margin-top:12px; }
+  .check input { width:auto; }
+  #log { background:#0e1116; color:#d7dde5; font-family: ui-monospace, Menlo, Consolas, monospace;
+         font-size:12.5px; border-radius:10px; padding:14px; height:280px; overflow:auto; white-space:pre-wrap; }
+  .status { font-size:12px; color:var(--sub); margin-left:auto; align-self:center; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+  .badge.on { background:#dcfce7; color:#166534; } .badge.off { background:#f3f4f6; color:#6b7280; }
+  .note { font-size:12px; color:var(--sub); background:#fbfbfc; border:1px dashed var(--line); border-radius:8px; padding:10px 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>おおはしこどもクリニック 予約ツール</h1>
+  <p class="sub">当日朝6:00の順番受付を自動で取ります。ローカル（この端末）だけで動きます。</p>
+
+  <div class="card">
+    <h2>ログイン情報</h2>
+    <label>メールアドレス</label>
+    <input id="email" type="email" placeholder="you@example.com">
+    <label>パスワード <span class="hint">（保存済みなら空のままでOK）</span> <span id="pwbadge" class="badge off">未設定</span></label>
+    <input id="password" type="password" placeholder="••••••••">
+    <p class="note" style="margin-top:12px">
+      診察券番号は MEDICALPASS のアカウントに一度登録すれば、予約時は再入力不要です。
+      下の欄は普段は空でOK（番号入力を求められる医院向けの保険）。
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>予約の設定</h2>
+    <div class="row">
+      <div>
+        <label>受診する子の名前 <span class="hint">（1人なら空でOK）</span></label>
+        <input id="patientName" type="text" placeholder="山田 はな">
+      </div>
+      <div>
+        <label>受付開始時刻</label>
+        <input id="targetTimeJst" type="time" step="1" value="06:00:00">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>診察券番号 <span class="hint">（通常は空）</span></label>
+        <input id="patientCardNumber" type="text" placeholder="（不要なら空欄）">
+      </div>
+      <div>
+        <label>メニュー候補 <span class="hint">（カンマ区切り・上から優先）</span></label>
+        <input id="menuTextCandidates" type="text" placeholder="診察, 一般診察, 診察＋注射">
+      </div>
+    </div>
+    <label>予約ページURL</label>
+    <input id="departmentUrl" type="text" placeholder="https://medicalpass.jp/departments/2860">
+    <label>結果通知の Webhook <span class="hint">（Discord/Slack・任意）</span></label>
+    <input id="notifyWebhook" type="text" placeholder="https://discord.com/api/webhooks/...">
+    <div class="btns" style="margin-top:16px">
+      <button class="save" id="saveBtn">設定を保存</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>実行</h2>
+    <label class="check"><input type="checkbox" id="showBrowser" checked> ブラウザを表示して動作を見る</label>
+    <div class="btns" style="margin-top:14px">
+      <button class="ghost" data-mode="preflight">① 下見（予約しない）</button>
+      <button class="ghost" data-mode="now">② 今すぐ試す</button>
+      <button class="primary" data-mode="book">③ 本番（6:00を待つ）</button>
+      <button class="stop" id="stopBtn">停止</button>
+      <span class="status" id="status">—</span>
+    </div>
+    <p class="note" style="margin-top:12px">
+      はじめは <b>① 下見</b> を押して、ログインできて予約メニューが見つかるか確認するのがおすすめ。
+      問題なければ前夜に <b>③ 本番</b> を起動して放置すれば、6:00ちょうどに予約します。
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>ログ</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+function addLog(t) {
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 20;
+  logEl.textContent += (logEl.textContent ? '\n' : '') + t;
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function load() {
+  const s = await fetch('/api/state').then(r => r.json());
+  $('email').value = s.email;
+  $('patientName').value = s.patientName;
+  $('patientCardNumber').value = s.patientCardNumber;
+  $('targetTimeJst').value = s.targetTimeJst;
+  $('menuTextCandidates').value = s.menuTextCandidates;
+  $('departmentUrl').value = s.departmentUrl;
+  $('notifyWebhook').value = s.notifyWebhook;
+  const badge = $('pwbadge');
+  badge.textContent = s.hasPassword ? '設定済み' : '未設定';
+  badge.className = 'badge ' + (s.hasPassword ? 'on' : 'off');
+  setRunning(s.running);
+}
+
+function payload() {
+  return {
+    email: $('email').value.trim(),
+    password: $('password').value,
+    notifyWebhook: $('notifyWebhook').value.trim(),
+    patientName: $('patientName').value.trim(),
+    patientCardNumber: $('patientCardNumber').value.trim(),
+    targetTimeJst: $('targetTimeJst').value,
+    menuTextCandidates: $('menuTextCandidates').value,
+    departmentUrl: $('departmentUrl').value.trim(),
+  };
+}
+
+async function save() {
+  await fetch('/api/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload()) });
+  $('password').value = '';
+  addLog('✔ 設定を保存しました。');
+  load();
+}
+
+function setRunning(on) {
+  $('status').textContent = on ? '実行中…' : '待機中';
+  document.querySelectorAll('button[data-mode]').forEach(b => b.disabled = on);
+}
+
+async function run(mode) {
+  await save();
+  await fetch('/api/run', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ mode, showBrowser: $('showBrowser').checked }) });
+  setRunning(true);
+}
+
+$('saveBtn').onclick = save;
+$('stopBtn').onclick = () => fetch('/api/stop', { method:'POST' });
+document.querySelectorAll('button[data-mode]').forEach(b => b.onclick = () => run(b.dataset.mode));
+
+const es = new EventSource('/api/logs');
+es.onmessage = (e) => {
+  const line = e.data.replace(/\\n/g, '\n');
+  if (line === '__DONE__') { setRunning(false); return; }
+  addLog(line);
+};
+load();
+</script>
+</body>
+</html>

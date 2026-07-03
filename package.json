@@ -9,6 +9,7 @@
     "book": "node src/book.js",
     "book:dry": "node src/book.js --dry-run",
     "preflight": "node src/book.js --preflight",
+    "gui": "node src/gui.js",
     "selftest": "node src/selftest.js",
     "test": "node src/selftest.js && node test/fixture-flow.mjs"
   },
