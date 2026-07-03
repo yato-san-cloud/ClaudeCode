@@ -42,23 +42,24 @@
 
 /* ---------- the mascot figure ---------- */
 .cody-figure {
+  position: relative; /* containing block for the min chip + emoji pops */
   pointer-events: auto;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   filter: drop-shadow(0 10px 18px rgba(33, 28, 23, 0.22));
-  transition: transform 0.18s ease;
+  /* The idle-life rAF loop owns `transform` (float/wander/squash/hover), so no
+     CSS transform-transition here — it would fight the per-frame updates. */
+  transform-origin: 50% 100%;
+  will-change: transform;
 }
 
 .cody-companion .cody-figure {
   width: 92px;
   height: auto;
-  animation: cody-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both,
-    cody-float 4.5s ease-in-out 0.5s infinite;
-}
-
-.cody-figure:hover {
-  transform: translateY(-2px) scale(1.04);
+  /* Entrance only (no fill) — after 0.42s the rAF loop takes over `transform`.
+     The gentle float/breathing is now produced by that loop, not CSS. */
+  animation: cody-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .cody-figure svg {
@@ -252,16 +253,8 @@
   }
 }
 
-/* Underwater drift: OCTA bobs and gently tilts like floating in the deep. */
-@keyframes cody-float {
-  0%,
-  100% {
-    transform: translateY(0) rotate(-2deg);
-  }
-  50% {
-    transform: translateY(-5px) rotate(2deg);
-  }
-}
+/* (The underwater float/bob is now produced by the JS rAF spring loop so it can
+   compose with wandering, squash and hover in a single transform.) */
 
 /* ---------- OCTA character motion (the "life") ----------
    Each animated body part is its own <g>; transform-box:fill-box makes the
@@ -345,8 +338,49 @@
   50% { transform: scale(1.025, 0.975); }
 }
 
+/* ---------- look-at: smooth eye/face tracking toward the cursor ----------
+   The rAF loop nudges .cody-face a couple px toward the pointer when it hovers
+   near OCTA; the transition keeps the glance soft. transform-box:fill-box makes
+   the origin local to the face group. */
+.cody-face {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 0.2s ease;
+}
+
+/* ---------- poke reaction: a floating emoji/sparkle that rises and fades ----- */
+.cody-pop {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  pointer-events: none; /* never blocks clicks beneath OCTA */
+  font-size: 20px;
+  line-height: 1;
+  z-index: 2;
+  opacity: 0;
+  transform: translate(-50%, 0);
+  will-change: transform, opacity;
+  animation: cody-pop-rise 0.95s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+@keyframes cody-pop-rise {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(0.4) rotate(0deg); }
+  22% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx, 0px)), -46px)
+      scale(1.2) rotate(var(--rot, 0deg));
+  }
+}
+
+/* jelly wiggle: a quick tentacle flutter during a wobble gesture */
+.cody-figure.octa-jelly .octa-tentacles {
+  animation-duration: 0.7s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cody-companion .cody-figure {
+    /* Keep the figure parked at home (a real transform → still a containing
+       block for the min chip) but with no rAF wandering driving it. */
     animation: cody-enter 0.42s ease both;
   }
   /* No flap / sway / per-mood motion when the user prefers reduced motion. */
@@ -358,6 +392,10 @@
     animation: none !important;
     transform: none !important;
   }
+  /* No floating pops or eye-tracking; keep a tiny static hover affordance. */
+  .cody-pop { animation: none !important; display: none !important; }
+  .cody-face { transition: none !important; }
+  .cody-figure:hover svg { transform: translateY(-1px) scale(1.03); }
 }
 
 /* ---------- mobile sizing ---------- */

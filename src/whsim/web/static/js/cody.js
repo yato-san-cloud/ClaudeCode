@@ -363,6 +363,32 @@ export function mountCody(targetEl, opts = {}) {
   let evading = false;        // currently retreated due to a collision
   let evadeRaf = 0;           // pending rAF for a recompute
 
+  // ---- liveliness (comical idle wandering + touch reactions) state ----
+  // A single rAF spring loop owns the figure's transform (translate/rotate/
+  // squash). Everything is transforms-only; the loop is paused whenever OCTA is
+  // minimized/hidden, the user prefers reduced motion, or a real speech bubble
+  // is open. Timers are all tracked and torn down on destroy.
+  const sp = {                 // per-axis spring state (px, px/s) & squash
+    x: 0, vx: 0, tx: 0,        // translate x  (target)
+    y: 0, vy: 0, ty: 0,        // translate y  (target)
+    r: 0, vr: 0, tr: 0,        // rotation deg (target)
+    sq: 0, vsq: 0,             // squash (0 = neutral; >0 = wide/short)
+  };
+  let liveRaf = 0;             // rAF handle for the spring loop
+  let lastFrameT = 0;          // last frame timestamp (for dt)
+  let breatheT = 0;            // breathing phase clock
+  let nextGestureAt = 0;       // when the next idle gesture may fire
+  let revertAt = 0;            // when a held gesture returns to the anchor
+  let lastContentMoveAt = 0;   // last pointer move over app content (not OCTA)
+  let hoverAmt = 0;            // smoothed 0..1 hover/proximity weight
+  const ptr = { x: -1, y: -1 };// last pointer position (viewport px)
+  let comboCount = 0;          // rapid-click combo counter
+  let comboAt = 0;             // timestamp of last click (for combo window)
+  let reactFaceTimer = null;   // restores the mood face after a click reaction
+  let quipTimer = null;        // clears a transient quip flag
+  let bubbleHasContent = false;// a real (non-quip) bubble is open
+  const popNodes = new Set();  // live emoji-pop elements (for cleanup)
+
   function clearTimer(t) { if (t) clearTimeout(t); return null; }
 
   // ---- anti-overlap: minimize + auto-retreat (companion only) ----
@@ -384,6 +410,8 @@ export function mountCody(targetEl, opts = {}) {
     writeMinimized(minimized);
     applyMinimized();
     recomputeEvade();
+    // A minimized puck stays still; restore resumes the playful wandering.
+    if (minimized) stopLive(true); else startLive();
   }
   function recomputeEvade() {
     if (!companion || destroyed) return;
@@ -421,6 +449,237 @@ export function mountCody(targetEl, opts = {}) {
     });
   }
 
+  // ---- liveliness: spring loop + gestures + reactions (companion only) ----
+  // Playful one-liners OCTA says when poked; combo escalates to a dizzy quip.
+  const CLICK_QUIPS = [
+    "わっ！", "なあに？", "ここにいるよ", "えへへ", "んん？", "はいはい、僕だよ",
+  ];
+  const COMBO_QUIP = "まわっちゃう〜！";
+
+  // Which way is "into the edge band, away from content"? At home OCTA sits
+  // bottom-right so it drifts LEFT/up; when evading (bottom-left) it drifts
+  // RIGHT/up. Either way it stays hugging an edge and never enters the middle.
+  function driftDir() { return evading ? 1 : -1; }
+
+  // The live gesture vocabulary — each is a short, characterful beat that
+  // returns to the calm anchor. Impulses are velocity kicks the spring absorbs.
+  function fireGesture(kind) {
+    const dir = driftDir();
+    switch (kind) {
+      case "hop":                     // a little squash-and-stretch jump
+        sp.vy -= 210; sp.sq = Math.max(sp.sq, 0.16); break;
+      case "spin":                    // a quick comical whirl
+        sp.vr += 700 * (Math.random() < 0.5 ? 1 : -1);
+        sp.vy -= 90; sp.sq = Math.max(sp.sq, 0.1); break;
+      case "wobble":                  // a jelly wiggle (+ tentacle flutter)
+        sp.vr += 300 * (Math.random() < 0.5 ? 1 : -1);
+        svg.classList.add("octa-jelly");
+        setTimeout(() => { if (!destroyed) svg.classList.remove("octa-jelly"); }, 900);
+        break;
+      case "peek":                    // duck part-way off the edge, then pop in
+        sp.tx = -dir * (18 + Math.random() * 14);
+        sp.ty = 6 + Math.random() * 6;
+        revertAt = performance.now() + 620; break;
+      case "drift":                   // amble to a nearby edge spot and linger
+      default:
+        sp.tx = dir * (34 + Math.random() * 46);
+        sp.ty = -(14 + Math.random() * 34);
+        sp.vy -= 60;
+        revertAt = performance.now() + 2200 + Math.random() * 1700; break;
+    }
+  }
+
+  // Choose the next idle gesture. Weighted toward position-changing ambles
+  // (drift/peek) so OCTA visibly wanders the edge band, with the in-place beats
+  // (hop/spin/wobble) sprinkled in for variety.
+  const GESTURE_BAG = [
+    "drift", "drift", "drift", "peek", "peek", "hop", "wobble", "spin", "hop",
+  ];
+  let firstGesture = true;
+  function pickGesture() {
+    if (firstGesture) { firstGesture = false; return "drift"; } // clear first move
+    return GESTURE_BAG[(Math.random() * GESTURE_BAG.length) | 0];
+  }
+
+  // Is OCTA calm enough to wander? Not while minimized, not while a real bubble
+  // is up, and not while the user is actively moving the pointer over content.
+  function idleForWander(now) {
+    return !minimized && !bubbleHasContent &&
+      (now - lastContentMoveAt > 1600);
+  }
+
+  function figureCenter() {
+    const r = figure.getBoundingClientRect();
+    return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+  }
+
+  // Critically-ish damped spring step (overshoots a touch → comical).
+  function springStep(pos, vel, target, k, d, dt) {
+    const a = k * (target - pos) - d * vel;
+    const v = vel + a * dt;
+    return { pos: pos + v * dt, vel: v };
+  }
+
+  function liveFrame(ts) {
+    liveRaf = 0;
+    if (destroyed) return;
+    const now = ts || performance.now();
+    let dt = (now - lastFrameT) / 1000;
+    lastFrameT = now;
+    if (!(dt > 0)) dt = 1 / 60;
+    if (dt > 0.05) dt = 0.05;                 // clamp after tab-away
+    breatheT += dt;
+
+    // Idle scheduler: fire a gesture, then set the next window (~8–18s).
+    if (now >= nextGestureAt && idleForWander(now)) {
+      fireGesture(pickGesture());
+      nextGestureAt = now + 7000 + Math.random() * 8000;  // ~7–15s, occasional
+    }
+    // Return a held drift/peek to the anchor.
+    if (revertAt && now >= revertAt) { sp.tx = 0; sp.ty = 0; revertAt = 0; }
+    // If content interaction resumes, calmly come home.
+    if ((minimized || bubbleHasContent) && (sp.tx || sp.ty)) {
+      sp.tx = 0; sp.ty = 0; revertAt = 0;
+    }
+
+    // Proximity "look toward cursor": tilt + eye-nudge when the pointer is near
+    // and OCTA is otherwise resting (never while it's mid-gesture far from home).
+    let lookTilt = 0;
+    const near = ptr.x >= 0 && !minimized;
+    if (near) {
+      const { cx, cy } = figureCenter();
+      const dx = ptr.x - cx, dy = ptr.y - cy;
+      const dist = Math.hypot(dx, dy);
+      const prox = dist < 180 ? 1 - dist / 180 : 0;
+      hoverAmt += ((dist < 120 ? 1 : 0) - hoverAmt) * Math.min(1, dt * 8);
+      if (prox > 0) {
+        const nx = Math.max(-2.6, Math.min(2.6, dx * 0.03));
+        const ny = Math.max(-2.2, Math.min(2.2, dy * 0.03));
+        faceGroup.style.transform = `translate(${nx.toFixed(2)}px, ${ny.toFixed(2)}px)`;
+        lookTilt = Math.max(-4, Math.min(4, dx * 0.02)) * prox;
+      } else if (faceGroup.style.transform) {
+        faceGroup.style.transform = "";
+      }
+    } else {
+      hoverAmt += (0 - hoverAmt) * Math.min(1, dt * 8);
+      if (faceGroup.style.transform) faceGroup.style.transform = "";
+    }
+
+    // Advance the springs.
+    let s;
+    s = springStep(sp.x, sp.vx, sp.tx, 170, 15, dt); sp.x = s.pos; sp.vx = s.vel;
+    s = springStep(sp.y, sp.vy, sp.ty, 170, 15, dt); sp.y = s.pos; sp.vy = s.vel;
+    s = springStep(sp.r, sp.vr, sp.tr + lookTilt, 120, 8, dt); sp.r = s.pos; sp.vr = s.vel;
+    s = springStep(sp.sq, sp.vsq, 0, 220, 16, dt); sp.sq = s.pos; sp.vsq = s.vel;
+
+    // Gentle idle breathing/float — always present so OCTA feels alive at rest.
+    const bob = Math.sin(breatheT * 1.1) * 2.4;
+    const sway = Math.sin(breatheT * 0.7) * 1.1;
+    const breathRot = Math.sin(breatheT * 0.9) * 1.3;
+
+    // Compose one transform (translate → rotate → squash) about the feet.
+    const tx = sp.x + sway;
+    const ty = sp.y + bob - hoverAmt * 2.5;
+    const rot = sp.r + breathRot;
+    const sq = Math.max(-0.28, Math.min(0.36, sp.sq));
+    const hs = 1 + hoverAmt * 0.04;               // subtle hover pop
+    const scaleX = (1 + sq * 0.5) * hs;
+    const scaleY = (1 - sq * 0.5) * hs;
+    figure.style.transform =
+      `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) ` +
+      `rotate(${rot.toFixed(2)}deg) scale(${scaleX.toFixed(3)}, ${scaleY.toFixed(3)})`;
+
+    liveRaf = requestAnimationFrame(liveFrame);
+  }
+
+  function startLive() {
+    if (!companion || reduceMotion || destroyed) return;
+    if (liveRaf || minimized || root.classList.contains("cody-hidden")) return;
+    lastFrameT = performance.now();
+    nextGestureAt = lastFrameT + 1600 + Math.random() * 1200;  // first move ~2s
+    liveRaf = requestAnimationFrame(liveFrame);
+  }
+  function stopLive(settle) {
+    if (liveRaf) { cancelAnimationFrame(liveRaf); liveRaf = 0; }
+    if (settle) {
+      sp.x = sp.y = sp.vx = sp.vy = sp.r = sp.vr = sp.sq = sp.vsq = 0;
+      sp.tx = sp.ty = 0; revertAt = 0;
+      figure.style.transform = "";
+      faceGroup.style.transform = "";
+    }
+  }
+
+  // Emoji/sparkle that floats up and fades on poke (pure CSS keyframe).
+  const POP_EMOJI = ["💗", "✨", "💫", "🫧", "🐙", "❤️"];
+  function spawnPop(emoji) {
+    if (reduceMotion || destroyed) return;
+    const el = document.createElement("span");
+    el.className = "cody-pop";
+    el.textContent = emoji || POP_EMOJI[(Math.random() * POP_EMOJI.length) | 0];
+    el.style.setProperty("--dx", `${(Math.random() * 40 - 20).toFixed(0)}px`);
+    el.style.setProperty("--rot", `${(Math.random() * 50 - 25).toFixed(0)}deg`);
+    figure.appendChild(el);
+    popNodes.add(el);
+    const done = () => { el.remove(); popNodes.delete(el); };
+    el.addEventListener("animationend", done, { once: true });
+    setTimeout(done, 1100);   // safety net if animationend is missed
+  }
+
+  // Briefly swap in a playful face, then restore the current mood's face.
+  function reactFace(faceStr, ms) {
+    reactFaceTimer = clearTimer(reactFaceTimer);
+    faceGroup.innerHTML = reduceMotion ? stripAnimate(faceStr) : faceStr;
+    reactFaceTimer = setTimeout(() => {
+      if (destroyed) return;
+      const face = (FACES[currentMood] || FACES.idle)();
+      faceGroup.innerHTML = reduceMotion ? stripAnimate(face) : face;
+    }, ms);
+  }
+
+  // The poke reaction: squish + jump + emoji pop + a quip; rapid pokes escalate
+  // to a dizzy spin, then everything settles back to calm.
+  function onFigureDown(e) {
+    if (destroyed) return;
+    // The minimize chip and bubble close have their own jobs — don't react.
+    if (minBtn && minBtn.contains(e.target)) return;
+    if (e.target.closest && e.target.closest(".cody-bubble-close")) return;
+
+    const now = performance.now();
+    comboCount = (now - comboAt < 800) ? comboCount + 1 : 1;
+    comboAt = now;
+    armInactivity();               // a poke counts as activity (stay awake)
+
+    if (!reduceMotion) {
+      spawnPop();
+      sp.vy -= 300;                 // hop up
+      sp.sq = Math.max(sp.sq, 0.30);// squish
+      sp.vr += (Math.random() < 0.5 ? -1 : 1) * (140 + comboCount * 60);
+    }
+
+    if (comboCount >= 4) {
+      // Dizzy combo: a big whirl + woozy face + a cheeky line, then calm down.
+      if (!reduceMotion) { sp.vr += 620; sp.vy -= 120; spawnPop("💫"); }
+      reactFace(eyesClosed + mouthWavy, 1100);
+      showBubble(COMBO_QUIP, 1500, { transient: true });
+      quipTimer = clearTimer(quipTimer);
+      quipTimer = setTimeout(() => { comboCount = 0; }, 900);
+    } else {
+      reactFace(eyesHappy + mouthOpen, 900);
+      if (!bubbleHasContent) {
+        showBubble(CLICK_QUIPS[(Math.random() * CLICK_QUIPS.length) | 0],
+          1400, { transient: true });
+      }
+    }
+    // Don't preventDefault / stopPropagation: leave any outer handler intact.
+  }
+
+  const onWinPointerMove = (e) => {
+    ptr.x = e.clientX; ptr.y = e.clientY;
+    // Movement over app content (not OCTA itself) pauses idle wandering.
+    if (!root.contains(e.target)) lastContentMoveAt = performance.now();
+  };
+  const onWinPointerLeave = () => { ptr.x = -1; ptr.y = -1; };
+
   function armInactivity() {
     inactivityTimer = clearTimer(inactivityTimer);
     inactivityTimer = setTimeout(() => {
@@ -445,11 +704,14 @@ export function mountCody(targetEl, opts = {}) {
     }
   }
 
-  function showBubble(text, ms) {
+  function showBubble(text, ms, opts = {}) {
     bubbleTimer = clearTimer(bubbleTimer);
     bubbleText.textContent = text;
     bubble.hidden = false;
     bubble.classList.remove("is-open");
+    // A "transient" bubble is a playful click-quip; it must NOT count as real
+    // content (so idle wandering is only paused for genuine messages).
+    bubbleHasContent = !opts.transient;
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!destroyed) bubble.classList.add("is-open");
     }));
@@ -458,6 +720,7 @@ export function mountCody(targetEl, opts = {}) {
 
   function hideBubble() {
     bubbleTimer = clearTimer(bubbleTimer);
+    bubbleHasContent = false;
     bubble.classList.remove("is-open");
     setTimeout(() => {
       if (!bubble.classList.contains("is-open")) bubble.hidden = true;
@@ -489,8 +752,8 @@ export function mountCody(targetEl, opts = {}) {
     return controller;
   }
 
-  function hide() { root.classList.add("cody-hidden"); return controller; }
-  function show() { root.classList.remove("cody-hidden"); scheduleEvade(); return controller; }
+  function hide() { root.classList.add("cody-hidden"); stopLive(true); return controller; }
+  function show() { root.classList.remove("cody-hidden"); scheduleEvade(); startLive(); return controller; }
 
   // ---- anti-overlap wiring (companion only) ----
   const onMinToggle = (e) => {
@@ -502,6 +765,10 @@ export function mountCody(targetEl, opts = {}) {
   let evadeObserver = null;
   if (companion) {
     if (minBtn) minBtn.addEventListener("click", onMinToggle);
+    figure.addEventListener("pointerdown", onFigureDown);
+    window.addEventListener("pointermove", onWinPointerMove, { passive: true });
+    window.addEventListener("pointerleave", onWinPointerLeave, { passive: true });
+    window.addEventListener("blur", onWinPointerLeave, { passive: true });
     window.addEventListener("resize", onViewportChange, { passive: true });
     window.addEventListener("scroll", onViewportChange, { passive: true, capture: true });
     // Layout shifts (view switches, KPI bar appearing, rail expand/collapse)
@@ -521,10 +788,19 @@ export function mountCody(targetEl, opts = {}) {
     inactivityTimer = clearTimer(inactivityTimer);
     autoIdleTimer = clearTimer(autoIdleTimer);
     bubbleTimer = clearTimer(bubbleTimer);
+    reactFaceTimer = clearTimer(reactFaceTimer);
+    quipTimer = clearTimer(quipTimer);
     if (evadeRaf) { cancelAnimationFrame(evadeRaf); evadeRaf = 0; }
+    stopLive(false);
+    popNodes.forEach((n) => n.remove());
+    popNodes.clear();
     closeBtn.removeEventListener("click", onClose);
     if (minBtn) minBtn.removeEventListener("click", onMinToggle);
     if (companion) {
+      figure.removeEventListener("pointerdown", onFigureDown);
+      window.removeEventListener("pointermove", onWinPointerMove);
+      window.removeEventListener("pointerleave", onWinPointerLeave);
+      window.removeEventListener("blur", onWinPointerLeave);
       window.removeEventListener("resize", onViewportChange);
       window.removeEventListener("scroll", onViewportChange, { capture: true });
     }
@@ -547,7 +823,7 @@ export function mountCody(targetEl, opts = {}) {
   applyMinimized();
   armInactivity();
   if (opts.greet) showBubble(DEFAULT_LINES.curious);
-  if (companion) scheduleEvade();
+  if (companion) { scheduleEvade(); startLive(); }
 
   window.whsimCody = controller;
   return controller;
