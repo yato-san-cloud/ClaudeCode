@@ -8,7 +8,9 @@
     "inspect": "node src/inspect.js",
     "book": "node src/book.js",
     "book:dry": "node src/book.js --dry-run",
-    "selftest": "node src/selftest.js"
+    "preflight": "node src/book.js --preflight",
+    "selftest": "node src/selftest.js",
+    "test": "node src/selftest.js && node test/fixture-flow.mjs"
   },
   "engines": {
     "node": ">=18"

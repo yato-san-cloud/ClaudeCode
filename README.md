@@ -36,7 +36,8 @@ Node.js 18 以上が必要です。
 ### 0. 設定なしで動く部分を確認
 
 ```bash
-npm run selftest   # 時刻計算・設定読み込みの自己テスト（ネット不要）
+npm run selftest   # 時刻計算・画面解析ロジックの自己テスト（ネット不要, 7件）
+npm test           # 上記 + 模擬サイトで予約完了までを実ブラウザで通し検証
 ```
 
 ### 1. 画面構造の記録（初回のおすすめ）
@@ -50,22 +51,30 @@ npm run inspect
 スクリプト自身は何もクリックしません。保存フォルダを見て `config.json` の
 `menuTextCandidates` / `proceedButtonTexts` / `successTexts` を実画面に合わせて調整できます。
 
-### 2. 動作確認（予約はしない）
+### 2. 予約前の下見（おすすめ・予約はしない）
 
 ```bash
-npm run book:dry
+npm run preflight
 ```
 
-ログイン → 診療科ページ到達 → メニュー検出、までを今すぐ確認し、
-`screenshots/dry-department.{png,html}` を保存します。
+ログインして診療科ページで**押せる要素を全部洗い出し**、どれがメニュー候補か、
+今が受付中か受付前かを報告します。`patientName` や `menuTextCandidates` を
+実画面に合わせて確定するのに使えます（`screenshots/preflight-department.{png,html}` 保存）。
+
+`npm run book:dry` はログイン→メニュー検出までの簡易確認です。
 
 ### 3. 本番
 
 前日夜〜当日5:55までに起動しておくと、6:00ちょうどに予約を試行します。
 
 ```bash
-npm run book
+npm run book              # 次の6:00を待って予約
+npm run book -- --now     # 待たずに今すぐ予約（受付中の時間帯用）
+npm run book -- --daily   # 常駐して毎朝くり返し予約（Ctrl+Cで停止）
 ```
+
+画面の文言が多少違っても、キーワード一致で正しいメニュー／「受付する」ボタンを
+自力で選び、「戻る・キャンセル・ログアウト」は避けます。受付番号を検出したら成功です。
 
 - NICT（日本標準時）と時刻同期してから待機
 - 5分前にログインを済ませ、6:00:00 に予約を実行、各ステップをスクリーンショット保存
@@ -103,11 +112,24 @@ npm run book
 | `NOTIFY_WEBHOOK_URL` | 結果通知の Discord/Slack Webhook |
 | `HEADLESS` | `1` でヘッドレス強制（サーバー実行時） |
 | `CHROMIUM_PATH` | ブラウザ実行ファイルを固定パスで指定したい場合 |
+| `CONFIG_FILE` | 使う設定ファイルを差し替え（子ども別・クリニック別に用意可） |
 
 ## 現状のステータス
 
 - ログインURL・診療科URL・フロー構成は公開情報から**確認済み**。
-- 各画面のボタン/メニューの正確な表記は、`menuTextCandidates` などに複数候補を入れて
-  テキスト一致で拾う設計にしてあります。初回に `npm run inspect` で実画面を記録すると確実です。
-- 時刻同期・設定読み込み・ブラウザ起動・遷移までは検証済み
-  （`npm run selftest` と `npm run book:dry` で確認可能）。
+- 画面のボタン/メニュー表記が多少違っても自力で正しい要素を選ぶ**自己適応型**。
+  ロジックは単体テスト＋模擬サイトでの通し検証で**予約完了（受付番号取得）まで実証済み**
+  （`npm test`）。
+- 残る唯一の未確定は「実際の medicalpass.jp 上のボタン文言」だけで、これは
+  `npm run preflight` を一度回せば画面の実要素が一覧でき、必要なら `config.json` に
+  1語足すだけで確定します（多くの場合そのままで通ります）。
+
+## テスト
+
+```bash
+npm test
+```
+
+- `src/selftest.js`: 時刻計算・メニュー選択・前進ボタン選択・完了判定の単体テスト
+- `test/fixture-flow.mjs`: `test/fixtures/` の模擬MEDICALPASS画面に対し、
+  ログイン→メニュー→確認→受付番号取得までを実ブラウザで通し検証

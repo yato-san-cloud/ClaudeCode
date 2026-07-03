@@ -32,6 +32,53 @@ export function launchOptions(config) {
   return opts;
 }
 
+// ---- 画面解析の純ロジック（ネット不要・テスト可能） ----
+
+/** クリックしてはいけない要素の語（戻る/キャンセル/ログアウト等） */
+export const AVOID_WORDS = [
+  '戻る', 'もどる', 'キャンセル', '取消', '取り消', '中止', '削除', 'ログアウト',
+  '閉じる', 'パスワード', '変更', '前へ', 'トップ', 'ホーム', 'マイページ',
+];
+
+const norm = (s) => (s || '').replace(/\s+/g, '').toLowerCase();
+
+/** ラベルがキーワード群にどれだけ一致するか。完全一致=3, 前方一致=2, 部分一致=1, なし=0 */
+export function scoreLabelByKeywords(label, keywords) {
+  const l = norm(label);
+  if (!l) return 0;
+  let best = 0;
+  for (const kw of keywords) {
+    const k = norm(kw);
+    if (!k) continue;
+    if (l === k) best = Math.max(best, 3);
+    else if (l.startsWith(k) || k.startsWith(l)) best = Math.max(best, 2);
+    else if (l.includes(k)) best = Math.max(best, 1);
+  }
+  return best;
+}
+
+/** 受付完了・整理番号発行を示すテキストか */
+export function looksLikeReceipt(text, successTexts = []) {
+  const t = text || '';
+  if (/(受付|整理)番号\s*[:：]?\s*\d+/.test(t)) return true;
+  if (/(受付|予約)(が)?(完了|受け付け)/.test(t)) return true;
+  return successTexts.some((s) => t.includes(s));
+}
+
+/**
+ * 確認画面で押す「前進」ボタンのスコア。
+ * proceedTexts に一致するほど高く、AVOID_WORDS を含むと強く減点。
+ * 0以下なら押さない。
+ */
+export function rankProceedLabel(label, proceedTexts) {
+  const l = norm(label);
+  if (!l) return -1;
+  if (AVOID_WORDS.some((w) => l.includes(norm(w)))) return -10;
+  return scoreLabelByKeywords(label, proceedTexts);
+}
+
+// ---- ここまで純ロジック ----
+
 export function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
