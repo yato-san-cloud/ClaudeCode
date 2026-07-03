@@ -22,6 +22,15 @@ import {
 } from './timetable_solver.js';
 import { api, esc } from './util.js';
 import { ZONE_JP } from './constants.js';
+// Cohesive solver sub-editors, extracted to a package under js/timetable/ (facade
+// precedent: designer/*.js). They read live solver state + element refs off a
+// shared `ctx` and re-solve through ctx.runSolver — a pure structural split with
+// no behaviour change. `el` is the package's shared DOM builder.
+import { el } from './timetable/dom.js';
+import { createBatchEditor } from './timetable/batch_editor.js';
+import { createShiftEditor } from './timetable/shift_editor.js';
+import { createDepsEditor } from './timetable/deps_editor.js';
+import { createComparePanel } from './timetable/compare_panel.js';
 
 const SLOTS = generateSlots();           // 60 half-hour marks, 0..1770 min
 const N = SLOTS.length;
@@ -30,12 +39,8 @@ const SECTIONS = ['入荷', '出荷ケース', '出荷バラ', 'ステージン�
 function isNum(v) { return typeof v === 'number' && Number.isFinite(v); }
 function r1(v) { return isNum(v) ? Math.round(v * 10) / 10 : 0; }
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
+// `el(tag, cls, text)` now lives in ./timetable/dom.js (shared with the extracted
+// solver sub-editors); imported above.
 function cssVar(name, fallback) {
   try {
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -203,8 +208,9 @@ export function mountTimetable(targetEl, opts = {}) {
   let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
 
   // ---- analytic staffing solver (稼働窓 + 上限 + 依存 + 前詰め/均等) ----------
-  let elSolver, elSolverDeps, elSolverBatches, elSolverShift, elSolverSummary,
-    elSolverCurve, elSolverCompare;
+  // elSolverDeps/Batches/Shift/Compare live on `ctx` below (owned by the extracted
+  // sub-editors); elSolver/Summary/Curve stay facade-local.
+  let elSolver, elSolverSummary, elSolverCurve;
   let solverResult = null;
   const solverState = {
     start: 9, end: 18, cap: 0, placement: 'front',
@@ -214,28 +220,21 @@ export function mountTimetable(targetEl, opts = {}) {
     shiftPlan: { breaks: [], shifts: [], default_wage_per_hr: 1200 },
     _seededShift: false,
   };
-  // Sections that can carry a batch-release schedule (入荷=arrivals, 出荷=order cutoffs).
-  const BATCH_SECTIONS = ['入荷', '出荷'];
-  // One-click シフト・休憩 presets the planner can drop instead of typing rows.
-  const SHIFT_PRESETS = {
-    'なし': { breaks: [], shifts: [], default_wage_per_hr: 1200 },
-    '昼休憩12-13': { breaks: [{ start: 12, end: 13 }], shifts: [], default_wage_per_hr: 1200 },
-    '2交代(8-17,17-22)': {
-      breaks: [{ start: 12, end: 13 }],
-      shifts: [
-        { label: '日勤', start: 8, end: 17, max_workers: 20, wage_per_hr: 1200 },
-        { label: '遅番', start: 17, end: 22, max_workers: 12, wage_per_hr: 1400 },
-      ],
-      default_wage_per_hr: 1200,
-    },
+
+  // Shared context for the extracted solver sub-editors (batch/shift/deps/compare).
+  // They read live state + element refs off `ctx` and re-solve through
+  // ctx.runSolver, so the closure's single source of truth (and behaviour) is
+  // preserved. Element refs are (re)assigned by buildSolverPanel; `runSolver` is a
+  // hoisted function declaration below.
+  const ctx = {
+    o, solverState, DEBOUNCE_MS,
+    elSolverDeps: null, elSolverBatches: null, elSolverShift: null, elSolverCompare: null,
+    runSolver,   // hoisted; late-bound by the sub-editors
   };
-  // Presets the planner can one-click instead of typing rows.
-  const BATCH_PRESETS = {
-    入荷: { 'なし（随時）': [], '昼1便': [{ hour: 12, pct: 100 }],
-      '朝70/昼20/夕10': [{ hour: 8, pct: 70 }, { hour: 12, pct: 20 }, { hour: 15, pct: 10 }] },
-    出荷: { 'なし（随時）': [], '夕締め1便': [{ hour: 16, pct: 100 }],
-      '昼40/夕60': [{ hour: 11, pct: 40 }, { hour: 16, pct: 60 }] },
-  };
+  const depsEditor = createDepsEditor(ctx);
+  const batchEditor = createBatchEditor(ctx);
+  const shiftEditor = createShiftEditor(ctx);
+  const comparePanel = createComparePanel(ctx);
 
   function build() {
     root.innerHTML = '';
@@ -378,16 +377,16 @@ export function mountTimetable(targetEl, opts = {}) {
     body.appendChild(ctrl);
 
     // Dependency editor (presets + per-process upstream edges).
-    elSolverDeps = el('div', 'tt-solver-deps');
-    body.appendChild(elSolverDeps);
+    ctx.elSolverDeps = el('div', 'tt-solver-deps');
+    body.appendChild(ctx.elSolverDeps);
 
     // Batch-release schedule editor (入荷/出荷 の {時刻, %} 投入).
-    elSolverBatches = el('div', 'tt-solver-batches');
-    body.appendChild(elSolverBatches);
+    ctx.elSolverBatches = el('div', 'tt-solver-batches');
+    body.appendChild(ctx.elSolverBatches);
 
     // シフト・休憩 editor (休憩帯 + シフトパターン + 時間帯別時給).
-    elSolverShift = el('div', 'tt-solver-shift');
-    body.appendChild(elSolverShift);
+    ctx.elSolverShift = el('div', 'tt-solver-shift');
+    body.appendChild(ctx.elSolverShift);
 
     // Summary + per-hour curve render targets.
     elSolverSummary = el('div', 'tt-solver-summary');
@@ -398,358 +397,19 @@ export function mountTimetable(targetEl, opts = {}) {
     // Scenario save + compare (作業バッチ/方式の比較).
     const cmpBar = el('div', 'tt-cmp-bar');
     const saveBtn = el('button', 'tt-chip', '💾 この条件をシナリオ保存');
-    saveBtn.onclick = saveScenario;
+    saveBtn.onclick = comparePanel.saveScenario;
     const cmpBtn = el('button', 'tt-chip', '🔁 シナリオ比較を更新');
-    cmpBtn.onclick = loadCompare;
+    cmpBtn.onclick = comparePanel.loadCompare;
     cmpBar.appendChild(saveBtn); cmpBar.appendChild(cmpBtn);
     body.appendChild(cmpBar);
-    elSolverCompare = el('div', 'tt-solver-compare');
-    body.appendChild(elSolverCompare);
+    ctx.elSolverCompare = el('div', 'tt-solver-compare');
+    body.appendChild(ctx.elSolverCompare);
 
     elSolver.appendChild(body);
     root.appendChild(elSolver);
-    renderDepEditor();
-    renderBatchEditor();
-    renderShiftEditor();
-  }
-
-  // ---- scenario save + compare (作業バッチ/方式) ------------------------------
-  async function saveScenario() {
-    const proj = typeof o.getProject === 'function' ? o.getProject() : null;
-    if (!proj) { (o.toast || (() => {}))('プロジェクトを開いてください。', 'error'); return; }
-    const label = (window.prompt('シナリオ名（例：朝寄せ案 / 夕締め案 / マルチ方式）', '案')
-      || '').trim();
-    if (!label) return;
-    try {
-      await api(`/api/projects/${encodeURIComponent(proj)}/scenarios`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label }),
-      });
-      (o.toast || (() => {}))(`シナリオ「${label}」を保存しました。`, 'ok');
-      loadCompare();
-    } catch (e) {
-      (o.toast || (() => {}))('保存に失敗: ' + (e && e.message ? e.message : e), 'error');
-    }
-  }
-
-  async function loadCompare() {
-    const proj = typeof o.getProject === 'function' ? o.getProject() : null;
-    if (!proj || !elSolverCompare) return;
-    elSolverCompare.innerHTML = '<div class="tt-info">シナリオ比較を計算中…</div>';
-    const qs = `start_hour=${solverState.start}&end_hour=${solverState.end}`
-      + `&cap=${solverState.cap || 0}&placement=${encodeURIComponent(solverState.placement)}`;
-    let data;
-    try {
-      data = await api(`/api/projects/${encodeURIComponent(proj)}/timetable/compare?${qs}`);
-    } catch (e) {
-      elSolverCompare.innerHTML = `<div class="tt-alert"><div class="tt-alert-head">比較に失敗</div><div>${esc(String(e.message || e))}</div></div>`;
-      return;
-    }
-    renderCompare(data);
-  }
-
-  function renderCompare(data) {
-    if (!data || !Array.isArray(data.rows) || data.rows.length <= 1) {
-      elSolverCompare.innerHTML = '<div class="tt-info">保存シナリオがありません。'
-        + '「💾 この条件をシナリオ保存」で 朝寄せ案／夕締め案／マルチ方式 などを保存すると、ここで比較できます。</div>';
-      return;
-    }
-    const base = data.rows[0];
-    const num = (v) => (v == null ? '—' : Math.round(Number(v)).toLocaleString());
-    const yen = (v) => (v == null ? '—' : '¥' + Math.round(Number(v)).toLocaleString());
-    const delta = (v, b) => {
-      if (v == null || b == null || v === b) return '';
-      const d = v - b; const up = d > 0;
-      return `<span class="tt-cmp-d ${up ? 'up' : 'down'}">${up ? '▲' : '▼'}${Math.abs(Math.round(d)).toLocaleString()}</span>`;
-    };
-    const batchTxt = (bc) => {
-      const ks = Object.keys(bc || {});
-      return ks.length ? ks.map((k) => `${esc(k)}${bc[k]}便`).join(' ') : '随時';
-    };
-    let html = '<div class="tt-section-title">シナリオ比較（同じ物量を各設計で／デルタは現在比）</div>';
-    html += '<div class="tt-matrix-scroll"><table class="tt-table tt-cmp-tbl"><thead><tr>'
-      + '<th class="tt-rowhead">シナリオ</th><th>作業方式</th><th>バッチ</th>'
-      + '<th class="tt-num-h">ピーク人数</th><th class="tt-num-h">総工数</th>'
-      + '<th class="tt-num-h">終了</th><th class="tt-num-h">人件費/日</th>'
-      + '<th class="tt-num-h">月額原価</th></tr></thead><tbody>';
-    data.rows.forEach((r, i) => {
-      const cur = i === 0;
-      html += `<tr class="${cur ? 'tt-cmp-cur' : ''}">`
-        + `<th class="tt-rowhead">${esc(r.label)}${r.feasible === false ? ' <span class="tt-cmp-bad">不足</span>' : ''}</th>`
-        + `<td>${esc(r.method || '—')}</td>`
-        + `<td>${batchTxt(r.batch_counts)}</td>`
-        + `<td class="tt-num">${num(r.peak_headcount)}${cur ? '' : delta(r.peak_headcount, base.peak_headcount)}</td>`
-        + `<td class="tt-num">${num(r.total_man_hours)}${cur ? '' : delta(r.total_man_hours, base.total_man_hours)}</td>`
-        + `<td class="tt-num">${r.makespan_hour == null ? '—' : r.makespan_hour + '時'}</td>`
-        + `<td class="tt-num">${yen(r.labour_cost_day)}${cur ? '' : delta(r.labour_cost_day, base.labour_cost_day)}</td>`
-        + `<td class="tt-num">${yen(r.monthly_cost)}${cur ? '' : delta(r.monthly_cost, base.monthly_cost)}</td>`
-        + '</tr>';
-    });
-    html += '</tbody></table></div>';
-    elSolverCompare.innerHTML = html;
-  }
-
-  // ---- バッチ投入スケジュール editor ------------------------------------------
-  // The day's volume for a section lands in batches at given hours; this is how a
-  // batch operation actually releases work (e.g. 入荷 朝70%/昼20%/夕10%). Per section
-  // a 便数 stepper adds/removes batches and each batch is a SLIDER whose ratios
-  // auto-rebalance to 100% (drag one up, the others give way). The solver gates the
-  // section's first process to what has landed by each hour.
-
-  // Distribute so the batch at `idx` becomes `val`% and the rest share (100-val)%
-  // in proportion to their current weights (equal share when they're all zero).
-  function rebalance(rows, idx, val) {
-    const n = rows.length;
-    if (!n) return;
-    val = Math.max(0, Math.min(100, Math.round(val)));
-    if (n === 1) { rows[0].pct = 100; return; }
-    rows[idx].pct = val;
-    const others = rows.map((_, i) => i).filter((i) => i !== idx);
-    const rest = 100 - val;
-    const otherSum = others.reduce((a, i) => a + (Number(rows[i].pct) || 0), 0);
-    others.forEach((i) => {
-      rows[i].pct = otherSum > 0 ? (rows[i].pct / otherSum) * rest : rest / others.length;
-    });
-    // integer round, then distribute the residual across the OTHER bars one unit at
-    // a time (never below 0) so Σ stays EXACTLY 100 even when the largest other bar
-    // is smaller than the drift.
-    rows.forEach((r) => { r.pct = Math.round(r.pct); });
-    let drift = 100 - rows.reduce((a, r) => a + r.pct, 0);
-    const ring = [...others].sort((a, b) => rows[b].pct - rows[a].pct);
-    let guard = 0;
-    while (drift !== 0 && ring.length && guard < 1000) {
-      const i = ring[guard % ring.length];
-      if (drift > 0) { rows[i].pct += 1; drift -= 1; }
-      else if (rows[i].pct > 0) { rows[i].pct -= 1; drift += 1; }
-      guard += 1;
-    }
-  }
-  function equalSplit(rows) {
-    const n = rows.length;
-    if (!n) return;
-    const base = Math.floor(100 / n);
-    rows.forEach((r) => { r.pct = base; });
-    rows[0].pct += 100 - base * n;   // residual onto the first
-  }
-  function suggestHour(rows) {
-    const s = solverState.start, e = Math.max(s + 1, Math.min(24, solverState.end));
-    if (!rows.length) return s;
-    const step = Math.max(1, Math.round((e - s) / (rows.length + 1)));
-    return Math.min(e - 1, (Math.max(...rows.map((r) => r.hour)) || s) + step);
-  }
-  function setBatchCount(sec, n) {
-    const rows = solverState.batches[sec] ? [...solverState.batches[sec]] : [];
-    n = Math.max(0, Math.min(8, n));
-    while (rows.length < n) rows.push({ hour: suggestHour(rows), pct: 0 });
-    while (rows.length > n) rows.pop();
-    if (n === 0) delete solverState.batches[sec];
-    else { equalSplit(rows); solverState.batches[sec] = rows; }
-    renderBatchEditor(); runSolver();
-  }
-
-  function renderBatchEditor() {
-    if (!elSolverBatches) return;
-    elSolverBatches.innerHTML = '';
-    elSolverBatches.appendChild(el('div', 'tt-solver-deps-title',
-      'バッチ投入スケジュール（便数を増減、スライダーで比率を調整＝自動で合計100%。空＝随時）'));
-    for (const sec of BATCH_SECTIONS) {
-      const rows = solverState.batches[sec] || [];
-      const block = el('div', 'tt-batch-block');
-      const head = el('div', 'tt-batch-head');
-      head.appendChild(el('span', 'tt-batch-sec', sec));
-      // 便数 stepper
-      const step = el('span', 'tt-batch-step');
-      const minus = el('button', 'tt-batch-stepbtn', '−'); minus.title = '便を減らす';
-      minus.onclick = () => setBatchCount(sec, rows.length - 1);
-      const count = el('span', 'tt-batch-count', `${rows.length}便`);
-      const plus = el('button', 'tt-batch-stepbtn', '＋'); plus.title = '便を増やす';
-      plus.onclick = () => setBatchCount(sec, rows.length + 1);
-      step.appendChild(minus); step.appendChild(count); step.appendChild(plus);
-      head.appendChild(step);
-      // presets
-      const presets = el('span', 'tt-solver-presets');
-      for (const [label, def] of Object.entries(BATCH_PRESETS[sec] || {})) {
-        const chip = el('button', 'tt-chip', label);
-        chip.onclick = () => {
-          solverState.batches[sec] = def.map((d) => ({ ...d }));
-          if (!solverState.batches[sec].length) delete solverState.batches[sec];
-          renderBatchEditor(); runSolver();
-        };
-        presets.appendChild(chip);
-      }
-      head.appendChild(presets);
-      block.appendChild(head);
-
-      // slider rows (hour + range + live %). Dragging one rebalances the others.
-      const grid = el('div', 'tt-batch-grid');
-      const sliders = []; const pcts = [];
-      rows.forEach((r, i) => {
-        const row = el('div', 'tt-batch-srow');
-        const hIn = el('input', 'tt-mini'); hIn.type = 'number'; hIn.min = '0'; hIn.max = '30';
-        hIn.value = String(r.hour); hIn.setAttribute('aria-label', `${sec} 便${i + 1} 時刻`);
-        hIn.oninput = () => { r.hour = parseInt(hIn.value, 10) || 0; scheduleBatchSolve(); };
-        const slider = el('input', 'tt-batch-slider'); slider.type = 'range';
-        slider.min = '0'; slider.max = '100'; slider.step = '1'; slider.value = String(r.pct);
-        slider.setAttribute('aria-label', `${sec} 便${i + 1} 割合`);
-        const pct = el('span', 'tt-batch-pct', `${Math.round(r.pct)}%`);
-        slider.oninput = () => {
-          rebalance(rows, i, parseFloat(slider.value) || 0);
-          sliders.forEach((s, k) => { s.value = String(rows[k].pct); });
-          pcts.forEach((p, k) => { p.textContent = `${rows[k].pct}%`; });
-          scheduleBatchSolve();
-        };
-        const del = el('button', 'tt-batch-del', '×'); del.title = 'この便を削除';
-        del.onclick = () => {
-          rows.splice(i, 1);
-          if (!rows.length) delete solverState.batches[sec];
-          else { equalSplit(rows); solverState.batches[sec] = rows; }
-          renderBatchEditor(); runSolver();
-        };
-        row.appendChild(el('span', 'tt-batch-blabel', `便${i + 1}`));
-        row.appendChild(hIn); row.appendChild(el('span', 'tt-batch-x', '時'));
-        row.appendChild(slider); row.appendChild(pct); row.appendChild(del);
-        sliders.push(slider); pcts.push(pct);
-        grid.appendChild(row);
-      });
-      block.appendChild(grid);
-      if (!rows.length) {
-        block.appendChild(el('div', 'tt-batch-note', '随時（バッチなし）。＋で便を追加すると比率を割り当てられます。'));
-      }
-      elSolverBatches.appendChild(block);
-    }
-  }
-  let batchSolveTimer = 0;
-  function scheduleBatchSolve() {
-    if (batchSolveTimer) clearTimeout(batchSolveTimer);
-    batchSolveTimer = setTimeout(runSolver, DEBOUNCE_MS);
-  }
-
-  // ---- シフト・休憩モデル editor -----------------------------------------------
-  // 休憩帯 (hours with no work), シフトパターン (named windows with a per-shift max
-  // 人数 + 時給) and a fallback 既定時給. The solver zeros break hours (volume shifts
-  // elsewhere), caps each hour's total by Σ max_workers of the covering shifts, and
-  // prices a 人件費/日 line. Empty plan = legacy behaviour.
-  function shiftDirty() { solverState._seededShift = true; }
-  let shiftSolveTimer = 0;
-  function scheduleShiftSolve() {
-    shiftDirty();
-    if (shiftSolveTimer) clearTimeout(shiftSolveTimer);
-    shiftSolveTimer = setTimeout(runSolver, DEBOUNCE_MS);
-  }
-  function shiftNum(value, min, max, onChange, cls) {
-    const inp = el('input', cls || 'tt-mini'); inp.type = 'number';
-    inp.min = String(min); inp.max = String(max); inp.value = String(value);
-    inp.oninput = () => onChange(parseFloat(inp.value) || 0);
-    return inp;
-  }
-
-  function renderShiftEditor() {
-    if (!elSolverShift) return;
-    const plan = solverState.shiftPlan;
-    elSolverShift.innerHTML = '';
-    elSolverShift.appendChild(el('div', 'tt-solver-deps-title',
-      'シフト・休憩（休憩帯は無配置、シフトは時間帯ごとの上限人数と時給。空＝従来どおり）'));
-
-    // Presets.
-    const presets = el('div', 'tt-solver-presets');
-    for (const [label, def] of Object.entries(SHIFT_PRESETS)) {
-      const chip = el('button', 'tt-chip', label);
-      chip.onclick = () => {
-        solverState.shiftPlan = {
-          breaks: (def.breaks || []).map((b) => ({ ...b })),
-          shifts: (def.shifts || []).map((s) => ({ ...s })),
-          default_wage_per_hr: def.default_wage_per_hr || 1200,
-        };
-        shiftDirty(); renderShiftEditor(); runSolver();
-      };
-      presets.appendChild(chip);
-    }
-    elSolverShift.appendChild(presets);
-
-    // 休憩帯 rows.
-    const bwrap = el('div', 'tt-batch-block');
-    const bhead = el('div', 'tt-batch-head');
-    bhead.appendChild(el('span', 'tt-batch-sec', '休憩'));
-    const baddBtn = el('button', 'tt-batch-stepbtn', '＋'); baddBtn.title = '休憩帯を追加';
-    baddBtn.onclick = () => {
-      plan.breaks.push({ start: 12, end: 13 });
-      shiftDirty(); renderShiftEditor(); runSolver();
-    };
-    bhead.appendChild(baddBtn);
-    bwrap.appendChild(bhead);
-    (plan.breaks || []).forEach((b, i) => {
-      const row = el('div', 'tt-shift-brow');
-      row.appendChild(el('span', 'tt-batch-blabel', `休憩${i + 1}`));
-      row.appendChild(shiftNum(b.start, 0, 30, (v) => { b.start = v; scheduleShiftSolve(); }));
-      row.appendChild(el('span', 'tt-batch-x', '〜'));
-      row.appendChild(shiftNum(b.end, 0, 30, (v) => { b.end = v; scheduleShiftSolve(); }));
-      row.appendChild(el('span', 'tt-batch-x', '時'));
-      const del = el('button', 'tt-batch-del', '×'); del.title = 'この休憩を削除';
-      del.onclick = () => { plan.breaks.splice(i, 1); shiftDirty(); renderShiftEditor(); runSolver(); };
-      row.appendChild(del);
-      bwrap.appendChild(row);
-    });
-    if (!(plan.breaks || []).length) {
-      bwrap.appendChild(el('div', 'tt-batch-note', '休憩帯なし。＋で 12〜13時 などの休憩を追加できます。'));
-    }
-    elSolverShift.appendChild(bwrap);
-
-    // シフトパターン rows.
-    const swrap = el('div', 'tt-batch-block');
-    const shead = el('div', 'tt-batch-head');
-    shead.appendChild(el('span', 'tt-batch-sec', 'シフト'));
-    const saddBtn = el('button', 'tt-batch-stepbtn', '＋'); saddBtn.title = 'シフトを追加';
-    saddBtn.onclick = () => {
-      plan.shifts.push({ label: `シフト${plan.shifts.length + 1}`, start: 9, end: 18,
-        max_workers: 20, wage_per_hr: plan.default_wage_per_hr || 1200 });
-      shiftDirty(); renderShiftEditor(); runSolver();
-    };
-    shead.appendChild(saddBtn);
-    swrap.appendChild(shead);
-    (plan.shifts || []).forEach((s, i) => {
-      const row = el('div', 'tt-shift-srow');
-      const lab = el('input', 'tt-mini tt-shift-lab'); lab.type = 'text'; lab.value = s.label || '';
-      lab.placeholder = '名称'; lab.setAttribute('aria-label', `シフト${i + 1} 名称`);
-      lab.oninput = () => { s.label = lab.value; scheduleShiftSolve(); };
-      row.appendChild(lab);
-      row.appendChild(shiftNum(s.start, 0, 30, (v) => { s.start = v; scheduleShiftSolve(); }));
-      row.appendChild(el('span', 'tt-batch-x', '〜'));
-      row.appendChild(shiftNum(s.end, 0, 30, (v) => { s.end = v; scheduleShiftSolve(); }));
-      row.appendChild(el('span', 'tt-batch-x', '時'));
-      row.appendChild(el('span', 'tt-batch-blabel', '上限'));
-      row.appendChild(shiftNum(s.max_workers, 0, 999, (v) => { s.max_workers = v; scheduleShiftSolve(); }));
-      row.appendChild(el('span', 'tt-batch-blabel', '¥/時'));
-      row.appendChild(shiftNum(s.wage_per_hr, 0, 99999, (v) => { s.wage_per_hr = v; scheduleShiftSolve(); }, 'tt-mini tt-shift-wage'));
-      const del = el('button', 'tt-batch-del', '×'); del.title = 'このシフトを削除';
-      del.onclick = () => { plan.shifts.splice(i, 1); shiftDirty(); renderShiftEditor(); runSolver(); };
-      row.appendChild(del);
-      swrap.appendChild(row);
-    });
-    if (!(plan.shifts || []).length) {
-      swrap.appendChild(el('div', 'tt-batch-note',
-        'シフトなし＝人数無制限（従来）。＋で 早番/遅番 などを追加すると各時間帯に上限人数がかかります。'));
-    }
-    elSolverShift.appendChild(swrap);
-
-    // 既定時給 (wage outside any shift band).
-    const wrow = el('div', 'tt-shift-brow');
-    wrow.appendChild(el('span', 'tt-batch-blabel', '既定時給 ¥/時'));
-    wrow.appendChild(shiftNum(plan.default_wage_per_hr, 0, 99999,
-      (v) => { plan.default_wage_per_hr = v; scheduleShiftSolve(); }, 'tt-mini tt-shift-wage'));
-    elSolverShift.appendChild(wrow);
-  }
-
-  // The plan to send: omit it until the user has touched it (so a saved plan stands).
-  function currentShiftPlan() {
-    const plan = solverState.shiftPlan || {};
-    return {
-      breaks: (plan.breaks || []).map((b) => ({ start: b.start, end: b.end })),
-      shifts: (plan.shifts || []).map((s) => ({
-        label: s.label || '', start: s.start, end: s.end,
-        max_workers: s.max_workers, wage_per_hr: s.wage_per_hr,
-      })),
-      default_wage_per_hr: plan.default_wage_per_hr || 0,
-    };
+    depsEditor.renderDepEditor();
+    batchEditor.renderBatchEditor();
+    shiftEditor.renderShiftEditor();
   }
 
   function ctrlField(label, control) {
@@ -764,46 +424,6 @@ export function mountTimetable(targetEl, opts = {}) {
     inp.oninput = () => onChange(parseInt(inp.value, 10) || 0);
     return inp;
   }
-
-  // Dependency editor: presets + a compact per-process upstream multi-toggle.
-  function renderDepEditor() {
-    if (!elSolverDeps) return;
-    elSolverDeps.innerHTML = '';
-    elSolverDeps.appendChild(el('div', 'tt-solver-deps-title', '工程依存（前工程が供給するまで後工程は立ち上がらない）'));
-    const presets = el('div', 'tt-solver-presets');
-    const std = el('button', 'tt-chip', '標準フロー（入荷→格納→…→出荷）');
-    std.onclick = () => { solverState.deps = cloneDeps(solverState.defaultDeps); renderDepEditor(); runSolver(); };
-    const none = el('button', 'tt-chip', '依存なし（並列）');
-    none.onclick = () => { solverState.deps = {}; renderDepEditor(); runSolver(); };
-    presets.appendChild(std); presets.appendChild(none);
-    elSolverDeps.appendChild(presets);
-
-    const ids = (solverState.processIds && solverState.processIds.length)
-      ? solverState.processIds : Object.keys(solverState.defaultDeps);
-    const grid = el('div', 'tt-solver-depgrid');
-    for (const pid of ids) {
-      const row = el('div', 'tt-solver-deprow');
-      row.appendChild(el('span', 'tt-solver-depname', pid));
-      const ups = el('span', 'tt-solver-depups');
-      for (const up of ids) {
-        if (up === pid) continue;
-        const on = (solverState.deps[pid] || []).includes(up);
-        const tag = el('button', 'tt-deptoggle' + (on ? ' on' : ''), up);
-        tag.title = on ? `${up} を前工程から外す` : `${up} を前工程に追加`;
-        tag.onclick = () => {
-          const cur = new Set(solverState.deps[pid] || []);
-          if (cur.has(up)) cur.delete(up); else cur.add(up);
-          solverState.deps[pid] = [...cur];
-          renderDepEditor(); runSolver();
-        };
-        ups.appendChild(tag);
-      }
-      row.appendChild(ups);
-      grid.appendChild(row);
-    }
-    elSolverDeps.appendChild(grid);
-  }
-  function cloneDeps(d) { const o = {}; for (const k of Object.keys(d || {})) o[k] = [...(d[k] || [])]; return o; }
 
   // POST the window/cap/deps/placement to the analytic solver and render.
   async function runSolver() {
@@ -821,7 +441,7 @@ export function mountTimetable(targetEl, opts = {}) {
       // so the backend persists/applies it; before that, let the saved one stand.
       ...(solverState._seededBatches ? { batches: solverState.batches } : {}),
       // Same for the シフト・休憩 plan (send only after the user edits it).
-      ...(solverState._seededShift ? { shift_plan: currentShiftPlan() } : {}),
+      ...(solverState._seededShift ? { shift_plan: shiftEditor.currentShiftPlan() } : {}),
     };
     let res;
     try {
@@ -836,9 +456,9 @@ export function mountTimetable(targetEl, opts = {}) {
     if (res && res.default_dependencies && !solverState._seededDeps) {
       solverState.defaultDeps = res.default_dependencies;
       solverState.processIds = (res.processes || []).map((p) => p.id);
-      if (!Object.keys(solverState.deps).length) solverState.deps = cloneDeps(res.default_dependencies);
+      if (!Object.keys(solverState.deps).length) solverState.deps = depsEditor.cloneDeps(res.default_dependencies);
       solverState._seededDeps = true;
-      renderDepEditor();
+      depsEditor.renderDepEditor();
     }
     // Seed the batch editor from the persisted schedule on first solve.
     if (res && !solverState._seededBatches) {
@@ -850,7 +470,7 @@ export function mountTimetable(targetEl, opts = {}) {
         }
       }
       solverState._seededBatches = true;
-      renderBatchEditor();
+      batchEditor.renderBatchEditor();
     }
     // Seed the シフト・休憩 editor from the persisted plan on first solve.
     if (res && !solverState._seededShift) {
@@ -865,7 +485,7 @@ export function mountTimetable(targetEl, opts = {}) {
           default_wage_per_hr: sp.default_wage_per_hr || 1200,
         };
         solverState._seededShift = true;
-        renderShiftEditor();
+        shiftEditor.renderShiftEditor();
       }
     }
     renderSolver();

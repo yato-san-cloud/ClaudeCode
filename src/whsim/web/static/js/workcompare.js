@@ -7,6 +7,9 @@
 import { esc, api } from './util.js';
 import * as echarts from 'echarts';
 import { startRunProgress } from './progress.js';
+// The ⚡自動掃引 section was extracted to a cohesive sub-module (facade precedent:
+// designer/*.js). It owns its own state and re-renders the panel via a callback.
+import { createSweepPanel } from './workcompare/sweep_panel.js';
 
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -77,8 +80,14 @@ export function mountWorkCompare(el, opts = {}) {
   let ro = null;
   let data = null;
   let running = false;
-  let sweepData = null;   // last 自動掃引 (mini-OptQuest) result
-  let sweeping = false;
+  // ⚡自動掃引 panel (state + render/wire/adopt) lives in ./workcompare/sweep_panel.js.
+  // It shares the facade's formatting vocabulary (fmt/yen/COLORS/WORK_PRESETS) and
+  // re-renders the whole panel through `rerender` — behaviour is unchanged.
+  const sweepPanel = createSweepPanel({
+    getProject, toast, root,
+    rerender: () => render(),
+    COLORS, WORK_PRESETS, fmt, yen,
+  });
   // The analytic recommendation handed over from ③設計「生産性試算」(pickrate).
   // We highlight it and, after the DES run, reconcile 解析推奨 vs DES推奨.
   let analyticPick = null;   // {id, label}
@@ -112,14 +121,14 @@ export function mountWorkCompare(el, opts = {}) {
   function headHtml() {
     return `<div class="wc-head"><h2>作業方法比較</h2>
       <span class="sub">シングル / マルチ / ゾーン / トータル を実行して「移動 vs 仕分け」で比べる</span>
-      <button type="button" class="wc-sweep-btn" data-sweep${sweeping ? ' disabled' : ''}>${sweeping ? '掃引中…' : '⚡ 自動掃引（解析）'}</button>
+      <button type="button" class="wc-sweep-btn" data-sweep${sweepPanel.isSweeping() ? ' disabled' : ''}>${sweepPanel.isSweeping() ? '掃引中…' : '⚡ 自動掃引（解析）'}</button>
       <button type="button" class="wc-run" data-run${running ? ' disabled' : ''}>${running ? '比較を実行中…' : '▶ 4方式を比較実行'}</button></div>`;
   }
   function wireHead() {
     const b = root.querySelector('[data-run]');
     if (b) b.onclick = () => run();
     const s = root.querySelector('[data-sweep]');
-    if (s) s.onclick = () => runSweep();
+    if (s) s.onclick = () => sweepPanel.runSweep();
   }
   function renderRunning() {
     disposeChart();
@@ -136,9 +145,9 @@ export function mountWorkCompare(el, opts = {}) {
         ? `<div class="wc-rec">解析（生産性試算）の推奨は <b>${esc(analyticPick.label)}</b>。`
           + `「▶ 4方式を比較実行」でDESを回し、移動/仕分け以外（混雑・待ち）も含めて裏取りします。</div>`
         : '';
-      root.innerHTML = headHtml() + ap + sweepHtml()
+      root.innerHTML = headHtml() + ap + sweepPanel.sweepHtml()
         + '<div class="wc-empty">「▶ 4方式を比較実行」を押すと、各方式を実行して比較します。</div>';
-      wireHead(); wireSweep(); return;
+      wireHead(); sweepPanel.wireSweep(); return;
     }
     const rec = d.recommend || {};
     const recRow = (m) => (m.id === rec.id);
@@ -178,103 +187,11 @@ export function mountWorkCompare(el, opts = {}) {
       + '</tbody></table>'
       + '<div class="wc-note">※ 散布図：左下ほど移動・仕分けが少ない。トータルは移動最小だが仕分け工数が立つ＝トレードオフ。'
       + '「この方式で設計」でモデルのピッキング工程に反映し、再実行・原価へ繋がります。</div>'
-      + sweepHtml();
+      + sweepPanel.sweepHtml();
     buildScatter(root.querySelector('[data-ec]'), methods, rec.id);
     wireHead();
-    wireSweep();
+    sweepPanel.wireSweep();
     root.querySelectorAll('[data-adopt]').forEach((b) => { b.onclick = () => adopt(b.dataset.adopt); });
-  }
-
-  // ⚡自動掃引（ミニOptQuest）: sweep 作業方式×人員数×まとめ数 analytically and rank.
-  // POST /sweep is near-instant (analytic evaluators), so we don't use the DES
-  // progress overlay — just a lightweight inline state.
-  async function runSweep() {
-    const name = getProject();
-    if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
-    if (sweeping) return;
-    sweeping = true;
-    render();
-    try {
-      const res = await api(`/api/projects/${encodeURIComponent(name)}/sweep`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      sweepData = res;
-    } catch (e) {
-      sweepData = { available: false, reason: (e && e.message ? e.message : String(e)) };
-    } finally { sweeping = false; render(); }
-  }
-
-  function sweepHtml() {
-    const d = sweepData;
-    if (!d) return '';
-    if (!d.available) {
-      return `<div class="wc-sweep"><h3>⚡ 自動掃引（解析）</h3>`
-        + `<div class="wc-note">${esc(d.reason || '物量データがありません。①取込/②分析で出荷実績を取り込んでください。')}</div></div>`;
-    }
-    const rows = (d.rows || []).slice(0, 10);
-    const win = d.window || {};
-    const noPickerSeam = (d.picker_worker_index == null);
-    const meta = `${fmt(d.evaluated)}通りを解析評価`
-      + (d.truncated ? '（打ち切り）' : '')
-      + `・${fmt(d.elapsed_s, 2)}秒・現行 ${fmt(d.current_pickers)}名`
-      + (win.start_hour != null ? `・稼働 ${win.start_hour}–${win.end_hour}時` : '');
-    return `<div class="wc-sweep">
-      <h3>⚡ 自動掃引（解析）— 上位10案</h3>
-      <div class="meta">${esc(d.objective || '')}</div>
-      <div class="meta">${esc(meta)}</div>
-      <div style="overflow-x:auto"><table class="wc-tbl"><thead><tr>
-        <th>#</th><th>作業方法</th><th>まとめ</th><th>人員</th><th>可否</th>
-        <th>時間(h)</th><th>ピーク</th><th>月次コスト</th><th>¥/件</th><th>採用</th>
-      </tr></thead><tbody>`
-      + rows.map((r) => `<tr class="${r.rank === 1 ? 'best' : ''}">`
-        + `<td>${fmt(r.rank)}</td>`
-        + `<td><span class="wc-sw" style="background:${COLORS[r.method_id] || '#888'}"></span>${esc(r.method_label)}</td>`
-        + `<td class="num">${fmt(r.orders_per_trip)}件/巡</td>`
-        + `<td class="num">${fmt(r.pickers)}名</td>`
-        + `<td class="${r.feasible ? 'wc-badge-ok' : 'wc-badge-ng'}">${r.feasible ? '可' : '不可'}</td>`
-        + `<td class="num">${fmt(r.makespan_hour, 1)}</td>`
-        + `<td class="num">${fmt(r.peak)}</td>`
-        + `<td class="num">${r.monthly_cost == null ? '—' : yen(r.monthly_cost)}</td>`
-        + `<td class="num">¥${fmt(r.cost_per_order, 1)}</td>`
-        + `<td><button type="button" class="wc-adopt" data-sweep-adopt="${fmt(r.rank)}">採用 →</button></td>`
-        + '</tr>').join('')
-      + '</tbody></table></div>'
-      + `<div class="wc-note">${esc(d.note || '解析モデルによる即時評価です。上位案は▶実行（DES）で裏取りしてください。')}`
-      + (noPickerSeam ? '　※ 人員グループが無いため方式・まとめのみ反映（人員数は表の値を目安に設定してください）。' : '')
-      + '</div></div>';
-  }
-
-  function wireSweep() {
-    root.querySelectorAll('[data-sweep-adopt]').forEach((b) => {
-      b.onclick = () => adoptSweep(parseInt(b.dataset.sweepAdopt, 10));
-    });
-  }
-
-  // 採用: reuse the same /apply dotted-path seam as adopt(), applying the winning
-  // combo's method (pick stage work, with its orders_per_trip) AND — when the model
-  // exposes a picker worker group — its picker count in one atomic edit.
-  async function adoptSweep(rank) {
-    const name = getProject();
-    const d = sweepData;
-    const r = (d && d.rows || []).find((x) => x.rank === rank);
-    if (!name || !r) return;
-    const base = WORK_PRESETS[r.method_id];
-    if (!base) { toast('方式が見つかりません。', 'error'); return; }
-    const work = { ...base, orders_per_trip: r.orders_per_trip };
-    const edits = {};
-    const pidx = (d.pick_stage_index != null) ? d.pick_stage_index : 2;
-    edits[`process.stages.${pidx}.work`] = work;
-    let appliedCount = false;
-    if (d.picker_worker_index != null) {
-      edits[`resources.workers.${d.picker_worker_index}.count`] = r.pickers;
-      appliedCount = true;
-    }
-    try {
-      await api(`/api/projects/${encodeURIComponent(name)}/apply`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ edits }) });
-      const cntMsg = appliedCount ? `・人員${r.pickers}名` : `（人員は${r.pickers}名目安で手動設定を）`;
-      toast(`「${r.method_label}／${r.orders_per_trip}件/巡${cntMsg}」を反映。▶実行（DES）で裏取りしてください。`, 'ok');
-    } catch (e) { toast('反映に失敗: ' + (e && e.message ? e.message : e), 'error'); }
   }
 
   function buildScatter(node, methods, recId) {
