@@ -91,9 +91,9 @@ def test_femoral_head_detection_accuracy():
 
 def test_iliac_crest_detection_accuracy():
     _, crest = _run_battery()
-    # 腸骨稜は上縁走査で相対的に難しい。gross な破綻のみ検出。
-    assert crest.mean() < 0.11, f"crest mean error regressed: {crest.mean():.3f}"
-    assert crest.max() < 0.20, f"crest max error regressed: {crest.max():.3f}"
+    # 連結成分ベースで最大の骨塊(腸骨)頂点を採る方式。現状 mean~0.044/max~0.14。
+    assert crest.mean() < 0.07, f"crest mean error regressed: {crest.mean():.3f}"
+    assert crest.max() < 0.18, f"crest max error regressed: {crest.max():.3f}"
 
 
 if __name__ == "__main__":

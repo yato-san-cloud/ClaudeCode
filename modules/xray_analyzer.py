@@ -112,7 +112,7 @@ def detect_landmarks(image_bytes: bytes, analysis_type: str) -> dict:
     elif analysis_type == "spine_alignment":
         landmarks = _detect_spine(edges, h, w)
     else:
-        landmarks = _detect_iliac_crests(edges, h, w)
+        landmarks = _detect_iliac_crests(gray, edges, h, w)
 
     return {
         "analysis_type": analysis_type,
@@ -211,25 +211,50 @@ def _detect_femoral_heads(gray, edges, h, w):
     ]
 
 
-def _detect_iliac_crests(edges, h, w):
-    """腸骨稜 = 骨盤上部で最も高い(上の)骨縁。左右の帯で上縁エッジを走査する。"""
-    y0, y1 = int(h * 0.12), int(h * 0.60)
+def _detect_iliac_crests(gray, edges, h, w, y0=None, y1=None):
+    """腸骨稜 = 腸骨(大きな骨塊)の最上点。左右の帯で「最大の骨塊の頂点」を採る。
+
+    単純な上縁エッジ走査だと、腸管ガスの縁や孤立した点など骨盤より上/外の構造を
+    拾いやすい。ここでは各帯で高輝度(骨)領域の連結成分を求め、最大成分の頂点を
+    腸骨稜とみなすことで、孤立した妨害構造を排除する。y1 で下限を制限できる。
+    """
+    y0 = int(h * 0.10) if y0 is None else max(0, int(y0))
+    y1 = int(h * 0.60) if y1 is None else min(h, int(y1))
+    if y1 - y0 < h * 0.10:            # 範囲が潰れたら既定に戻す
+        y0, y1 = int(h * 0.10), int(h * 0.60)
 
     def crest_in_band(x0, x1):
+        sub = gray[y0:y1, x0:x1]
+        if sub.size == 0:
+            return (x0 + x1) // 2, int(h * 0.35)
+        # 骨=高輝度を二値化し、最大の骨塊(腸骨)の頂点を採る
+        thr = np.percentile(sub, 75)
+        _, bw = cv2.threshold(sub, float(thr), 255, cv2.THRESH_BINARY)
+        bw = cv2.morphologyEx(bw.astype(np.uint8), cv2.MORPH_OPEN,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        n, lbl, stats, _ = cv2.connectedComponentsWithStats(bw, connectivity=8)
+        best, min_area = None, (x1 - x0) * (y1 - y0) * 0.03
+        for i in range(1, n):
+            a = stats[i, cv2.CC_STAT_AREA]
+            if a < min_area:
+                continue
+            if best is None or a > stats[best, cv2.CC_STAT_AREA]:
+                best = i
+        if best is not None:
+            ys, xs = np.where(lbl == best)
+            top = int(ys.min())
+            tx = int(np.median(xs[ys <= top + max(2, int((y1 - y0) * 0.02))])) + x0
+            return tx, top + y0
+        # フォールバック: 従来の上縁エッジ走査
         band = edges[y0:y1, x0:x1]
-        tops = []
-        for col in range(band.shape[1]):
-            ys = np.where(band[:, col] > 0)[0]
-            if len(ys):
-                tops.append((ys[0], col))
+        tops = [(np.where(band[:, c] > 0)[0][0], c)
+                for c in range(band.shape[1]) if band[:, c].any()]
         if not tops:
             return (x0 + x1) // 2, int(h * 0.35)
-        # ノイズ対策: 上端候補のうち上位25%の中央値を採る
-        tops.sort(key=lambda t: t[0])
+        tops.sort()
         take = tops[: max(3, len(tops) // 4)]
-        ty = int(np.median([t[0] for t in take])) + y0
-        tx = int(np.median([t[1] for t in take])) + x0
-        return tx, ty
+        return (int(np.median([t[1] for t in take])) + x0,
+                int(np.median([t[0] for t in take])) + y0)
 
     lx, ly = crest_in_band(int(w * 0.18), int(w * 0.44))
     rx, ry = crest_in_band(int(w * 0.56), int(w * 0.82))
@@ -272,7 +297,9 @@ def _detect_pelvis_full(gray, edges, h, w):
     解剖学的な妥当位置を初期値として与え、術者の補正を前提とする。
     """
     femoral = _detect_femoral_heads(gray, edges, h, w)
-    iliac = _detect_iliac_crests(edges, h, w)
+    # 大腿骨頭の下方(≒骨盤下部)は腸骨稜ではないので下限だけ制限する。
+    fem_y0 = (femoral[0]["y"] + femoral[1]["y"]) / 2
+    iliac = _detect_iliac_crests(gray, edges, h, w, y1=fem_y0 - h * 0.05)
 
     fl, fr = femoral[0], femoral[1]
     il, ir = iliac[0], iliac[1]
