@@ -40,6 +40,20 @@
   gap: 8px;
 }
 
+/* The mover wraps the bubble + figure; the rAF loop translates it so the speech
+   bubble rides along with OCTA as it wanders. The bubble keeps its own
+   open/close transform and the figure keeps its own rotate/squash on top. */
+.cody-mover {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  will-change: transform;
+}
+.cody-companion.cody-evade .cody-mover {
+  align-items: flex-start;
+}
+
 /* ---------- the mascot figure ---------- */
 .cody-figure {
   position: relative; /* containing block for the min chip + emoji pops */

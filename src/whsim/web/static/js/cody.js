@@ -347,8 +347,15 @@ export function mountCody(targetEl, opts = {}) {
     figure.appendChild(minBtn);
   }
 
-  root.appendChild(bubble);
-  root.appendChild(figure);
+  // For the floating companion, bubble + figure live inside a "mover": the rAF
+  // loop translates the mover (so the speech bubble RIDES ALONG with OCTA while
+  // it wanders), while the figure keeps its own rotate/squash and the bubble
+  // keeps its own open/close transform. Inline mounts need no mover.
+  const mover = companion ? document.createElement("div") : root;
+  if (companion) mover.className = "cody-mover";
+  mover.appendChild(bubble);
+  mover.appendChild(figure);
+  if (companion) root.appendChild(mover);
   target.appendChild(root);
 
   const faceGroup = svg.querySelector(".cody-face");
@@ -463,49 +470,57 @@ export function mountCody(targetEl, opts = {}) {
 
   // The live gesture vocabulary — each is a short, characterful beat that
   // returns to the calm anchor. Impulses are velocity kicks the spring absorbs.
+  // `soft` (a bubble is open) shrinks travel and softens the jump so a reader
+  // isn't jolted; the big disorienting spin is excluded upstream in pickGesture.
   function fireGesture(kind) {
     const dir = driftDir();
+    const soft = bubbleHasContent;
     switch (kind) {
       case "hop":                     // a little squash-and-stretch jump
-        sp.vy -= 210; sp.sq = Math.max(sp.sq, 0.16); break;
-      case "spin":                    // a quick comical whirl
+        sp.vy -= soft ? 120 : 210; sp.sq = Math.max(sp.sq, soft ? 0.1 : 0.16); break;
+      case "spin":                    // a quick comical whirl (quiet views only)
         sp.vr += 700 * (Math.random() < 0.5 ? 1 : -1);
         sp.vy -= 90; sp.sq = Math.max(sp.sq, 0.1); break;
       case "wobble":                  // a jelly wiggle (+ tentacle flutter)
-        sp.vr += 300 * (Math.random() < 0.5 ? 1 : -1);
+        sp.vr += (soft ? 190 : 300) * (Math.random() < 0.5 ? 1 : -1);
         svg.classList.add("octa-jelly");
         setTimeout(() => { if (!destroyed) svg.classList.remove("octa-jelly"); }, 900);
         break;
       case "peek":                    // duck part-way off the edge, then pop in
         sp.tx = -dir * (18 + Math.random() * 14);
-        sp.ty = 6 + Math.random() * 6;
+        sp.ty = (soft ? 3 : 6) + Math.random() * 6;
         revertAt = performance.now() + 620; break;
       case "drift":                   // amble to a nearby edge spot and linger
       default:
-        sp.tx = dir * (34 + Math.random() * 46);
-        sp.ty = -(14 + Math.random() * 34);
+        sp.tx = dir * ((soft ? 20 : 34) + Math.random() * (soft ? 26 : 46));
+        sp.ty = -((soft ? 10 : 14) + Math.random() * (soft ? 20 : 34));
         sp.vy -= 60;
         revertAt = performance.now() + 2200 + Math.random() * 1700; break;
     }
   }
 
   // Choose the next idle gesture. Weighted toward position-changing ambles
-  // (drift/peek) so OCTA visibly wanders the edge band, with the in-place beats
-  // (hop/spin/wobble) sprinkled in for variety.
+  // (drift/peek) so OCTA visibly wanders the edge band. Quiet views get the full
+  // repertoire (incl. spin/hop); while a bubble is open we drop the big spin so
+  // the reader isn't jolted — the bubble rides along for the gentle gestures.
   const GESTURE_BAG = [
     "drift", "drift", "drift", "peek", "peek", "hop", "wobble", "spin", "hop",
+  ];
+  const GESTURE_BAG_GENTLE = [
+    "drift", "drift", "drift", "peek", "peek", "hop", "wobble",
   ];
   let firstGesture = true;
   function pickGesture() {
     if (firstGesture) { firstGesture = false; return "drift"; } // clear first move
-    return GESTURE_BAG[(Math.random() * GESTURE_BAG.length) | 0];
+    const bag = bubbleHasContent ? GESTURE_BAG_GENTLE : GESTURE_BAG;
+    return bag[(Math.random() * bag.length) | 0];
   }
 
-  // Is OCTA calm enough to wander? Not while minimized, not while a real bubble
-  // is up, and not while the user is actively moving the pointer over content.
+  // Is OCTA calm enough to wander? Not while minimized, and not while the user is
+  // actively moving the pointer over content. A speech bubble no longer blocks
+  // wandering (the bubble rides along) — it only narrows the gesture set.
   function idleForWander(now) {
-    return !minimized && !bubbleHasContent &&
-      (now - lastContentMoveAt > 1600);
+    return !minimized && (now - lastContentMoveAt > 1600);
   }
 
   function figureCenter() {
@@ -530,15 +545,19 @@ export function mountCody(targetEl, opts = {}) {
     if (dt > 0.05) dt = 0.05;                 // clamp after tab-away
     breatheT += dt;
 
-    // Idle scheduler: fire a gesture, then set the next window (~8–18s).
+    // Idle scheduler: fire a gesture, then set the next window. Quiet views move
+    // a touch more often (~6–12s) so wandering is reliably noticeable; while a
+    // bubble is open OCTA ambles a little more calmly (~8–14s).
     if (now >= nextGestureAt && idleForWander(now)) {
       fireGesture(pickGesture());
-      nextGestureAt = now + 7000 + Math.random() * 8000;  // ~7–15s, occasional
+      nextGestureAt = now + (bubbleHasContent
+        ? 8000 + Math.random() * 6000
+        : 6000 + Math.random() * 6000);
     }
     // Return a held drift/peek to the anchor.
     if (revertAt && now >= revertAt) { sp.tx = 0; sp.ty = 0; revertAt = 0; }
-    // If content interaction resumes, calmly come home.
-    if ((minimized || bubbleHasContent) && (sp.tx || sp.ty)) {
+    // If minimized, calmly come home (the bubble may still ride along otherwise).
+    if (minimized && (sp.tx || sp.ty)) {
       sp.tx = 0; sp.ty = 0; revertAt = 0;
     }
 
@@ -577,7 +596,9 @@ export function mountCody(targetEl, opts = {}) {
     const sway = Math.sin(breatheT * 0.7) * 1.1;
     const breathRot = Math.sin(breatheT * 0.9) * 1.3;
 
-    // Compose one transform (translate → rotate → squash) about the feet.
+    // The MOVER carries the translation (wander + breathing) so the speech
+    // bubble rides along with OCTA; the FIGURE keeps only rotate/squash (its
+    // body wiggles while the bubble text stays level and attached).
     const tx = sp.x + sway;
     const ty = sp.y + bob - hoverAmt * 2.5;
     const rot = sp.r + breathRot;
@@ -585,8 +606,8 @@ export function mountCody(targetEl, opts = {}) {
     const hs = 1 + hoverAmt * 0.04;               // subtle hover pop
     const scaleX = (1 + sq * 0.5) * hs;
     const scaleY = (1 - sq * 0.5) * hs;
+    mover.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px)`;
     figure.style.transform =
-      `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) ` +
       `rotate(${rot.toFixed(2)}deg) scale(${scaleX.toFixed(3)}, ${scaleY.toFixed(3)})`;
 
     liveRaf = requestAnimationFrame(liveFrame);
@@ -604,6 +625,7 @@ export function mountCody(targetEl, opts = {}) {
     if (settle) {
       sp.x = sp.y = sp.vx = sp.vy = sp.r = sp.vr = sp.sq = sp.vsq = 0;
       sp.tx = sp.ty = 0; revertAt = 0;
+      if (companion) mover.style.transform = "";
       figure.style.transform = "";
       faceGroup.style.transform = "";
     }
