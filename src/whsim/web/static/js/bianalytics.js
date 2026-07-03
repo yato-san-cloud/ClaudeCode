@@ -415,6 +415,13 @@ export function mountBIAnalytics(el, opts = {}) {
       qty: sum(cells, 'qty'),
       lines: sum(cells, 'lines'),
       orders: sum(cells, 'orders'),
+      // xtab cells are rank×曜日×時間 buckets, so an order that spans multiple
+      // ABC ranks is counted once per rank → summing cell.orders OVER-counts
+      // distinct orders (it double-counts). The 日次(daily) series is bucketed by
+      // day only (orders never span days), so ITS sum is the true distinct total
+      // and it matches ①取込 / ②物量サマリ. Use it for the unfiltered headline;
+      // when a filter is on we can only offer the gross ("延べ") cell count.
+      ordersDistinct: (data.daily || []).reduce((s, c) => s + (c.orders || 0), 0),
       totQty: sum(all, 'qty'),
       peakWd: wk.length ? top(wk) : null,
       peakHr: hr.length ? top(hr) : null,
@@ -429,10 +436,15 @@ export function mountBIAnalytics(el, opts = {}) {
     const filt = filterActive();
     const share = (filt && k.totQty > 0)
       ? ` <span class="d">全体の${pct(k.qty / k.totQty)}</span>` : '';
+    // 無絞込みは 真のユニーク受注数 (日次合計＝②物量サマリと一致); 絞込中は rank を
+    // またぐ延べ件数しか出せないので「オーダー（延べ）」と明示して誤解を避ける。
+    const ordersCard = filt
+      ? ['オーダー（延べ）', fmt(k.orders)]
+      : ['オーダー', fmt(k.ordersDistinct || k.orders)];
     const cards = [
       [filt ? '物量（絞込）' : '物量', `${fmt(k.qty)}${share}`],
       ['行数', fmt(k.lines)],
-      ['オーダー', fmt(k.orders)],
+      ordersCard,
       ['SKU数（全体）', fmt(k.skus)],
       ['ピーク曜日', k.peakWd ? `${esc(k.peakWd.label)}曜` : '—'],
       ['ピーク時間', k.peakHr ? `${k.peakHr.hour}時` : '—'],

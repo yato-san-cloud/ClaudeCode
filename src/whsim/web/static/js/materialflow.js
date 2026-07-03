@@ -43,6 +43,13 @@ function injectStyle() {
   .mf-btn:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:2px}
   @media(prefers-reduced-motion:reduce){.mf-btn{transition:none}}
   .mf-hint{font-size:12px;color:var(--ink-tertiary,#8195a8)}
+  /* zero-volume guidance: shown when 工程はあるが荷役物量が未入力のとき、
+     どのボタンを押せばよいかを一言で案内する（空の画面で手が止まらないように）。*/
+  .mf-guide{font-size:13px;line-height:1.55;color:var(--ink-secondary,#52677c);
+    background:color-mix(in srgb,var(--accent,#16C0DE) 8%,transparent);
+    border:1px solid color-mix(in srgb,var(--accent,#16C0DE) 30%,transparent);
+    border-radius:10px;padding:9px 13px}
+  .mf-guide b{color:var(--ink-primary,#16202e)}
   .mf-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
   .mf-kpi{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));border-radius:12px;padding:13px 15px}
   .mf-kpi .l{font-size:10.5px;letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);text-transform:uppercase;margin-bottom:7px}
@@ -301,14 +308,15 @@ export function mountMaterialFlow(el, opts = {}) {
     disposeSankey();
     root.innerHTML =
       `<div class="mf-bar">
+        <button class="mf-btn primary" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成">📥 取込データから</button>
         <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
-        <button class="mf-btn" data-act="upload">出荷データから取込</button>
+        <button class="mf-btn" data-act="upload" title="手元の別の出荷CSV/Excelを取り込む">別ファイルを取込</button>
         <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
        </div>
        <div class="mf-empty">
          <div class="mf-empty-title">工程フローがまだありません</div>
-         <div class="mf-empty-body">サンプル物量、または出荷データを取り込むと、工程ごとの荷役物量がここに表示されます。</div>
-         <button class="mf-btn primary" data-act="sample">サンプル物量で始める</button>
+         <div class="mf-empty-body">①取込の出荷実績を取り込むと、工程ごとの荷役物量がここに表示されます。「📥 取込データから」で取込済みデータを反映、まずは試すならサンプルでも始められます。</div>
+         <button class="mf-btn primary" data-act="fromproject">取込データから始める</button>
        </div>`;
     wire();
   }
@@ -336,18 +344,25 @@ export function mountMaterialFlow(el, opts = {}) {
     }).join('');
 
     const anyVol = flow.some((p) => (vol[p.id] || 0) > 0);
+    // ①取込済みの出荷実績から埋めるのが第一導線。まだ物量が無いときは
+    // その一手をハイライトし、空の画面で迷わせない。
+    const guide = anyVol ? '' :
+      `<div class="mf-guide">①取込の出荷実績はまだ反映されていません。<b>「📥 取込データから」</b>`
+      + `を押すと、取り込んだデータから工程ごとの荷役物量を自動作成します（再アップロード不要）。</div>`;
     root.innerHTML =
       `<div class="mf-bar">
-        <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
-        <button class="mf-btn" data-act="upload">出荷データから取込</button>
-        <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
+        <button class="mf-btn primary" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成（再アップロード不要）">📥 取込データから</button>
         <button class="mf-btn" data-act="frombi">基礎物量を取込</button>
+        <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
+        <button class="mf-btn" data-act="upload" title="手元の別の出荷CSV/Excelを追加で取り込む">別ファイルを取込</button>
+        <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
         <button class="mf-btn" data-act="generate">不足を生成</button>
         <button class="mf-btn" data-act="editproc">${editing ? '編集中…' : '工程を編集'}</button>
         <span class="mf-recalc" data-mf-recalc aria-live="polite">再計算中…</span>
         <button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>
        </div>
        <span class="mf-hint">工程ごとの荷役物量（1日平均）。データから取込・不足は手入力/生成し、人員配置へ。</span>
+       ${guide}
        ${editorHtml()}
        <div data-mf-chain>${chainHtml()}</div>
        <div class="mf-kpis">
@@ -384,6 +399,39 @@ export function mountMaterialFlow(el, opts = {}) {
       toast(label + 'から荷役物量を取り込みました。', 'ok');
     } catch (e) {
       toast('取込に失敗しました: ' + e.message, 'error');
+      render();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ①取込で読み込んだ出荷実績 (project の解析バンドル) から荷役物量を直接充填する。
+  // 「別ファイルを取込」が新規ファイルのアップロードなのに対し、こちらは 取込済みの
+  // データをそのまま使う — 営業が最初に押すべき導線。bi 保存も再アップロードも不要。
+  async function fromProject() {
+    const name = getProject();
+    if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
+    root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = true));
+    setBusy(true);
+    try {
+      const b = await getJSON(`/api/projects/${encodeURIComponent(name)}/analysis/bundle`);
+      const procs = (b && b.staffing && b.staffing.processes) || [];
+      const map = {};
+      let n = 0;
+      procs.forEach((p) => {
+        map[p.id] = p.daily_volume;
+        if ((p.daily_volume || 0) > 0) n += 1;
+      });
+      if (!n) {
+        render();
+        toast('取込済みの出荷データが見つかりません。①取込で出荷実績を読み込んでください。', 'info');
+        return;
+      }
+      setVolumes(map, 'data');
+      render();
+      toast(`取込データから ${n} 工程に荷役物量を反映しました。`, 'ok');
+    } catch (e) {
+      toast('取込に失敗しました: ' + (e && e.message ? e.message : e), 'error');
       render();
     } finally {
       setBusy(false);
@@ -624,7 +672,8 @@ export function mountMaterialFlow(el, opts = {}) {
       const btn = e.target.closest('[data-act]');
       if (!btn) return;
       const act = btn.dataset.act;
-      if (act === 'sample') fromBundle(getJSON('/api/analysis/sample'), 'サンプル');
+      if (act === 'fromproject') fromProject();
+      else if (act === 'sample') fromBundle(getJSON('/api/analysis/sample'), 'サンプル');
       else if (act === 'upload') { const fi = root.querySelector('[data-mf-file]'); if (fi) fi.click(); }
       else if (act === 'frombi') fromBI();
       else if (act === 'generate') generate();

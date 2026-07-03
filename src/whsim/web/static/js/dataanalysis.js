@@ -396,7 +396,11 @@ function kpiCards(k) {
     ['総出荷ピース', fmt(k.total_pcs_out)],
     ['総出荷ライン', fmt(k.total_lines_out)],
     ['総オーダー', fmt(k.total_orders)],
-    ['稼働SKU', `${fmt(k.sku_active)}<small> / ${fmt(k.sku_master)}</small>`],
+    // 稼働SKU：商品マスタ未取込 (sku_master=0) のときは分母「/ 0」を出さない
+    // (「50 / 0」は壊れて見える)。マスタがある時だけ 稼働/全体 を併記する。
+    ['稼働SKU', k.sku_master
+      ? `${fmt(k.sku_active)}<small> / ${fmt(k.sku_master)}</small>`
+      : fmt(k.sku_active)],
     ['上位10%SKU集中', pct(k.top10_sku_share)],
     ['平均在庫回転', k.avg_turnover != null ? Number(k.avg_turnover).toFixed(2) : '—'],
     ['デッドストック率', pct(k.dead_sku_rate)],
