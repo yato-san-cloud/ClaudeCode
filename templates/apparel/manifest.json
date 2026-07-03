@@ -38,19 +38,19 @@
       "choices": [
         {
           "value": "discrete",
-          "label": "都度ピック"
+          "label": "シングルオーダー"
         },
         {
           "value": "batch",
-          "label": "バッチ"
+          "label": "マルチオーダー"
         },
         {
           "value": "zone",
-          "label": "ゾーン"
+          "label": "ゾーン（リレー）"
         },
         {
           "value": "wave",
-          "label": "ウェーブ"
+          "label": "バッチ投入"
         }
       ]
     },

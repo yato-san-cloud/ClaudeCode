@@ -30,10 +30,22 @@
       "label": "ピッキング方式",
       "type": "choice",
       "choices": [
-        { "value": "discrete", "label": "都度ピック" },
-        { "value": "batch", "label": "バッチ" },
-        { "value": "zone", "label": "ゾーン" },
-        { "value": "wave", "label": "ウェーブ" }
+        {
+          "value": "discrete",
+          "label": "シングルオーダー"
+        },
+        {
+          "value": "batch",
+          "label": "マルチオーダー"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン（リレー）"
+        },
+        {
+          "value": "wave",
+          "label": "バッチ投入"
+        }
       ]
     },
     {
