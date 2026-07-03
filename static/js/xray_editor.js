@@ -473,7 +473,7 @@ const XE = (() => {
             const iliacDiff = Math.abs(Li.y - Ri.y);
             const innomL = Math.abs(Lis.y - Li.y), innomR = Math.abs(Ris.y - Ri.y);
             const innomDiff = Math.abs(innomL - innomR);
-            const sSym = Lf && (lm('symphysis').x - midX);
+            const sSym = lm('symphysis').x - midX;
             const sS2 = lm('s2').x - midX;
             const shiftRow = (label, s) => rows.push([label,
                 sig(Math.abs(s)) ? `${pside(s < 0)}方向へ ${fmtLen(Math.abs(s))}` : '中央']);
