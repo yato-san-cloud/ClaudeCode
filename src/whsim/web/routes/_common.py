@@ -605,6 +605,10 @@ def _analysis_payload(model, metrics: dict, source: str) -> dict:
         "charts": {"stages": stages_chart, "cost": cost_chart,
                    "productivity": prod_chart},
         "productivity_compare": prod_compare,
+        # Busiest-day disclosure: present (a dict) only when a multi-day import was
+        # collapsed to its representative day; None otherwise (single-day / the thin
+        # analytic estimate) → the view shows nothing. Additive, behavior-preserving.
+        "rep_day": metrics.get("rep_day"),
         # Monte-Carlo 信頼区間 block (n / confidence / per-metric CIs). Present for
         # a run, absent (None) for the thin analytic estimate. The view reads its
         # `n` to render the single-run note and the ±5% replication recommendation.

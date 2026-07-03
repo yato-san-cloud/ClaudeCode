@@ -67,6 +67,11 @@ class RunResult:
     staging_capacity: int = 0               # 仮置き buffer capacity (0 = disabled)
     replay_window_s: float = 0.0
     cost: dict = field(default_factory=dict)
+    # Busiest-day disclosure metadata: None for single-day/profile demand (the
+    # pass-through path stays byte-identical), a dict when a multi-day import was
+    # collapsed to its representative day (see ``rep_day_meta``). Purely surfaced
+    # for the UI so the single-day KPI counts reconcile with the ②分析 totals.
+    rep_day: dict | None = None
 
 
 def representative_day(model: WarehouseModel) -> WarehouseModel:
@@ -108,6 +113,43 @@ def representative_day(model: WarehouseModel) -> WarehouseModel:
     return m
 
 
+# Monday-anchored weekday labels (0=月): the real-calendar ETL bases arrival_s on
+# the Monday on/before the first date, so a day-bucket index mod 7 recovers the
+# true weekday. Best-effort ("相当") for non-ETL offsets — see ``rep_day_meta``.
+_WEEKDAYS_JP = ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def rep_day_meta(model: WarehouseModel) -> dict | None:
+    """Disclosure metadata for the busiest-day collapse — ``None`` when it doesn't apply.
+
+    Mirrors ``representative_day``'s bucketing/tie-break WITHOUT collapsing the model,
+    so the UI can reconcile the simulated single-day KPI counts with the ②分析
+    multi-day totals (a salesperson who imports 1,494 orders across 27 days and sees
+    the sim process 83 needs to be told those 83 are the busiest day, not a data loss).
+    Returns ``None`` for single-day / profile demand (the pass-through path) so callers
+    surface nothing there — keeping that path byte-identical.
+    """
+    orders = model.orders.outbound
+    if len(orders) < 2:
+        return None
+    days: dict[int, list] = {}
+    for o in orders:
+        days.setdefault(int((o.arrival_s or 0.0) // 86400), []).append(o)
+    if len(days) < 2:
+        return None  # already a single day — nothing to disclose
+    best = max(days, key=lambda d: (len(days[d]), -d))  # busiest; ties → earliest
+    day_orders = days[best]
+    return {
+        "total_days": len(days),
+        "total_orders": len(orders),
+        "day_orders": len(day_orders),
+        "day_lines": sum(len(o.lines) for o in day_orders),
+        # Weekday of the simulated day (Monday-anchored ETL → 相当 label). Always
+        # derivable from the offset, so always present for a multi-day import.
+        "weekday": _WEEKDAYS_JP[best % 7],
+    }
+
+
 def run_once(
     model: WarehouseModel,
     seed: int | None = None,
@@ -120,6 +162,11 @@ def run_once(
     # accepts the 4 positional chunk args simply misses them (TypeError is a
     # swallowed reporting hiccup), so existing callers are unaffected.
     _report(progress, 0.0, model.simulation.duration_s, phase="build")
+    # Capture the busiest-day disclosure BEFORE the collapse (afterwards the model
+    # is single-day and the metadata is None). ``run_replications`` pre-collapses,
+    # so it re-attaches the pre-collapse meta to each result; a direct multi-day
+    # ``run_once`` (CLI) captures it correctly here.
+    rep_meta = rep_day_meta(model)
     model = representative_day(model)
     rng = random.Random(model.simulation.random_seed if seed is None else seed)
     env = simpy.Environment()
@@ -200,6 +247,7 @@ def run_once(
         n_replenishers=world.n_replenishers,
         staging_capacity=world.staging_capacity,
         replay_window_s=window, cost=_cost_inputs(model),
+        rep_day=rep_meta,
     )
 
 
@@ -256,6 +304,10 @@ def run_replications(
     # rebuilding the graph (and re-solving its Dijkstra sources) per rep was pure
     # waste on large floors. Behaviour-preserving: the graph is deterministic and
     # read-only apart from its memoised distance/snap caches.
+    # Disclosure metadata must be read from the ORIGINAL multi-day model, before
+    # the collapse below turns it single-day; run_once (fed the collapsed model)
+    # would otherwise see one day and report None. Re-attached to each result.
+    rep_meta = rep_day_meta(model)
     model = representative_day(model)
     graph = AisleGraph.from_model(model)
     results: list[RunResult] = []
@@ -266,6 +318,7 @@ def run_replications(
         res = run_once(model, seed=model.simulation.random_seed + r,
                        replay_window_s=None if r == 0 else 0.0, progress=cb,
                        graph=graph)
+        res.rep_day = rep_meta
         results.append(res)
         heat_sum = res.heat.copy() if heat_sum is None else heat_sum + res.heat
     assert heat_sum is not None

@@ -212,6 +212,12 @@ def _run_blocking(proj: Project, name: str | None = None) -> dict:
     metrics = kpi_mod.compute(results, model)
     if scale_note:
         metrics["scale_note"] = scale_note
+    # Busiest-day disclosure: when a multi-day import was collapsed to its
+    # representative day, carry the metadata so the KPI view can reconcile the
+    # single-day counts with the ②分析 totals. Absent (None) for single-day/
+    # profile demand → the payload shape is byte-identical there.
+    if res.rep_day:
+        metrics["rep_day"] = res.rep_day
     est = analytic.estimate(model)
 
     run_dir = proj.new_run_dir()

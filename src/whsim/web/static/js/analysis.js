@@ -141,6 +141,21 @@ function injectStyle() {
   color:var(--warn,#F5B05A);
   border-color:color-mix(in srgb,var(--warn,#F5B05A) 30%,transparent);
 }
+/* 代表日ディスクロージャ: an unobtrusive note that reconciles the simulated
+   single-day KPI counts with the ②分析 multi-day totals. Accent left-rule so it
+   reads as a "why these numbers" cue, not a warning. */
+#analysis .an-view .an-repday{
+  margin:10px 0 2px;padding:9px 12px 9px 13px;border-radius:8px;
+  font-size:var(--fs-xs,12px);line-height:1.5;
+  color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+  border:1px solid var(--line-hair,rgba(255,255,255,.08));
+  border-left:2px solid var(--accent,#16C0DE);
+  background:var(--bg-sunken,rgba(255,255,255,.02));
+}
+#analysis .an-view .an-repday b{
+  color:var(--ink-primary,#e6edf3);font-weight:700;
+  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+}
 
 /* delta: arrow + sign + muted colour + 60px sparkline (triple-encoded) */
 #analysis .an-view .delta{display:inline-flex;align-items:center;gap:5px}
@@ -550,6 +565,24 @@ function buildCiNote(ci) {
   return null;
 }
 
+// 代表日 disclosure note (below the hero). The run collapses a multi-day import
+// to its busiest single day for capacity sizing, so the KPI counts (e.g. 83
+// オーダー) look far smaller than the ②分析 totals (e.g. 1,494件/27日). This one
+// line tells the salesperson those numbers reconcile — no data was lost. Returns
+// null for single-day / estimate runs (rep_day absent) so nothing renders there.
+function buildRepDayNote(rd) {
+  if (!rd || typeof rd !== 'object') return null;
+  const days = rd.total_days, tot = rd.total_orders, dayN = rd.day_orders;
+  if (!isNum(days) || !isNum(tot) || !isNum(dayN)) return null;
+  const wd = (typeof rd.weekday === 'string' && rd.weekday) ? `（${rd.weekday}曜相当）` : '';
+  const note = el('p', { class: 'an-repday' });
+  note.appendChild(document.createTextNode(`最繁日${wd}を代表日としてシミュレーション：`));
+  note.appendChild(el('b', null, `${group(dayN)}オーダー`));
+  note.appendChild(document.createTextNode(
+    `（全${group(days)}日・${group(tot)}件の中で最も忙しい日）`));
+  return note;
+}
+
 function buildHero(heroItems) {
   const grid = el('div', { class: 'kpi-hero' });
   heroItems.forEach((h) => {
@@ -599,11 +632,15 @@ function buildKpiGroups(groups) {
   return frag;
 }
 
-function buildKpiSection(kpis, ci) {
+function buildKpiSection(kpis, ci, repDay) {
   const sec = el('section', { class: 'an-section' });
   sec.appendChild(el('h2', { class: 'an-section-title' }, '主要KPI'));
   const hero = Array.isArray(kpis.hero) ? kpis.hero : [];
   if (hero.length) sec.appendChild(buildHero(hero));
+  // 代表日 disclosure right under the hero: reconciles the single-day KPI counts
+  // with the ②分析 multi-day totals (absent → nothing rendered).
+  const repNote = buildRepDayNote(repDay);
+  if (repNote) sec.appendChild(repNote);
   // Replication guidance right below the hero (single-run note or ±5% target).
   const note = buildCiNote(ci);
   if (note) sec.appendChild(note);
@@ -1210,7 +1247,7 @@ function render(targetEl, payload) {
   }
 
   root.appendChild(buildInsightsSection(insights));
-  root.appendChild(buildKpiSection(kpis, data.ci));
+  root.appendChild(buildKpiSection(kpis, data.ci, data.rep_day));
   const chartsSec = buildChartsSection(charts, data.currency);
   if (chartsSec) root.appendChild(chartsSec);
   const prodSec = buildProdFeedback(data.productivity_compare, targetEl);

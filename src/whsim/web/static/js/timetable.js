@@ -88,6 +88,10 @@ function injectStyle() {
     border-radius:var(--r-lg);background:var(--bg-panel)}
   .tt-empty-title{font-weight:700;color:var(--ink-primary);font-size:var(--fs-section)}
   .tt-empty-body{color:var(--ink-secondary);font-size:var(--fs-sm);max-width:48ch}
+  /* fresh-handoff guidance (targets arrived, nobody placed yet): one line + CTA,
+     not a wall of 達成率0% warnings. */
+  .tt-empty-guide{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
+  .tt-empty-guide-msg{flex:1 1 auto;min-width:16ch}
   /* analytic staffing solver panel */
   .tt-solver{border:1px solid var(--line);border-radius:var(--r-lg,12px);
     background:var(--panel-2,var(--bg-panel));padding:var(--sp-2,8px) var(--sp-3,12px)}
@@ -660,6 +664,31 @@ export function mountTimetable(targetEl, opts = {}) {
   function renderWarnings() {
     const ws = result.warnings || [];
     elWarn.innerHTML = '';
+    // Fresh material-flow handoff: the 物量 targets arrived but no headcount is
+    // placed yet, so EVERY process reads 達成率0% / 物量未達. That is not a real
+    // shortfall — it just needs the solver to auto-place. Suppress the per-process
+    // warning spam and show ONE friendly line + a primary CTA that runs the
+    // analytic solver (▶ソルバー実行). When SOME placement exists, a shortfall is
+    // real, so fall through to the normal warning list.
+    const noPlacement = result.processes && result.processes.length
+      && result.processes.every((p) => (p.assigned_hours || 0) === 0);
+    const hasWork = (result.total_required_hours || 0) > 0;
+    if (noPlacement && hasWork) {
+      const box = el('div', 'tt-info tt-empty-guide');
+      box.appendChild(el('div', 'tt-empty-guide-msg',
+        'まだ人員が配置されていません。「▶ソルバー実行」で自動配置します。'));
+      const cta = el('button', 'tt-btn tt-solver-run', '▶ ソルバー実行');
+      cta.onclick = () => {
+        if (elSolver) {
+          elSolver.open = true;
+          try { elSolver.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_e) { /* noop */ }
+        }
+        runSolver();
+      };
+      box.appendChild(cta);
+      elWarn.appendChild(box);
+      return;
+    }
     if (!ws.length) {
       const ok = el('div', 'tt-info', '✓ 制約・物量に問題はありません。');
       elWarn.appendChild(ok);
