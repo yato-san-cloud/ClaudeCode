@@ -7,7 +7,8 @@
   "scripts": {
     "inspect": "node src/inspect.js",
     "book": "node src/book.js",
-    "book:dry": "node src/book.js --dry-run"
+    "book:dry": "node src/book.js --dry-run",
+    "selftest": "node src/selftest.js"
   },
   "engines": {
     "node": ">=18"

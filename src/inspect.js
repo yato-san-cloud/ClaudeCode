@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { loadDotEnv, loadConfig, ensureDir, timestamp, log } from './lib.js';
+import { loadDotEnv, loadConfig, ensureDir, timestamp, log, launchOptions } from './lib.js';
 
 loadDotEnv();
 const config = loadConfig();
@@ -56,7 +56,7 @@ async function snapshotPage(page, label) {
   }
 }
 
-const browser = await chromium.launch({ headless: false });
+const browser = await chromium.launch({ ...launchOptions(config), headless: false });
 const context = await browser.newContext({ locale: 'ja-JP' });
 const page = await context.newPage();
 

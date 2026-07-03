@@ -1,13 +1,19 @@
 {
+  "loginUrl": "https://medicalpass.jp/users/login",
   "departmentUrl": "https://medicalpass.jp/departments/2860",
 
   "targetTimeJst": "06:00:00",
   "preOpenLeadMinutes": 5,
 
-  "menuText": "一般診察",
-  "proceedButtonTexts": ["次へ", "確認", "予約する", "受付する", "この内容で予約", "予約を確定"],
-  "successTexts": ["受付番号", "受付が完了", "予約が完了", "予約を受け付けました"],
-  "closedTexts": ["受付時間外", "受付を開始していません", "受付しておりません"],
+  "//patientName": "アカウントに複数の家族を登録している場合、受診する子の氏名を入れる（1人なら空でよい）",
+  "patientName": "",
+
+  "//menuTextCandidates": "当日一般受付で押すメニュー名の候補。上から順に探して最初に見つかったものを押す",
+  "menuTextCandidates": ["診察", "一般診察", "一般外来", "診察＋注射", "診察+注射"],
+
+  "proceedButtonTexts": ["受付する", "予約する", "この内容で受付", "この内容で予約", "受付を確定", "予約を確定", "確定する", "次へ", "確認"],
+  "successTexts": ["受付番号", "受付が完了", "受付を受け付けました", "予約が完了", "受付完了", "予約を受け付けました"],
+  "closedTexts": ["受付時間外", "受付を開始していません", "受付を停止", "受付停止", "受付は終了", "本日の受付は終了", "定員", "受付を締め切", "受付しておりません"],
 
   "retry": {
     "intervalSeconds": 3,

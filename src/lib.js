@@ -16,6 +16,22 @@ export function loadConfig(file = 'config.json') {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+/**
+ * chromium.launch() に渡すオプションを組み立てる。
+ * 通常は headless だけ指定すればよいが、ブラウザを固定パスに置いている環境向けに
+ * CHROMIUM_PATH 環境変数 / config.chromiumPath で実行ファイルを明示できる。
+ */
+export function launchOptions(config) {
+  // HEADLESS 環境変数があれば config より優先（サーバー/CIで headless 実行するため）
+  const headless = process.env.HEADLESS !== undefined
+    ? /^(1|true|yes)$/i.test(process.env.HEADLESS)
+    : !!config.headless;
+  const opts = { headless };
+  const exe = process.env.CHROMIUM_PATH || config.chromiumPath;
+  if (exe) opts.executablePath = exe;
+  return opts;
+}
+
 export function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
