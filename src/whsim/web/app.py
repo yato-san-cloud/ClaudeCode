@@ -55,10 +55,14 @@ from whsim.web.routes._common import (  # noqa: F401 — re-exported for callers
 )
 from whsim.web.routes import (
     analysis as analysis_routes,
+    design as design_routes,
     imports as imports_routes,
+    inventory as inventory_routes,
     misc as misc_routes,
     projects as projects_routes,
     run_render as run_render_routes,
+    scorecard as scorecard_routes,
+    staffing as staffing_routes,
     sweep as sweep_routes,
     viewer as viewer_routes,
 )
@@ -423,6 +427,10 @@ app.include_router(misc_routes.router)
 app.include_router(projects_routes.router)
 app.include_router(imports_routes.router)
 app.include_router(analysis_routes.router)
+app.include_router(staffing_routes.router)
+app.include_router(inventory_routes.router)
+app.include_router(design_routes.router)
+app.include_router(scorecard_routes.router)
 app.include_router(run_render_routes.router)
 app.include_router(viewer_routes.router)
 app.include_router(sweep_routes.router)
