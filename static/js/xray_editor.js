@@ -19,7 +19,8 @@ const XE = (() => {
         file: null, image: null, imgW: 0, imgH: 0,
         type: 'pelvis_full',
         landmarks: [],
-        calib: { on: false, pts: null, mm: 100 },
+        calib: { on: false, pts: null, mm: 100, direct: null, source: null },
+        dicom: null,
         filters: { contrast: 1, brightness: 1, invert: false },
         ap: true, showLines: true, summary: null,
         vb: { x: 0, y: 0, w: 1, h: 1 },
@@ -112,10 +113,14 @@ const XE = (() => {
             S.lastExport = null;
             S.calib.on = false;
             S.calib.pts = null;
+            S.calib.direct = null;
+            S.calib.source = null;
+            S.dicom = data.dicom || null;
             $('calibChk').checked = false;
             $('calibFields').style.display = 'none';
             $('exportResult').style.display = 'none';
 
+            applyDicomScale();
             setupCanvas();
             fitView();
             draw();
@@ -349,6 +354,11 @@ const XE = (() => {
     }
 
     function toggleCalib(on) {
+        // DICOM等の自動スケール中は手動2点キャリブレーションを無効化
+        if (S.calib.direct) {
+            $('calibChk').checked = false;
+            return;
+        }
         S.calib.on = on;
         $('calibFields').style.display = on ? 'block' : 'none';
         if (on && !S.calib.pts) {
@@ -359,6 +369,35 @@ const XE = (() => {
         }
         draw();
         recompute();
+    }
+
+    // DICOMから取得した mm/px を直接スケールとして適用し、状態を表示する
+    function applyDicomScale() {
+        const banner = $('dicomBanner');
+        const calibRow = $('calibManualRow');
+        if (S.dicom && S.dicom.mm_per_px) {
+            S.calib.direct = S.dicom.mm_per_px;
+            S.calib.source = S.dicom.spacing_source || 'DICOM';
+            if (banner) {
+                const perMm = (1 / S.dicom.mm_per_px).toFixed(1);
+                banner.style.display = 'block';
+                banner.innerHTML =
+                    `DICOM ${S.dicom.spacing_source} から自動スケール取得: ` +
+                    `<b>${S.dicom.mm_per_px} mm/px</b>（${perMm} px/mm）— mm値は自動表示されます`;
+            }
+            if (calibRow) calibRow.style.display = 'none';  // 手動不要
+        } else {
+            if (banner) {
+                if (S.dicom) {
+                    banner.style.display = 'block';
+                    banner.innerHTML =
+                        'DICOMを読み込みました（PixelSpacing情報なし）。mmが必要な場合は手動スケールを設定してください。';
+                } else {
+                    banner.style.display = 'none';
+                }
+            }
+            if (calibRow) calibRow.style.display = '';
+        }
     }
 
     function persistClinic() {
@@ -385,6 +424,8 @@ const XE = (() => {
     }
 
     function mmPerPx() {
+        // DICOM PixelSpacing 等の直接スケールが最優先
+        if (S.calib.direct && S.calib.direct > 0) return S.calib.direct;
         if (!S.calib.on || !S.calib.pts || !(S.calib.mm > 0)) return null;
         const [a, b] = S.calib.pts;
         const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -486,7 +527,10 @@ const XE = (() => {
             S.summary = null;
         }
 
-        rows.push(['スケール', mmPerPx() ? 'mm換算（フィルム面）' : '未設定（px表示）']);
+        const scaleLabel = mmPerPx()
+            ? (S.calib.direct ? `DICOM自動（${S.calib.source}）` : 'mm換算（フィルム面）')
+            : '未設定（px表示）';
+        rows.push(['スケール', scaleLabel]);
         rows.push(['左右表記', S.ap ? 'AP標準（画面左＝患者右）' : '反転（画面左＝患者左）']);
         return rows;
     }
@@ -811,6 +855,7 @@ const XE = (() => {
             width: S.imgW, height: S.imgH,
             landmarks: S.landmarks,
             calib: S.calib,
+            dicom: S.dicom,
             filters: S.filters,
             ap_standard: S.ap,
             patient: {
@@ -843,7 +888,8 @@ const XE = (() => {
                 S.imgW = d.width; S.imgH = d.height;
                 S.type = d.analysis_type || 'pelvis_full';
                 S.landmarks = d.landmarks;
-                S.calib = d.calib || { on: false, pts: null, mm: 100 };
+                S.calib = d.calib || { on: false, pts: null, mm: 100, direct: null, source: null };
+                S.dicom = d.dicom || null;
                 S.filters = d.filters || { contrast: 1, brightness: 1, invert: false };
                 S.ap = d.ap_standard !== false;
                 S.undo = [];
@@ -867,6 +913,7 @@ const XE = (() => {
                 }
                 $('uploadLabel').textContent = `セッション読込: ${file.name}`;
 
+                applyDicomScale();
                 setupCanvas();
                 fitView();
                 draw();

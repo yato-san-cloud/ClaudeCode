@@ -13,8 +13,8 @@
     <div class="upload-zone" id="uploadZone">
         <div class="icon">&#128444;</div>
         <p id="uploadLabel">クリックまたはドラッグ&amp;ドロップでX線画像を選択</p>
-        <p style="font-size: 0.8rem; margin-top: 0.5rem;">対応形式: JPG / PNG / BMP（最大64MB）</p>
-        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+        <p style="font-size: 0.8rem; margin-top: 0.5rem;">対応形式: DICOM(.dcm) / JPG / PNG / BMP（最大64MB）</p>
+        <input type="file" id="fileInput" accept=".dcm,application/dicom,image/*" style="display: none;">
     </div>
     <div class="upload-actions">
         <label class="btn btn-outline session-load">
@@ -126,18 +126,21 @@
 
                 <div class="side-card">
                     <h4>スケール設定（mm換算）</h4>
-                    <label class="check-line">
-                        <input type="checkbox" id="calibChk">
-                        キャリブレーションを使う
-                    </label>
-                    <div id="calibFields" style="display:none;">
-                        <p class="side-help">
-                            画像に写った既知の長さ（定規・キャリブレーションボール等）の両端に
-                            <span style="color:#b14fff; font-weight:600;">紫の2点</span>を合わせ、実寸を入力してください。
-                        </p>
-                        <div class="slider-row">
-                            <label>実寸 (mm)</label>
-                            <input type="number" id="calibMM" value="100" min="1" step="1">
+                    <div id="dicomBanner" class="dicom-banner" style="display:none;"></div>
+                    <div id="calibManualRow">
+                        <label class="check-line">
+                            <input type="checkbox" id="calibChk">
+                            手動キャリブレーションを使う
+                        </label>
+                        <div id="calibFields" style="display:none;">
+                            <p class="side-help">
+                                画像に写った既知の長さ（定規・キャリブレーションボール等）の両端に
+                                <span style="color:#b14fff; font-weight:600;">紫の2点</span>を合わせ、実寸を入力してください。
+                            </p>
+                            <div class="slider-row">
+                                <label>実寸 (mm)</label>
+                                <input type="number" id="calibMM" value="100" min="1" step="1">
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -557,6 +557,20 @@ body {
     margin-top: 0.4rem;
 }
 
+.dicom-banner {
+    background: #eef7ef;
+    border: 1px solid #bfe3c4;
+    border-left: 4px solid var(--success);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    margin-bottom: 0.7rem;
+    font-size: 0.82rem;
+    color: #2f6b3a;
+    line-height: 1.5;
+}
+
+.dicom-banner b { color: #1f5b2c; }
+
 .slider-row {
     margin-bottom: 0.6rem;
 }

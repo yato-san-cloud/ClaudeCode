@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, send_file, jsonify
 from modules.referral_letter import generate_referral_pdf
 from modules.xray_analyzer import detect_landmarks, render_annotated
 from modules.xray_report import generate_xray_report_pdf
+from modules.dicom_loader import is_dicom, load_dicom
 
 APP_VERSION = "1.0.0"
 
@@ -102,15 +103,32 @@ def xray():
         image_bytes = f.read()
         analysis_type = request.form.get("analysis_type", "pelvis_full")
 
+        # DICOM(.dcm)なら PNG へ正規化し、PixelSpacing から自動スケールを取得
+        dicom_info = None
+        mimetype = f.mimetype if (f.mimetype or "").startswith("image/") else "image/png"
+        if is_dicom(image_bytes) or (f.filename or "").lower().endswith(".dcm"):
+            try:
+                loaded = load_dicom(image_bytes)
+            except Exception as e:
+                return jsonify({"error": f"DICOMの読み込みに失敗しました: {e}"}), 400
+            image_bytes = loaded["png"]
+            mimetype = "image/png"
+            dicom_info = {
+                "mm_per_px": loaded["mm_per_px"],
+                "spacing_source": loaded["spacing_source"],
+                "meta": loaded["meta"],
+            }
+
         try:
             detection = detect_landmarks(image_bytes, analysis_type)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
-        mimetype = f.mimetype if (f.mimetype or "").startswith("image/") else "image/png"
         detection["image"] = (
             f"data:{mimetype};base64," + base64.b64encode(image_bytes).decode("utf-8")
         )
+        if dicom_info:
+            detection["dicom"] = dicom_info
         return jsonify(detection)
 
     return render_template("xray.html")

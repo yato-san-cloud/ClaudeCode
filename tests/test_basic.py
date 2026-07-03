@@ -2,6 +2,7 @@
 
 実行: python3 tests/test_basic.py
 """
+import io
 import os
 import sys
 
@@ -159,6 +160,84 @@ def test_xray_report_pdf():
     labels = [r[0] for r in rows]
     assert any("大腿骨頭ライン" in x for x in labels)
     assert any("恥骨結合" in x for x in labels)
+
+
+def _make_dicom(photometric="MONOCHROME2", spacing=True):
+    import numpy as np
+    import cv2
+    import pydicom
+    from pydicom.dataset import Dataset, FileDataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    h, w = 500, 420
+    arr = np.full((h, w), 8000, np.uint16)
+    cv2.ellipse(arr, (w // 2, int(h * 0.5)), (150, 95), 0, 0, 360, 22000, -1)
+    cv2.circle(arr, (int(w * 0.35), int(h * 0.6)), 26, 32000, -1)
+    cv2.circle(arr, (int(w * 0.65), int(h * 0.6)), 26, 32000, -1)
+    wc = 20000
+    if photometric == "MONOCHROME1":
+        arr = 65535 - arr
+        wc = 65535 - wc  # 反転データに合わせて窓中心も反転 (実データの挙動)
+
+    meta = Dataset()
+    meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\x00" * 128)
+    ds.Modality = "CR"
+    ds.BodyPartExamined = "PELVIS"
+    ds.PhotometricInterpretation = photometric
+    ds.SamplesPerPixel = 1
+    ds.Rows = h
+    ds.Columns = w
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    ds.WindowCenter = wc
+    ds.WindowWidth = 40000
+    if spacing:
+        ds.ImagerPixelSpacing = [0.143, 0.143]
+    ds.PixelData = arr.tobytes()
+
+    buf = io.BytesIO()
+    ds.save_as(buf, write_like_original=False)
+    return buf.getvalue()
+
+
+def test_dicom_detected_and_loaded():
+    from modules.dicom_loader import is_dicom, load_dicom
+    data = _make_dicom()
+    assert is_dicom(data)
+    r = load_dicom(data)
+    assert r["png"][:8] == b"\x89PNG\r\n\x1a\n"
+    assert r["width"] == 420 and r["height"] == 500
+    assert abs(r["mm_per_px"] - 0.143) < 1e-6
+    assert r["spacing_source"] == "ImagerPixelSpacing"
+    assert r["meta"]["body_part"] == "PELVIS"
+
+
+def test_dicom_monochrome1_inverted():
+    from modules.dicom_loader import load_dicom
+    import numpy as np
+    import cv2
+    m2 = cv2.imdecode(np.frombuffer(load_dicom(_make_dicom("MONOCHROME2"))["png"], np.uint8), cv2.IMREAD_GRAYSCALE)
+    m1 = cv2.imdecode(np.frombuffer(load_dicom(_make_dicom("MONOCHROME1"))["png"], np.uint8), cv2.IMREAD_GRAYSCALE)
+    # MONOCHROME1は反転補正され、MONOCHROME2とほぼ同じ明暗になる
+    assert abs(float(m2.mean()) - float(m1.mean())) < 25
+
+
+def test_dicom_without_spacing_returns_none():
+    from modules.dicom_loader import load_dicom
+    r = load_dicom(_make_dicom(spacing=False))
+    assert r["mm_per_px"] is None
+
+
+def test_dicom_png_feeds_analyzer():
+    from modules.dicom_loader import load_dicom
+    png = load_dicom(_make_dicom())["png"]
+    det = detect_landmarks(png, "pelvis_full")
+    assert len(det["landmarks"]) == 6
 
 
 def test_desktop_module_imports():
