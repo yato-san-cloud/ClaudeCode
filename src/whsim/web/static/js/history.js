@@ -85,17 +85,23 @@ const HIST_CSS = `
 .hist-clear:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .hist-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;
   max-height:320px;overflow-y:auto;overscroll-behavior:contain}
-.hist-row{display:flex;align-items:flex-start;gap:7px;width:100%;text-align:left;
+/* Compact activity-log rows: ONE clean text line (ellipsis; full text on hover via
+   the row's title) + a clearly visible relative timestamp below it. Deliberately
+   single-line — the previous 2-line -webkit-line-clamp inside a flex column
+   mis-measured its height, so the timestamp was pushed out of the row and collided
+   with the next entry (the 「文字が潰れる」 bug). */
+.hist-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
   border:none;background:transparent;font:inherit;color:var(--ink-secondary);
   padding:5px 6px;border-radius:var(--r-md);cursor:default}
 .hist-row.is-link{cursor:pointer}
 .hist-row.is-link:hover{background:var(--bg-hover);color:var(--ink-primary)}
 .hist-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.hist-ico{flex:0 0 auto;font-size:12px;line-height:1.5;width:16px;text-align:center}
-.hist-body{flex:1;min-width:0;display:flex;flex-direction:column}
-.hist-text{font-size:11.5px;line-height:1.45;overflow:hidden;display:-webkit-box;
-  -webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
-.hist-time{font-size:10px;color:var(--ink-tertiary);margin-top:1px}
+.hist-ico{flex:0 0 auto;font-size:13px;line-height:1;width:18px;text-align:center}
+.hist-body{flex:1;min-width:0}
+.hist-text{font-size:11.5px;line-height:1.4;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.hist-time{font-size:10px;line-height:1.3;color:var(--ink-tertiary);margin-top:1px;
+  white-space:nowrap}
 .hist-empty{font-size:11.5px;color:var(--ink-tertiary);line-height:1.6;padding:4px 2px}
 @media (prefers-reduced-motion: reduce){.hist-clear{transition:none}}
 `;
