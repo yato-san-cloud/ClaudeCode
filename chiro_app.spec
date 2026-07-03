@@ -36,6 +36,19 @@ elif IS_MAC:
 else:
     hiddenimports += ["webview.platforms.gtk", "webview.platforms.qt"]
 
+# DICOM: pydicom はプラグインをエントリポイントで動的検出するため、
+# 明示収集してパッケージに含める (非圧縮DICOMは常に、圧縮はプラグイン同梱時)
+try:
+    from PyInstaller.utils.hooks import collect_submodules
+    hiddenimports += collect_submodules("pydicom")
+    for _mod in ("pylibjpeg", "libjpeg", "openjpeg"):
+        try:
+            hiddenimports += collect_submodules(_mod)
+        except Exception:
+            pass
+except Exception:
+    pass
+
 win_icon = os.path.join("static", "icons", "icon.ico")
 mac_icon = os.path.join("static", "icons", "icon.icns")
 

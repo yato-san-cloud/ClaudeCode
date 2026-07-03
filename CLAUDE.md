@@ -23,6 +23,15 @@ PyInstaller; Windows/macOS binaries are built by GitHub Actions.
 - `modules/xray_analyzer.py` is the source of truth for measurement geometry.
   `static/js/xray_editor.js` mirrors the same formulas for live UI updates —
   change both together.
+- Pelvic geometry uses TRUE HORIZONTAL (image-y) as the reference axis, per the
+  Gonstead rolling-ruler-parallel-to-film-edge method — not perpendicular to the
+  tilted femoral-head line. PI/AS is from innominate vertical length (iliac crest
+  → ischial tuberosity); longer side = PI. Significance threshold is ≥5mm
+  (calibrated). Clinical rounding: 0.5° / 0.5mm. Never assert a full listing —
+  measurements + a hedged "示唆" only (sources conflict on PI↔femur-head side).
+- DICOM: `modules/dicom_loader.py` normalizes to 8-bit PNG and extracts
+  PixelSpacing → mm/px (detector-plane, magnification-uncorrected). pydicom is
+  imported lazily so the app boots without it; DICOM upload just errors if absent.
 - Landmark ids are viewer-coordinate based (`left_*` = screen-left). Patient-side
   labels are derived via `ap_standard` (AP standard: screen-left = patient RIGHT).
 - mm values are only emitted when a `mm_per_px` calibration is provided; never

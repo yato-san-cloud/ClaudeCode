@@ -15,10 +15,12 @@ from modules.referral_letter import _Doc, FONT, MARGIN_X, LINE
 # 計測キー → 日本語ラベル (表示順もこの順)
 _LABELS_FULL = [
     ("fhl_tilt_deg", "大腿骨頭ライン(FHL)傾斜", "°"),
-    ("fhl_lower_side", "低い側(大腿骨頭)", ""),
     ("femur_diff", "大腿骨頭 高低差", None),   # px/mm ペア
-    ("iliac_diff", "腸骨稜 高低差(FHL基準)", None),
-    ("iliac_higher_side", "高い側(腸骨稜)", ""),
+    ("fhl_lower_side", "低位側(大腿骨頭＝短下肢)", ""),
+    ("iliac_diff", "腸骨稜 高低差", None),
+    ("iliac_lower_side", "低位側(腸骨稜)", ""),
+    ("innominate_diff", "寛骨長 左右差", None),
+    ("pi_side", "長い側(PI寛骨の目安)", ""),
     ("symphysis_shift", "恥骨結合 側方偏位", "shift"),
     ("s2_shift", "S2 側方偏位", "shift"),
 ]
@@ -89,15 +91,15 @@ def measurement_rows(measurements: dict, analysis_type: str):
         if val is not None:
             rows.append((label, str(val)))
 
-    # 腸骨稜高の内訳 (pelvis_full)
-    heights_mm = measurements.get("iliac_height_mm")
-    heights_px = measurements.get("iliac_height_px")
-    if isinstance(heights_mm, dict):
-        for side, v in heights_mm.items():
-            rows.append((f"腸骨稜高（{side}）", f"{v} mm"))
-    elif isinstance(heights_px, dict):
-        for side, v in heights_px.items():
-            rows.append((f"腸骨稜高（{side}）", f"{v} px"))
+    # 寛骨長の内訳 (pelvis_full): 腸骨稜→坐骨結節の垂直長 左右
+    innom_mm = measurements.get("innominate_len_mm")
+    innom_px = measurements.get("innominate_len_px")
+    if isinstance(innom_mm, dict):
+        for side, v in innom_mm.items():
+            rows.append((f"寛骨長（{side}）", f"{v} mm"))
+    elif isinstance(innom_px, dict):
+        for side, v in innom_px.items():
+            rows.append((f"寛骨長（{side}）", f"{v} px"))
 
     scale = "mm換算（フィルム面・拡大率未補正）" if measurements.get("calibrated") else "未設定（px表示）"
     rows.append(("スケール", scale))

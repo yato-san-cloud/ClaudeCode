@@ -13,6 +13,7 @@ const XE = (() => {
     const COLOR = {
         femoral: '#00c7ff', iliac: '#ff3b3b', spine: '#50c850',
         fhl: '#ffd700', midline: '#c8c8c8', sym: '#ff50ff', calib: '#b14fff',
+        ischium: '#ffa24a',
     };
 
     const S = {
@@ -453,48 +454,61 @@ const XE = (() => {
         return k ? `${roundMM(px * k)}mm` : `${px.toFixed(0)}px`;
     }
 
-    function fhlFrame() {
-        const L = lm('left_femoral'), R = lm('right_femoral');
-        if (!L || !R) return null;
-        let ux = R.x - L.x, uy = R.y - L.y;
-        const n0 = Math.hypot(ux, uy) || 1;
-        ux /= n0; uy /= n0;
-        let nx = uy, ny = -ux;
-        if (ny > 0) { nx = -nx; ny = -ny; }
-        return { L, R, ux, uy, nx, ny, mx: (L.x + R.x) / 2, my: (L.y + R.y) / 2 };
-    }
 
     function measures() {
         const rows = [];
         const t = S.type;
 
         if (t === 'pelvis_full') {
-            const f = fhlFrame();
-            if (!f) return rows;
-            const tilt = Math.atan2(f.R.y - f.L.y, f.R.x - f.L.x) * 180 / Math.PI;
-            const femDiff = Math.abs(f.R.y - f.L.y);
-            const dot = (p, vx, vy) => (p.x - f.mx) * vx + (p.y - f.my) * vy;
-            const hL = dot(lm('left_iliac'), f.nx, f.ny);
-            const hR = dot(lm('right_iliac'), f.nx, f.ny);
-            const iliacDiff = Math.abs(hL - hR);
-            const sSym = dot(lm('symphysis'), f.ux, f.uy);
-            const sS2 = dot(lm('s2'), f.ux, f.uy);
-            const shiftRow = (label, s) => rows.push([label,
-                Math.abs(s) > THR_PX ? `${pside(s < 0)}方向へ ${fmtLen(Math.abs(s))}` : '中央']);
+            // Gonstead本式: 真の水平(画像y)を基準に計測 (analyzer.py と一致)
+            const Lf = lm('left_femoral'), Rf = lm('right_femoral');
+            const Li = lm('left_iliac'), Ri = lm('right_iliac');
+            const Lis = lm('left_ischium'), Ris = lm('right_ischium');
+            if (!Lf || !Rf || !Li || !Ri || !Lis || !Ris) return rows;
+            const midX = (Lf.x + Rf.x) / 2;
+            const sig = (d) => { const k = mmPerPx(); return k ? d * k >= 5.0 : d >= THR_PX; };
 
-            const iliacHigh = iliacDiff > THR_PX ? pside(hL > hR) : '同高';
+            const tilt = Math.atan2(Rf.y - Lf.y, Rf.x - Lf.x) * 180 / Math.PI;
+            const femDiff = Math.abs(Lf.y - Rf.y);
+            const iliacDiff = Math.abs(Li.y - Ri.y);
+            const innomL = Math.abs(Lis.y - Li.y), innomR = Math.abs(Ris.y - Ri.y);
+            const innomDiff = Math.abs(innomL - innomR);
+            const sSym = Lf && (lm('symphysis').x - midX);
+            const sS2 = lm('s2').x - midX;
+            const shiftRow = (label, s) => rows.push([label,
+                sig(Math.abs(s)) ? `${pside(s < 0)}方向へ ${fmtLen(Math.abs(s))}` : '中央']);
+
+            const fhlLow = sig(femDiff) ? pside(Lf.y > Rf.y) : '水平';
+            const iliacLow = sig(iliacDiff) ? pside(Li.y > Ri.y) : '同高';
+            const piSide = sig(innomDiff) ? pside(innomL > innomR) : null;
+
             rows.push(['大腿骨頭ライン(FHL)傾斜', `${roundAngle(Math.abs(tilt))}°`]);
-            rows.push(['低い側（大腿骨頭）', femDiff > THR_PX ? pside(f.L.y > f.R.y) : '水平']);
             rows.push(['大腿骨頭 高低差', fmtLen(femDiff)]);
-            rows.push([`腸骨稜高（${pside(true)}）`, fmtLen(Math.abs(hL))]);
-            rows.push([`腸骨稜高（${pside(false)}）`, fmtLen(Math.abs(hR))]);
+            rows.push(['低位側（大腿骨頭＝短下肢）', fhlLow]);
             rows.push(['腸骨稜 高低差', fmtLen(iliacDiff)]);
-            rows.push(['高い側（腸骨稜）', iliacHigh]);
+            rows.push(['低位側（腸骨稜）', iliacLow]);
+            rows.push([`寛骨長（${pside(true)}）`, fmtLen(innomL)]);
+            rows.push([`寛骨長（${pside(false)}）`, fmtLen(innomR)]);
+            rows.push(['寛骨長 左右差', fmtLen(innomDiff)]);
+            rows.push(['長い側（PI目安）', piSide || '左右差なし']);
             shiftRow('恥骨結合 側方偏位', sSym);
             shiftRow('S2 側方偏位', sS2);
-            S.summary = (iliacHigh === '右' || iliacHigh === '左')
-                ? `患者${iliacHigh}側の腸骨稜高位（FHL基準）。同側寛骨のPI変位を示唆。`
-                : '腸骨稜高は左右ほぼ同等。明らかな高低差なし。';
+
+            const rotWarn = (sig(Math.abs(sSym)) || sig(Math.abs(sS2)));
+            if (piSide) {
+                const asSide = pside(!(innomL > innomR));
+                let s = `寛骨垂直長は患者${piSide}側が長い → 同側PI寛骨の目安（対側${asSide}はAS傾向）。`;
+                if (fhlLow === '右' || fhlLow === '左') {
+                    s += (fhlLow === piSide)
+                        ? ` 大腿骨頭も${fhlLow}低位で短下肢側と一致。`
+                        : ` ただし大腿骨頭低位は${fhlLow}側で不一致（要確認）。`;
+                }
+                if (rotWarn) s += ' ※恥骨結合/S2に偏位あり。体位回旋が高さ計測に影響の可能性。';
+                S.summary = s;
+            } else {
+                S.summary = '寛骨垂直長の左右差は僅少（有意差なし）。'
+                    + (rotWarn ? ' ※恥骨結合/S2に偏位あり。体位回旋の影響に注意。' : '');
+            }
         } else if (t === 'pelvis_tilt') {
             const L = lm('left_iliac'), R = lm('right_iliac');
             if (!L || !R) return rows;
@@ -632,44 +646,45 @@ const XE = (() => {
         const t = S.type;
 
         if (t === 'pelvis_full') {
-            const f = fhlFrame();
-            if (!f) return;
-            lineAlong(f.mx, f.my, f.ux, f.uy, COLOR.fhl, sw);
-            lineAlong(f.mx, f.my, f.nx, f.ny, COLOR.midline, sw * 0.8, true);
+            const Lf = lm('left_femoral'), Rf = lm('right_femoral');
+            const Li = lm('left_iliac'), Ri = lm('right_iliac');
+            const Lis = lm('left_ischium'), Ris = lm('right_ischium');
+            if (!Lf || !Rf || !Li || !Ri || !Lis || !Ris) return;
+            const midX = (Lf.x + Rf.x) / 2;
+            const W = S.imgW;
 
-            const headR = S.imgW * 0.045;
-            [f.L, f.R].forEach(p => circle(p.x, p.y, headR, COLOR.femoral, sw));
+            // 大腿骨頭線 + 各頭の水平参照線 (真の水平)
+            seg(Lf.x, Lf.y, Rf.x, Rf.y, COLOR.fhl, sw);
+            seg(-9000, Lf.y, W + 9000, Lf.y, COLOR.fhl, sw * 0.8, true);
+            seg(-9000, Rf.y, W + 9000, Rf.y, COLOR.fhl, sw * 0.8, true);
+            // 垂直中心線
+            seg(midX, -9000, midX, S.imgH + 9000, COLOR.midline, sw * 0.8, true);
 
-            ['left_iliac', 'right_iliac'].forEach(id => {
-                const P = lm(id);
-                const hd = (P.x - f.mx) * f.nx + (P.y - f.my) * f.ny;
-                const footX = P.x - hd * f.nx, footY = P.y - hd * f.ny;
-                seg(P.x, P.y, footX, footY, COLOR.iliac, sw * 0.8, true);
-                const segLen = S.imgW * 0.09;
-                seg(P.x - f.ux * segLen, P.y - f.uy * segLen,
-                    P.x + f.ux * segLen, P.y + f.uy * segLen, COLOR.iliac, sw);
-            });
+            const headR = W * 0.045;
+            [Lf, Rf].forEach(p => circle(p.x, p.y, headR, COLOR.femoral, sw));
 
+            // 腸骨稜: 水平参照線
+            [Li, Ri].forEach(P => seg(-9000, P.y, W + 9000, P.y, COLOR.iliac, sw * 0.8, true));
+
+            // 寛骨長: 腸骨稜→坐骨結節の縦線
+            seg(Li.x, Li.y, Lis.x, Lis.y, COLOR.ischium, sw);
+            seg(Ri.x, Ri.y, Ris.x, Ris.y, COLOR.ischium, sw);
+
+            // 恥骨結合 / S2: 中心線への水平距離
             ['symphysis', 's2'].forEach(id => {
                 const P = lm(id);
-                const sd = (P.x - f.mx) * f.ux + (P.y - f.my) * f.uy;
-                const footX = P.x - sd * f.ux, footY = P.y - sd * f.uy;
-                seg(P.x, P.y, footX, footY, COLOR.sym, sw * 0.8, true);
+                seg(P.x, P.y, midX, P.y, COLOR.sym, sw * 0.8, true);
             });
 
             // 数値ラベル
-            const tilt = Math.abs(Math.atan2(f.R.y - f.L.y, f.R.x - f.L.x) * 180 / Math.PI);
-            const hL = (lm('left_iliac').x - f.mx) * f.nx + (lm('left_iliac').y - f.my) * f.ny;
-            const hR = (lm('right_iliac').x - f.mx) * f.nx + (lm('right_iliac').y - f.my) * f.ny;
-            txt(f.mx + f.ux * S.imgW * 0.17, f.my + f.uy * S.imgW * 0.17 - fs * 0.5,
-                `FHL ${tilt.toFixed(1)}°`, COLOR.fhl, fs);
-            txt(lm('left_iliac').x + fs, lm('left_iliac').y - fs * 0.8,
-                `Δ${fmtShort(Math.abs(hL - hR))}`, COLOR.iliac, fs);
+            const tilt = Math.abs(Math.atan2(Rf.y - Lf.y, Rf.x - Lf.x) * 180 / Math.PI);
+            txt(midX + W * 0.03, (Lf.y + Rf.y) / 2 - fs * 0.5, `FHL ${roundAngle(tilt)}°`, COLOR.fhl, fs);
+            txt(Li.x + fs, Li.y - fs * 0.6, `Δ${fmtShort(Math.abs(Li.y - Ri.y))}`, COLOR.iliac, fs);
+            const innomDiff = Math.abs(Math.abs(Lis.y - Li.y) - Math.abs(Ris.y - Ri.y));
+            txt(Lis.x - W * 0.16, Lis.y, `Innom ${fmtShort(innomDiff)}`, COLOR.ischium, fs);
             const sym = lm('symphysis'), s2p = lm('s2');
-            const sSym = (sym.x - f.mx) * f.ux + (sym.y - f.my) * f.uy;
-            const sS2 = (s2p.x - f.mx) * f.ux + (s2p.y - f.my) * f.uy;
-            txt(sym.x + fs, sym.y + fs * 1.4, `SP ${fmtShort(Math.abs(sSym))}`, COLOR.sym, fs);
-            txt(s2p.x + fs, s2p.y - fs * 0.5, `S2 ${fmtShort(Math.abs(sS2))}`, COLOR.sym, fs);
+            txt(sym.x + fs, sym.y + fs * 1.4, `Sym ${fmtShort(Math.abs(sym.x - midX))}`, COLOR.sym, fs);
+            txt(s2p.x + fs, s2p.y - fs * 0.5, `S2 ${fmtShort(Math.abs(s2p.x - midX))}`, COLOR.sym, fs);
         } else if (t === 'pelvis_tilt') {
             const L = lm('left_iliac'), R = lm('right_iliac');
             if (!L || !R) return;

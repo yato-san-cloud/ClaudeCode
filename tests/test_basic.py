@@ -44,7 +44,8 @@ def test_detect_landmarks_shapes():
     assert len(detect_landmarks(b, "spine_alignment")["landmarks"]) >= 3
     full = detect_landmarks(b, "pelvis_full")["landmarks"]
     assert {lm["id"] for lm in full} == {
-        "left_femoral", "right_femoral", "left_iliac", "right_iliac", "symphysis", "s2",
+        "left_femoral", "right_femoral", "left_iliac", "right_iliac",
+        "left_ischium", "right_ischium", "symphysis", "s2",
     }
 
 
@@ -65,11 +66,40 @@ def test_pelvis_full_measurements():
     lm = detect_landmarks(b, "pelvis_full")["landmarks"]
     m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
     for key in ("fhl_tilt_deg", "femur_diff_px", "iliac_diff_px",
-                "symphysis_shift", "s2_shift", "iliac_height_px",
+                "innominate_len_px", "innominate_diff_px", "pi_side",
+                "symphysis_shift", "s2_shift", "rotation_warning",
                 "clinical_summary"):
         assert key in m, key
     assert m["femur_diff_mm"] is not None
     assert m["symphysis_shift"]["side"] in ("右", "左", "中央")
+
+
+def test_innominate_longer_side_is_pi():
+    # 画面左の坐骨結節を大きく下げ、左寛骨を長く → 患者右(AP標準)がPI側
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    by_id = {p["id"]: p for p in lm}
+    by_id["left_ischium"]["y"] += 40   # 画面左の寛骨を縦に長く
+    m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
+    assert m["pi_side"] == "右"          # 画面左＝患者右
+    assert "右" in m["clinical_summary"]
+    assert "PI" in m["clinical_summary"]
+
+
+def test_positioning_caveat_in_note():
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    m = compute_measurements(lm, "pelvis_full")
+    assert "体位回旋" in m["analysis_note"]
+
+
+def test_rotation_warning_flags_symphysis_shift():
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    by_id = {p["id"]: p for p in lm}
+    by_id["symphysis"]["x"] += 40   # 恥骨結合を中心線から大きくずらす
+    m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
+    assert m["rotation_warning"] is True
 
 
 def test_clinical_rounding_helpers():
@@ -95,16 +125,15 @@ def test_film_plane_note_when_calibrated():
     assert "フィルム面" in m["analysis_note"]
 
 
-def test_summary_flags_high_crest_side():
-    # 右腸骨稜を大きく上げると患者右高位のサマリになる (AP標準: 画面左=患者右)
+def test_iliac_lower_side():
+    # 画面左の腸骨稜を大きく下げる → 患者右(AP標準)が低位
     b = _sample_bytes()
     lm = detect_landmarks(b, "pelvis_full")["landmarks"]
     by_id = {p["id"]: p for p in lm}
-    by_id["left_iliac"]["y"] -= 60   # 画面左を大きく上げる = 患者右が高位
-    by_id["right_iliac"]["y"] += 20
-    m = compute_measurements(lm, "pelvis_full")
-    assert m["iliac_higher_side"] == "右"
-    assert "右" in m["clinical_summary"]
+    by_id["left_iliac"]["y"] += 60   # 画面左を大きく下げる = 患者右が低位
+    by_id["right_iliac"]["y"] -= 20
+    m = compute_measurements(lm, "pelvis_full", mm_per_px=0.5)
+    assert m["iliac_lower_side"] == "右"
 
 
 def test_measurement_changes_with_landmark_move():
@@ -237,7 +266,7 @@ def test_dicom_png_feeds_analyzer():
     from modules.dicom_loader import load_dicom
     png = load_dicom(_make_dicom())["png"]
     det = detect_landmarks(png, "pelvis_full")
-    assert len(det["landmarks"]) == 6
+    assert len(det["landmarks"]) == 8
 
 
 def test_desktop_module_imports():

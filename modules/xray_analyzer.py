@@ -26,6 +26,7 @@ C_SPINE = (80, 200, 80)      # #50c850 緑
 C_MIDLINE = (200, 200, 200)  # #c8c8c8 灰
 C_FHL = (0, 215, 255)        # #ffd700 金 (大腿骨頭ライン)
 C_SYM = (255, 80, 255)       # #ff50ff 紫
+C_ISCHIUM = (74, 162, 255)   # #ffa24a 橙 (坐骨結節/寛骨長)
 
 
 def _decode(image_bytes):
@@ -225,9 +226,11 @@ def _detect_spine(edges, h, w):
 
 
 def _detect_pelvis_full(gray, edges, h, w):
-    """Gonstead式 骨盤総合分析用の6点:
-    大腿骨頭 左右 / 腸骨稜 左右 / 恥骨結合 / 第2仙骨結節(S2)。
-    恥骨結合・S2 は個体差が大きいため妥当な初期位置のみ与え、補正前提とする。
+    """Gonstead式 骨盤総合分析用の8点:
+    大腿骨頭 左右 / 腸骨稜 左右 / 坐骨結節 左右 / 恥骨結合 / 第2仙骨結節(S2)。
+
+    坐骨結節・恥骨結合・S2 は個体差が大きく自動検出が不安定なため、
+    解剖学的な妥当位置を初期値として与え、術者の補正を前提とする。
     """
     femoral = _detect_femoral_heads(gray, edges, h, w)
     iliac = _detect_iliac_crests(edges, h, w)
@@ -238,12 +241,23 @@ def _detect_pelvis_full(gray, edges, h, w):
     fem_y = (fl["y"] + fr["y"]) // 2
     crest_y = (il["y"] + ir["y"]) // 2
 
+    # 坐骨結節: 大腿骨頭の下方やや内側。最下点付近を初期値に。
+    def ischium(fx, fy):
+        return int(fx + (mid_x - fx) * 0.25), int(min(h - 3, fy + h * 0.07))
+
+    lix, liy = ischium(fl["x"], fl["y"])
+    rix, riy = ischium(fr["x"], fr["y"])
+    ischia = [
+        {"id": "left_ischium", "label": "坐骨結節(画面左)", "x": lix, "y": liy, "color": "#ffa24a"},
+        {"id": "right_ischium", "label": "坐骨結節(画面右)", "x": rix, "y": riy, "color": "#ffa24a"},
+    ]
+
     symphysis = {"id": "symphysis", "label": "恥骨結合", "color": "#ff50ff",
                  "x": mid_x, "y": min(h - 5, int(fem_y + h * 0.04))}
     s2 = {"id": "s2", "label": "S2(第2仙骨結節)", "color": "#ff50ff",
           "x": mid_x, "y": int(crest_y + (fem_y - crest_y) * 0.45)}
 
-    return femoral + iliac + [symphysis, s2]
+    return femoral + iliac + ischia + [symphysis, s2]
 
 
 # ==========================================================================
@@ -267,6 +281,9 @@ def compute_measurements(landmarks: list, analysis_type: str,
         note += " mm値はフィルム面上の実測で、撮影拡大率は未補正です。"
     else:
         note += " スケール未設定のためpx表示です。"
+    if analysis_type in ("pelvis_full", "pelvis_tilt", "leg_length"):
+        note += ("　骨盤計測は撮影時の体位回旋に敏感で、数度の回旋がmm単位の差を生むこと"
+                 "が報告されています（Weinert 2005 ほか）。良好なポジショニングの像でご判断ください。")
 
     base = {"calibrated": bool(mm_per_px), "convention": convention, "analysis_note": note}
 
@@ -332,65 +349,100 @@ def _fhl_frame(pts):
 
 
 def _compute_pelvis_full(pts, mm, mm_per_px, ap_standard):
-    L, R, u, n, M = _fhl_frame(pts)
+    """Gonstead本式に沿った計測。
 
-    # FHL傾斜: 画面右の骨頭が下 → 正
-    tilt = math.degrees(math.atan2(R[1] - L[1], R[0] - L[0]))
-    fem_diff = abs(R[1] - L[1])
-    fem_lower_viewer_left = L[1] > R[1]
+    基準軸は「真の水平（フィルム端）」。ローリング定規をフィルム端に平行に
+    当てる本式に倣い、大腿骨頭・腸骨稜の高さ、寛骨長はすべて画像の縦(y)で測る。
+    PI/AS判定は寛骨垂直長（腸骨稜→坐骨結節）の左右差に基づき、長い側=PI。
+    """
+    Lf, Rf = pts["left_femoral"], pts["right_femoral"]
+    Li, Ri = pts["left_iliac"], pts["right_iliac"]
+    Lis, Ris = pts["left_ischium"], pts["right_ischium"]
+    mid_x = (Lf[0] + Rf[0]) / 2
 
-    # 腸骨稜高: FHLからの垂直距離 (Gonsteadの measured innominate 相当)
-    hL = float(np.dot(np.array(pts["left_iliac"]) - M, n))
-    hR = float(np.dot(np.array(pts["right_iliac"]) - M, n))
-    iliac_diff = abs(hL - hR)
-    iliac_higher_viewer_left = hL > hR
+    # 有意差しきい値: 教育資料で一貫する「左右差≥5mm」を採用。
+    # 未校正時は点の手置き誤差を踏まえた px フロア(3px)。
+    def significant(diff_px):
+        if mm_per_px:
+            return diff_px * mm_per_px >= 5.0
+        return diff_px >= 3.0
 
-    # 側方偏位: FHL中点を通る垂直軸からの水平距離 (画面右向き正)
-    s_sym = float(np.dot(np.array(pts["symphysis"]) - M, u))
-    s_s2 = float(np.dot(np.array(pts["s2"]) - M, u))
+    # 大腿骨頭高低差 (真の水平基準 = 画像y差) → 低位側 = 短下肢(MD)側
+    tilt = math.degrees(math.atan2(Rf[1] - Lf[1], Rf[0] - Lf[0]))
+    fem_diff = abs(Lf[1] - Rf[1])
+    fhl_low = patient_side(Lf[1] > Rf[1], ap_standard) if significant(fem_diff) else "水平"
 
-    # 有意差のしきい値: 点の手置き誤差を踏まえ、これ未満は「差なし」扱い
-    thr_px = 3.0
+    # 腸骨稜高低差 (真の水平基準) → 低位側
+    iliac_diff = abs(Li[1] - Ri[1])
+    iliac_low = patient_side(Li[1] > Ri[1], ap_standard) if significant(iliac_diff) else "同高"
+
+    # 寛骨垂直長 (腸骨稜→坐骨結節, 真の縦距離)。長い側 = PI, 短い側 = AS
+    innom_L = abs(Lis[1] - Li[1])
+    innom_R = abs(Ris[1] - Ri[1])
+    innom_diff = abs(innom_L - innom_R)
+    longer_viewer_left = innom_L > innom_R
+    if significant(innom_diff):
+        pi_side = patient_side(longer_viewer_left, ap_standard)
+        as_side = patient_side(not longer_viewer_left, ap_standard)
+    else:
+        pi_side = as_side = None
+
+    # 側方偏位 (垂直中心線 = 大腿骨頭中点を通る鉛直線からの水平ずれ)
+    s_sym = float(pts["symphysis"][0] - mid_x)
+    s_s2 = float(pts["s2"][0] - mid_x)
 
     def shift(side_val):
         return {
             "px": round(abs(side_val), 1),
             "mm": mm(abs(side_val)),
-            "side": patient_side(side_val < 0, ap_standard) if abs(side_val) > thr_px else "中央",
+            "side": patient_side(side_val < 0, ap_standard) if significant(abs(side_val)) else "中央",
         }
 
-    iliac_high = (patient_side(iliac_higher_viewer_left, ap_standard)
-                  if iliac_diff > thr_px else "同高")
-    fhl_low = (patient_side(fem_lower_viewer_left, ap_standard)
-               if fem_diff > thr_px else "水平")
+    sym_shift = shift(s_sym)
+    s2_shift = shift(s_s2)
 
-    # ガンステッド的な一言サマリ: 腸骨稜高位側 = deficient側(PI寛骨の目安)。
-    # 断定はせず「示唆」に留める(硬派な術者は道具に診断させたがらない)。
-    if iliac_high in ("右", "左"):
-        summary = f"患者{iliac_high}側の腸骨稜高位（FHL基準）。同側寛骨のPI変位を示唆。"
+    # 所見サマリ: PI/AS は寛骨長差に基づく「目安」まで。断定しない。
+    if pi_side:
+        summary = (f"寛骨垂直長は患者{pi_side}側が長い → 同側PI寛骨の目安"
+                   f"（対側{as_side}はAS傾向）。")
+        # 大腿骨頭低位側との整合（PIは短下肢側に出やすい）
+        if fhl_low in ("右", "左"):
+            if fhl_low == pi_side:
+                summary += f" 大腿骨頭も{fhl_low}低位で短下肢側と一致。"
+            else:
+                summary += f" ただし大腿骨頭低位は{fhl_low}側で不一致（要確認）。"
     else:
-        summary = "腸骨稜高は左右ほぼ同等。明らかな高低差なし。"
+        summary = "寛骨垂直長の左右差は僅少（有意差なし）。"
+
+    # 回旋の警告: 恥骨結合/S2の偏位が大きいと、体位回旋が高さ計測を歪める
+    rotation_warn = bool(sym_shift["side"] in ("右", "左") or s2_shift["side"] in ("右", "左"))
+    if rotation_warn:
+        summary += " ※恥骨結合/S2に偏位あり。体位回旋が高さ計測に影響している可能性。"
 
     result = {
         "fhl_tilt_deg": round_angle(abs(tilt)),
         "fhl_lower_side": fhl_low,
         "femur_diff_px": round(fem_diff, 1),
         "femur_diff_mm": mm(fem_diff),
-        "iliac_height_px": {
-            patient_side(True, ap_standard): round(hL, 1),
-            patient_side(False, ap_standard): round(hR, 1),
-        },
         "iliac_diff_px": round(iliac_diff, 1),
         "iliac_diff_mm": mm(iliac_diff),
-        "iliac_higher_side": iliac_high,
-        "symphysis_shift": shift(s_sym),
-        "s2_shift": shift(s_s2),
+        "iliac_lower_side": iliac_low,
+        "innominate_len_px": {
+            patient_side(True, ap_standard): round(innom_L, 1),
+            patient_side(False, ap_standard): round(innom_R, 1),
+        },
+        "innominate_diff_px": round(innom_diff, 1),
+        "innominate_diff_mm": mm(innom_diff),
+        "pi_side": pi_side or "左右差なし",
+        "symphysis_shift": sym_shift,
+        "s2_shift": s2_shift,
+        "rotation_warning": rotation_warn,
         "clinical_summary": summary,
     }
     if mm_per_px:
-        result["iliac_height_mm"] = {
-            patient_side(True, ap_standard): mm(abs(hL)),
-            patient_side(False, ap_standard): mm(abs(hR)),
+        result["innominate_len_mm"] = {
+            patient_side(True, ap_standard): mm(innom_L),
+            patient_side(False, ap_standard): mm(innom_R),
         }
     return result
 
@@ -485,19 +537,19 @@ def _fmt(px_val, mm_val, unit_suffix=""):
 
 
 def _render_pelvis_full(result, pts, m, h, w, sw, fs):
-    npts = {k: np.array(v, dtype=float) for k, v in pts.items()}
-    L, R = npts["left_femoral"], npts["right_femoral"]
-    d = R - L
-    norm = np.linalg.norm(d)
-    u = d / norm if norm > 1e-6 else np.array([1.0, 0.0])
-    n = np.array([u[1], -u[0]])
-    if n[1] > 0:
-        n = -n
-    M = (L + R) / 2
+    """Gonstead本式の作図: 真の水平を基準に、大腿骨頭線・腸骨稜の水平参照線・
+    寛骨長(腸骨稜→坐骨結節)・垂直中心線を描く。"""
+    Lf, Rf = pts["left_femoral"], pts["right_femoral"]
+    mid_x = (Lf[0] + Rf[0]) // 2
+    thin = max(1, sw - 1)
 
-    # 基準線: FHL + 垂直軸
-    _line_along(result, M, u, C_FHL, sw)
-    _line_along(result, M, n, C_MIDLINE, max(1, sw - 1), dashed=True)
+    # 大腿骨頭線 + 各頭の水平参照線 (真の水平)
+    cv2.line(result, Lf, Rf, C_FHL, sw, cv2.LINE_AA)
+    _dashed_line(result, (0, Lf[1]), (w, Lf[1]), C_FHL, thin)
+    _dashed_line(result, (0, Rf[1]), (w, Rf[1]), C_FHL, thin)
+
+    # 垂直中心線 (大腿骨頭中点を通る鉛直線)
+    cv2.line(result, (mid_x, 0), (mid_x, h), C_MIDLINE, thin, cv2.LINE_AA)
 
     # 大腿骨頭
     head_r = int(w * 0.045)
@@ -506,33 +558,34 @@ def _render_pelvis_full(result, pts, m, h, w, sw, fs):
         cv2.circle(result, p, head_r, C_FEMORAL, sw, cv2.LINE_AA)
         cv2.drawMarker(result, p, C_FEMORAL, cv2.MARKER_CROSS, sw * 8, sw, cv2.LINE_AA)
 
-    # 腸骨稜: 点 + FHLへの垂線(計測線) + クレストライン
+    # 腸骨稜: 各稜の水平参照線 + マーカー
     for key in ("left_iliac", "right_iliac"):
-        P = npts[key]
-        foot = P - np.dot(P - M, n) * n
-        _dashed_line(result, _pt(P), _pt(foot), C_ILIAC, max(1, sw - 1))
-        seg = u * w * 0.09
-        cv2.line(result, _pt(P - seg), _pt(P + seg), C_ILIAC, sw, cv2.LINE_AA)
-        _marker(result, pts[key], C_ILIAC, sw)
+        P = pts[key]
+        _dashed_line(result, (0, P[1]), (w, P[1]), C_ILIAC, thin)
+        _marker(result, P, C_ILIAC, sw)
 
-    # 恥骨結合 / S2: 垂直軸への水平距離
+    # 寛骨垂直長: 腸骨稜→坐骨結節の縦線 + 坐骨結節マーカー
+    for ic, isk in (("left_iliac", "left_ischium"), ("right_iliac", "right_ischium")):
+        cv2.line(result, pts[ic], pts[isk], C_ISCHIUM, sw, cv2.LINE_AA)
+        _marker(result, pts[isk], C_ISCHIUM, sw)
+
+    # 恥骨結合 / S2: 中心線への水平距離
     for key in ("symphysis", "s2"):
-        P = npts[key]
-        foot = P - np.dot(P - M, u) * u
-        _dashed_line(result, _pt(P), _pt(foot), C_SYM, max(1, sw - 1))
-        _marker(result, pts[key], C_SYM, sw)
+        P = pts[key]
+        cv2.line(result, P, (mid_x, P[1]), C_SYM, thin, cv2.LINE_AA)
+        _marker(result, P, C_SYM, sw)
 
-    # 数値ラベル (°記号・簡潔表記で読影者にそのまま通る形に)
+    # 数値ラベル
     _label_text(result, f"FHL {m['fhl_tilt_deg']:g}°",
-                M + u * w * 0.16 + n * h * 0.02, fs, C_FHL)
+                (mid_x + int(w * 0.03), (Lf[1] + Rf[1]) // 2 - int(h * 0.015)), fs, C_FHL)
     _label_text(result, "Crest " + _fmt(m["iliac_diff_px"], m["iliac_diff_mm"]),
-                npts["left_iliac"] + np.array([w * 0.02, -h * 0.015]), fs, C_ILIAC)
+                (pts["left_iliac"][0] + int(w * 0.02), pts["left_iliac"][1] - int(h * 0.015)), fs, C_ILIAC)
+    _label_text(result, "Innom " + _fmt(m["innominate_diff_px"], m["innominate_diff_mm"]),
+                (pts["left_ischium"][0] - int(w * 0.15), pts["left_ischium"][1]), fs, C_ISCHIUM)
     _label_text(result, "Sym " + _fmt(m["symphysis_shift"]["px"], m["symphysis_shift"]["mm"]),
-                npts["symphysis"] + np.array([w * 0.02, h * 0.03]), fs, C_SYM)
+                (pts["symphysis"][0] + int(w * 0.02), pts["symphysis"][1] + int(h * 0.03)), fs, C_SYM)
     _label_text(result, "S2 " + _fmt(m["s2_shift"]["px"], m["s2_shift"]["mm"]),
-                npts["s2"] + np.array([w * 0.02, -h * 0.01]), fs, C_SYM)
-    _label_text(result, "Head " + _fmt(m["femur_diff_px"], m["femur_diff_mm"]),
-                M + u * (-w * 0.24) + n * h * 0.02, fs, C_FEMORAL)
+                (pts["s2"][0] + int(w * 0.02), pts["s2"][1] - int(h * 0.01)), fs, C_SYM)
 
 
 def _render_pelvis_tilt(result, pts, m, h, w, sw, fs):
