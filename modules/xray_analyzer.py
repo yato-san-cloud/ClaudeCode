@@ -114,7 +114,8 @@ def detect_landmarks(image_bytes: bytes, analysis_type: str) -> dict:
 
 
 def _hough_femoral_pair(gray, h, w):
-    """大腿骨頭は球形に近く円として写るため Hough 円検出を試みる。"""
+    """大腿骨頭は球形に近く円として写るため Hough 円検出を試みる。
+    実X線で検証済みのパラメータを用いる(過度に緩めると仙骨等の偽円を拾うため)。"""
     roi_top = int(h * 0.40)
     roi_bottom = int(h * 0.90)
     roi = cv2.GaussianBlur(gray[roi_top:roi_bottom, :], (7, 7), 2)
@@ -147,24 +148,53 @@ def _hough_femoral_pair(gray, h, w):
     return best
 
 
-def _scan_femoral_fallback(edges, h, w):
-    """フォールバック: 左右の代表列で最初に現れるエッジを骨頭上縁とみなす。"""
-    roi_top = int(h * 0.5)
-    roi = edges[roi_top:, :]
+def _blob_femoral_pair(gray, h, w):
+    """明るい高密度ブロブの重心で大腿骨頭を推定する。円形度で選抜し、
+    取れない側は代表列位置にフォールバックするため常に (L, R) を返す。"""
+    roi_top, roi_bot = int(h * 0.48), int(h * 0.90)
+    roi = gray[roi_top:roi_bot, :]
+    thr = np.percentile(roi, 80)
+    _, bw = cv2.threshold(roi, int(thr), 255, cv2.THRESH_BINARY)
+    bw = cv2.morphologyEx(bw, cv2.MORPH_OPEN,
+                          cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    mid_x = w // 2
+    exp_area = math.pi * (w * 0.055) ** 2
+    rmin, rmax = w * 0.03, w * 0.16
 
-    def first_edge(col_x):
-        col = roi[:, col_x]
-        pts = np.where(col > 0)[0]
-        return roi_top + (int(pts[0]) if len(pts) else int(h * 0.1))
+    def pick(x0, x1):
+        sub = np.zeros_like(bw)
+        sub[:, x0:x1] = bw[:, x0:x1]
+        cnts, _ = cv2.findContours(sub, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best, best_score = None, None
+        for c in cnts:
+            a = cv2.contourArea(c)
+            if a < exp_area * 0.2:
+                continue
+            (_cx, _cy), rad = cv2.minEnclosingCircle(c)
+            if not (rmin <= rad <= rmax):
+                continue
+            circ = a / (math.pi * rad * rad + 1e-6)
+            score = circ - abs(a - exp_area) / exp_area * 0.2
+            M = cv2.moments(c)
+            if M["m00"] == 0:
+                continue
+            if best_score is None or score > best_score:
+                best_score = score
+                best = (M["m10"] / M["m00"], M["m01"] / M["m00"] + roi_top)
+        return best
 
-    lx, rx = int(w * 0.35), int(w * 0.65)
-    return (lx, first_edge(lx)), (rx, first_edge(rx))
+    left = pick(int(w * 0.18), mid_x) or (w * 0.35, h * 0.60)
+    right = pick(mid_x, int(w * 0.82)) or (w * 0.65, h * 0.60)
+    return left, right
 
 
 def _detect_femoral_heads(gray, edges, h, w):
+    """大腿骨頭検出。原理的な Hough を優先し(実X線で信頼できる)、Hough が
+    円ペアを得られない画像でのみ明るいブロブ重心にフォールバックする。
+    ブロブは中央の高密度構造(仙骨等)を拾い得るため、上書きには使わない。"""
     pair = _hough_femoral_pair(gray, h, w)
     if pair is None:
-        pair = _scan_femoral_fallback(edges, h, w)
+        pair = _blob_femoral_pair(gray, h, w)
     (lx, ly), (rx, ry) = pair
     return [
         {"id": "left_femoral", "label": "大腿骨頭(画面左)", "x": int(lx), "y": int(ly), "color": "#00c7ff"},

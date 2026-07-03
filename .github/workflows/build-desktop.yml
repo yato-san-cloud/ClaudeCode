@@ -48,7 +48,9 @@ jobs:
           pip install pywebview pyinstaller
 
       - name: Run tests
-        run: python tests/test_basic.py
+        run: |
+          python tests/test_basic.py
+          python tests/test_detection_quality.py
 
       - name: Build .icns icon (macOS)
         if: runner.os == 'macOS'
