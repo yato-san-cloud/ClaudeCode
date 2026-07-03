@@ -64,11 +64,12 @@ def _fmt_pair(measurements, base_key):
 def _fmt_shift(shift):
     if not isinstance(shift, dict):
         return None
+    px = shift.get("px")
+    if px is None:
+        return None
     side = shift.get("side", "")
-    if shift.get("mm") is not None:
-        val = f"{shift['mm']} mm（{shift['px']} px）"
-    else:
-        val = f"{shift['px']} px"
+    mm_v = shift.get("mm")
+    val = f"{mm_v} mm（{px} px）" if mm_v is not None else f"{px} px"
     return f"{side}方向へ {val}" if side not in ("", "中央") else f"中央（{val}）"
 
 
@@ -117,10 +118,10 @@ def generate_xray_report_pdf(payload: dict) -> io.BytesIO:
       measurements: dict (compute_measurements の出力)
       image_png: bytes (注釈済み画像) ※任意
     """
-    patient = payload.get("patient") or {}
-    clinic = payload.get("clinic") or {}
+    patient = payload.get("patient") if isinstance(payload.get("patient"), dict) else {}
+    clinic = payload.get("clinic") if isinstance(payload.get("clinic"), dict) else {}
     analysis_type = payload.get("analysis_type", "pelvis_full")
-    measurements = payload.get("measurements") or {}
+    measurements = payload.get("measurements") if isinstance(payload.get("measurements"), dict) else {}
     image_png = payload.get("image_png")
 
     doc = _Doc()

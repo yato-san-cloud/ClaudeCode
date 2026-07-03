@@ -36,13 +36,31 @@ def inject_globals():
     return {"app_version": APP_VERSION}
 
 
+def _safe_name(name: str) -> str:
+    """ダウンロード名に使えない制御文字・パス区切りを除去する。"""
+    import re
+    name = str(name or "").strip()
+    name = re.sub(r"[\r\n\t/\\\x00-\x1f\x7f]", "_", name)
+    return name[:80] or "不明"
+
+
 def _download_name(form_data):
-    name = form_data.get("patient_name") or "不明"
+    name = _safe_name(form_data.get("patient_name") or "不明")
     return f"紹介状_{name}_{datetime.now().strftime('%Y%m%d')}.pdf"
 
 
 def _decode_data_url(data_url: str) -> bytes:
     return base64.b64decode(data_url.split(",")[-1])
+
+
+def _coerce_mm_per_px(v):
+    if v in (None, ""):
+        return None
+    try:
+        f = float(v)
+        return f if f > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_filters(obj) -> dict:
@@ -141,7 +159,7 @@ def xray_export():
     image_b64 = data.get("image", "")
     analysis_type = data.get("analysis_type", "pelvis_full")
     landmarks = data.get("landmarks", [])
-    mm_per_px = data.get("mm_per_px")
+    mm_per_px = _coerce_mm_per_px(data.get("mm_per_px"))
     filters = _parse_filters(data.get("filters"))
     ap_standard = bool(data.get("ap_standard", True))
 
@@ -158,7 +176,7 @@ def xray_export():
             image_bytes, analysis_type, landmarks, mm_per_px,
             filters=filters, ap_standard=ap_standard,
         )
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, TypeError, IndexError) as e:
         return jsonify({"error": f"描画に失敗しました: {e}"}), 400
 
     return jsonify({
@@ -174,11 +192,11 @@ def xray_report():
     image_b64 = data.get("image", "")
     analysis_type = data.get("analysis_type", "pelvis_full")
     landmarks = data.get("landmarks", [])
-    mm_per_px = data.get("mm_per_px")
+    mm_per_px = _coerce_mm_per_px(data.get("mm_per_px"))
     filters = _parse_filters(data.get("filters"))
     ap_standard = bool(data.get("ap_standard", True))
-    patient = data.get("patient") or {}
-    clinic = data.get("clinic") or {}
+    patient = data.get("patient") if isinstance(data.get("patient"), dict) else {}
+    clinic = data.get("clinic") if isinstance(data.get("clinic"), dict) else {}
 
     if not image_b64 or not landmarks:
         return jsonify({"error": "画像またはランドマークがありません"}), 400
@@ -189,7 +207,7 @@ def xray_report():
             image_bytes, analysis_type, landmarks, mm_per_px,
             filters=filters, ap_standard=ap_standard,
         )
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, TypeError, IndexError) as e:
         return jsonify({"error": f"分析に失敗しました: {e}"}), 400
 
     pdf = generate_xray_report_pdf({
@@ -200,7 +218,7 @@ def xray_report():
         "image_png": annotated,
     })
 
-    name = patient.get("name") or "無記名"
+    name = _safe_name(patient.get("name") or "無記名")
     return send_file(
         pdf,
         mimetype="application/pdf",

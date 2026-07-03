@@ -437,21 +437,28 @@ const XE = (() => {
         return S.ap ? (viewerLeft ? '右' : '左') : (viewerLeft ? '左' : '右');
     }
 
-    // 臨床的な丸め (analyzer.py と一致): 角度0.5°、長さ0.5mm刻み
+    // 臨床的な丸め (analyzer.py と一致): 角度0.5°、長さ0.5mm刻み (half-up)
     function roundAngle(deg) { return Math.round(deg * 2) / 2; }
     function roundMM(v) { return Math.round(v * 2) / 2; }
+    // px表示は Python round(x,1):g と一致させる (末尾の.0は落とす)
+    function pxs(px) { return +px.toFixed(1); }
 
-    // 有意差しきい値 (px)。これ未満は「差なし」扱い
+    // 有意差しきい値。校正時は表示と同じ丸めで mm≥5、未校正は 3px フロア
+    // (analyzer.py の _significant と一致)。
     const THR_PX = 3.0;
+    function sig(diffPx) {
+        const k = mmPerPx();
+        return k ? roundMM(diffPx * k) >= 5.0 : diffPx >= THR_PX;
+    }
 
     function fmtLen(px) {
         const k = mmPerPx();
-        return k ? `${roundMM(px * k)} mm（${px.toFixed(0)}px）` : `${px.toFixed(0)} px`;
+        return k ? `${roundMM(px * k)} mm（${pxs(px)}px）` : `${pxs(px)} px`;
     }
 
     function fmtShort(px) {
         const k = mmPerPx();
-        return k ? `${roundMM(px * k)}mm` : `${px.toFixed(0)}px`;
+        return k ? `${roundMM(px * k)}mm` : `${pxs(px)}px`;
     }
 
 
@@ -466,9 +473,8 @@ const XE = (() => {
             const Lis = lm('left_ischium'), Ris = lm('right_ischium');
             if (!Lf || !Rf || !Li || !Ri || !Lis || !Ris) return rows;
             const midX = (Lf.x + Rf.x) / 2;
-            const sig = (d) => { const k = mmPerPx(); return k ? d * k >= 5.0 : d >= THR_PX; };
 
-            const tilt = Math.atan2(Rf.y - Lf.y, Rf.x - Lf.x) * 180 / Math.PI;
+            const tilt = Math.atan2(Math.abs(Rf.y - Lf.y), Math.abs(Rf.x - Lf.x)) * 180 / Math.PI;
             const femDiff = Math.abs(Lf.y - Rf.y);
             const iliacDiff = Math.abs(Li.y - Ri.y);
             const innomL = Math.abs(Lis.y - Li.y), innomR = Math.abs(Ris.y - Ri.y);
@@ -482,7 +488,7 @@ const XE = (() => {
             const iliacLow = sig(iliacDiff) ? pside(Li.y > Ri.y) : '同高';
             const piSide = sig(innomDiff) ? pside(innomL > innomR) : null;
 
-            rows.push(['大腿骨頭ライン(FHL)傾斜', `${roundAngle(Math.abs(tilt))}°`]);
+            rows.push(['大腿骨頭ライン(FHL)傾斜', `${roundAngle(tilt)}°`]);
             rows.push(['大腿骨頭 高低差', fmtLen(femDiff)]);
             rows.push(['低位側（大腿骨頭＝短下肢）', fhlLow]);
             rows.push(['腸骨稜 高低差', fmtLen(iliacDiff)]);
@@ -503,27 +509,27 @@ const XE = (() => {
                         ? ` 大腿骨頭も${fhlLow}低位で短下肢側と一致。`
                         : ` ただし大腿骨頭低位は${fhlLow}側で不一致（要確認）。`;
                 }
-                if (rotWarn) s += ' ※恥骨結合/S2に偏位あり。体位回旋が高さ計測に影響の可能性。';
+                if (rotWarn) s += ' ※恥骨結合/S2に偏位あり。体位回旋が高さ計測に影響している可能性。';
                 S.summary = s;
             } else {
                 S.summary = '寛骨垂直長の左右差は僅少（有意差なし）。'
-                    + (rotWarn ? ' ※恥骨結合/S2に偏位あり。体位回旋の影響に注意。' : '');
+                    + (rotWarn ? ' ※恥骨結合/S2に偏位あり。体位回旋が高さ計測に影響している可能性。' : '');
             }
         } else if (t === 'pelvis_tilt') {
             const L = lm('left_iliac'), R = lm('right_iliac');
             if (!L || !R) return rows;
-            const angle = Math.atan2(R.y - L.y, R.x - L.x) * 180 / Math.PI;
+            const angle = Math.atan2(Math.abs(R.y - L.y), Math.abs(R.x - L.x)) * 180 / Math.PI;
             const diff = Math.abs(R.y - L.y);
-            rows.push(['骨盤傾斜角', `${roundAngle(Math.abs(angle))}°`]);
+            rows.push(['骨盤傾斜角', `${roundAngle(angle)}°`]);
             rows.push(['腸骨稜 高低差', fmtLen(diff)]);
-            rows.push(['高い側', diff > THR_PX ? pside(L.y < R.y) : '同高']);
+            rows.push(['高い側', sig(diff) ? pside(L.y < R.y) : '同高']);
             S.summary = null;
         } else if (t === 'leg_length') {
             const L = lm('left_femoral'), R = lm('right_femoral');
             if (!L || !R) return rows;
             const diff = Math.abs(L.y - R.y);
             rows.push(['大腿骨頭 高低差', fmtLen(diff)]);
-            rows.push(['低い側', diff > THR_PX ? pside(L.y > R.y) : '水平']);
+            rows.push(['低い側', sig(diff) ? pside(L.y > R.y) : '水平']);
             S.summary = null;
         } else if (t === 'spine_alignment') {
             const pts = [...S.landmarks].sort((a, b) => a.y - b.y);
@@ -677,7 +683,7 @@ const XE = (() => {
             });
 
             // 数値ラベル
-            const tilt = Math.abs(Math.atan2(Rf.y - Lf.y, Rf.x - Lf.x) * 180 / Math.PI);
+            const tilt = Math.atan2(Math.abs(Rf.y - Lf.y), Math.abs(Rf.x - Lf.x)) * 180 / Math.PI;
             txt(midX + W * 0.03, (Lf.y + Rf.y) / 2 - fs * 0.5, `FHL ${roundAngle(tilt)}°`, COLOR.fhl, fs);
             txt(Li.x + fs, Li.y - fs * 0.6, `Δ${fmtShort(Math.abs(Li.y - Ri.y))}`, COLOR.iliac, fs);
             const innomDiff = Math.abs(Math.abs(Lis.y - Li.y) - Math.abs(Ris.y - Ri.y));

@@ -60,12 +60,21 @@ def patient_side(viewer_left: bool, ap_standard: bool = True) -> str:
 # 臨床的に意味のある丸め。X線の拡大率・ポジショニング・点の手置き誤差を
 # 考えると、角度0.01°やmm0.1のような桁は過剰精度（硬派な術者ほど嫌う）。
 # 角度は0.5°、長さは0.5mm刻みに丸め、道具が身の丈を分かっている状態にする。
+# JS(Math.round)と一致させるため half-up で丸める(Python標準roundは偶数丸め)。
+# 計測値は非負(絶対差・角度)なので floor(x+0.5) で十分。
 def round_angle(deg: float) -> float:
-    return round(deg * 2) / 2
+    return math.floor(deg * 2 + 0.5) / 2
 
 
 def round_mm(mm_val: float) -> float:
-    return round(mm_val * 2) / 2
+    return math.floor(mm_val * 2 + 0.5) / 2
+
+
+def _significant(diff_px: float, mm_per_px) -> bool:
+    """左右差が臨床的に有意か。校正時は表示と同じ丸めで mm≥5、未校正は 3px フロア。"""
+    if mm_per_px:
+        return round_mm(diff_px * mm_per_px) >= 5.0
+    return diff_px >= 3.0
 
 
 def apply_display_filters(img, filters):
@@ -323,11 +332,12 @@ def compute_measurements(landmarks: list, analysis_type: str,
     if analysis_type == "leg_length":
         l, r = pts["left_femoral"], pts["right_femoral"]
         diff_px = abs(l[1] - r[1])
-        lower_viewer_left = l[1] > r[1]
+        lower = (patient_side(l[1] > r[1], ap_standard)
+                 if _significant(diff_px, mm_per_px) else "水平")
         return {
             "vertical_diff_px": round(diff_px, 1),
             "vertical_diff_mm": mm(diff_px),
-            "lower_side": patient_side(lower_viewer_left, ap_standard),
+            "lower_side": lower,
             **base,
         }
 
@@ -353,13 +363,15 @@ def compute_measurements(landmarks: list, analysis_type: str,
     # pelvis_tilt
     l, r = pts["left_iliac"], pts["right_iliac"]
     dy, dx = r[1] - l[1], r[0] - l[0]
-    angle = math.degrees(math.atan2(dy, dx))
+    angle = math.degrees(math.atan2(abs(dy), abs(dx)))  # 水平からの鋭角
     diff_px = abs(dy)
+    higher = (patient_side(l[1] < r[1], ap_standard)
+              if _significant(diff_px, mm_per_px) else "同高")
     return {
-        "tilt_angle_deg": round_angle(abs(angle)),
+        "tilt_angle_deg": round_angle(angle),
         "height_diff_px": round(diff_px, 1),
         "height_diff_mm": mm(diff_px),
-        "higher_side": patient_side(l[1] < r[1], ap_standard),
+        "higher_side": higher,
         **base,
     }
 
@@ -390,15 +402,13 @@ def _compute_pelvis_full(pts, mm, mm_per_px, ap_standard):
     Lis, Ris = pts["left_ischium"], pts["right_ischium"]
     mid_x = (Lf[0] + Rf[0]) / 2
 
-    # 有意差しきい値: 教育資料で一貫する「左右差≥5mm」を採用。
-    # 未校正時は点の手置き誤差を踏まえた px フロア(3px)。
+    # 有意差しきい値 (校正時 mm≥5 / 未校正 3px フロア) は _significant に集約。
     def significant(diff_px):
-        if mm_per_px:
-            return diff_px * mm_per_px >= 5.0
-        return diff_px >= 3.0
+        return _significant(diff_px, mm_per_px)
 
-    # 大腿骨頭高低差 (真の水平基準 = 画像y差) → 低位側 = 短下肢(MD)側
-    tilt = math.degrees(math.atan2(Rf[1] - Lf[1], Rf[0] - Lf[0]))
+    # 大腿骨頭高低差 (真の水平基準 = 画像y差) → 低位側 = 短下肢(MD)側。
+    # 反転/交差入力でも水平からの鋭角を返す (|dy|,|dx| で第1象限に畳む)。
+    tilt = math.degrees(math.atan2(abs(Rf[1] - Lf[1]), abs(Rf[0] - Lf[0])))
     fem_diff = abs(Lf[1] - Rf[1])
     fhl_low = patient_side(Lf[1] > Rf[1], ap_standard) if significant(fem_diff) else "水平"
 

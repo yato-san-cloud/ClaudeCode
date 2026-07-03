@@ -269,6 +269,101 @@ def test_dicom_png_feeds_analyzer():
     assert len(det["landmarks"]) == 8
 
 
+def test_dicom_anisotropic_resampled_to_isotropic():
+    from modules.dicom_loader import load_dicom
+    import numpy as np, cv2, io
+    import pydicom
+    from pydicom.dataset import Dataset, FileDataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    h, w = 400, 500
+    arr = np.full((h, w), 8000, np.uint16)
+    cv2.circle(arr, (w // 2, h // 2), 60, 30000, -1)
+    meta = Dataset()
+    meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\x00" * 128)
+    ds.Modality = "CR"; ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.SamplesPerPixel = 1; ds.Rows = h; ds.Columns = w
+    ds.BitsAllocated = 16; ds.BitsStored = 16; ds.HighBit = 15; ds.PixelRepresentation = 0
+    ds.WindowCenter = 20000; ds.WindowWidth = 40000
+    ds.ImagerPixelSpacing = [0.20, 0.14]  # row(y)=0.20, col(x)=0.14 非等方
+    ds.PixelData = arr.tobytes()
+    buf = io.BytesIO(); ds.save_as(buf, write_like_original=False)
+
+    r = load_dicom(buf.getvalue())
+    assert r["resampled_isotropic"] is True
+    assert abs(r["mm_per_px"] - 0.14) < 1e-6      # 細かい方(col)が等方スケール
+    assert r["width"] == 500                        # x はそのまま
+    assert 565 <= r["height"] <= 575                # y を 0.20/0.14 倍に upsample
+
+
+def test_dicom_uniform_image_no_nan():
+    from modules.dicom_loader import _window_to_uint8
+    import numpy as np
+
+    class _DS:  # 窓情報なしの均一画像
+        pass
+    arr = np.full((10, 10), 1234, np.float32)
+    out = _window_to_uint8(arr, _DS(), invert=False)
+    assert out.dtype == np.uint8 and not np.isnan(out).any()
+
+
+def test_simple_modes_gate_side_by_threshold():
+    b = _sample_bytes()
+    # pelvis_tilt: 2px差(未校正) → 同高
+    lm = detect_landmarks(b, "pelvis_tilt")["landmarks"]
+    d = {p["id"]: p for p in lm}
+    d["left_iliac"]["y"] = 500
+    d["right_iliac"]["y"] = 502
+    assert compute_measurements(lm, "pelvis_tilt")["higher_side"] == "同高"
+    # leg_length: 1px差 → 水平
+    lm2 = detect_landmarks(b, "leg_length")["landmarks"]
+    d2 = {p["id"]: p for p in lm2}
+    d2["left_femoral"]["y"] = 600
+    d2["right_femoral"]["y"] = 601
+    assert compute_measurements(lm2, "leg_length")["lower_side"] == "水平"
+
+
+def test_fhl_angle_is_acute_on_crossed_heads():
+    b = _sample_bytes()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+    d = {p["id"]: p for p in lm}
+    d["left_femoral"]["x"] = 400; d["left_femoral"]["y"] = 300
+    d["right_femoral"]["x"] = 100; d["right_femoral"]["y"] = 305  # x が交差
+    assert compute_measurements(lm, "pelvis_full")["fhl_tilt_deg"] <= 90
+
+
+def test_report_endpoints_harden_bad_input():
+    import app as appmod
+    c = appmod.app.test_client()
+    b = _sample_bytes()
+    import base64
+    img = "data:image/png;base64," + base64.b64encode(b).decode()
+    lm = detect_landmarks(b, "pelvis_full")["landmarks"]
+
+    # patient/clinic が非dict、mm_per_px が文字列 → 500にならず正常処理 or 400
+    r = c.post("/xray/report", json={
+        "image": img, "analysis_type": "pelvis_full", "landmarks": lm,
+        "mm_per_px": "not-a-number", "patient": "山田", "clinic": ["x"],
+    })
+    assert r.status_code in (200, 400), r.status_code
+
+    # 壊れたランドマーク → 400 (500でない)
+    r2 = c.post("/xray/export", json={
+        "image": img, "analysis_type": "pelvis_full",
+        "landmarks": [{"id": "left_femoral"}], "mm_per_px": None,
+    })
+    assert r2.status_code == 400, r2.status_code
+
+
+def test_fmt_shift_missing_px():
+    from modules.xray_report import _fmt_shift
+    assert _fmt_shift({"side": "右"}) is None
+    assert _fmt_shift({"px": 5.0, "mm": None, "side": "中央"}) is not None
+
+
 def test_desktop_module_imports():
     """desktop.py が import エラーを出さずに起動可能なこと。"""
     import desktop
