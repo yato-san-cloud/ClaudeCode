@@ -18,11 +18,12 @@
   /* ミラー（上・左右） */
   .mir{position:absolute; top:38px; width:148px; height:66px; background:#000; border:1px solid #2b364d; border-radius:8px; overflow:hidden; z-index:6; touch-action:none;}
   #mirLbox{left:8px;} #mirRbox{right:8px;}
+  #mirCbox{left:50%; transform:translateX(-50%); width:198px; height:58px; top:34px;}
   .mir canvas{display:block; width:100%; height:100%;}
   .mir .lab{position:absolute; left:4px; top:2px; font-size:9px; color:#9fb0c8; background:rgba(0,0,0,.45); padding:0 3px; border-radius:3px;}
   .mir .adj{position:absolute; right:4px; bottom:2px; font-size:8px; color:#8fa0b8;}
   /* 速度・ギア（上中央） */
-  #spd{position:absolute; top:36px; left:50%; transform:translateX(-50%); z-index:6; background:rgba(18,22,30,.85); border:1px solid #2b364d; border-radius:9px; padding:3px 12px; display:flex; align-items:baseline; gap:9px;}
+  #spd{position:absolute; top:96px; left:50%; transform:translateX(-50%); z-index:6; background:rgba(18,22,30,.85); border:1px solid #2b364d; border-radius:9px; padding:2px 11px; display:flex; align-items:baseline; gap:9px;}
   #spd .kmh{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1;}
   #spd .u{font-size:9px; color:var(--sub);}
   #spd .gear b{font-size:13px; font-weight:800; color:#3b4560; margin:0 1px;} #spd .gear b.act{color:var(--accent);}
@@ -70,6 +71,7 @@
   </div>
   <div class="mir" id="mirLbox"><canvas id="mirL"></canvas><span class="lab">左ミラー</span><span class="adj">調整:ドラッグ</span></div>
   <div class="mir" id="mirRbox"><canvas id="mirR"></canvas><span class="lab">右ミラー</span><span class="adj">調整:ドラッグ</span></div>
+  <div class="mir" id="mirCbox"><canvas id="mirC"></canvas><span class="lab">ルームミラー</span></div>
   <div id="spd"><span><span class="kmh" id="kmh">0</span> <span class="u">km/h</span></span><span class="gear"><b data-g="P">P</b><b data-g="R">R</b><b data-g="N">N</b><b data-g="D">D</b></span></div>
   <div id="coach"><span class="msg" id="coachMsg">課題を選んでスタート</span></div>
 
@@ -173,7 +175,7 @@ const car={x:0,y:0,th:0,steer:0,v:0};
 let wheelAngle=0, gear='P', brakeHeld=false, accelHeld=false, creepMode=true;
 let reverses=0, wasReversing=false, result=null, cutRecorded=false, parPhase=0;
 let showGuide=true, showLines=true;
-const mirrorPan={L:0,R:0}, mirrorPitch={L:-0.05,R:-0.05};
+const mirrorPan={L:0,R:0,C:0}, mirrorPitch={L:-0.05,R:-0.05,C:-0.05};
 
 function computeBounds(){ let a=[...M.rects,M.bay,...M.parkedCars], minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
   for(const r of a){ minX=Math.min(minX,r.x0);maxX=Math.max(maxX,r.x1);minY=Math.min(minY,r.y0);maxY=Math.max(maxY,r.y1);}
@@ -218,7 +220,7 @@ function bindMirrorAdjust(id,side){ const el=document.getElementById(id); let d=
   el.addEventListener('pointermove',e=>{ if(!d)return; mirrorPan[side]=clamp(mirrorPan[side]+(e.clientX-lx)*0.004,-0.6,0.6);
     mirrorPitch[side]=clamp(mirrorPitch[side]+(e.clientY-ly)*0.003,-0.4,0.4); lx=e.clientX; ly=e.clientY; });
   ['pointerup','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>d=false)); }
-bindMirrorAdjust('mirL','L'); bindMirrorAdjust('mirR','R');
+bindMirrorAdjust('mirL','L'); bindMirrorAdjust('mirR','R'); bindMirrorAdjust('mirC','C');
 
 // メニュー
 const menu=document.getElementById('menu');
@@ -244,7 +246,7 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     bicycle(car,dt); updateLogic();
     handAnim(dt);
   }
-  renderScene(); renderWheel(); renderMirror('L'); renderMirror('R'); updateGauges();
+  renderScene(); renderWheel(); renderMirror('L'); renderMirror('R'); renderRearview(); updateGauges();
   requestAnimationFrame(step);
 }
 function updateLogic(){
@@ -269,7 +271,7 @@ function resize(){ const r=document.getElementById('app').getBoundingClientRect(
   cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); W=r.width;H=r.height;
   if(bounds){ const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY, availTop=44, availBot=Math.min(150,H*0.42), drawH=Math.max(70,H-availTop-availBot);
     PPM=Math.min(W/ww, drawH/wh)*0.98; ox=(W-ww*PPM)/2; oyTop=availTop+(drawH-wh*PPM)/2; }
-  sizeCanvas(wheelCv); sizeCanvas(document.getElementById('mirL')); sizeCanvas(document.getElementById('mirR')); }
+  sizeCanvas(wheelCv); sizeCanvas(document.getElementById('mirL')); sizeCanvas(document.getElementById('mirR')); sizeCanvas(document.getElementById('mirC')); }
 function sizeCanvas(c){ const dpr=window.devicePixelRatio||1;
   if(c.id==='wheel'){ const d=Math.round(Math.min(176,H*0.42,W*0.30)); c.style.width=d+'px'; c.style.height=d+'px'; c.width=d*dpr; c.height=d*dpr; }
   else { const r=c.getBoundingClientRect(); c.width=Math.max(1,r.width*dpr); c.height=Math.max(1,r.height*dpr); }
@@ -376,33 +378,83 @@ function renderWheel(){ const g=wheelCv.getContext('2d'), w=wheelCv.getBoundingC
 }
 function roundRectG(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
 
-/* ==================== ミラー（簡易3D投影） ==================== */
-function renderMirror(side){ const el=document.getElementById(side==='L'?'mirL':'mirR'), g=el.getContext('2d');
-  const w=el.getBoundingClientRect().width, h=el.getBoundingClientRect().height; g.clearRect(0,0,w,h);
-  if(!M){return;}
-  // 空/地面
-  g.fillStyle='#0b1a2e'; g.fillRect(0,0,w,h); g.fillStyle='#1a2436'; g.fillRect(0,h*0.5,w,h*0.5);
-  const cam=driverMirror(car,side), camH=1.05;
-  const look=car.th+Math.PI+(side==='R'?-0.5:0.5)+mirrorPan[side];
-  const cosL=Math.cos(look), sinL=Math.sin(look), focal=w*0.85, horizon=h*0.5 + mirrorPitch[side]*h*2;
-  function proj(px,py,pz){ const dx=px-cam.x,dy=py-cam.y, depth=dx*cosL+dy*sinL, right=-dx*sinL+dy*cosL; if(depth<0.2)return null;
-    return {x:w/2 - focal*(right/depth), y:horizon - focal*((pz-camH)/depth), depth}; }
-  function post(px,py,top,col){ const a=proj(px,py,0), b=proj(px,py,top); if(!a||!b)return; g.strokeStyle=col; g.lineWidth=Math.max(2,60/a.depth); g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); }
-  // 地面グリッド（奥行き感）
-  g.strokeStyle='rgba(120,140,170,.25)'; g.lineWidth=1;
-  for(let d=1;d<=8;d++){ const pts=[]; for(let o=-4;o<=4;o++){ const p=proj(cam.x+ (cosL*d) + (-sinL*o), cam.y+ (sinL*d)+(cosL*o),0); if(p)pts.push(p); } for(let i=1;i<pts.length;i++){ g.beginPath(); g.moveTo(pts[i-1].x,pts[i-1].y); g.lineTo(pts[i].x,pts[i].y); g.stroke(); } }
-  // 縁石ライン
-  if(M.curbY!=null){ let prev=null; for(let x=bounds.minX;x<=bounds.maxX;x+=0.5){ const p=proj(x,M.curbY,0.08); if(p&&prev){ g.strokeStyle='#8ea0bc'; g.lineWidth=2; g.beginPath(); g.moveTo(prev.x,prev.y); g.lineTo(p.x,p.y); g.stroke(); } prev=p; } }
-  // ポール
-  for(const p of M.poles) post(p.x,p.y,1.0,'#ffb020');
-  // 駐車車両（角を柱で）
-  for(const o of M.parkedCars){ post(o.x0,o.y0,1.2,'#9fb0c8'); post(o.x0,o.y1,1.2,'#9fb0c8'); post(o.x1,o.y1,1.2,'#9fb0c8'); }
-  // 自車の後輪（そのミラー側）＝タイヤの目印
-  const rw=side==='L'?wheelPositions(car).RL:wheelPositions(car).RR; const tp=proj(rw.x,rw.y,0.15);
-  if(tp){ g.fillStyle='#20242c'; g.beginPath(); g.ellipse(tp.x,tp.y,Math.max(5,80/tp.depth),Math.max(3,44/tp.depth),0,0,7); g.fill(); g.fillStyle='#0c0e12'; g.fillText('',tp.x,tp.y); }
-  // 自車ボディ端
-  const bodyC=side==='L'?toWorld(car,-C.rearOverhang,C.width/2):toWorld(car,-C.rearOverhang,-C.width/2); const bp=proj(bodyC.x,bodyC.y,0.5);
-  if(bp){ g.fillStyle='rgba(190,70,70,.55)'; g.fillRect(side==='L'?0:w-14,0,14,h); }
+/* ==================== ミラー（3D投影・リアル化：自車の車体＋タイヤ＋ルームミラー） ==================== */
+const CARCOL='#c23a34';
+function mkProj(camx,camy,camH,look,focal,horizon,w){ const cs=Math.cos(look), sn=Math.sin(look);
+  return (px,py,pz)=>{ const dx=px-camx,dy=py-camy, depth=dx*cs+dy*sn; if(depth<=0.18)return null;
+    const cr=dx*sn-dy*cs; return {x:w/2 - focal*(cr/depth), y:horizon - focal*((pz-camH)/depth), depth}; }; }
+function mSky(g,w,h,horizon){ const hz=clamp(horizon,0,h);
+  let sky=g.createLinearGradient(0,0,0,Math.max(1,hz)); sky.addColorStop(0,'#2a3a4e'); sky.addColorStop(1,'#1d2836'); g.fillStyle=sky; g.fillRect(0,0,w,hz);
+  let gr=g.createLinearGradient(0,hz,0,h); gr.addColorStop(0,'#212a3b'); gr.addColorStop(1,'#12181f'); g.fillStyle=gr; g.fillRect(0,hz,w,h-hz); }
+function mGroundLine(proj,g,y,z,col,wd){ let prev=null; g.strokeStyle=col; g.lineWidth=wd;
+  for(let x=bounds.minX-1;x<=bounds.maxX+1;x+=0.4){ const p=proj(x,y,z); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+function mRect(proj,g,r,col,wd,z){ const pts=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1],[r.x0,r.y0]]; g.strokeStyle=col; g.lineWidth=wd; let prev=null;
+  for(const [x,y] of pts){ const p=proj(x,y,z||0); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+function mPole(proj,g,x,y,top,col){ const a=proj(x,y,0),b=proj(x,y,top); if(!a||!b)return; g.strokeStyle=col; g.lineWidth=Math.max(2,44/a.depth);
+  g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); g.fillStyle=col; g.beginPath(); g.arc(b.x,b.y,Math.max(2,16/a.depth),0,7); g.fill(); }
+function mCarBox(proj,g,r,ht){ const c=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1]];
+  const bot=c.map(([x,y])=>proj(x,y,0)), top=c.map(([x,y])=>proj(x,y,ht)); if(bot.some(p=>!p)||top.some(p=>!p))return;
+  g.fillStyle='rgba(66,76,100,.96)'; for(let i=0;i<4;i++){ const j=(i+1)%4; g.beginPath(); g.moveTo(bot[i].x,bot[i].y);g.lineTo(bot[j].x,bot[j].y);g.lineTo(top[j].x,top[j].y);g.lineTo(top[i].x,top[i].y);g.closePath(); g.fill(); }
+  g.fillStyle='#68748e'; g.beginPath(); g.moveTo(top[0].x,top[0].y); for(let i=1;i<4;i++)g.lineTo(top[i].x,top[i].y); g.closePath(); g.fill(); g.strokeStyle='#8a96b0'; g.lineWidth=1; g.stroke(); }
+function mWorld(proj,g){
+  if(M.bay) mRect(proj,g,M.bay,'rgba(150,195,150,.6)',2,0.02);
+  for(const r of M.rects) mRect(proj,g,r,'rgba(90,110,140,.22)',1,0);
+  if(M.curbY!=null){ mGroundLine(proj,g,M.curbY,0.12,'#d3dce8',3); mGroundLine(proj,g,M.curbY,0,'#7d8ca6',1.4); }
+  for(const o of M.parkedCars) mCarBox(proj,g,o,1.42);
+  for(const p of M.poles) mPole(proj,g,p.x,p.y,1.0,'#ffb020');
+}
+function mHousing(g,w,h){ let sh=g.createLinearGradient(0,0,0,h); sh.addColorStop(0,'rgba(255,255,255,.12)'); sh.addColorStop(0.18,'rgba(255,255,255,0)');
+  g.fillStyle=sh; g.fillRect(0,0,w,h); g.strokeStyle='#05070b'; g.lineWidth=3; g.strokeRect(1.5,1.5,w-3,h-3); }
+function mEgoFlank(proj,g,side){                 // 自車の側面（ドアミラー内側）＝ボディ＋ガラス＋ホイールアーチ＋後輪
+  const S=side==='L'?1:-1, ly=S*(C.width/2);
+  const lxs=[0.7,0.0,-0.8,-1.5,-C.rearOverhang-0.05], bodyZ=0.72, roofZ=1.0;
+  const top=[],mid=[],bot=[];
+  for(const lx of lxs){ const p=toWorld(car,lx,ly); top.push(proj(p.x,p.y,roofZ)); mid.push(proj(p.x,p.y,bodyZ)); bot.push(proj(p.x,p.y,0)); }
+  if(mid.some(p=>!p)||bot.some(p=>!p))return;
+  // 下部ボディ
+  g.beginPath(); g.moveTo(mid[0].x,mid[0].y); for(let i=1;i<mid.length;i++)g.lineTo(mid[i].x,mid[i].y);
+  for(let i=bot.length-1;i>=0;i--)g.lineTo(bot[i].x,bot[i].y); g.closePath();
+  const grd=g.createLinearGradient(0,mid[0].y,0,bot[0].y); grd.addColorStop(0,'#e6635a'); grd.addColorStop(0.5,CARCOL); grd.addColorStop(1,'#6f1f1b');
+  g.fillStyle=grd; g.fill(); g.strokeStyle='#4c1210'; g.lineWidth=1.3; g.stroke();
+  // 上部（ガラス・グラスハウス）
+  if(top.every(p=>p)){ g.beginPath(); g.moveTo(top[0].x,top[0].y); for(let i=1;i<top.length;i++)g.lineTo(top[i].x,top[i].y);
+    for(let i=mid.length-1;i>=0;i--)g.lineTo(mid[i].x,mid[i].y); g.closePath();
+    const gg=g.createLinearGradient(0,top[0].y,0,mid[0].y); gg.addColorStop(0,'#2b3440'); gg.addColorStop(1,'#141a21'); g.fillStyle=gg; g.fill(); g.strokeStyle='#3a1512'; g.lineWidth=1; g.stroke(); }
+  // 後輪＋アーチ
+  const rw=side==='L'?wheelPositions(car).RL:wheelPositions(car).RR;
+  const wc=proj(rw.x,rw.y,0.17), wg=proj(rw.x,rw.y,0);
+  if(wc&&wg){ const rr=Math.max(5,58/wc.depth);
+    g.fillStyle='rgba(0,0,0,.4)'; g.beginPath(); g.ellipse(wg.x,wg.y,rr*1.25,rr*0.4,0,0,7); g.fill();        // 接地影
+    g.fillStyle='#2a0f0d'; g.beginPath(); g.arc(wc.x,wc.y,rr*1.15,Math.PI,2*Math.PI); g.closePath(); g.fill(); // アーチ
+    g.fillStyle='#131418'; g.beginPath(); g.ellipse(wc.x,wc.y,rr*0.72,rr,0,0,7); g.fill();                    // タイヤ
+    g.fillStyle='#474d59'; g.beginPath(); g.ellipse(wc.x,wc.y,rr*0.34,rr*0.55,0,0,7); g.fill();               // ホイール
+    g.fillStyle='#20242c'; g.beginPath(); g.ellipse(wc.x,wc.y,rr*0.13,rr*0.22,0,0,7); g.fill(); }             // ハブ
+}
+function renderMirror(side){
+  const el=document.getElementById(side==='L'?'mirL':'mirR'); if(!el)return; const g=el.getContext('2d');
+  const w=el.getBoundingClientRect().width, h=el.getBoundingClientRect().height; if(!M||w<2)return;
+  g.clearRect(0,0,w,h);
+  const cam=driverMirror(car,side), camH=1.02, sgn=side==='R'?1:-1;
+  const look=car.th+Math.PI + sgn*0.32 + mirrorPan[side];
+  const focal=w*0.46, horizon=clamp(h*0.46 - mirrorPitch[side]*h, 8, h-8);
+  mSky(g,w,h,horizon); const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w);
+  mWorld(proj,g); mEgoFlank(proj,g,side); mHousing(g,w,h);
+}
+function renderRearview(){
+  const el=document.getElementById('mirC'); if(!el)return; const g=el.getContext('2d');
+  const w=el.getBoundingClientRect().width, h=el.getBoundingClientRect().height; if(!M||w<2)return;
+  g.clearRect(0,0,w,h);
+  const cam=toWorld(car,-0.2,0), camH=1.18;
+  const look=car.th+Math.PI + mirrorPan.C;
+  const focal=w*0.44, horizon=clamp(h*0.50 - mirrorPitch.C*h, 8, h-8);
+  mSky(g,w,h,horizon); const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w);
+  mWorld(proj,g);
+  const rl=toWorld(car,-C.rearOverhang,C.width/2), rr=toWorld(car,-C.rearOverhang,-C.width/2);
+  const a=proj(rl.x,rl.y,0.6), b=proj(rr.x,rr.y,0.6), a0=proj(rl.x,rl.y,0), b0=proj(rr.x,rr.y,0);
+  if(a&&b&&a0&&b0){ const grd=g.createLinearGradient(0,Math.min(a.y,b.y),0,Math.max(a0.y,b0.y));
+    grd.addColorStop(0,'#7a221d'); grd.addColorStop(1,'#3c0f0d'); g.fillStyle=grd;
+    g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.lineTo(b0.x,b0.y); g.lineTo(a0.x,a0.y); g.closePath(); g.fill(); }
+  mHousing(g,w,h);
 }
 
 /* ==================== ゲージ更新（DOM） ==================== */
