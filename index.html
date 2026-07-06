@@ -8,47 +8,41 @@
   html,body{margin:0; height:100%; background:var(--bg); color:var(--ink); overflow:hidden;
     font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN",sans-serif;
     touch-action:none; -webkit-user-select:none; user-select:none;}
-  #app{display:flex; flex-direction:row; height:100%; width:100%;}
-  /* 左：俯瞰 */
-  #scene{position:relative; flex:1 1 56%; min-width:0; background:#0a1220;}
-  #scene canvas{display:block; width:100%; height:100%;}
-  #topbar{position:absolute; left:8px; top:8px; right:8px; display:flex; gap:6px; align-items:center; pointer-events:none;}
-  #topbar .t{font-size:13px; font-weight:700; background:rgba(12,18,28,.7); padding:4px 8px; border-radius:7px;}
-  #topbar button{pointer-events:auto; background:#26304a; color:var(--ink); border:0; border-radius:7px; padding:6px 8px; font-size:11px; font-weight:700;}
-  #topbar button.on{background:var(--accent); color:#04101f;}
-  #topbar button.menu{background:var(--accent2); color:#fff;}
-  #topbar .sp{flex:1;}
-  #coach{position:absolute; left:8px; right:8px; bottom:8px; text-align:center; pointer-events:none;}
-  #coach .msg{display:inline-block; font-size:13px; font-weight:700; background:rgba(12,18,28,.85);
-    border:1px solid #2b364d; border-radius:9px; padding:6px 11px; max-width:96%;}
-  .msg.ok{color:var(--ok);border-color:var(--ok);} .msg.warn{color:var(--warn);border-color:var(--warn);} .msg.bad{color:var(--bad);border-color:var(--bad);}
-  /* 右：ダッシュボード */
-  #dash{flex:0 0 44%; max-width:520px; display:flex; flex-direction:column; gap:6px; padding:8px; background:linear-gradient(180deg,#12151d,#0e1119);}
-  #dashTop{display:flex; gap:6px; align-items:stretch; height:74px;}
-  .mir{flex:1 1 0; min-width:0; position:relative; background:#000; border-radius:8px; overflow:hidden; border:1px solid #2b364d;}
+  #app{position:relative; width:100%; height:100%; overflow:hidden; background:#0a1220;}
+  #cv{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  /* 上部バー */
+  #topbar{position:absolute; top:0; left:0; right:0; height:34px; display:flex; align-items:center; gap:6px; padding:4px 8px; z-index:8; pointer-events:none;}
+  #topbar .t{font-size:12px; font-weight:700; background:rgba(12,18,28,.6); padding:3px 7px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:32%;}
+  #topbar button{pointer-events:auto; background:#26304a; color:var(--ink); border:0; border-radius:6px; padding:5px 8px; font-size:11px; font-weight:700; white-space:nowrap;}
+  #topbar button.on{background:var(--accent); color:#04101f;} #topbar button.menu{background:var(--accent2); color:#fff;} #topbar .sp{flex:1;}
+  /* ミラー（上・左右） */
+  .mir{position:absolute; top:38px; width:148px; height:66px; background:#000; border:1px solid #2b364d; border-radius:8px; overflow:hidden; z-index:6; touch-action:none;}
+  #mirLbox{left:8px;} #mirRbox{right:8px;}
   .mir canvas{display:block; width:100%; height:100%;}
-  .mir .lab{position:absolute; left:4px; top:2px; font-size:9px; color:#9fb0c8; background:rgba(0,0,0,.4); padding:0 3px; border-radius:3px;}
-  .mir .adj{position:absolute; right:3px; bottom:2px; font-size:8px; color:#8fa0b8;}
-  #spd{flex:0 0 116px; background:var(--panel); border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center;}
-  #spd .kmh{font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1;}
-  #spd .u{font-size:9px; color:var(--sub); margin-top:1px;}
-  #spd .gear{margin-top:4px; font-size:12px; font-weight:800; letter-spacing:2px;}
-  #spd .gear b{color:#3b4560; margin:0 1px;} #spd .gear b.act{color:var(--accent);}
-  #wheelWrap{flex:1 1 auto; position:relative; min-height:0; display:flex; align-items:center; justify-content:center;}
-  #wheel{touch-action:none; display:block;}
-  #wheelWrap .hint{position:absolute; left:8px; top:6px; font-size:10px; color:var(--sub);}
-  #recenter{position:absolute; right:6px; top:6px; background:#26304a; color:var(--ink); border:0; border-radius:8px; padding:6px 9px; font-size:11px; font-weight:700;}
-  #dashBot{display:flex; gap:6px; align-items:stretch; height:96px;}
-  #shifter{flex:0 0 66px; display:flex; flex-direction:column; gap:3px;}
-  #shifter button{flex:1; border:0; border-radius:7px; background:var(--panel2); color:var(--sub); font-weight:800; font-size:14px;}
+  .mir .lab{position:absolute; left:4px; top:2px; font-size:9px; color:#9fb0c8; background:rgba(0,0,0,.45); padding:0 3px; border-radius:3px;}
+  .mir .adj{position:absolute; right:4px; bottom:2px; font-size:8px; color:#8fa0b8;}
+  /* 速度・ギア（上中央） */
+  #spd{position:absolute; top:36px; left:50%; transform:translateX(-50%); z-index:6; background:rgba(18,22,30,.85); border:1px solid #2b364d; border-radius:9px; padding:3px 12px; display:flex; align-items:baseline; gap:9px;}
+  #spd .kmh{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1;}
+  #spd .u{font-size:9px; color:var(--sub);}
+  #spd .gear b{font-size:13px; font-weight:800; color:#3b4560; margin:0 1px;} #spd .gear b.act{color:var(--accent);}
+  /* コーチ（下中央） */
+  #coach{position:absolute; left:50%; transform:translateX(-50%); bottom:6px; max-width:44%; text-align:center; z-index:6; pointer-events:none;}
+  #coach .msg{display:inline-block; font-size:12.5px; font-weight:700; background:rgba(12,18,28,.86); border:1px solid #2b364d; border-radius:9px; padding:5px 10px;}
+  .msg.ok{color:var(--ok);border-color:var(--ok);} .msg.warn{color:var(--warn);border-color:var(--warn);} .msg.bad{color:var(--bad);border-color:var(--bad);}
+  /* 左親指：シフト＋ペダル */
+  #leftCluster{position:absolute; left:8px; bottom:8px; width:176px; display:flex; flex-direction:column; gap:6px; z-index:9;}
+  #shifter{display:flex; gap:4px;}
+  #shifter button{flex:1; height:30px; border:0; border-radius:6px; background:var(--panel2); color:var(--sub); font-weight:800; font-size:13px;}
   #shifter button.act{background:var(--accent); color:#04101f;}
-  .pedal{flex:1; border:0; border-radius:10px; font-weight:800; font-size:15px; color:#fff; box-shadow:0 3px 0 rgba(0,0,0,.4);}
+  #pedals{display:flex; gap:6px;}
+  .pedal{flex:1; height:82px; border:0; border-radius:12px; font-weight:800; font-size:14px; color:#fff; box-shadow:0 3px 0 rgba(0,0,0,.4);}
   .pedal.brake{background:#7a2530;} .pedal.brake.held{background:var(--bad); transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.4);}
   .pedal.accel{background:#1f5a37;} .pedal.accel.held{background:var(--ok); color:#04101f; transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.4);}
-  #dashFoot{display:flex; gap:6px; align-items:center; height:30px;}
-  #dashFoot button{border:0; border-radius:7px; padding:6px 8px; font-size:11px; font-weight:700; background:#26304a; color:var(--ink);}
-  #dashFoot button.on{background:var(--ok); color:#04101f;}
-  #dashFoot .sp{flex:1;}
+  /* 右親指：ハンドル */
+  #rightCluster{position:absolute; right:8px; bottom:8px; display:flex; flex-direction:column; align-items:center; gap:4px; z-index:9;}
+  #recenter{background:#26304a; color:var(--ink); border:0; border-radius:8px; padding:5px 11px; font-size:11px; font-weight:700;}
+  #wheel{touch-action:none; display:block;}
   /* メニュー */
   #menu{position:fixed; inset:0; background:#0b0f17; display:none; flex-direction:column; gap:10px; padding:14px 16px; overflow:auto; z-index:30;}
   #menu.show{display:flex;} #menu h2{margin:2px 0 0; font-size:16px;}
@@ -63,49 +57,30 @@
 </style>
 
 <div id="app">
-  <!-- 左：俯瞰 -->
-  <div id="scene">
-    <canvas id="cv"></canvas>
-    <div id="topbar">
-      <button class="menu" id="btnMenu">≡課題</button>
-      <span class="t" id="title">方向転換（右バック）</span>
-      <span class="sp"></span>
-      <button id="btnGuide" class="on">お手本</button>
-      <button id="btnLines" class="on">タイヤ線</button>
-    </div>
-    <div id="coach"><span class="msg" id="coachMsg">課題を選んでスタート</span></div>
+  <canvas id="cv"></canvas>
+  <div id="topbar">
+    <button class="menu" id="btnMenu">≡課題</button>
+    <span class="t" id="title">方向転換（右バック）</span>
+    <span class="sp"></span>
+    <button id="btnGuide" class="on">お手本</button>
+    <button id="btnLines" class="on">タイヤ線</button>
+    <button id="creep" class="on">クリープON</button>
+    <button id="reset">やり直し</button>
   </div>
+  <div class="mir" id="mirLbox"><canvas id="mirL"></canvas><span class="lab">左ミラー</span><span class="adj">調整:ドラッグ</span></div>
+  <div class="mir" id="mirRbox"><canvas id="mirR"></canvas><span class="lab">右ミラー</span><span class="adj">調整:ドラッグ</span></div>
+  <div id="spd"><span><span class="kmh" id="kmh">0</span> <span class="u">km/h</span></span><span class="gear"><b data-g="P">P</b><b data-g="R">R</b><b data-g="N">N</b><b data-g="D">D</b></span></div>
+  <div id="coach"><span class="msg" id="coachMsg">課題を選んでスタート</span></div>
 
-  <!-- 右：ダッシュボード -->
-  <div id="dash">
-    <div id="dashTop">
-      <div class="mir"><canvas id="mirL"></canvas><span class="lab">左ミラー</span><span class="adj">ドラッグで調整</span></div>
-      <div id="spd">
-        <div class="kmh" id="kmh">0</div><div class="u">km/h</div>
-        <div class="gear"><b data-g="P">P</b><b data-g="R">R</b><b data-g="N">N</b><b data-g="D">D</b></div>
-      </div>
-      <div class="mir"><canvas id="mirR"></canvas><span class="lab">右ミラー</span><span class="adj">ドラッグで調整</span></div>
-    </div>
-
-    <div id="wheelWrap">
-      <span class="hint" id="wheelHint">ハンドルを指でまわす</span>
-      <button id="recenter">まっすぐ</button>
-      <canvas id="wheel"></canvas>
-    </div>
-
-    <div id="dashBot">
-      <div id="shifter">
-        <button data-g="D">D</button><button data-g="N">N</button>
-        <button data-g="R">R</button><button data-g="P" class="act">P</button>
-      </div>
-      <button class="pedal brake" id="brake">ブレーキ</button>
-      <button class="pedal accel" id="accel">アクセル</button>
-    </div>
-    <div id="dashFoot">
-      <button id="creep" class="on">クリープ ON</button>
-      <span class="sp"></span>
-      <button id="reset">やり直し</button>
-    </div>
+  <!-- 左親指：シフト＋ペダル -->
+  <div id="leftCluster">
+    <div id="shifter"><button data-g="P" class="act">P</button><button data-g="R">R</button><button data-g="N">N</button><button data-g="D">D</button></div>
+    <div id="pedals"><button class="pedal brake" id="brake">ブレーキ</button><button class="pedal accel" id="accel">アクセル</button></div>
+  </div>
+  <!-- 右親指：ハンドル -->
+  <div id="rightCluster">
+    <button id="recenter">まっすぐ</button>
+    <canvas id="wheel"></canvas>
   </div>
 
   <div id="menu">
@@ -289,14 +264,18 @@ function updateLogic(){
 
 /* ==================== 俯瞰の描画（左） ==================== */
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
-let PPM=22,W=0,H=0,ox=0,oy=0;
-function resize(){ const host=document.getElementById('scene'), r=host.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
-  cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); W=r.width;H=r.height; if(!bounds)return;
-  const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY; PPM=Math.min(W/ww,H/wh)*0.98; ox=(W-ww*PPM)/2; oy=(H-wh*PPM)/2;
+let PPM=22,W=0,H=0,ox=0,oyTop=0;
+function resize(){ const r=document.getElementById('app').getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+  cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); W=r.width;H=r.height;
+  if(bounds){ const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY, availTop=44, availBot=Math.min(150,H*0.42), drawH=Math.max(70,H-availTop-availBot);
+    PPM=Math.min(W/ww, drawH/wh)*0.98; ox=(W-ww*PPM)/2; oyTop=availTop+(drawH-wh*PPM)/2; }
   sizeCanvas(wheelCv); sizeCanvas(document.getElementById('mirL')); sizeCanvas(document.getElementById('mirR')); }
-function sizeCanvas(c){ const r=c.getBoundingClientRect(), dpr=window.devicePixelRatio||1; if(c.id==='wheel'){ const d=Math.min(r.width,document.getElementById('wheelWrap').getBoundingClientRect().height)-6; c.style.width=d+'px';c.style.height=d+'px'; const rr=c.getBoundingClientRect(); c.width=rr.width*dpr;c.height=rr.height*dpr; } else { c.width=r.width*dpr;c.height=r.height*dpr; } c.getContext('2d').setTransform(dpr,0,0,dpr,0,0); }
-addEventListener('resize',()=>{ resize(); });
-function wx(x){ return ox+(x-bounds.minX)*PPM; } function wy(y){ return H-oy-(y-bounds.minY)*PPM; }
+function sizeCanvas(c){ const dpr=window.devicePixelRatio||1;
+  if(c.id==='wheel'){ const d=Math.round(Math.min(176,H*0.42,W*0.30)); c.style.width=d+'px'; c.style.height=d+'px'; c.width=d*dpr; c.height=d*dpr; }
+  else { const r=c.getBoundingClientRect(); c.width=Math.max(1,r.width*dpr); c.height=Math.max(1,r.height*dpr); }
+  c.getContext('2d').setTransform(dpr,0,0,dpr,0,0); }
+addEventListener('resize',()=>resize());
+function wx(x){ return ox+(x-bounds.minX)*PPM; } function wy(y){ return oyTop+(bounds.maxY-y)*PPM; }
 function fillR(r,col){ ctx.fillStyle=col; ctx.fillRect(wx(r.x0),wy(r.y1),(r.x1-r.x0)*PPM,(r.y1-r.y0)*PPM); }
 function strokeR(r,col,w){ ctx.strokeStyle=col; ctx.lineWidth=w; ctx.strokeRect(wx(r.x0),wy(r.y1),(r.x1-r.x0)*PPM,(r.y1-r.y0)*PPM); }
 
@@ -317,7 +296,6 @@ function renderScene(){ ctx.clearRect(0,0,W,H); if(!M||!bounds)return;
   if(showLines) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
-  drawCueGauge();
 }
 function drawWheelTrails(s){
   const w=wheelPositions(s), st=s.steer, D=2.6;
