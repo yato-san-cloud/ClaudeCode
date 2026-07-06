@@ -15,6 +15,21 @@
   #topbar .t{font-size:12px; font-weight:700; background:rgba(12,18,28,.6); padding:3px 7px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:32%;}
   #topbar button{pointer-events:auto; background:#26304a; color:var(--ink); border:0; border-radius:6px; padding:5px 8px; font-size:11px; font-weight:700; white-space:nowrap;}
   #topbar button.on{background:var(--accent); color:#04101f;} #topbar button.menu{background:var(--accent2); color:#fff;} #topbar .sp{flex:1;}
+  #btnExam.on{background:#ff8b3d; color:#241000;}
+  .mir.checked{border-color:var(--ok); box-shadow:0 0 8px rgba(55,214,122,.7);}
+  /* 結果パネル */
+  #resultPanel{position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:40; background:rgba(5,8,14,.6);}
+  #resultPanel.show{display:flex;}
+  #resultPanel .box{width:min(92%,410px); max-height:92%; overflow:auto; background:#141a26; border:1px solid #2b364d; border-radius:14px; padding:13px 16px;}
+  #resultPanel h3{margin:0 0 2px; font-size:18px;}
+  #resultPanel h3.pass{color:var(--ok);} #resultPanel h3.fail{color:var(--bad);}
+  #resultPanel .score{font-size:12.5px; color:var(--sub); margin-bottom:6px;}
+  #resultPanel ul{margin:5px 0; padding-left:18px; font-size:12px; line-height:1.55;}
+  #resultPanel .sec-t{font-size:11px; color:var(--sub); font-weight:700; margin-top:7px;}
+  #resultPanel .adv{font-size:12px; color:var(--warn); margin:6px 0 0;}
+  #resultPanel .btns{display:flex; gap:8px; margin-top:11px;}
+  #resultPanel .btns button{flex:1; border:0; border-radius:9px; padding:10px 0; font-weight:800; background:var(--accent); color:#04101f;}
+  #resultPanel .btns button.sec{background:#26304a; color:var(--ink);}
   /* ミラー（上・左右） */
   .mir{position:absolute; top:38px; width:148px; height:66px; background:#000; border:1px solid #2b364d; border-radius:8px; overflow:hidden; z-index:6; touch-action:none;}
   #mirLbox{left:8px;} #mirRbox{right:8px;}
@@ -31,10 +46,14 @@
   #coach{position:absolute; left:50%; transform:translateX(-50%); bottom:6px; max-width:44%; text-align:center; z-index:6; pointer-events:none;}
   #coach .msg{display:inline-block; font-size:12.5px; font-weight:700; background:rgba(12,18,28,.86); border:1px solid #2b364d; border-radius:9px; padding:5px 10px;}
   .msg.ok{color:var(--ok);border-color:var(--ok);} .msg.warn{color:var(--warn);border-color:var(--warn);} .msg.bad{color:var(--bad);border-color:var(--bad);}
-  /* 左親指：シフト＋ペダル */
-  #leftCluster{position:absolute; left:8px; bottom:8px; width:168px; z-index:9;}
+  /* 左親指：サイド/目視＋ペダル */
+  #leftCluster{position:absolute; left:8px; bottom:8px; width:172px; z-index:9;}
+  #prep{display:flex; gap:6px; margin-bottom:6px;}
+  #prep button{flex:1; height:32px; border:0; border-radius:8px; background:var(--panel2); color:var(--ink); font-weight:800; font-size:11.5px;}
+  #handbrake.on{background:#c2333f; color:#fff;}
+  #lookback:active{background:var(--accent); color:#04101f;}
   #pedals{display:flex; gap:6px;}
-  .pedal{flex:1; height:106px; border:0; border-radius:12px; font-weight:800; font-size:14px; color:#fff; box-shadow:0 3px 0 rgba(0,0,0,.4);}
+  .pedal{flex:1; height:96px; border:0; border-radius:12px; font-weight:800; font-size:14px; color:#fff; box-shadow:0 3px 0 rgba(0,0,0,.4);}
   .pedal.brake{background:#7a2530;} .pedal.brake.held{background:var(--bad); transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.4);}
   .pedal.accel{background:#1f5a37;} .pedal.accel.held{background:var(--ok); color:#04101f; transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.4);}
   /* 右親指：シフト＋ハンドル */
@@ -64,6 +83,7 @@
     <button class="menu" id="btnMenu">≡課題</button>
     <span class="t" id="title">方向転換（右バック）</span>
     <span class="sp"></span>
+    <button id="btnExam">検定</button>
     <button id="btnGuide" class="on">お手本</button>
     <button id="btnLines" class="on">タイヤ線</button>
     <button id="creep" class="on">クリープON</button>
@@ -75,8 +95,9 @@
   <div id="spd"><span><span class="kmh" id="kmh">0</span> <span class="u">km/h</span></span><span class="gear"><b data-g="P">P</b><b data-g="R">R</b><b data-g="N">N</b><b data-g="D">D</b></span></div>
   <div id="coach"><span class="msg" id="coachMsg">課題を選んでスタート</span></div>
 
-  <!-- 左親指：シフト＋ペダル -->
+  <!-- 左親指：サイド/目視＋ペダル -->
   <div id="leftCluster">
+    <div id="prep"><button id="handbrake" class="on">🅿 サイド</button><button id="lookback">👀 後方目視</button></div>
     <div id="pedals"><button class="pedal brake" id="brake">ブレーキ</button><button class="pedal accel" id="accel">アクセル</button></div>
   </div>
   <!-- 右親指：シフト＋ハンドル -->
@@ -84,6 +105,12 @@
     <div id="shifter"><button data-g="P" class="act">P</button><button data-g="R">R</button><button data-g="N">N</button><button data-g="D">D</button></div>
     <div id="wheelBox"><button id="recenter">まっすぐ</button><canvas id="wheel"></canvas></div>
   </div>
+
+  <div id="resultPanel"><div class="box">
+    <h3 id="resTitle">結果</h3><div class="score" id="resScore"></div>
+    <div id="resBody"></div>
+    <div class="btns"><button id="resRetry">もう一度</button><button id="resMenu" class="sec">課題をえらぶ</button></div>
+  </div></div>
 
   <div id="menu">
     <h2>課題をえらぶ</h2>
@@ -106,7 +133,7 @@ const DEG=Math.PI/180;
 /* ==================== CONFIG（実寸に差し替え可） ==================== */
 const CONFIG={
   car:{ length:4.58, width:1.795, wheelbase:2.70, frontOverhang:0.92, track:1.54,
-        maxSteerDeg:36, creep:0.55, maxSpeed:1.9 },
+        maxSteerDeg:36, steerPlayDeg:8, creep:0.55, maxSpeed:1.9 },
   perp:{ bayWidth:3.0, bayDepth:5.5, turninX:6.0 },
   parallel:{ approachY:3.2, turninX:8.0, theta1Deg:42, slotDepth:2.5, parkedLen:4.5,
              parkedW:1.75, curbGap:0.25, frontClear:2.0, rearClear:0.5, bayPad:0.4 }
@@ -114,6 +141,7 @@ const CONFIG={
 const C=CONFIG.car; C.rearOverhang=C.length-C.wheelbase-C.frontOverhang;
 const MAXSTEER=C.maxSteerDeg*DEG;
 const WHEEL_LOCK=1.25*2*Math.PI;   // ロック・トゥ・ロック2.5回転（片側1.25回転）
+const WHEEL_PLAY=(C.steerPlayDeg||0)*DEG; // ハンドルの遊び（実車の感覚）
 
 /* ==================== 物理・車体 ==================== */
 function bicycle(s,dt){ s.x+=s.v*Math.cos(s.th)*dt; s.y+=s.v*Math.sin(s.th)*dt; s.th+=(s.v/C.wheelbase)*Math.tan(s.steer)*dt; }
@@ -174,8 +202,14 @@ let M=null, bounds=null;
 const car={x:0,y:0,th:0,steer:0,v:0};
 let wheelAngle=0, gear='P', brakeHeld=false, accelHeld=false, creepMode=true;
 let reverses=0, wasReversing=false, result=null, cutRecorded=false, parPhase=0;
-let showGuide=true, showLines=true;
+let showGuide=true, showLines=true, examMode=false;
+let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
+let deductions=[], advice='', contactFail=false;
+const checks={room:-1e9,L:-1e9,R:-1e9,back:-1e9};
+const trail=[];
 const mirrorPan={L:0,R:0,C:0}, mirrorPitch={L:-0.05,R:-0.05,C:-0.05};
+function deduct(name,pts){ deductions.push({name,pts}); }
+function allChecked(){ return (tick-checks.room<900)&&(tick-checks.L<900)&&(tick-checks.R<900)&&(tick-checks.back<900); }
 
 function computeBounds(){ let a=[...M.rects,M.bay,...M.parkedCars], minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
   for(const r of a){ minX=Math.min(minX,r.x0);maxX=Math.max(maxX,r.x1);minY=Math.min(minY,r.y0);maxY=Math.max(maxY,r.y1);}
@@ -184,7 +218,12 @@ function drivable(x,y){ let ok=false; for(const r of M.rects) if(inRect(r,x,y)){
   for(const o of M.obstacles) if(inRect(o,x,y))return false; return true; }
 function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=M.start.th;car.steer=0;car.v=0;
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
-  document.getElementById('title').textContent=M.title; setCoach(M.coach,''); computeBounds(); resize(); closeMenu(); }
+  handbrake=true; hbWarned=false; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
+  deductions=[]; advice=''; contactFail=false; trail.length=0;
+  checks.room=checks.L=checks.R=checks.back=-1e9;
+  updateHbUI(); document.getElementById('resultPanel').classList.remove('show');
+  document.getElementById('title').textContent=M.title;
+  setCoach('① サイド解除 → ② シフトD → '+M.coach,''); computeBounds(); resize(); closeMenu(); }
 function resetCar(){ loadScenario(M.id); }
 const coachEl=document.getElementById('coachMsg');
 function setCoach(t,cls){ coachEl.textContent=t; coachEl.className='msg'+(cls?(' '+cls):''); }
@@ -208,18 +247,33 @@ function bindPedal(id,set){ const el=document.getElementById(id);
 bindPedal('brake',v=>brakeHeld=v); bindPedal('accel',v=>accelHeld=v);
 function setGearUI(){ document.querySelectorAll('#shifter button').forEach(b=>b.classList.toggle('act',b.dataset.g===gear));
   document.querySelectorAll('#spd .gear b').forEach(b=>b.classList.toggle('act',b.dataset.g===gear)); }
-document.querySelectorAll('#shifter button').forEach(b=>b.addEventListener('click',()=>{ gear=b.dataset.g; setGearUI(); }));
+document.querySelectorAll('#shifter button').forEach(b=>b.addEventListener('click',()=>{ gear=b.dataset.g; setGearUI();
+  if(gear==='R'&&!allChecked()&&!examMode&&!result) setCoach('後退前の安全確認：ルームミラー→左右ミラー→👀後方目視 をタップ','warn'); }));
 document.getElementById('creep').addEventListener('click',function(){ creepMode=!creepMode; this.classList.toggle('on',creepMode); this.textContent='クリープ '+(creepMode?'ON':'OFF'); });
 document.getElementById('btnGuide').addEventListener('click',function(){ showGuide=!showGuide; this.classList.toggle('on',showGuide); });
 document.getElementById('btnLines').addEventListener('click',function(){ showLines=!showLines; this.classList.toggle('on',showLines); });
 document.getElementById('reset').addEventListener('click',resetCar);
+document.getElementById('btnExam').addEventListener('click',function(){ examMode=!examMode; this.classList.toggle('on',examMode); resetCar();
+  if(examMode) setCoach('検定モード：お手本・ヒントなし。手順どおりに！','warn'); });
+// サイドブレーキ・後方目視
+function updateHbUI(){ document.getElementById('handbrake').classList.toggle('on',handbrake); }
+document.getElementById('handbrake').addEventListener('click',()=>{ if(result)return; handbrake=!handbrake; updateHbUI(); });
+document.getElementById('lookback').addEventListener('click',()=>{ if(result)return; checks.back=tick;
+  setCoach('後方ヨシ！','ok'); });
+// 結果パネル
+document.getElementById('resRetry').addEventListener('click',()=>resetCar());
+document.getElementById('resMenu').addEventListener('click',()=>{ document.getElementById('resultPanel').classList.remove('show'); openMenu(); });
 
-// ミラー調整（各ミラーをドラッグ）
-function bindMirrorAdjust(id,side){ const el=document.getElementById(id); let d=false,lx=0,ly=0;
-  el.addEventListener('pointerdown',e=>{e.preventDefault(); d=true; lx=e.clientX; ly=e.clientY; el.setPointerCapture(e.pointerId);});
-  el.addEventListener('pointermove',e=>{ if(!d)return; mirrorPan[side]=clamp(mirrorPan[side]+(e.clientX-lx)*0.004,-0.6,0.6);
+// ミラー調整（ドラッグ）＋安全確認（タップ）
+function registerCheck(side){ const key=side==='C'?'room':side; checks[key]=tick;
+  const box=document.getElementById(side==='L'?'mirLbox':side==='R'?'mirRbox':'mirCbox');
+  box.classList.add('checked'); setTimeout(()=>box.classList.remove('checked'),600); }
+function bindMirrorAdjust(id,side){ const el=document.getElementById(id); let d=false,lx=0,ly=0,sx=0,sy=0,moved=0;
+  el.addEventListener('pointerdown',e=>{e.preventDefault(); d=true; lx=sx=e.clientX; ly=sy=e.clientY; moved=0; el.setPointerCapture(e.pointerId);});
+  el.addEventListener('pointermove',e=>{ if(!d)return; moved=Math.max(moved,Math.hypot(e.clientX-sx,e.clientY-sy));
+    mirrorPan[side]=clamp(mirrorPan[side]+(e.clientX-lx)*0.004,-0.6,0.6);
     mirrorPitch[side]=clamp(mirrorPitch[side]+(e.clientY-ly)*0.003,-0.4,0.4); lx=e.clientX; ly=e.clientY; });
-  ['pointerup','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>d=false)); }
+  ['pointerup','pointercancel'].forEach(ev=>el.addEventListener(ev,e=>{ if(d&&moved<8) registerCheck(side); d=false; })); }
 bindMirrorAdjust('mirL','L'); bindMirrorAdjust('mirR','R'); bindMirrorAdjust('mirC','C');
 
 // メニュー
@@ -234,16 +288,24 @@ let last=null, tick=0;
 function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>0.05)dt=0.05; tick++;
   if(M && !result && !menu.classList.contains('show')){
     if(recenterWheel){ wheelAngle+=Math.sign(-wheelAngle)*Math.min(Math.abs(wheelAngle),8*dt); if(Math.abs(wheelAngle)<0.02){wheelAngle=0;recenterWheel=false;} }
-    car.steer=MAXSTEER*clamp(wheelAngle/WHEEL_LOCK,-1,1);
-    // 速度：ギア＋クリープ＋アクセル−ブレーキ
+    // 遊び（デッドゾーン）を挟んでハンドル→前輪切れ角
+    const eff=Math.max(0,Math.abs(wheelAngle)-WHEEL_PLAY)*Math.sign(wheelAngle);
+    car.steer=MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
+    // 速度：ギア＋サイド＋クリープ＋アクセル−ブレーキ
     const dir=gear==='D'?1:gear==='R'?-1:0; let target=0, rate=6;
     if(gear==='P'){ target=0; rate=12; }
+    else if(handbrake){ target=0; rate=10;
+      if(accelHeld&&dir&&!hbWarned){ hbWarned=true; deduct('サイドブレーキ戻し忘れ',10); setCoach('サイドブレーキが掛かっています！左下で解除','bad'); } }
     else if(brakeHeld){ target=0; rate=10; }
     else if(accelHeld && dir){ target=dir*C.maxSpeed; }
     else if(creepMode && dir){ target=dir*C.creep; }
     else { target=0; rate=4; }
     car.v+=(target-car.v)*Math.min(1,dt*rate); if(Math.abs(car.v)<0.015&&target===0)car.v=0;
-    bicycle(car,dt); updateLogic();
+    bicycle(car,dt);
+    // 自分の軌跡（後車軸）を記録
+    if(Math.abs(car.v)>0.03){ const lt=trail[trail.length-1];
+      if(!lt||Math.hypot(car.x-lt.x,car.y-lt.y)>0.12){ trail.push({x:car.x,y:car.y}); if(trail.length>2500)trail.shift(); } }
+    updateLogic();
     handAnim(dt);
   }
   renderScene(); renderWheel(); renderMirror('L'); renderMirror('R'); renderRearview(); updateGauges();
@@ -251,17 +313,56 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
 }
 function updateLogic(){
   const reversing=car.v<-0.05;
-  if(car.v>0.05&&wasReversing){ reverses++; } if(reversing)wasReversing=true; else if(car.v>0.05)wasReversing=false;
+  if(car.v>0.05&&wasReversing){ reverses++;
+    if(reverses===2||reverses===3){ deduct(`切り返し${reverses}回目`,5); if(!examMode)setCoach(`切り返し${reverses}回目（−5点）`,'warn'); }
+    if(reverses>=4){ finish('fail','切り返し超過（4回）'); return; } }
+  if(reversing)wasReversing=true; else if(car.v>0.05)wasReversing=false;
+  // 後退開始時の安全確認チェック
+  if(reversing&&!revCheckDone){ revCheckDone=true; safetyOK=allChecked();
+    if(!safetyOK){ deduct('後退時の安全不確認',10); if(!examMode)setCoach('安全確認が不足！ルーム→左右ミラー→👀目視をタップしてから後退','bad'); } }
+  // 速度の出しすぎ
+  if(Math.abs(car.v)>1.7){ if(++spdTicks>50&&!spdWarned){ spdWarned=true; deduct('速度の出しすぎ',5); if(!examMode)setCoach('課題中はもっとゆっくり（クリープ＋ブレーキ）','warn'); } } else spdTicks=0;
+  // 基準点タイミング（結果パネル用にadviceも保存）
   if(M.successKind==='perp' && reversing && !cutRecorded && Math.abs(car.steer)>MAXSTEER*0.5){ cutRecorded=true; const d=M.turnRefX-car.x;
-    if(d>0.4)setCoach(`早切りかも：あと約${(d*100)|0}cm前に出てから切ると青い線に乗ります`,'warn');
-    else if(d<-0.4)setCoach(`行き過ぎ：${((-d)*100)|0}cmほど手前で切り始めると余裕が出ます`,'warn');
-    else setCoach(`切り始めOK！このまま${M.lockLabel}いっぱいで奥まで`,'ok'); }
-  if(M.successKind==='parallel' && reversing && parPhase===0 && Math.abs(normAng(car.th))>=M.theta1*0.85){ parPhase=1; setCoach('今！ここから「左いっぱい」に切り返して真っ直ぐに','warn'); }
+    if(d>0.4){ advice=`早切り癖：あと約${(d*100)|0}cm前に出てから切るとお手本の弧に乗る`; if(!examMode)setCoach(advice,'warn'); }
+    else if(d<-0.4){ advice=`切り遅れ：${((-d)*100)|0}cmほど手前で切り始めると余裕が出る`; if(!examMode)setCoach(advice,'warn'); }
+    else { advice=''; if(!examMode)setCoach(`切り始めOK！このまま${M.lockLabel}いっぱいで奥まで`,'ok'); } }
+  if(M.successKind==='parallel' && reversing && parPhase===0 && Math.abs(normAng(car.th))>=M.theta1*0.85){ parPhase=1; if(!examMode)setCoach('今！ここから「左いっぱい」に切り返して真っ直ぐに','warn'); }
+  // 接触・脱輪＝検定中止
   const cs=carCorners(car);
-  for(const p of cs){ if(!drivable(p.x,p.y)){ result='fail'; setCoach(M.parkedCars.length?'車・縁石に接触。やり直し':'脱輪／ポール接触。やり直し','bad'); car.v=0; return; } }
-  const stopped=Math.abs(car.v)<0.03 && (brakeHeld||gear==='P'||gear==='N'||!creepMode);
-  if(M.successKind==='perp'){ if(inRect(M.bay,cs[2].x,cs[2].y)&&inRect(M.bay,cs[3].x,cs[3].y)&&alignedV(car.th)&&stopped){ result='success'; setCoach(`入りました！切り返し ${reverses} 回`,'ok'); } }
-  else { if(cs.every(p=>inRect(M.bay,p.x,p.y))&&alignedH(car.th)&&stopped){ result='success'; setCoach(`きれいに入りました！切り返し ${reverses} 回`,'ok'); } }
+  for(const p of cs){ if(!drivable(p.x,p.y)){ contactFail=true;
+    finish('fail',M.parkedCars.length?'接触（車・縁石）':'脱輪・ポール接触'); return; } }
+  // 正着判定 → 完了手順（停止→P→サイド）で終了
+  const posOK = M.successKind==='perp'
+    ? (inRect(M.bay,cs[2].x,cs[2].y)&&inRect(M.bay,cs[3].x,cs[3].y)&&alignedV(car.th))
+    : (cs.every(p=>inRect(M.bay,p.x,p.y))&&alignedH(car.th));
+  if(posOK&&Math.abs(car.v)<0.03){
+    if(gear==='P'&&handbrake){ finish('success'); }
+    else if(tick%40===0) setCoach('OK！ここで停止 → シフトP → サイドを掛けて完了','ok');
+  }
+}
+/* ==================== 採点・結果 ==================== */
+function finish(kind,reason){ result=kind; car.v=0;
+  if(kind==='fail'&&reason) deductions.push({name:reason+'＝検定中止',pts:100});
+  const total=deductions.reduce((a,d)=>a+d.pts,0), score=Math.max(0,100-total);
+  const pass=kind==='success'&&score>=70;
+  setCoach(kind==='success'?`完了！切り返し ${reverses} 回`:'検定中止','ok');
+  showResult(pass,score,kind);
+}
+function showResult(pass,score,kind){
+  const t=document.getElementById('resTitle'), s=document.getElementById('resScore'), b=document.getElementById('resBody');
+  t.textContent=pass?'🎉 合格ライン！':'不合格'; t.className=pass?'pass':'fail';
+  s.textContent=`${score}点 ／ 100点（70点以上で合格${examMode?'・検定モード':'・練習モード'}）`;
+  const ded=deductions.length?('<ul>'+deductions.map(d=>`<li>${d.name}：−${d.pts>=100?'中止':d.pts+'点'}</li>`).join('')+'</ul>'):'<ul><li>減点なし！</li></ul>';
+  const ck=[
+    ['サイドブレーキ操作', hbWarned?'✗ 戻し忘れ':'✓'],
+    ['後退前の安全確認', safetyOK===false?'✗ 不足':safetyOK===null?'−（未後退）':'✓'],
+    ['切り返し回数', `${reverses}回 ${reverses<=1?'✓':reverses<=3?'△':'✗'}`],
+    ['接触・脱輪', contactFail?'✗':'✓'],
+    ['枠内に正着', kind==='success'?'✓':'✗'],
+  ].map(([k,v])=>`<li>${k}：${v}</li>`).join('');
+  b.innerHTML=`<div class="sec-t">減点内訳</div>${ded}<div class="sec-t">手順チェック</div><ul>${ck}</ul>`+(advice?`<div class="adv">💡 ${advice}</div>`:'');
+  document.getElementById('resultPanel').classList.add('show');
 }
 
 /* ==================== 俯瞰の描画（左） ==================== */
@@ -288,14 +389,17 @@ function renderScene(){ ctx.clearRect(0,0,W,H); if(!M||!bounds)return;
   if(M.curbY!=null){ ctx.strokeStyle='#6d7f9c'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(wx(bounds.minX),wy(M.curbY)); ctx.lineTo(wx(bounds.maxX),wy(M.curbY)); ctx.stroke();
     ctx.strokeStyle='rgba(140,150,170,.5)'; ctx.lineWidth=1; for(let x=bounds.minX;x<bounds.maxX;x+=0.4){ ctx.beginPath(); ctx.moveTo(wx(x),wy(M.curbY)); ctx.lineTo(wx(x-0.25),wy(M.curbY)-6); ctx.stroke(); } }
   for(const o of M.parkedCars){ fillR(o,'#3a445d'); strokeR(o,'#5a6a8c',1.5); ctx.fillStyle='#7f8ea8'; }
-  // お手本
-  if(showGuide){ ctx.strokeStyle='rgba(77,163,255,.5)'; ctx.lineWidth=3; ctx.setLineDash([8,7]); ctx.beginPath();
+  // お手本（検定モードでは非表示）
+  if(showGuide&&!examMode){ ctx.strokeStyle='rgba(77,163,255,.5)'; ctx.lineWidth=3; ctx.setLineDash([8,7]); ctx.beginPath();
     M.ideal.path.forEach((p,i)=>{const X=wx(p.x),Y=wy(p.y);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);}); ctx.stroke(); ctx.setLineDash([]);
     ctx.strokeStyle='rgba(77,163,255,.9)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(wx(M.turnRefX),wy(bounds.maxY)); ctx.lineTo(wx(M.turnRefX),wy(bounds.minY)); ctx.stroke();
     ctx.fillStyle='rgba(77,163,255,.9)'; ctx.font='11px system-ui'; ctx.fillText('切り始めの目安', wx(M.turnRefX)+5, wy(bounds.maxY)+14); }
+  // 自分の軌跡（後車軸の通った跡＝癖が見える）
+  if(trail.length>1){ ctx.strokeStyle='rgba(240,246,255,.45)'; ctx.lineWidth=2; ctx.beginPath();
+    trail.forEach((p,i)=>{const X=wx(p.x),Y=wy(p.y);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);}); ctx.lineTo(wx(car.x),wy(car.y)); ctx.stroke(); }
   // ポール
   for(const p of M.poles){ ctx.fillStyle='#ffb020'; ctx.beginPath(); ctx.arc(wx(p.x),wy(p.y),6,0,7); ctx.fill(); ctx.strokeStyle='#7a5500'; ctx.lineWidth=1.5; ctx.stroke(); }
-  if(showLines) drawWheelTrails(car);
+  if(showLines&&!examMode) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
 }
@@ -311,6 +415,24 @@ function drawWheelTrails(s){
   // 前輪＝水色、後輪＝橙。右ハンドル想定で「遠い左輪・後輪」を意識できるよう色分け
   draw(w.FR,'rgba(90,200,255,.9)',true); draw(w.FL,'rgba(90,200,255,.55)',true);
   draw(w.RR,'rgba(255,176,32,.9)',false); draw(w.RL,'rgba(255,176,32,.55)',false);
+  // 旋回中心(ICR)・回転半径・外輪スイング弧：ハンドル量→軌跡の連動を見せる
+  if(strong){
+    const Rr=C.wheelbase/Math.tan(st), nx=-Math.sin(s.th), ny=Math.cos(s.th), IC={x:s.x+nx*Rr,y:s.y+ny*Rr};
+    const IX=clamp(wx(IC.x),110,W-130), IY=clamp(wy(IC.y),52,H-56), onscreen=Math.abs(IX-wx(IC.x))<1&&Math.abs(IY-wy(IC.y))<1;
+    ctx.strokeStyle='rgba(124,92,255,.9)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(IX-7,IY); ctx.lineTo(IX+7,IY); ctx.moveTo(IX,IY-7); ctx.lineTo(IX,IY+7); ctx.stroke();
+    if(onscreen){ ctx.strokeStyle='rgba(124,92,255,.35)'; ctx.setLineDash([3,5]); ctx.beginPath();
+      ctx.moveTo(IX,IY); ctx.lineTo(wx(s.x),wy(s.y)); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.fillStyle='rgba(124,92,255,.95)'; ctx.font='bold 11px system-ui';
+    ctx.fillText(`旋回中心 R=${Math.abs(Rr).toFixed(1)}m`, IX+9, IY+4);
+    // 前外側コーナーの弧（外輪差＝一番外を通る点）
+    const cs2=carCorners(s), outer=st>0?cs2[1]:cs2[0];
+    const rw2=Math.hypot(outer.x-IC.x,outer.y-IC.y), a0=Math.atan2(outer.y-IC.y,outer.x-IC.x), span=2.6/rw2;
+    ctx.strokeStyle='rgba(255,110,150,.85)'; ctx.lineWidth=2; ctx.setLineDash([3,4]); ctx.beginPath();
+    for(let k=-20;k<=20;k++){ const a=a0+span*k/20; const X=wx(IC.x+Math.cos(a)*rw2), Y=wy(IC.y+Math.sin(a)*rw2); k===-20?ctx.moveTo(X,Y):ctx.lineTo(X,Y); }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle='rgba(255,110,150,.9)'; ctx.font='10px system-ui'; ctx.fillText('外輪スイング', wx(outer.x)+6, wy(outer.y)-6);
+  }
   // 4輪本体（前輪は切れ角つき）
   const drawWheel=(wp,ang)=>{ ctx.save(); ctx.translate(wx(wp.x),wy(wp.y)); ctx.rotate(-ang); ctx.fillStyle='#e8edf6'; ctx.fillRect(-6,-3,12,6); ctx.restore(); };
   drawWheel(w.FL,s.th+st); drawWheel(w.FR,s.th+st); drawWheel(w.RL,s.th); drawWheel(w.RR,s.th);
@@ -322,7 +444,7 @@ function drawCar(s){ const cs=carCorners(s), col=result==='fail'?'#ff5c5c':resul
   const d=driverMirror(s,'R'); ctx.fillStyle='#0b1524'; ctx.beginPath(); ctx.arc(wx(d.x),wy(d.y),2.5,0,7); ctx.fill();
   const c=Math.cos(s.th),sn=Math.sin(s.th),fx=C.wheelbase+C.frontOverhang; ctx.fillStyle='#0b1524'; ctx.beginPath(); ctx.arc(wx(s.x+fx*c),wy(s.y+fx*sn),3,0,7); ctx.fill();
 }
-function drawCourseCue(){ if(result)return; let show=null;
+function drawCourseCue(){ if(result||examMode)return; let show=null;
   if(M.successKind==='perp'){ if(Math.abs(car.x-M.turnRefX)<0.45)show=`ここで止めて ${M.lockLabel}いっぱい`; }
   else{ const a=Math.abs(normAng(car.th)); if(car.v<-0.05&&a>=M.theta1*0.85&&a<=M.theta1*1.2)show='今、左いっぱい！'; }
   if(!show)return; const al=0.5+0.5*Math.abs(Math.sin(tick*0.12)), X=wx(car.x),Y=wy(car.y)-26;
@@ -372,9 +494,11 @@ function renderWheel(){ const g=wheelCv.getContext('2d'), w=wheelCv.getBoundingC
     for(let k=-1;k<=2;k++){ g.beginPath(); roundRectG(g,-8+ (k+1)*4.2,-11,3.4,6,1.6); g.fill(); g.stroke(); } // 指
     g.restore(); }
   g.restore();
-  // 舵角テキスト
+  // 舵角・回転半径テキスト（ハンドル量↔軌跡の連動を数字でも）
   g.fillStyle='#93a1b8'; g.font='11px system-ui'; g.textAlign='center';
-  const turns=(wheelAngle/ (2*Math.PI)); g.fillText(`舵角 ${Math.round(car.steer/DEG)}°  /  ${turns>=0?'左':'右'}${Math.abs(turns).toFixed(1)}回転`, cx, h-4);
+  const turns=(wheelAngle/(2*Math.PI)), sd=Math.round(Math.abs(car.steer)/DEG);
+  const rTxt=Math.abs(car.steer)<0.5*DEG?'直進':`R${Math.abs(C.wheelbase/Math.tan(car.steer)).toFixed(1)}m`;
+  g.fillText(`${turns>=0?'左':'右'}${Math.abs(turns).toFixed(1)}回転｜舵角${sd}°｜${rTxt}`, cx, h-4);
 }
 function roundRectG(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
 
