@@ -314,8 +314,9 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
   if(M && !result && !menu.classList.contains('show')){
     if(recenterWheel){ wheelAngle+=Math.sign(-wheelAngle)*Math.min(Math.abs(wheelAngle),8*dt); if(Math.abs(wheelAngle)<0.02){wheelAngle=0;recenterWheel=false;} }
     // 遊び（デッドゾーン）を挟んでハンドル→前輪切れ角
+    // ハンドルを時計回り(右)に回す=wheelAngle正 → 前輪は右に切れる=car.steer負、という向きなので符号を反転する
     const eff=Math.max(0,Math.abs(wheelAngle)-WHEEL_PLAY)*Math.sign(wheelAngle);
-    car.steer=MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
+    car.steer=-MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
     // 速度：ギア＋サイド＋クリープ＋アクセル−ブレーキ
     const dir=gear==='D'?1:gear==='R'?-1:0; let target=0, rate=6;
     if(gear==='P'){ target=0; rate=12; }
@@ -528,7 +529,7 @@ function renderWheel(){ const g=wheelCv.getContext('2d'), w=wheelCv.getBoundingC
   g.fillStyle='#93a1b8'; g.font='11px system-ui'; g.textAlign='center';
   const turns=(wheelAngle/(2*Math.PI)), sd=Math.round(Math.abs(car.steer)/DEG);
   const rTxt=Math.abs(car.steer)<0.5*DEG?'直進':`R${Math.abs(C.wheelbase/Math.tan(car.steer)).toFixed(1)}m`;
-  g.fillText(`${turns>=0?'左':'右'}${Math.abs(turns).toFixed(1)}回転｜舵角${sd}°｜${rTxt}`, cx, h-4);
+  g.fillText(`${turns>=0?'右':'左'}${Math.abs(turns).toFixed(1)}回転｜舵角${sd}°｜${rTxt}`, cx, h-4);
 }
 function roundRectG(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
 
