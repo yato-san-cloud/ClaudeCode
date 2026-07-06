@@ -233,60 +233,80 @@ function resetCar(){ loadScenario(M.id); }
 const coachEl=document.getElementById('coachMsg');
 function setCoach(t,cls){ coachEl.textContent=t; coachEl.className='msg'+(cls?(' '+cls):''); }
 
-/* ==================== 入力 ==================== */
+/* ==================== 入力（Pointer Events未対応の簡易WebView向けフォールバック付き） ==================== */
+// AirDrop/LINE等のプレビュー表示（Quick Look系）ではPointer Events APIが動かないことがあるため、
+// 対応していれば従来通りpointer*を使い、非対応ならtouch/mouseに自動フォールバックする。
+const HAS_POINTER = typeof window.PointerEvent === 'function';
+function bindDrag(el,{start,move,end}){
+  if(HAS_POINTER){
+    el.addEventListener('pointerdown',e=>{ e.preventDefault(); try{el.setPointerCapture(e.pointerId);}catch(_){} start&&start(e.clientX,e.clientY); });
+    el.addEventListener('pointermove',e=>{ move&&move(e.clientX,e.clientY); });
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=>el.addEventListener(ev,()=>{ end&&end(); }));
+  } else {
+    el.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.touches[0]; start&&start(t.clientX,t.clientY); },{passive:false});
+    el.addEventListener('touchmove',e=>{ e.preventDefault(); const t=e.touches[0]; move&&move(t.clientX,t.clientY); },{passive:false});
+    ['touchend','touchcancel'].forEach(ev=>el.addEventListener(ev,()=>{ end&&end(); }));
+    let mdown=false;
+    el.addEventListener('mousedown',e=>{ mdown=true; start&&start(e.clientX,e.clientY); });
+    window.addEventListener('mousemove',e=>{ if(mdown) move&&move(e.clientX,e.clientY); });
+    window.addEventListener('mouseup',()=>{ if(mdown){ mdown=false; end&&end(); } });
+  }
+}
+function bindTap(el,fn){
+  if(HAS_POINTER){ el.addEventListener('click',fn); }
+  else { el.addEventListener('touchend',e=>{ e.preventDefault(); fn(e); },{passive:false}); }
+}
+
 // ステアリング：ドラッグで連続回転（微調整可・2.5回転）
 const wheelCv=document.getElementById('wheel');
 let wdrag=false, wlast=0;
-function pAngle(e){ const r=wheelCv.getBoundingClientRect(); return Math.atan2(e.clientY-(r.top+r.height/2), e.clientX-(r.left+r.width/2)); }
-wheelCv.addEventListener('pointerdown',e=>{ e.preventDefault(); wdrag=true; wlast=pAngle(e); wheelCv.setPointerCapture(e.pointerId); });
-wheelCv.addEventListener('pointermove',e=>{ if(!wdrag)return; const a=pAngle(e); wheelAngle=clamp(wheelAngle+normAng(a-wlast),-WHEEL_LOCK,WHEEL_LOCK); wlast=a; });
-['pointerup','pointercancel'].forEach(ev=>wheelCv.addEventListener(ev,()=>wdrag=false));
-document.getElementById('recenter').addEventListener('click',()=>{ recenterWheel=true; });
+function angAt(x,y){ const r=wheelCv.getBoundingClientRect(); return Math.atan2(y-(r.top+r.height/2), x-(r.left+r.width/2)); }
+bindDrag(wheelCv,{ start:(x,y)=>{ wdrag=true; wlast=angAt(x,y); },
+  move:(x,y)=>{ if(!wdrag)return; const a=angAt(x,y); wheelAngle=clamp(wheelAngle+normAng(a-wlast),-WHEEL_LOCK,WHEEL_LOCK); wlast=a; },
+  end:()=>{ wdrag=false; } });
+bindTap(document.getElementById('recenter'),()=>{ recenterWheel=true; });
 let recenterWheel=false;
 
 // ペダル・ギア
 function bindPedal(id,set){ const el=document.getElementById(id);
-  const on=e=>{e.preventDefault(); set(true); el.classList.add('held');};
-  const off=e=>{e.preventDefault(); set(false); el.classList.remove('held');};
-  el.addEventListener('pointerdown',on); ['pointerup','pointercancel','pointerleave'].forEach(ev=>el.addEventListener(ev,off)); }
+  bindDrag(el,{ start:()=>{ set(true); el.classList.add('held'); }, end:()=>{ set(false); el.classList.remove('held'); } }); }
 bindPedal('brake',v=>brakeHeld=v); bindPedal('accel',v=>accelHeld=v);
 function setGearUI(){ document.querySelectorAll('#shifter button').forEach(b=>b.classList.toggle('act',b.dataset.g===gear));
   document.querySelectorAll('#spd .gear b').forEach(b=>b.classList.toggle('act',b.dataset.g===gear)); }
-document.querySelectorAll('#shifter button').forEach(b=>b.addEventListener('click',()=>{ gear=b.dataset.g; setGearUI();
+document.querySelectorAll('#shifter button').forEach(b=>bindTap(b,()=>{ gear=b.dataset.g; setGearUI();
   if(gear==='R'&&!allChecked()&&!examMode&&!result) setCoach('後退前の安全確認：ルームミラー→左右ミラー→👀後方目視 をタップ','warn'); }));
-document.getElementById('creep').addEventListener('click',function(){ creepMode=!creepMode; this.classList.toggle('on',creepMode); this.textContent='クリープ '+(creepMode?'ON':'OFF'); });
-document.getElementById('btnGuide').addEventListener('click',function(){ showGuide=!showGuide; this.classList.toggle('on',showGuide); });
-document.getElementById('btnLines').addEventListener('click',function(){ showLines=!showLines; this.classList.toggle('on',showLines); });
-document.getElementById('reset').addEventListener('click',resetCar);
-document.getElementById('btnExam').addEventListener('click',function(){ examMode=!examMode; this.classList.toggle('on',examMode); resetCar();
+bindTap(document.getElementById('creep'),function(){ creepMode=!creepMode; this.classList.toggle('on',creepMode); this.textContent='クリープ '+(creepMode?'ON':'OFF'); });
+bindTap(document.getElementById('btnGuide'),function(){ showGuide=!showGuide; this.classList.toggle('on',showGuide); });
+bindTap(document.getElementById('btnLines'),function(){ showLines=!showLines; this.classList.toggle('on',showLines); });
+bindTap(document.getElementById('reset'),resetCar);
+bindTap(document.getElementById('btnExam'),function(){ examMode=!examMode; this.classList.toggle('on',examMode); resetCar();
   if(examMode) setCoach('検定モード：お手本・ヒントなし。手順どおりに！','warn'); });
 // サイドブレーキ・後方目視
 function updateHbUI(){ document.getElementById('handbrake').classList.toggle('on',handbrake); }
-document.getElementById('handbrake').addEventListener('click',()=>{ if(result)return; handbrake=!handbrake; updateHbUI(); });
-document.getElementById('lookback').addEventListener('click',()=>{ if(result)return; checks.back=tick;
-  setCoach('後方ヨシ！','ok'); });
+bindTap(document.getElementById('handbrake'),()=>{ if(result)return; handbrake=!handbrake; updateHbUI(); });
+bindTap(document.getElementById('lookback'),()=>{ if(result)return; checks.back=tick; setCoach('後方ヨシ！','ok'); });
 // 結果パネル
-document.getElementById('resRetry').addEventListener('click',()=>resetCar());
-document.getElementById('resMenu').addEventListener('click',()=>{ document.getElementById('resultPanel').classList.remove('show'); openMenu(); });
+bindTap(document.getElementById('resRetry'),()=>resetCar());
+bindTap(document.getElementById('resMenu'),()=>{ document.getElementById('resultPanel').classList.remove('show'); openMenu(); });
 
 // ミラー調整（ドラッグ）＋安全確認（タップ）
 function registerCheck(side){ const key=side==='C'?'room':side; checks[key]=tick;
   const box=document.getElementById(side==='L'?'mirLbox':side==='R'?'mirRbox':'mirCbox');
   box.classList.add('checked'); setTimeout(()=>box.classList.remove('checked'),600); }
-function bindMirrorAdjust(id,side){ const el=document.getElementById(id); let d=false,lx=0,ly=0,sx=0,sy=0,moved=0;
-  el.addEventListener('pointerdown',e=>{e.preventDefault(); d=true; lx=sx=e.clientX; ly=sy=e.clientY; moved=0; el.setPointerCapture(e.pointerId);});
-  el.addEventListener('pointermove',e=>{ if(!d)return; moved=Math.max(moved,Math.hypot(e.clientX-sx,e.clientY-sy));
-    mirrorPan[side]=clamp(mirrorPan[side]+(e.clientX-lx)*0.004,-0.6,0.6);
-    mirrorPitch[side]=clamp(mirrorPitch[side]+(e.clientY-ly)*0.003,-0.4,0.4); lx=e.clientX; ly=e.clientY; });
-  ['pointerup','pointercancel'].forEach(ev=>el.addEventListener(ev,e=>{ if(d&&moved<8) registerCheck(side); d=false; })); }
+function bindMirrorAdjust(id,side){ const el=document.getElementById(id); let lx=0,ly=0,sx=0,sy=0,moved=0;
+  bindDrag(el,{ start:(x,y)=>{ lx=sx=x; ly=sy=y; moved=0; },
+    move:(x,y)=>{ moved=Math.max(moved,Math.hypot(x-sx,y-sy));
+      mirrorPan[side]=clamp(mirrorPan[side]+(x-lx)*0.004,-0.6,0.6);
+      mirrorPitch[side]=clamp(mirrorPitch[side]+(y-ly)*0.003,-0.4,0.4); lx=x; ly=y; },
+    end:()=>{ if(moved<8) registerCheck(side); } }); }
 bindMirrorAdjust('mirL','L'); bindMirrorAdjust('mirR','R'); bindMirrorAdjust('mirC','C');
 
 // メニュー
 const menu=document.getElementById('menu');
 function openMenu(){menu.classList.add('show');} function closeMenu(){menu.classList.remove('show');}
-document.getElementById('btnMenu').addEventListener('click',openMenu);
-document.getElementById('menuClose').addEventListener('click',closeMenu);
-document.querySelectorAll('.card').forEach(c=>c.addEventListener('click',()=>loadScenario(c.dataset.id)));
+bindTap(document.getElementById('btnMenu'),openMenu);
+bindTap(document.getElementById('menuClose'),closeMenu);
+document.querySelectorAll('.card').forEach(c=>bindTap(c,()=>loadScenario(c.dataset.id)));
 
 /* ==================== 更新ループ ==================== */
 let last=null, tick=0;
