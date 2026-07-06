@@ -11,9 +11,9 @@
   #app{position:relative; width:100%; height:100%; overflow:hidden; background:#0a1220;}
   #cv{position:absolute; inset:0; width:100%; height:100%; display:block;}
   /* 上部バー */
-  #topbar{position:absolute; top:0; left:0; right:0; height:34px; display:flex; align-items:center; gap:6px; padding:4px 8px; z-index:8; pointer-events:none;}
-  #topbar .t{font-size:12px; font-weight:700; background:rgba(12,18,28,.6); padding:3px 7px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:32%;}
-  #topbar button{pointer-events:auto; background:#26304a; color:var(--ink); border:0; border-radius:6px; padding:5px 8px; font-size:11px; font-weight:700; white-space:nowrap;}
+  #topbar{position:absolute; top:0; left:0; right:0; height:28px; display:flex; align-items:center; gap:5px; padding:3px 8px; z-index:8; pointer-events:none;}
+  #topbar .t{font-size:11px; font-weight:700; background:rgba(12,18,28,.6); padding:2px 6px; border-radius:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:30%;}
+  #topbar button{pointer-events:auto; background:#26304a; color:var(--ink); border:0; border-radius:6px; padding:4px 7px; font-size:10.5px; font-weight:700; white-space:nowrap;}
   #topbar button.on{background:var(--accent); color:#04101f;} #topbar button.menu{background:var(--accent2); color:#fff;} #topbar .sp{flex:1;}
   #btnExam.on{background:#ff8b3d; color:#241000;}
   .mir.checked{border-color:var(--ok); box-shadow:0 0 8px rgba(55,214,122,.7);}
@@ -30,16 +30,20 @@
   #resultPanel .btns{display:flex; gap:8px; margin-top:11px;}
   #resultPanel .btns button{flex:1; border:0; border-radius:9px; padding:10px 0; font-weight:800; background:var(--accent); color:#04101f;}
   #resultPanel .btns button.sec{background:#26304a; color:var(--ink);}
-  /* ミラー（上・左右） */
-  .mir{position:absolute; top:38px; width:148px; height:66px; background:#000; border:1px solid #2b364d; border-radius:8px; overflow:hidden; z-index:6; touch-action:none;}
-  #mirLbox{left:8px;} #mirRbox{right:8px;}
-  #mirCbox{left:50%; transform:translateX(-50%); width:198px; height:58px; top:34px;}
+  /* フロントガラス視界（上帯）。ミラーは実車と同じくこの中に重ねる */
+  #frontBox{position:absolute; top:28px; left:0; right:0; height:37%; z-index:5; overflow:hidden; background:#000; border-bottom:2px solid #05070b;}
+  #frontBox canvas{display:block; width:100%; height:100%;}
+  #frontBox .flab{position:absolute; left:6px; bottom:3px; font-size:9px; color:#9fb0c8; background:rgba(0,0,0,.45); padding:0 3px; border-radius:3px;}
+  /* ミラー（フロント視界内：左右下隅＋上中央） */
+  .mir{position:absolute; width:148px; height:66px; background:#000; border:1px solid #2b364d; border-radius:8px; overflow:hidden; z-index:6; touch-action:none;}
+  #mirLbox{left:6px; top:calc(28px + 37% - 72px);} #mirRbox{right:6px; top:calc(28px + 37% - 72px);}
+  #mirCbox{left:50%; transform:translateX(-50%); width:198px; height:58px; top:32px;}
   .mir canvas{display:block; width:100%; height:100%;}
   .mir .lab{position:absolute; left:4px; top:2px; font-size:9px; color:#9fb0c8; background:rgba(0,0,0,.45); padding:0 3px; border-radius:3px;}
   .mir .adj{position:absolute; right:4px; bottom:2px; font-size:8px; color:#8fa0b8;}
-  /* 速度・ギア（上中央） */
-  #spd{position:absolute; top:96px; left:50%; transform:translateX(-50%); z-index:6; background:rgba(18,22,30,.85); border:1px solid #2b364d; border-radius:9px; padding:2px 11px; display:flex; align-items:baseline; gap:9px;}
-  #spd .kmh{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1;}
+  /* 速度・ギア（フロント視界の下端中央＝ダッシュ計器） */
+  #spd{position:absolute; top:calc(28px + 37% - 32px); left:50%; transform:translateX(-50%); z-index:6; background:rgba(18,22,30,.88); border:1px solid #2b364d; border-radius:9px; padding:2px 11px; display:flex; align-items:baseline; gap:9px;}
+  #spd .kmh{font-size:20px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1;}
   #spd .u{font-size:9px; color:var(--sub);}
   #spd .gear b{font-size:13px; font-weight:800; color:#3b4560; margin:0 1px;} #spd .gear b.act{color:var(--accent);}
   /* コーチ（下中央） */
@@ -89,6 +93,7 @@
     <button id="creep" class="on">クリープON</button>
     <button id="reset">やり直し</button>
   </div>
+  <div id="frontBox"><canvas id="frontCv"></canvas><span class="flab">フロント</span></div>
   <div class="mir" id="mirLbox"><canvas id="mirL"></canvas><span class="lab">左ミラー</span><span class="adj">調整:ドラッグ</span></div>
   <div class="mir" id="mirRbox"><canvas id="mirR"></canvas><span class="lab">右ミラー</span><span class="adj">調整:ドラッグ</span></div>
   <div class="mir" id="mirCbox"><canvas id="mirC"></canvas><span class="lab">ルームミラー</span></div>
@@ -308,7 +313,7 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     updateLogic();
     handAnim(dt);
   }
-  renderScene(); renderWheel(); renderMirror('L'); renderMirror('R'); renderRearview(); updateGauges();
+  renderScene(); renderFront(); renderWheel(); renderMirror('L'); renderMirror('R'); renderRearview(); updateGauges();
   requestAnimationFrame(step);
 }
 function updateLogic(){
@@ -367,12 +372,17 @@ function showResult(pass,score,kind){
 
 /* ==================== 俯瞰の描画（左） ==================== */
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
-let PPM=22,W=0,H=0,ox=0,oyTop=0;
+let PPM=22,W=0,H=0,ox=0,oyTop=0,frontBottom=0;
 function resize(){ const r=document.getElementById('app').getBoundingClientRect(), dpr=window.devicePixelRatio||1;
   cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); W=r.width;H=r.height;
-  if(bounds){ const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY, availTop=44, availBot=Math.min(150,H*0.42), drawH=Math.max(70,H-availTop-availBot);
-    PPM=Math.min(W/ww, drawH/wh)*0.98; ox=(W-ww*PPM)/2; oyTop=availTop+(drawH-wh*PPM)/2; }
-  sizeCanvas(wheelCv); sizeCanvas(document.getElementById('mirL')); sizeCanvas(document.getElementById('mirR')); sizeCanvas(document.getElementById('mirC')); }
+  frontBottom=28+H*0.37;
+  if(bounds){ const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY;
+    const availTop=frontBottom+8, availBot=48, insetL=186, insetR=252;
+    const availW=Math.max(120,W-insetL-insetR), drawH=Math.max(70,H-availTop-availBot);
+    PPM=Math.min(availW/ww, drawH/wh)*0.98;
+    ox=insetL+(availW-ww*PPM)/2; oyTop=availTop+(drawH-wh*PPM)/2; }
+  sizeCanvas(wheelCv); sizeCanvas(document.getElementById('frontCv'));
+  sizeCanvas(document.getElementById('mirL')); sizeCanvas(document.getElementById('mirR')); sizeCanvas(document.getElementById('mirC')); }
 function sizeCanvas(c){ const dpr=window.devicePixelRatio||1;
   if(c.id==='wheel'){ const d=Math.round(Math.min(176,H*0.42,W*0.30)); c.style.width=d+'px'; c.style.height=d+'px'; c.width=d*dpr; c.height=d*dpr; }
   else { const r=c.getBoundingClientRect(); c.width=Math.max(1,r.width*dpr); c.height=Math.max(1,r.height*dpr); }
@@ -418,7 +428,7 @@ function drawWheelTrails(s){
   // 旋回中心(ICR)・回転半径・外輪スイング弧：ハンドル量→軌跡の連動を見せる
   if(strong){
     const Rr=C.wheelbase/Math.tan(st), nx=-Math.sin(s.th), ny=Math.cos(s.th), IC={x:s.x+nx*Rr,y:s.y+ny*Rr};
-    const IX=clamp(wx(IC.x),110,W-130), IY=clamp(wy(IC.y),52,H-56), onscreen=Math.abs(IX-wx(IC.x))<1&&Math.abs(IY-wy(IC.y))<1;
+    const IX=clamp(wx(IC.x),110,W-130), IY=clamp(wy(IC.y),frontBottom+16,H-56), onscreen=Math.abs(IX-wx(IC.x))<1&&Math.abs(IY-wy(IC.y))<1;
     ctx.strokeStyle='rgba(124,92,255,.9)'; ctx.lineWidth=2;
     ctx.beginPath(); ctx.moveTo(IX-7,IY); ctx.lineTo(IX+7,IY); ctx.moveTo(IX,IY-7); ctx.lineTo(IX,IY+7); ctx.stroke();
     if(onscreen){ ctx.strokeStyle='rgba(124,92,255,.35)'; ctx.setLineDash([3,5]); ctx.beginPath();
@@ -504,9 +514,9 @@ function roundRectG(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,
 
 /* ==================== ミラー（3D投影・リアル化：自車の車体＋タイヤ＋ルームミラー） ==================== */
 const CARCOL='#c23a34';
-function mkProj(camx,camy,camH,look,focal,horizon,w){ const cs=Math.cos(look), sn=Math.sin(look);
+function mkProj(camx,camy,camH,look,focal,horizon,w,sgn=-1){ const cs=Math.cos(look), sn=Math.sin(look);
   return (px,py,pz)=>{ const dx=px-camx,dy=py-camy, depth=dx*cs+dy*sn; if(depth<=0.18)return null;
-    const cr=dx*sn-dy*cs; return {x:w/2 - focal*(cr/depth), y:horizon - focal*((pz-camH)/depth), depth}; }; }
+    const cr=dx*sn-dy*cs; return {x:w/2 + sgn*focal*(cr/depth), y:horizon - focal*((pz-camH)/depth), depth}; }; }
 function mSky(g,w,h,horizon){ const hz=clamp(horizon,0,h);
   let sky=g.createLinearGradient(0,0,0,Math.max(1,hz)); sky.addColorStop(0,'#2a3a4e'); sky.addColorStop(1,'#1d2836'); g.fillStyle=sky; g.fillRect(0,0,w,hz);
   let gr=g.createLinearGradient(0,hz,0,h); gr.addColorStop(0,'#212a3b'); gr.addColorStop(1,'#12181f'); g.fillStyle=gr; g.fillRect(0,hz,w,h-hz); }
@@ -563,6 +573,44 @@ function renderMirror(side){
   const focal=w*0.46, horizon=clamp(h*0.46 - mirrorPitch[side]*h, 8, h-8);
   mSky(g,w,h,horizon); const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w);
   mWorld(proj,g); mEgoFlank(proj,g,side); mHousing(g,w,h);
+}
+/* フロントガラス視界：前方の目標（ポール・枠・目安ライン）が実際どう見えるか */
+function renderFront(){
+  const el=document.getElementById('frontCv'); if(!el)return; const g=el.getContext('2d');
+  const w=el.getBoundingClientRect().width, h=el.getBoundingClientRect().height; if(!M||w<2)return;
+  g.clearRect(0,0,w,h);
+  const cam=toWorld(car,1.5,-(C.width/2-0.55)), camH=1.22;        // 右ハンドル運転席の目線
+  const look=car.th, focal=w*0.46, horizon=h*0.50;
+  mSky(g,w,h,horizon);
+  const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w,+1);    // 前方＝鏡像なし
+  // 地面の奥行きグリッド（速度感・距離感）
+  g.strokeStyle='rgba(120,140,170,.18)'; g.lineWidth=1;
+  const cs0=Math.cos(look), sn0=Math.sin(look);
+  for(let d=2;d<=16;d+=2){ let prev=null; for(let o=-8;o<=8;o+=2){ const p=proj(cam.x+cs0*d-sn0*o, cam.y+sn0*d+cs0*o, 0);
+    if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+  mWorld(proj,g);
+  // 切り始めの目安ライン（地面の青ライン）が前方に見える
+  if(showGuide&&!examMode){ let prev=null; g.strokeStyle='rgba(77,163,255,.85)'; g.lineWidth=3;
+    for(let y=bounds.minY;y<=bounds.maxY;y+=0.4){ const p=proj(M.turnRefX,y,0.02); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+  // 自車のボンネット（RHDで少し右寄りに見える）
+  const cs2=carCorners(car), pl=proj(cs2[0].x,cs2[0].y,0.98), pr=proj(cs2[1].x,cs2[1].y,0.98);
+  if(pl&&pr){ const topY=Math.min(pl.y,pr.y); const grd=g.createLinearGradient(0,topY,0,h);
+    grd.addColorStop(0,'#e6635a'); grd.addColorStop(0.45,CARCOL); grd.addColorStop(1,'#5f1b17');
+    g.beginPath(); g.moveTo(-8,h+8); g.lineTo(pl.x,pl.y); g.lineTo(pr.x,pr.y); g.lineTo(w+8,h+8); g.closePath();
+    g.fillStyle=grd; g.fill();
+    g.strokeStyle='#521512'; g.lineWidth=2; g.beginPath(); g.moveTo(pl.x,pl.y); g.lineTo(pr.x,pr.y); g.stroke();
+    const shine=g.createLinearGradient(0,topY,0,topY+18);
+    shine.addColorStop(0,'rgba(255,255,255,.28)'); shine.addColorStop(1,'rgba(255,255,255,0)');
+    g.beginPath(); g.moveTo(pl.x,pl.y); g.lineTo(pr.x,pr.y); g.lineTo(pr.x,pr.y+16); g.lineTo(pl.x,pl.y+16); g.closePath(); g.fillStyle=shine; g.fill(); }
+  // Aピラー（窓のフレーム感）
+  const pw=Math.max(10,w*0.02);
+  for(const [x0,x1] of [[0,pw],[w-pw,w]]){ const pg=g.createLinearGradient(x0,0,x1,0);
+    pg.addColorStop(x0===0?0:1,'#05070b'); pg.addColorStop(x0===0?1:0,'rgba(5,7,11,.25)');
+    g.fillStyle=pg; g.beginPath();
+    if(x0===0){ g.moveTo(0,0); g.lineTo(pw*2.2,0); g.lineTo(pw,h); g.lineTo(0,h); }
+    else { g.moveTo(w,0); g.lineTo(w-pw*2.2,0); g.lineTo(w-pw,h); g.lineTo(w,h); }
+    g.closePath(); g.fill(); }
+  g.strokeStyle='#05070b'; g.lineWidth=2; g.strokeRect(1,1,w-2,h-2);
 }
 function renderRearview(){
   const el=document.getElementById('mirC'); if(!el)return; const g=el.getContext('2d');
