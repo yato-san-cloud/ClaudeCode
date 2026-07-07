@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>現場マニュアル運用基盤 詳細仕様書</title>
+<style>
+  :root{
+    --ink:#0f172a; --sub:#64748b; --line:#e2e8f0; --bg:#f8fafc;
+    --brand:#0f766e; --brand-l:#f0fdfa; --brand-b:#99f6e4;
+    --amber:#f59e0b; --amber-l:#fffbeb;
+    --red:#dc2626; --red-l:#fef2f2;
+    --blue:#2563eb; --blue-l:#eff6ff;
+    --vio:#7c3aed; --vio-l:#f5f3ff;
+  }
+  *{box-sizing:border-box}
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,-apple-system,sans-serif;
+    color:var(--ink); line-height:1.75; margin:0; background:var(--bg); font-size:14.5px}
+  .page{max-width:960px; margin:0 auto; padding:36px 28px 80px}
+
+  /* cover */
+  .cover{background:linear-gradient(135deg,#0f766e,#115e59); color:#fff; border-radius:18px; padding:34px 36px; margin-bottom:26px}
+  .cover .doc-type{font-size:12px; letter-spacing:.18em; opacity:.85; font-weight:700}
+  .cover h1{font-size:30px; margin:6px 0 10px; line-height:1.35}
+  .cover .lead{font-size:14px; opacity:.92; max-width:640px}
+  .cover .meta-row{display:flex; gap:22px; flex-wrap:wrap; margin-top:18px; font-size:12.5px}
+  .cover .meta-row div{background:rgba(255,255,255,.14); padding:6px 14px; border-radius:999px; font-weight:600}
+
+  /* toc */
+  nav.toc{background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 24px; margin-bottom:34px}
+  nav.toc b{font-size:13px; color:var(--brand)}
+  nav.toc ol{margin:8px 0 0; padding-left:22px; columns:2; gap:34px; font-size:13.5px}
+  nav.toc li{margin-bottom:3px}
+  nav.toc a{color:var(--ink); text-decoration:none}
+  nav.toc a:hover{color:var(--brand); text-decoration:underline}
+
+  h2{font-size:21px; margin:44px 0 14px; padding-bottom:8px; border-bottom:3px solid var(--brand); display:flex; align-items:center; gap:10px}
+  h2 .no{background:var(--brand); color:#fff; font-size:14px; width:30px; height:30px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; flex:none}
+  h3{font-size:16px; margin:26px 0 8px; color:#134e4a}
+  p{margin:8px 0}
+  .callout{border-left:4px solid var(--brand); background:var(--brand-l); padding:10px 16px; border-radius:0 10px 10px 0; margin:14px 0; font-size:13.5px}
+  .callout.warn{border-color:var(--amber); background:var(--amber-l)}
+  .callout.risk{border-color:var(--red); background:var(--red-l)}
+  .callout b:first-child{display:block; font-size:12px; letter-spacing:.05em}
+
+  table{border-collapse:collapse; width:100%; margin:12px 0; background:#fff; font-size:13px}
+  th{background:#134e4a; color:#fff; font-weight:700; text-align:left; padding:8px 12px; white-space:nowrap}
+  td{border:1px solid var(--line); padding:8px 12px; vertical-align:top}
+  tr:nth-child(even) td{background:#fafcfc}
+  .tbl-wrap{overflow-x:auto}
+  code{background:#eef2f7; border-radius:5px; padding:1px 7px; font-size:12.5px; font-family:ui-monospace,Menlo,Consolas,monospace}
+
+  .tag{display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:2px 10px; white-space:nowrap}
+  .tg-done{background:#dcfce7; color:#166534}
+  .tg-todo{background:#fee2e2; color:#b91c1c}
+  .tg-opt{background:#f1f5f9; color:#475569}
+  .tg-rpa{background:var(--vio-l); color:var(--vio)}
+
+  /* ===== architecture diagram ===== */
+  .arch{background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px; margin:16px 0}
+  .layer{display:flex; gap:12px; align-items:stretch; margin-bottom:0}
+  .layer-label{writing-mode:vertical-rl; text-orientation:upright; font-size:11px; font-weight:700; color:#fff; border-radius:8px; padding:10px 4px; display:flex; align-items:center; justify-content:center; flex:none; letter-spacing:.1em}
+  .layer-boxes{flex:1; display:flex; gap:10px; flex-wrap:wrap; padding:10px; border-radius:10px}
+  .node{border-radius:10px; padding:9px 13px; font-size:12.5px; flex:1; min-width:150px; background:#fff; border:1.5px solid var(--line); box-shadow:0 1px 2px rgba(15,23,42,.06)}
+  .node b{display:block; font-size:13px; margin-bottom:2px}
+  .node .sm{color:var(--sub); font-size:11.5px; line-height:1.5; display:block}
+  .flow-gap{display:flex; justify-content:center; gap:60px; padding:2px 0; color:var(--sub); font-size:12px; font-weight:700}
+  .flow-gap span{display:inline-flex; flex-direction:column; align-items:center; line-height:1.3}
+  .flow-gap .ar{font-size:17px; color:var(--brand)}
+  .l-site .layer-label{background:var(--brand)}   .l-site .layer-boxes{background:var(--brand-l)}   .l-site .node{border-color:var(--brand-b)}
+  .l-store .layer-label{background:var(--blue)}   .l-store .layer-boxes{background:var(--blue-l)}
+  .l-auto .layer-label{background:var(--vio)}     .l-auto .layer-boxes{background:var(--vio-l)}
+  .l-gov .layer-label{background:#475569}         .l-gov .layer-boxes{background:#f1f5f9}
+  .fnum{display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--brand); color:#fff; font-size:11.5px; font-weight:700; align-items:center; justify-content:center; margin-right:6px; flex:none}
+  ol.flows{list-style:none; padding:0; margin:14px 0 0; font-size:13px}
+  ol.flows li{display:flex; align-items:baseline; margin-bottom:5px}
+
+  /* ===== roadmap ===== */
+  .phases{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin:16px 0}
+  .phase{background:#fff; border:1px solid var(--line); border-top:5px solid var(--brand); border-radius:12px; padding:14px 16px}
+  .phase.p1{border-top-color:#14b8a6}
+  .phase.p2{border-top-color:#0ea5e9}
+  .phase.p3{border-top-color:var(--vio)}
+  .phase.p4{border-top-color:#475569}
+  .phase .ph{font-size:11px; font-weight:700; color:var(--sub); letter-spacing:.06em}
+  .phase .pt{font-size:15.5px; font-weight:700; margin:2px 0 6px}
+  .phase ul{margin:0; padding-left:18px; font-size:12.5px}
+  .phase li{margin-bottom:3px}
+  .phase .goal{margin-top:8px; font-size:12px; background:var(--brand-l); border-radius:8px; padding:5px 9px; color:#134e4a}
+  .phase .goal b{font-size:11px}
+
+  .check{list-style:none; padding:0; margin:10px 0}
+  .check li{padding:8px 12px 8px 38px; position:relative; background:#fff; border:1px solid var(--line); border-radius:9px; margin-bottom:7px; font-size:13.5px}
+  .check li::before{content:"☐"; position:absolute; left:13px; top:7px; color:var(--brand); font-size:16px; font-weight:700}
+
+  footer{margin-top:56px; padding-top:16px; border-top:1px solid var(--line); color:var(--sub); font-size:12px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px}
+
+  @media print{
+    body{background:#fff; font-size:12.5px}
+    .page{padding:0; max-width:none}
+    .cover{border-radius:0}
+    h2{page-break-after:avoid}
+    .arch,.phase,table,.callout{page-break-inside:avoid}
+    nav.toc a{color:var(--ink)}
+    @page{margin:14mm}
+  }
+  @media (max-width:640px){
+    nav.toc ol{columns:1}
+    .cover h1{font-size:24px}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="cover">
+    <div class="doc-type">SPECIFICATION ・ 詳細仕様書</div>
+    <h1>現場マニュアル運用基盤<br>全体アーキテクチャ &amp; ロードマップ</h1>
+    <p class="lead">写真ベースの手順書を「現場が自走して作り・使い・直し続ける」ための全体設計。作成ツール（単一HTML）、保管・台帳（Teams / Kintone）、自動化（キーエンスRK）、および立ち上げ計画を1冊に定義する。</p>
+    <div class="meta-row">
+      <div>版数：v1.0</div>
+      <div>発行日：2026年7月7日</div>
+      <div>対象：現場・職長・管理者・情シス</div>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <b>目次</b>
+    <ol>
+      <li><a href="#s1">目的とスコープ</a></li>
+      <li><a href="#s2">全体アーキテクチャ</a></li>
+      <li><a href="#s3">コンポーネント仕様：作成ツール</a></li>
+      <li><a href="#s4">コンポーネント仕様：書き出しマニュアル</a></li>
+      <li><a href="#s5">コンポーネント仕様：台帳（Teams / Kintone）</a></li>
+      <li><a href="#s6">コンポーネント仕様：RPA（キーエンスRK）</a></li>
+      <li><a href="#s7">マニュアルのライフサイクルと運用ルール</a></li>
+      <li><a href="#s8">KPIと形骸化防止の仕組み</a></li>
+      <li><a href="#s9">ネクストアクション（直近2週間）</a></li>
+      <li><a href="#s10">ロードマップ（90日＋その先）</a></li>
+      <li><a href="#s11">リスクと未決事項</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================ -->
+  <h2 id="s1"><span class="no">1</span>目的とスコープ</h2>
+  <p><b>目的：</b>作業手順書の「作成が大変・更新されない・使われない」を構造的に解消し、現場主導でマニュアルが増え続け・鮮度が保たれる状態（自走）を90日で作る。</p>
+  <div class="tbl-wrap"><table>
+    <tr><th>区分</th><th>内容</th></tr>
+    <tr><td><b>スコープ内</b></td><td>手順書の作成・閲覧・点検記録・改訂・保管・台帳管理・見直しリマインド・フィードバック処理・KPI集計、および上記のRPA自動化</td></tr>
+    <tr><td><b>スコープ外</b></td><td>教育計画そのものの策定、設備保全システム（CMMS）との連携、多言語化（フェーズ4候補）</td></tr>
+    <tr><td><b>前提環境</b></td><td>現場スマホ（iOS/Android・ブラウザのみ）、事務所Windows PC、Teams または Kintone、<b>キーエンスRK（既存導入済み・実行用PC 1台）</b></td></tr>
+  </table></div>
+
+  <!-- ============================================================ -->
+  <h2 id="s2"><span class="no">2</span>全体アーキテクチャ</h2>
+  <p>4層構成。<b>現場層は「ブラウザだけ」で完結</b>させ、定型の事務作業（台帳転記・PDF化・集計・督促）を自動化層（キーエンスRK＋Teams/Kintone標準機能）へ寄せるのが設計方針。</p>
+
+  <div class="arch">
+    <div class="layer l-site">
+      <div class="layer-label">現場層</div>
+      <div class="layer-boxes">
+        <div class="node"><b>📱 作成ツール（index.html）</b><span class="sm">撮影→注釈→手順化。端末内保存（IndexedDB）。HTML書き出し／再取り込み</span></div>
+        <div class="node"><b>📄 書き出しマニュアル（単一HTML）</b><span class="sm">現場モード・点検チェック・期限警告・📢フィードバックを内蔵</span></div>
+        <div class="node"><b>🏷 設備QR掲示</b><span class="sm">読むと該当マニュアルのURLへ。探さない導線</span></div>
+      </div>
+    </div>
+    <div class="flow-gap"><span><span class="ar">↓</span>①書き出し提出</span><span><span class="ar">↑</span>②配布・QR経由閲覧</span><span><span class="ar">↓</span>③フィードバック投稿</span></div>
+    <div class="layer l-store">
+      <div class="layer-label">保管台帳層</div>
+      <div class="layer-boxes">
+        <div class="node"><b>📂 提出フォルダ（共有）</b><span class="sm">現場が書き出したHTMLを置くだけの受け口（inbox）</span></div>
+        <div class="node"><b>📚 正本ライブラリ</b><span class="sm">01_運用中／02_承認待ち／90_旧版。HTML＋PDFの2ファイル一式</span></div>
+        <div class="node"><b>🗃 手順書台帳（Kintone または Teams Lists）</b><span class="sm">管理番号・版数・状態・次回見直し日・承認者・リンク</span></div>
+      </div>
+    </div>
+    <div class="flow-gap"><span><span class="ar">↕</span>④監視・登録・変換（自動）</span><span><span class="ar">↓</span>⑤期限抽出・集計（自動）</span></div>
+    <div class="layer l-auto">
+      <div class="layer-label">自動化層</div>
+      <div class="layer-boxes">
+        <div class="node"><b>🤖 キーエンスRK 実行PC</b><span class="sm">RK-01 台帳同期／RK-02 PDF変換／RK-03 リマインド／RK-04 FB集計／RK-05 バックアップ世代管理</span></div>
+        <div class="node"><b>🔔 Teams / Kintone 標準通知</b><span class="sm">承認フロー・メンション通知。RKと役割分担（§6.1）</span></div>
+      </div>
+    </div>
+    <div class="flow-gap"><span><span class="ar">↓</span>⑥督促・レポート</span><span><span class="ar">↑</span>⑦承認・改訂指示</span></div>
+    <div class="layer l-gov">
+      <div class="layer-label">管理改善層</div>
+      <div class="layer-boxes">
+        <div class="node"><b>👷 承認者（職長・班長）</b><span class="sm">内容確認→「運用中」へ。改訂の再承認</span></div>
+        <div class="node"><b>🧑‍💼 管理者（1名）</b><span class="sm">台帳・リマインド対応、FB一次返信（48h）、KPIレビュー</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h3>主要データフロー</h3>
+  <ol class="flows">
+    <li><span class="fnum">1</span>現場がツールでマニュアル作成→HTML書き出し→<b>提出フォルダ</b>へ置く（現場の作業はここまで）</li>
+    <li><span class="fnum">2</span><span class="tag tg-rpa">RK-01</span>&nbsp;が提出フォルダを監視し、台帳へ新規登録／版数更新、正本ライブラリへ命名規則どおり配置</li>
+    <li><span class="fnum">3</span><span class="tag tg-rpa">RK-02</span>&nbsp;がHTMLから閲覧用PDFを自動生成し、HTMLとペアで格納（2ファイル運用の手間をゼロに）</li>
+    <li><span class="fnum">4</span>承認者が台帳上で承認→状態「運用中」→現場はQR経由で閲覧・点検利用</li>
+    <li><span class="fnum">5</span>現場がマニュアル内📢からフィードバックをコピー→チャネル／レコードコメントへ貼付</li>
+    <li><span class="fnum">6</span><span class="tag tg-rpa">RK-03</span>&nbsp;が見直し期限30日前を抽出し督促、<span class="tag tg-rpa">RK-04</span>&nbsp;がFBを月次集計してKPIレポート化</li>
+    <li><span class="fnum">7</span>改訂時はHTMLをツールへ再取り込み→修正→版数上げ→①へ戻る（旧版は90_旧版へ自動退避）</li>
+  </ol>
+
+  <div class="callout"><b>設計方針（重要）</b>現場層は今後も「ブラウザで開くだけ」を死守する。自動化はすべて<b>ファイルと台帳という安定インターフェース</b>越しに行い、RKに画面操作を極力させない（§6.4）。これにより現場のUX・RPAの保守性の両方が守られる。</div>
+
+  <!-- ============================================================ -->
+  <h2 id="s3"><span class="no">3</span>コンポーネント仕様：作成ツール（index.html）<span class="tag tg-done">実装済み</span></h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>項目</th><th>仕様</th></tr>
+    <tr><td>形態</td><td>単一HTMLファイル。外部依存なし（CDN・通信なし）＝オフライン動作。配布は共有フォルダ/Teamsから各端末へ</td></tr>
+    <tr><td>作成機能</td><td>カメラ起動→撮影→手順追加（1手順=写真+タイトル+説明）。手順の並べ替え・削除・複製</td></tr>
+    <tr><td>写真注釈</td><td>丸・矢印・四角・ペン・番号スタンプ、3色。元写真を保持し再編集可能（書き出し時は焼き込み）</td></tr>
+    <tr><td>手順タイプ</td><td>手順／⚠注意／☑点検（点検は書き出し先でチェックリスト化）</td></tr>
+    <tr><td>管理情報</td><td>版数・状態（下書き/承認待ち/運用中/廃止）・作成者・承認者・次回見直し日・改訂メモ・準備物</td></tr>
+    <tr><td>保存</td><td>端末内 IndexedDB（失敗時 localStorage フォールバック）。自動保存。写真は横1280pxへ自動縮小</td></tr>
+    <tr><td>入出力</td><td>書き出し：単一HTML／全データバックアップ(.json)。取り込み：書き出しHTML・バックアップJSON（ラウンドトリップ改訂）</td></tr>
+    <tr><td>テスト</td><td>Playwright E2E（<code>tests/smoke.js</code>・15項目）</td></tr>
+  </table></div>
+
+  <!-- ============================================================ -->
+  <h2 id="s4"><span class="no">4</span>コンポーネント仕様：書き出しマニュアル<span class="tag tg-done">実装済み</span></h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>機能</th><th>仕様</th><th>狙い</th></tr>
+    <tr><td>▶ 現場モード</td><td>1手順ずつ全画面・大文字表示、前後ナビ</td><td>スマホ片手で見ながら作業できる</td></tr>
+    <tr><td>☑ 点検記録</td><td>チェック状態・実施者・日付を端末に保存。印刷で記録紙に</td><td>毎日使われる=鮮度チェックが毎日走る</td></tr>
+    <tr><td>⚠ 期限警告</td><td>次回見直し日超過で冒頭に赤バナー自動表示</td><td>劣化をマニュアル自身が自己申告</td></tr>
+    <tr><td>📢 フィードバック</td><td>指摘を記録→整形テキストをコピー→Teams/Kintoneへ貼付</td><td>指摘コスト30秒。改善ループの入口</td></tr>
+    <tr><td>印刷様式</td><td>承認欄（作成・確認・承認）、目次、A4印刷CSS</td><td>紙運用・監査にも対応</td></tr>
+    <tr><td>データ埋め込み</td><td><code>&lt;script type="application/json" id="__manualdata"&gt;</code> に全データを内包（再取り込み・RK-01の読取に使用）</td><td>ファイル1個が「原本」になる</td></tr>
+  </table></div>
+
+  <!-- ============================================================ -->
+  <h2 id="s5"><span class="no">5</span>コンポーネント仕様：台帳（Teams / Kintone）<span class="tag tg-todo">構築待ち・要決定</span></h2>
+  <p>台帳は<b>どちらか一方に一本化</b>する（詳細比較は <code>docs/operations-design.md</code> §5）。選定基準は「見直しリマインドが確実に人へ届く方」。以下は共通のフィールド定義。</p>
+  <div class="tbl-wrap"><table>
+    <tr><th>フィールド</th><th>型</th><th>備考</th></tr>
+    <tr><td>管理番号</td><td>自動採番</td><td><code>M-###</code>。ファイル名と一致させる（§7.2）</td></tr>
+    <tr><td>タイトル／設備・現場</td><td>文字列</td><td>書き出しHTMLの埋め込みJSONからRK-01が転記</td></tr>
+    <tr><td>版数／状態</td><td>文字列／選択</td><td>状態：下書き→承認待ち→運用中→要見直し→廃止</td></tr>
+    <tr><td>次回見直し日</td><td>日付</td><td>リマインドの起点。<b>必須入力</b></td></tr>
+    <tr><td>作成者／承認者</td><td>ユーザー</td><td>Kintoneはプロセス管理、TeamsはApprovalsと連動</td></tr>
+    <tr><td>ファイル</td><td>添付/リンク</td><td>HTML（マスター）＋PDF（閲覧用）のペア</td></tr>
+    <tr><td>改訂履歴</td><td>テーブル</td><td>日付・版数・変更内容（改訂メモから転記）</td></tr>
+  </table></div>
+  <div class="callout warn"><b>実務注意</b>SharePoint・KintoneともHTML添付はブラウザ内表示されず「ダウンロード」になる。日常閲覧はPDF、点検・改訂はHTML、の2ファイル運用が前提。<b>このPDF化を人手でやると必ず滞るため、RK-02で自動化する（§6）。</b></div>
+
+  <!-- ============================================================ -->
+  <h2 id="s6"><span class="no">6</span>コンポーネント仕様：RPA（キーエンスRK）<span class="tag tg-todo">シナリオ開発待ち</span></h2>
+
+  <h3>6.1 役割分担の原則</h3>
+  <div class="tbl-wrap"><table>
+    <tr><th>処理</th><th>担当</th><th>理由</th></tr>
+    <tr><td>承認フロー・メンション通知</td><td>Teams / Kintone 標準機能</td><td>標準機能で足りるものにRPAを使わない（保守負債を作らない）</td></tr>
+    <tr><td>ファイル監視・転記・変換・集計・帳票化</td><td>キーエンスRK</td><td>標準機能では届かない「ファイル⇔台帳⇔Excel」の橋渡しが得意領域</td></tr>
+    <tr><td>判断（承認可否・改訂要否）</td><td>人（承認者・管理者）</td><td>自動化しない。RPAは判断材料を運ぶだけ</td></tr>
+  </table></div>
+
+  <h3>6.2 RKシナリオ一覧</h3>
+  <div class="tbl-wrap"><table>
+    <tr><th>ID</th><th>シナリオ</th><th>トリガー/頻度</th><th>処理内容</th><th>優先度</th></tr>
+    <tr>
+      <td><b>RK-02</b></td><td>PDF自動変換</td><td>提出フォルダ監視（日次 or 時間毎）</td>
+      <td>新規/更新HTMLをブラウザで開き印刷→PDF保存→正本ライブラリへHTMLとペア配置</td>
+      <td><b>★最優先</b>（2ファイル運用の人手を排除。効果が最も速く出る）</td>
+    </tr>
+    <tr>
+      <td><b>RK-01</b></td><td>台帳同期</td><td>提出フォルダ監視（日次）</td>
+      <td>HTML内の埋め込みJSON（タイトル・版数・見直し日等）を読み取り→台帳へ新規登録/版数更新→ファイルを命名規則にリネームし正本ライブラリへ移動、旧版を90_旧版へ退避</td>
+      <td>★高</td>
+    </tr>
+    <tr>
+      <td><b>RK-03</b></td><td>見直しリマインド</td><td>週次（月曜朝）</td>
+      <td>台帳から「見直し日≦30日後」「期限超過」を抽出→管理者・作成者へ通知（Teams投稿/メール）→台帳の状態を「要見直し」へ更新</td>
+      <td>中（Kintone採用時は標準通知で代替し、RKは期限超過の状態更新のみ）</td>
+    </tr>
+    <tr>
+      <td><b>RK-04</b></td><td>フィードバック集計・KPIレポート</td><td>月次（月初）</td>
+      <td>チャネル/コメントの「【手順書フィードバック】」定型文を収集→Excel集計（件数・対応率・48h以内返信率）→KPIレポートを管理者へ送付</td>
+      <td>中</td>
+    </tr>
+    <tr>
+      <td><b>RK-05</b></td><td>バックアップ世代管理</td><td>週次</td>
+      <td>共有フォルダに置かれた各自のバックアップ(.json)を日付フォルダへアーカイブ、4世代超を削除、未提出者リストを管理者へ</td>
+      <td>低</td>
+    </tr>
+  </table></div>
+
+  <h3>6.3 共通仕様（全シナリオ）</h3>
+  <div class="tbl-wrap"><table>
+    <tr><th>項目</th><th>仕様</th></tr>
+    <tr><td>実行環境</td><td>RK実行用Windows PC 1台（常時起動）。RKのスケジューラで起動</td></tr>
+    <tr><td>ログ</td><td>実行ごとに <code>99_RPAログ\YYYYMM.csv</code> へ「日時・シナリオID・対象ファイル・結果」を追記</td></tr>
+    <tr><td>異常時</td><td><b>黙って止まらない</b>：失敗時は管理者へ通知して当該ファイルを <code>_error</code> フォルダへ退避、後続処理は継続</td></tr>
+    <tr><td>冪等性</td><td>同じファイルを二重処理しない（処理済みは移動 or 台帳の更新日時と照合）。再実行は常に安全</td></tr>
+  </table></div>
+
+  <h3>6.4 RK設計上の制約・指針</h3>
+  <div class="callout risk"><b>リスク回避</b>RPAは「画面が変わると壊れる」。そのため本設計では、RKの操作対象を<b>①フォルダ/ファイル操作 ②埋め込みJSONのテキスト読取 ③Excel操作</b>という変化しないインターフェースに限定する。Teams/Kintoneの画面操作は最小限（投稿・添付のみ）に抑え、UI改版の影響を局所化する。書き出しHTMLの埋め込みJSON仕様（<code>id="__manualdata"</code>）は<b>RKとの契約（インターフェース仕様）として凍結</b>し、変更時はRKシナリオと同時改修とする。</div>
+
+  <!-- ============================================================ -->
+  <h2 id="s7"><span class="no">7</span>マニュアルのライフサイクルと運用ルール</h2>
+  <h3>7.1 状態遷移</h3>
+  <p><code>下書き</code> →（提出）→ <code>承認待ち</code> →（承認）→ <code>運用中</code> →（期限30日前 or 超過）→ <code>要見直し</code> →（改訂して再提出）→ <code>承認待ち</code>へ戻る／（不要になったら）→ <code>廃止</code>（90_旧版へ、削除はしない）</p>
+  <h3>7.2 命名規則</h3>
+  <p><code>[管理番号]_[設備]_[作業]_v[版数].html</code>　例：<code>M-012_プレス2号機_始業点検_v1.2.html</code>（RK-01がリネームを自動化）</p>
+  <h3>7.3 版数ルール</h3>
+  <p>軽微修正=0.1上げ／手順の増減・順序変更=1.0上げ＋再承認。改訂メモに変更点1行必須。</p>
+  <h3>7.4 役割</h3>
+  <p>作成者=現場全員（1本15分）／承認者=職長（1本5分）／管理者=1名（週30分、RPA導入後は週15分想定）。</p>
+
+  <!-- ============================================================ -->
+  <h2 id="s8"><span class="no">8</span>KPIと形骸化防止の仕組み</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>KPI</th><th>健全ライン</th><th>データ源</th></tr>
+    <tr><td>運用中マニュアル数</td><td>増加が続く</td><td>台帳（RK-04が月次集計）</td></tr>
+    <tr><td>見直し期限内率</td><td>90%以上</td><td>台帳＋RK-03</td></tr>
+    <tr><td>フィードバック件数</td><td><b>月0件が続く方が危険</b>（利用されていない兆候）</td><td>RK-04</td></tr>
+    <tr><td>FB一次返信 48h以内率</td><td>90%以上</td><td>RK-04</td></tr>
+  </table></div>
+  <p>仕組みとしての防止策：期限警告バナー（ツール）×台帳リマインド（RK-03）の二重化、点検・新人教育への組み込み（使う場面のカレンダー化）、フィードバック48時間一次返信ルール。詳細は <code>docs/operations-design.md</code>。</p>
+
+  <!-- ============================================================ -->
+  <h2 id="s9"><span class="no">9</span>ネクストアクション（直近2週間）</h2>
+  <ul class="check">
+    <li><b>【決定】台帳基盤を Teams か Kintone に決める</b>（判断基準：リマインドが確実に届く方／決裁者：管理部門）— これが決まらないとRK-01/03が着手できない</li>
+    <li><b>【現場】パイロット1ライン選定＋マニュアル5本作成</b>（ツールは配布済み。新人が最近つまずいた作業から選ぶ）</li>
+    <li><b>【管理者】共有フォルダ構成の作成</b>：<code>00_提出(inbox)／01_運用中／02_承認待ち／90_旧版／98_バックアップ／99_RPAログ</code></li>
+    <li><b>【RPA担当】RK-02（PDF自動変換）シナリオ作成・テスト</b> — 最小で最速の効果。提出フォルダ→PDF生成→ペア配置まで</li>
+    <li><b>【管理者】台帳アプリ/Lists作成</b>（§5のフィールド定義どおり）＋承認フロー設定</li>
+    <li><b>【RPA担当】RK-01（台帳同期）シナリオ作成</b> — 埋め込みJSON読取→台帳転記→リネーム配置</li>
+    <li><b>【現場+管理者】パイロット設備にQR掲示</b>（正本ライブラリのURLをQR化・ラミネート）</li>
+  </ul>
+  <div class="callout"><b>完了判定</b>2週間後に「現場が置いたHTMLが、翌朝には台帳に載りPDF付きで閲覧できる」状態になっていること。</div>
+
+  <!-- ============================================================ -->
+  <h2 id="s10"><span class="no">10</span>ロードマップ（90日＋その先）</h2>
+  <div class="phases">
+    <div class="phase p1">
+      <div class="ph">PHASE 1 ・ Week 1–2</div>
+      <div class="pt">パイロット始動</div>
+      <ul>
+        <li>台帳基盤の決定（Teams/Kintone）</li>
+        <li>1ライン・5本作成</li>
+        <li>フォルダ構成・命名規則確定</li>
+        <li>RK-02（PDF変換）稼働</li>
+      </ul>
+      <div class="goal"><b>ゴール：</b>「15分で作れる」体感と、提出→自動PDF化の成功体験</div>
+    </div>
+    <div class="phase p2">
+      <div class="ph">PHASE 2 ・ Week 3–6</div>
+      <div class="pt">台帳・承認の確立</div>
+      <ul>
+        <li>台帳アプリ稼働＋承認フロー</li>
+        <li>RK-01（台帳同期）稼働</li>
+        <li>QR掲示・現場モード周知</li>
+        <li>FB 48hルール開始</li>
+      </ul>
+      <div class="goal"><b>ゴール：</b>5本が「運用中」、改訂1件をフロー通り完走</div>
+    </div>
+    <div class="phase p3">
+      <div class="ph">PHASE 3 ・ Month 2–3</div>
+      <div class="pt">横展開と自動化完成</div>
+      <ul>
+        <li>全職場へ展開（20〜30本）</li>
+        <li>RK-03（リマインド）／RK-04（KPI集計）稼働</li>
+        <li>新人教育・点検への組み込み</li>
+        <li>Month 3末：KPI初回レビュー＝<b>自走判定</b></li>
+      </ul>
+      <div class="goal"><b>ゴール：</b>期限内率90%・FBが自然発生している</div>
+    </div>
+    <div class="phase p4">
+      <div class="ph">PHASE 4 ・ Month 4＋</div>
+      <div class="pt">定着・発展（候補）</div>
+      <ul>
+        <li>RK-05（バックアップ世代管理）</li>
+        <li>点検記録の台帳自動転記（RK拡張）</li>
+        <li>多言語版・動画リンク対応の検討</li>
+        <li>他部門・他工場への展開</li>
+      </ul>
+      <div class="goal"><b>ゴール：</b>KPI定点観測のみで回る状態</div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <h2 id="s11"><span class="no">11</span>リスクと未決事項</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>#</th><th>リスク / 未決事項</th><th>対応方針</th><th>期限</th></tr>
+    <tr><td>1</td><td><b>台帳基盤（Teams / Kintone）が未決定</b></td><td>§5の比較で2週間以内に決定。決定までRK-01/03は着手しない</td><td>Week 2</td></tr>
+    <tr><td>2</td><td>RK実行PCの確保・常時起動運用</td><td>既存RK運用に相乗り可か情シスへ確認。専用スケジュール枠を確保</td><td>Week 2</td></tr>
+    <tr><td>3</td><td>RKシナリオがUI改版で停止する</td><td>ファイル/JSON/Excel中心の設計（§6.4）＋失敗時通知で無音停止を防ぐ</td><td>恒常</td></tr>
+    <tr><td>4</td><td>端末ローカル保存ゆえの端末紛失・機種変更時のデータ消失</td><td>週次バックアップ運用＋RK-05で未提出者を可視化。正本は常に共有側に存在</td><td>Phase 4</td></tr>
+    <tr><td>5</td><td>写真への機密・個人情報の写り込み</td><td>撮影ルール（顔・客先情報NG）を教育資料に明記。承認時チェック項目化</td><td>Phase 2</td></tr>
+    <tr><td>6</td><td>フィードバック放置による改善ループ停止</td><td>48h一次返信率をKPI化（RK-04で自動計測）。低下したら管理者負荷を見直す</td><td>恒常</td></tr>
+  </table></div>
+
+  <footer>
+    <span>現場マニュアル運用基盤 詳細仕様書 v1.0 ・ 2026-07-07</span>
+    <span>関連：README.md ／ docs/operations-design.md ／ index.html（ツール本体）</span>
+  </footer>
+</div>
+</body>
+</html>

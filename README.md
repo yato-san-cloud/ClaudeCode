@@ -25,10 +25,10 @@
 - 端末をまたぐ共有は「HTML書き出し」または「全データをバックアップ(.json)」で
 - バックアップは週1回、共有場所（Teams/Kintone）への保存を推奨
 
-## 運用設計
+## 運用設計・仕様書
 
-作成後の管理（Teams / Kintone での台帳・承認・見直しリマインド・形骸化防止策）は
-[docs/operations-design.md](docs/operations-design.md) を参照。
+- **詳細仕様書（全体アーキテクチャ／キーエンスRK連携／ロードマップ）**: [docs/spec.html](docs/spec.html) — ブラウザで開く・A4印刷対応
+- 運用設計の背景・Teams/Kintone比較の詳細: [docs/operations-design.md](docs/operations-design.md)
 
 ## 開発
 

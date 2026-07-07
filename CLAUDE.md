@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `index.html` — the entire app: editor UI, IndexedDB persistence (localStorage fallback), canvas photo annotation, and `buildDoc()` which generates the standalone viewer HTML
 - `docs/operations-design.md` — operations/rollout design (Teams / Kintone management, anti-formalization loops)
+- `docs/spec.html` — standalone HTML specification: overall architecture, Keyence RK (RPA) scenario specs, next actions, roadmap. Print-ready; no external deps (same offline rule as `index.html`)
 - `tests/smoke.js` — Playwright end-to-end smoke test
 - `README.md` — user-facing usage
 
