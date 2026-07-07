@@ -18,55 +18,76 @@
     background:var(--bg); color:var(--ink); line-height:1.6;
     padding-bottom:96px;
   }
-  header{
+  header.app{
     position:sticky; top:0; z-index:20;
     background:var(--brand); color:#fff;
     padding:12px 16px; box-shadow:var(--shadow);
     display:flex; align-items:center; gap:10px;
   }
-  header .logo{font-size:22px}
-  header h1{font-size:17px; margin:0; font-weight:700; flex:1; letter-spacing:.02em}
-  header .count{font-size:12px; background:rgba(255,255,255,.2); padding:3px 9px; border-radius:999px; font-weight:600}
+  header.app .logo{font-size:22px}
+  header.app h1{font-size:17px; margin:0; font-weight:700; flex:1; letter-spacing:.02em}
+  header.app .count{font-size:12px; background:rgba(255,255,255,.2); padding:3px 9px; border-radius:999px; font-weight:600; white-space:nowrap}
+  .hback{border:none; background:rgba(255,255,255,.18); color:#fff; font-size:20px; width:36px; height:36px; border-radius:9px; cursor:pointer; flex:none; line-height:1}
   .wrap{max-width:760px; margin:0 auto; padding:16px}
 
-  /* --- meta card --- */
+  /* ---- home ---- */
+  .home-actions{display:flex; gap:10px; margin-bottom:16px}
+  .home-actions button{flex:1; padding:14px; border-radius:12px; font-size:15px; font-weight:700; font-family:inherit; cursor:pointer; border:none}
+  #btn-new{background:var(--brand); color:#fff}
+  #btn-new:hover{background:var(--brand-d)}
+  #btn-import{background:var(--card); color:var(--brand); border:2px dashed var(--brand)}
+  #btn-import:hover{background:#f0fdfa}
+  .mcard{display:flex; gap:12px; background:var(--card); border-radius:14px; box-shadow:var(--shadow); padding:12px; margin-bottom:12px; cursor:pointer; align-items:center}
+  .mcard:hover{outline:2px solid #99f6e4}
+  .thumb{width:76px; height:57px; border-radius:8px; overflow:hidden; background:#e2e8f0; flex:none; display:flex; align-items:center; justify-content:center; font-size:26px}
+  .thumb img{width:100%; height:100%; object-fit:cover}
+  .minfo{flex:1; min-width:0}
+  .mtitle{font-weight:700; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .msub{font-size:12px; color:var(--sub)}
+  .chip{font-size:11px; padding:2px 9px; border-radius:999px; font-weight:700; display:inline-block; margin-right:4px; margin-top:3px}
+  .st-draft{background:#f1f5f9; color:#475569}
+  .st-wait{background:#fef3c7; color:#b45309}
+  .st-active{background:#dcfce7; color:#166534}
+  .st-retired{background:#e2e8f0; color:#334155; text-decoration:line-through}
+  .st-over{background:#fee2e2; color:#b91c1c}
+  .macts{display:flex; flex-direction:column; gap:2px}
+  .linkbtn{border:none; background:none; color:var(--sub); text-decoration:underline; font-size:12px; cursor:pointer; font-family:inherit}
+
+  /* ---- meta card ---- */
   .meta{background:var(--card); border-radius:14px; box-shadow:var(--shadow); padding:16px; margin-bottom:16px}
-  .meta input{
+  .meta input,.meta select{
     width:100%; border:none; border-bottom:2px solid var(--line);
     padding:8px 2px; font-size:15px; font-family:inherit; color:var(--ink);
-    background:transparent; transition:border-color .15s;
+    background:transparent; transition:border-color .15s; border-radius:0;
   }
-  .meta input:focus{outline:none; border-color:var(--brand)}
+  .meta input:focus,.meta select:focus{outline:none; border-color:var(--brand)}
   .meta .title-in{font-size:20px; font-weight:700; margin-bottom:10px}
   .meta .row{display:flex; gap:12px}
-  .meta .row input{flex:1}
+  .meta .row>div{flex:1}
   .meta label{display:block; font-size:11px; color:var(--sub); margin-bottom:-2px; font-weight:600}
+  .meta textarea{width:100%; border:1.5px solid var(--line); border-radius:8px; padding:8px; font-family:inherit; font-size:14px; resize:vertical; margin-top:4px; color:var(--ink)}
+  .meta textarea:focus{outline:none; border-color:var(--brand)}
+  details.mgmt{margin-top:14px; border-top:1px dashed var(--line); padding-top:10px}
+  details.mgmt summary{cursor:pointer; font-size:13px; font-weight:700; color:var(--sub)}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px}
 
-  /* --- steps --- */
+  /* ---- steps ---- */
   #steps{display:flex; flex-direction:column; gap:14px}
-  .step{
-    background:var(--card); border-radius:14px; box-shadow:var(--shadow);
-    overflow:hidden; position:relative;
-  }
-  .step-head{
-    display:flex; align-items:center; gap:10px;
-    padding:10px 14px; border-bottom:1px solid var(--line); background:#f8fafc;
-  }
-  .step-num{
-    width:28px; height:28px; flex:none; border-radius:50%;
-    background:var(--brand); color:#fff; font-weight:700; font-size:14px;
-    display:flex; align-items:center; justify-content:center;
-  }
+  .step{background:var(--card); border-radius:14px; box-shadow:var(--shadow); overflow:hidden; position:relative}
+  .step-head{display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); background:#f8fafc}
+  .step-num{width:28px; height:28px; flex:none; border-radius:50%; background:var(--brand); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center}
+  .step-num.n-warn{background:var(--accent)}
+  .step-num.n-check{background:#fff; color:var(--brand); border:2px solid var(--brand)}
   .step-head .sp{flex:1}
-  .icon-btn{
-    border:none; background:transparent; font-size:18px; cursor:pointer;
-    width:34px; height:34px; border-radius:8px; color:var(--sub);
-    display:flex; align-items:center; justify-content:center;
-  }
+  .icon-btn{border:none; background:transparent; font-size:18px; cursor:pointer; width:34px; height:34px; border-radius:8px; color:var(--sub); display:flex; align-items:center; justify-content:center}
   .icon-btn:hover{background:var(--line)}
   .icon-btn.del:hover{background:#fee2e2; color:var(--danger)}
   .icon-btn:disabled{opacity:.25; cursor:default}
   .step-body{padding:14px}
+  .seg{display:flex; gap:6px; margin-bottom:10px}
+  .seg button{flex:1; padding:7px; border-radius:8px; border:1.5px solid var(--line); background:#fff; font-family:inherit; font-size:13px; font-weight:700; color:var(--sub); cursor:pointer}
+  .seg button.on{border-color:var(--brand); color:var(--brand); background:#f0fdfa}
+  .seg button.on[data-t="warn"]{border-color:var(--accent); color:#b45309; background:#fffbeb}
   .photo-slot{
     position:relative; width:100%; aspect-ratio:4/3; border-radius:10px;
     background:#f1f5f9; border:2px dashed var(--line);
@@ -78,330 +99,960 @@
   .photo-slot .cam{font-size:38px}
   .photo-slot .hint{font-size:13px; font-weight:600}
   .photo-slot img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
-  .photo-slot .retake{
-    position:absolute; right:8px; bottom:8px; background:rgba(15,23,42,.72);
-    color:#fff; font-size:12px; padding:5px 10px; border-radius:999px; font-weight:600;
-    display:flex; align-items:center; gap:4px;
-  }
-  .step-body input.s-title{
-    width:100%; border:none; font-size:16px; font-weight:700; font-family:inherit;
-    padding:4px 2px; margin-bottom:6px; color:var(--ink);
-    border-bottom:2px solid transparent;
-  }
+  .p-chip{position:absolute; background:rgba(15,23,42,.72); color:#fff; font-size:12px; padding:5px 10px; border-radius:999px; font-weight:600; display:flex; gap:4px; align-items:center}
+  .p-edit{left:8px; bottom:8px}
+  .retake{right:8px; bottom:8px}
+  .step-body input.s-title{width:100%; border:none; font-size:16px; font-weight:700; font-family:inherit; padding:4px 2px; margin-bottom:6px; color:var(--ink); border-bottom:2px solid transparent}
   .step-body input.s-title:focus{outline:none; border-bottom-color:var(--brand)}
-  .step-body textarea{
-    width:100%; border:none; resize:vertical; min-height:52px; font-size:14px;
-    font-family:inherit; color:var(--ink); padding:4px 2px; line-height:1.6;
-  }
+  .step-body textarea{width:100%; border:none; resize:vertical; min-height:52px; font-size:14px; font-family:inherit; color:var(--ink); padding:4px 2px; line-height:1.6}
   .step-body textarea:focus{outline:none}
   .step-body .field-lbl{font-size:11px; color:var(--sub); font-weight:600; margin-top:8px}
-
   .empty{text-align:center; color:var(--sub); padding:40px 20px; font-size:14px}
   .empty .big{font-size:40px; margin-bottom:8px}
-
-  /* --- add button --- */
-  .add-step{
-    width:100%; margin-top:14px; padding:16px; border-radius:14px;
-    border:2px dashed var(--brand); background:#f0fdfa; color:var(--brand);
-    font-size:16px; font-weight:700; font-family:inherit; cursor:pointer;
-    display:flex; align-items:center; justify-content:center; gap:8px;
-  }
+  .add-step{width:100%; margin-top:14px; padding:16px; border-radius:14px; border:2px dashed var(--brand); background:#f0fdfa; color:var(--brand); font-size:16px; font-weight:700; font-family:inherit; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px}
   .add-step:hover{background:#ccfbf1}
 
-  /* --- footer bar --- */
-  .bar{
-    position:fixed; bottom:0; left:0; right:0; z-index:20;
-    background:var(--card); border-top:1px solid var(--line);
-    padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px;
-    max-width:760px; margin:0 auto;
-  }
-  .bar button{
-    flex:1; padding:13px; border-radius:11px; border:none; font-size:15px;
-    font-weight:700; font-family:inherit; cursor:pointer; display:flex;
-    align-items:center; justify-content:center; gap:6px;
-  }
+  /* ---- footer bar ---- */
+  .bar{position:fixed; bottom:0; left:0; right:0; z-index:20; background:var(--card); border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; max-width:760px; margin:0 auto}
+  .bar button{flex:1; padding:13px; border-radius:11px; border:none; font-size:15px; font-weight:700; font-family:inherit; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px}
   .btn-ghost{background:var(--bg); color:var(--ink)}
   .btn-ghost:hover{background:var(--line)}
   .btn-primary{background:var(--brand); color:#fff}
   .btn-primary:hover{background:var(--brand-d)}
 
-  .toast{
-    position:fixed; left:50%; bottom:88px; transform:translateX(-50%) translateY(20px);
-    background:var(--ink); color:#fff; padding:11px 20px; border-radius:999px;
-    font-size:14px; font-weight:600; box-shadow:var(--shadow); opacity:0;
-    transition:opacity .25s,transform .25s; pointer-events:none; z-index:40;
-  }
-  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  /* ---- annotation modal ---- */
+  .modal{position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:12px}
+  .an-box{background:#fff; border-radius:14px; max-width:720px; width:100%; padding:12px}
+  .an-box h3{margin:2px 4px 10px; font-size:15px}
+  .an-tools{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; align-items:center}
+  .an-tools .tl{width:42px; height:42px; border-radius:9px; border:1.5px solid var(--line); background:#fff; font-size:17px; cursor:pointer}
+  .an-tools .tl.on{border-color:var(--brand); background:#f0fdfa}
+  .dot{width:28px; height:28px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1.5px var(--line); cursor:pointer; flex:none; padding:0}
+  .dot.on{box-shadow:0 0 0 3px var(--ink)}
+  #an-cv{max-width:100%; max-height:60vh; display:block; margin:0 auto; touch-action:none; border-radius:8px; background:#f1f5f9}
+  .an-actions{display:flex; gap:8px; margin-top:12px}
+  .an-actions button{flex:1; padding:12px; border-radius:10px; border:none; font-size:14px; font-weight:700; font-family:inherit; cursor:pointer}
 
+  .toast{position:fixed; left:50%; bottom:88px; transform:translateX(-50%) translateY(20px); background:var(--ink); color:#fff; padding:11px 20px; border-radius:999px; font-size:14px; font-weight:600; box-shadow:var(--shadow); opacity:0; transition:opacity .25s,transform .25s; pointer-events:none; z-index:60}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
   .save-note{text-align:center; font-size:11px; color:var(--sub); margin-top:18px}
+  [hidden]{display:none!important}
   @media (max-width:480px){ .wrap{padding:12px} }
 </style>
 </head>
 <body>
-<header>
-  <span class="logo">📋</span>
-  <h1>現場マニュアル作成</h1>
-  <span class="count" id="count">0 手順</span>
-</header>
 
-<div class="wrap">
-  <div class="meta">
-    <input class="title-in" id="m-title" placeholder="マニュアルのタイトル（例：〇〇装置 始業点検）" autocomplete="off">
-    <div class="row">
-      <div style="flex:1">
-        <label for="m-place">現場・設備</label>
-        <input id="m-place" placeholder="例：第2工場 A棟" autocomplete="off">
-      </div>
-      <div style="flex:1">
-        <label for="m-author">作成者</label>
-        <input id="m-author" placeholder="例：山田" autocomplete="off">
-      </div>
+<!-- ============ ホーム（一覧） ============ -->
+<div id="v-home">
+  <header class="app">
+    <span class="logo">📋</span>
+    <h1>現場マニュアル作成</h1>
+    <span class="count" id="hcount">0 件</span>
+  </header>
+  <div class="wrap">
+    <div class="home-actions">
+      <button id="btn-new">＋ 新規作成</button>
+      <button id="btn-import">📥 取り込み</button>
     </div>
+    <div id="mlist"></div>
+    <div id="home-empty" class="empty">
+      <div class="big">📸</div>
+      「新規作成」から、写真を撮るだけでマニュアルが作れます。<br>
+      書き出したHTMLやバックアップは「取り込み」で戻せます。
+    </div>
+    <p class="save-note"><button class="linkbtn" id="btn-backup">全データをバックアップ（.json）</button></p>
   </div>
-
-  <div id="steps"></div>
-  <div id="empty" class="empty">
-    <div class="big">📸</div>
-    「手順を追加」を押して、写真を撮るところから始めましょう。<br>
-    入力内容はこの端末に自動保存されます。
-  </div>
-
-  <button class="add-step" id="add"><span>＋</span> 手順を追加</button>
-
-  <p class="save-note" id="savenote">— 未保存 —</p>
 </div>
 
-<div class="bar">
-  <button class="btn-ghost" id="btn-clear">🗑 全消去</button>
-  <button class="btn-ghost" id="btn-print">🖨 印刷 / PDF</button>
-  <button class="btn-primary" id="btn-export">⬇ HTML書き出し</button>
+<!-- ============ 編集画面 ============ -->
+<div id="v-edit" hidden>
+  <header class="app">
+    <button class="hback" id="btn-back">‹</button>
+    <h1>マニュアル編集</h1>
+    <span class="count" id="ecount">0 手順</span>
+  </header>
+  <div class="wrap">
+    <div class="meta">
+      <input class="title-in" id="m-title" placeholder="マニュアルのタイトル（例：〇〇装置 始業点検）" autocomplete="off">
+      <div class="row">
+        <div><label for="m-place">現場・設備</label><input id="m-place" placeholder="例：第2工場 A棟" autocomplete="off"></div>
+        <div><label for="m-author">作成者</label><input id="m-author" placeholder="例：山田" autocomplete="off"></div>
+      </div>
+      <label for="m-tools" style="margin-top:12px">準備するもの（1行に1つ・任意）</label>
+      <textarea id="m-tools" rows="2" placeholder="軍手&#10;トルクレンチ"></textarea>
+      <details class="mgmt">
+        <summary>🗂 管理情報（版数・承認・見直し日）</summary>
+        <div class="grid2">
+          <div><label for="m-version">版数</label><input id="m-version" placeholder="1.0"></div>
+          <div><label for="m-status">状態</label>
+            <select id="m-status">
+              <option value="draft">下書き</option>
+              <option value="wait">承認待ち</option>
+              <option value="active">運用中</option>
+              <option value="retired">廃止</option>
+            </select></div>
+          <div><label for="m-approver">承認者</label><input id="m-approver" placeholder="例：佐藤 班長"></div>
+          <div><label for="m-review">次回見直し日</label><input type="date" id="m-review"></div>
+        </div>
+        <div style="margin-top:10px"><label for="m-note">改訂メモ（今回の変更点）</label><input id="m-note" placeholder="例：バルブ電動化に伴い手順3を変更"></div>
+      </details>
+    </div>
+
+    <div id="steps"></div>
+    <div id="e-empty" class="empty">
+      <div class="big">📷</div>
+      「手順を追加」を押すとカメラが起動します。<br>
+      撮った写真をタップすると赤丸・矢印を書き込めます。
+    </div>
+    <button class="add-step" id="add"><span>＋</span> 手順を追加</button>
+    <p class="save-note" id="savenote">— 未保存 —</p>
+  </div>
+  <div class="bar">
+    <button class="btn-ghost" id="btn-preview">👁 プレビュー</button>
+    <button class="btn-primary" id="btn-export">⬇ HTML書き出し</button>
+  </div>
+</div>
+
+<!-- ============ 写真書き込みモーダル ============ -->
+<div class="modal" id="annot" hidden>
+  <div class="an-box">
+    <h3>✏ 写真に書き込み</h3>
+    <div class="an-tools">
+      <button class="tl on" data-tool="circle" title="丸">⭕</button>
+      <button class="tl" data-tool="arrow" title="矢印">↗</button>
+      <button class="tl" data-tool="rect" title="四角">▢</button>
+      <button class="tl" data-tool="pen" title="ペン">✏</button>
+      <button class="tl" data-tool="num" title="番号スタンプ">①</button>
+      <button class="dot on" data-c="#dc2626" style="background:#dc2626" title="赤"></button>
+      <button class="dot" data-c="#facc15" style="background:#facc15" title="黄"></button>
+      <button class="dot" data-c="#2563eb" style="background:#2563eb" title="青"></button>
+      <span style="flex:1"></span>
+      <button class="tl" id="an-undo" title="元に戻す">↩</button>
+      <button class="tl" id="an-clear" title="全消し">🗑</button>
+    </div>
+    <canvas id="an-cv"></canvas>
+    <div class="an-actions">
+      <button class="btn-ghost" id="an-cancel">キャンセル</button>
+      <button class="btn-primary" id="an-save">保存</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
-
-<!-- hidden camera input -->
 <input type="file" id="filepick" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="importpick" accept=".html,.json,text/html,application/json" style="display:none">
 
 <script>
 "use strict";
-const KEY = "genba_manual_v1";
-const MAXW = 1280, JPEG_Q = 0.82;
-
-let state = { title:"", place:"", author:"", steps:[] };
-let pendingStepId = null;   // step waiting for a photo
-let uid = () => Math.random().toString(36).slice(2,9);
-
+/* ================= helpers ================= */
 const $ = s => document.querySelector(s);
-const stepsEl = $("#steps"), emptyEl = $("#empty");
-
-/* ---------- persistence ---------- */
-function load(){
-  try{
-    const raw = localStorage.getItem(KEY);
-    if(raw){ state = JSON.parse(raw); }
-  }catch(e){ console.warn("load failed", e); }
-  if(!Array.isArray(state.steps)) state.steps = [];
+const uid = () => Math.random().toString(36).slice(2,10);
+const MAXW = 1280, JPEG_Q = 0.82;
+function esc(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function fmtDate(ts){ if(!ts) return "-"; const d=new Date(ts); return d.getFullYear()+"/"+(d.getMonth()+1)+"/"+d.getDate(); }
+function isOverdue(m){
+  if(!m.reviewDate) return false;
+  const due = new Date(m.reviewDate+"T23:59:59");
+  return !isNaN(due.getTime()) && Date.now() > due.getTime();
 }
+let toastTimer=null;
+function toast(msg){
+  const t=$("#toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2200);
+}
+function showView(id){ ["v-home","v-edit"].forEach(v=>{ $("#"+v).hidden = v!==id; }); window.scrollTo(0,0); }
+
+/* ================= storage (IndexedDB / localStorage fallback) ================= */
+const LSKEY="genba_manuals_ls";
+let manuals=[], cur=null, useLS=false, _db=null;
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    if(_db) return res(_db);
+    if(!window.indexedDB) return rej(new Error("no idb"));
+    const r=indexedDB.open("genba_tool",1);
+    r.onupgradeneeded=()=>{ r.result.createObjectStore("manuals",{keyPath:"id"}); };
+    r.onsuccess=()=>{ _db=r.result; res(_db); };
+    r.onerror=()=>rej(r.error);
+    r.onblocked=()=>rej(new Error("blocked"));
+  });
+}
+function lsRead(){ try{ return JSON.parse(localStorage.getItem(LSKEY)||"[]"); }catch(e){ return []; } }
+function lsWrite(){ try{ localStorage.setItem(LSKEY, JSON.stringify(manuals)); }catch(e){ toast("⚠ 保存できません（容量不足）"); } }
+async function dbAll(){
+  if(useLS) return lsRead();
+  try{
+    const d=await idbOpen();
+    return await new Promise((res,rej)=>{
+      const q=d.transaction("manuals","readonly").objectStore("manuals").getAll();
+      q.onsuccess=()=>res(q.result||[]); q.onerror=()=>rej(q.error);
+    });
+  }catch(e){ useLS=true; return lsRead(); }
+}
+async function dbPut(m){
+  const i=manuals.findIndex(x=>x.id===m.id);
+  if(i>=0) manuals[i]=m; else manuals.push(m);
+  if(useLS) return lsWrite();
+  try{
+    const d=await idbOpen();
+    await new Promise((res,rej)=>{
+      const tx=d.transaction("manuals","readwrite");
+      tx.objectStore("manuals").put(m);
+      tx.oncomplete=res; tx.onerror=()=>rej(tx.error);
+    });
+  }catch(e){ useLS=true; lsWrite(); }
+}
+async function dbDel(id){
+  manuals=manuals.filter(x=>x.id!==id);
+  if(useLS) return lsWrite();
+  try{
+    const d=await idbOpen();
+    await new Promise((res,rej)=>{
+      const tx=d.transaction("manuals","readwrite");
+      tx.objectStore("manuals").delete(id);
+      tx.oncomplete=res; tx.onerror=()=>rej(tx.error);
+    });
+  }catch(e){ useLS=true; lsWrite(); }
+}
+
+/* ================= autosave ================= */
 let saveTimer=null;
 function save(){
+  if(!cur) return;
+  cur.updatedAt=Date.now();
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(()=>{
-    try{
-      localStorage.setItem(KEY, JSON.stringify(state));
-      stampSaved();
-    }catch(e){
-      toast("⚠ 保存できません（容量オーバーの可能性）");
-    }
-  }, 250);
+  saveTimer=setTimeout(()=>{ dbPut(cur).then(stampSaved); },300);
+}
+async function flushSave(){
+  clearTimeout(saveTimer);
+  if(cur){ cur.updatedAt=Date.now(); await dbPut(cur); }
 }
 function stampSaved(){
-  const d = new Date();
-  const p = n => String(n).padStart(2,"0");
-  $("#savenote").textContent = `✓ 保存済み ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const d=new Date(); const p=n=>String(n).padStart(2,"0");
+  $("#savenote").textContent=`✓ 保存済み ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/* ---------- image downscale ---------- */
-function processImage(file, cb){
-  const reader = new FileReader();
-  reader.onload = e => {
-    const img = new Image();
-    img.onload = () => {
-      let {width:w, height:h} = img;
-      if(w > MAXW){ h = Math.round(h * MAXW / w); w = MAXW; }
-      const cv = document.createElement("canvas");
-      cv.width = w; cv.height = h;
-      cv.getContext("2d").drawImage(img, 0, 0, w, h);
-      cb(cv.toDataURL("image/jpeg", JPEG_Q));
-    };
-    img.onerror = () => cb(null);
-    img.src = e.target.result;
-  };
-  reader.onerror = () => cb(null);
-  reader.readAsDataURL(file);
+/* ================= home ================= */
+function statusChips(m){
+  const map={draft:["下書き","st-draft"],wait:["承認待ち","st-wait"],active:["運用中","st-active"],retired:["廃止","st-retired"]};
+  const [tx,cls]=map[m.status]||map.draft;
+  const out=[{tx,cls}];
+  if(m.status==="active" && isOverdue(m)) out.push({tx:"⚠ 要見直し",cls:"st-over"});
+  return out;
+}
+function renderHome(){
+  $("#hcount").textContent=manuals.length+" 件";
+  $("#home-empty").hidden = manuals.length>0;
+  const list=$("#mlist"); list.innerHTML="";
+  manuals.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(m=>{
+    const ph=(m.steps||[]).find(s=>s.photo);
+    const card=document.createElement("div"); card.className="mcard";
+    card.innerHTML=`
+      <div class="thumb">${ph?`<img src="${ph.photo}" alt="">`:"📋"}</div>
+      <div class="minfo">
+        <div class="mtitle">${esc(m.title)||"無題のマニュアル"}</div>
+        <div class="msub">v${esc(m.version||"1.0")} ・ ${(m.steps||[]).length}手順 ・ 更新 ${fmtDate(m.updatedAt)}</div>
+        <div>${statusChips(m).map(c=>`<span class="chip ${c.cls}">${c.tx}</span>`).join("")}</div>
+      </div>
+      <div class="macts">
+        <button class="icon-btn a-x" title="HTML書き出し">⬇</button>
+        <button class="icon-btn a-d" title="複製">⧉</button>
+        <button class="icon-btn del a-del" title="削除">✕</button>
+      </div>`;
+    card.onclick=()=>openEditor(m);
+    const stop=fn=>e=>{ e.stopPropagation(); fn(); };
+    card.querySelector(".a-x").onclick=stop(()=>exportHTML(m));
+    card.querySelector(".a-d").onclick=stop(()=>dupManual(m));
+    card.querySelector(".a-del").onclick=stop(()=>delManual(m));
+    list.appendChild(card);
+  });
+}
+function blankManual(){
+  return { id:uid(), title:"", place:"", author:"", approver:"", version:"1.0",
+    status:"draft", reviewDate:"", note:"", tools:"", steps:[],
+    createdAt:Date.now(), updatedAt:Date.now() };
+}
+function newManual(){ const m=blankManual(); dbPut(m); openEditor(m); }
+function dupManual(m){
+  const c=JSON.parse(JSON.stringify(m));
+  c.id=uid(); c.title=(m.title||"無題")+"（複製）"; c.status="draft";
+  c.createdAt=c.updatedAt=Date.now();
+  (c.steps||[]).forEach(s=>s.id=uid());
+  dbPut(c).then(()=>{ renderHome(); toast("⧉ 複製しました"); });
+}
+function delManual(m){
+  if(!confirm(`「${m.title||"無題のマニュアル"}」を削除しますか？\nこの操作は元に戻せません。`)) return;
+  dbDel(m.id).then(()=>{ renderHome(); toast("削除しました"); });
+}
+function backupAll(){
+  if(!manuals.length){ toast("バックアップするデータがありません"); return; }
+  const data={ app:"genba-manual-tool", exportedAt:new Date().toISOString(), manuals };
+  const d=new Date(); const p=n=>String(n).padStart(2,"0");
+  downloadFile(JSON.stringify(data),
+    `manuals_backup_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.json`,
+    "application/json");
+  toast("⬇ バックアップを書き出しました");
+}
+function downloadFile(content, name, mime){
+  const blob=new Blob([content],{type:mime+";charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
-/* ---------- render ---------- */
-function render(){
-  $("#m-title").value = state.title || "";
-  $("#m-place").value = state.place || "";
-  $("#m-author").value = state.author || "";
-  $("#count").textContent = state.steps.length + " 手順";
-  emptyEl.style.display = state.steps.length ? "none" : "block";
-
-  stepsEl.innerHTML = "";
-  state.steps.forEach((st, i) => {
-    const el = document.createElement("div");
-    el.className = "step"; el.dataset.id = st.id;
-    el.innerHTML = `
+/* ================= editor ================= */
+function openEditor(m){
+  cur=m;
+  $("#m-title").value=m.title||"";
+  $("#m-place").value=m.place||"";
+  $("#m-author").value=m.author||"";
+  $("#m-tools").value=m.tools||"";
+  $("#m-version").value=m.version||"1.0";
+  $("#m-status").value=m.status||"draft";
+  $("#m-approver").value=m.approver||"";
+  $("#m-review").value=m.reviewDate||"";
+  $("#m-note").value=m.note||"";
+  $("#savenote").textContent="— 自動保存されます —";
+  renderSteps();
+  showView("v-edit");
+}
+async function goHome(){
+  await flushSave();
+  cur=null;
+  renderHome();
+  showView("v-home");
+}
+let pendingStepId=null;
+function renderSteps(){
+  const steps=cur?cur.steps:[];
+  $("#ecount").textContent=steps.length+" 手順";
+  $("#e-empty").hidden = steps.length>0;
+  const box=$("#steps"); box.innerHTML="";
+  steps.forEach((st,i)=>{
+    const type=st.type||"step";
+    const el=document.createElement("div");
+    el.className="step";
+    el.innerHTML=`
       <div class="step-head">
-        <span class="step-num">${i+1}</span>
+        <span class="step-num${type==="warn"?" n-warn":""}${type==="check"?" n-check":""}">${i+1}</span>
         <span class="sp"></span>
-        <button class="icon-btn up"   title="上へ" ${i===0?"disabled":""}>▲</button>
-        <button class="icon-btn down" title="下へ" ${i===state.steps.length-1?"disabled":""}>▼</button>
-        <button class="icon-btn del"  title="削除">✕</button>
+        <button class="icon-btn up" title="上へ" ${i===0?"disabled":""}>▲</button>
+        <button class="icon-btn down" title="下へ" ${i===steps.length-1?"disabled":""}>▼</button>
+        <button class="icon-btn del sdel" title="削除">✕</button>
       </div>
       <div class="step-body">
+        <div class="seg">
+          <button data-t="step" class="${type==="step"?"on":""}">手順</button>
+          <button data-t="warn" class="${type==="warn"?"on":""}">⚠ 注意</button>
+          <button data-t="check" class="${type==="check"?"on":""}">☑ 点検</button>
+        </div>
         <div class="photo-slot">
           ${st.photo
-            ? `<img src="${st.photo}" alt=""><span class="retake">🔄 撮り直し</span>`
-            : `<span class="cam">📷</span><span class="hint">タップして写真を撮る</span>`}
+            ?`<img src="${st.photo}" alt=""><span class="p-chip p-edit">✏ 書き込み</span><span class="p-chip retake">🔄 撮り直し</span>`
+            :`<span class="cam">📷</span><span class="hint">タップして写真を撮る</span>`}
         </div>
         <input class="s-title" placeholder="手順のタイトル（例：電源スイッチを確認）" value="${esc(st.title)}">
         <div class="field-lbl">説明・注意点</div>
         <textarea placeholder="やること、注意点、判断基準などを書く">${esc(st.desc)}</textarea>
       </div>`;
-
-    // events
-    el.querySelector(".photo-slot").onclick = () => { pendingStepId = st.id; $("#filepick").value=""; $("#filepick").click(); };
-    el.querySelector(".s-title").oninput = e => { st.title = e.target.value; save(); };
-    el.querySelector("textarea").oninput = e => { st.desc = e.target.value; save(); };
-    el.querySelector(".up").onclick   = () => move(i, -1);
-    el.querySelector(".down").onclick = () => move(i, +1);
-    el.querySelector(".del").onclick  = () => {
-      if(confirm(`手順 ${i+1} を削除しますか？`)){ state.steps.splice(i,1); save(); render(); }
+    const slot=el.querySelector(".photo-slot");
+    slot.onclick=()=>{
+      if(st.photo){ openAnnot(st); }
+      else { pendingStepId=st.id; $("#filepick").value=""; $("#filepick").click(); }
     };
-    stepsEl.appendChild(el);
+    const rt=el.querySelector(".retake");
+    if(rt) rt.onclick=e=>{ e.stopPropagation(); pendingStepId=st.id; $("#filepick").value=""; $("#filepick").click(); };
+    el.querySelectorAll(".seg button").forEach(b=>{
+      b.onclick=()=>{ st.type=b.dataset.t; save(); renderSteps(); };
+    });
+    el.querySelector(".s-title").oninput=e=>{ st.title=e.target.value; save(); };
+    el.querySelector("textarea").oninput=e=>{ st.desc=e.target.value; save(); };
+    el.querySelector(".up").onclick=()=>moveStep(i,-1);
+    el.querySelector(".down").onclick=()=>moveStep(i,1);
+    el.querySelector(".sdel").onclick=()=>{
+      if(confirm(`手順 ${i+1} を削除しますか？`)){ cur.steps.splice(i,1); save(); renderSteps(); }
+    };
+    box.appendChild(el);
   });
 }
-function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-
-function move(i, dir){
-  const j = i + dir;
-  if(j<0 || j>=state.steps.length) return;
-  [state.steps[i], state.steps[j]] = [state.steps[j], state.steps[i]];
-  save(); render();
+function moveStep(i,dir){
+  const j=i+dir;
+  if(j<0||j>=cur.steps.length) return;
+  [cur.steps[i],cur.steps[j]]=[cur.steps[j],cur.steps[i]];
+  save(); renderSteps();
 }
 function addStep(){
-  state.steps.push({ id:uid(), title:"", desc:"", photo:null });
-  save(); render();
-  // jump to camera immediately for the new step
-  const last = state.steps[state.steps.length-1];
-  pendingStepId = last.id; $("#filepick").value=""; $("#filepick").click();
-  setTimeout(()=>window.scrollTo({top:document.body.scrollHeight, behavior:"smooth"}), 50);
+  cur.steps.push({ id:uid(), type:"step", title:"", desc:"", photo:null, photoOrig:null, marks:null });
+  save(); renderSteps();
+  const last=cur.steps[cur.steps.length-1];
+  pendingStepId=last.id; $("#filepick").value=""; $("#filepick").click();
+  setTimeout(()=>window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}),50);
 }
 
-/* ---------- toast ---------- */
-let toastTimer=null;
-function toast(msg){
-  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
-  clearTimeout(toastTimer); toastTimer = setTimeout(()=>t.classList.remove("show"), 2200);
+/* ================= photo capture & downscale ================= */
+function processImage(file, cb){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width, h=img.height;
+      if(w>MAXW){ h=Math.round(h*MAXW/w); w=MAXW; }
+      const cv=document.createElement("canvas");
+      cv.width=w; cv.height=h;
+      cv.getContext("2d").drawImage(img,0,0,w,h);
+      cb(cv.toDataURL("image/jpeg",JPEG_Q));
+    };
+    img.onerror=()=>cb(null);
+    img.src=e.target.result;
+  };
+  reader.onerror=()=>cb(null);
+  reader.readAsDataURL(file);
 }
 
-/* ---------- wire up ---------- */
-$("#m-title").oninput  = e => { state.title  = e.target.value; save(); $("#count"); };
-$("#m-place").oninput  = e => { state.place  = e.target.value; save(); };
-$("#m-author").oninput = e => { state.author = e.target.value; save(); };
-$("#add").onclick = addStep;
-
-$("#filepick").onchange = e => {
-  const file = e.target.files[0];
-  if(!file || !pendingStepId) return;
-  toast("画像を処理中…");
-  processImage(file, dataUrl => {
-    const st = state.steps.find(s => s.id === pendingStepId);
-    if(st && dataUrl){ st.photo = dataUrl; save(); render(); toast("✓ 写真を追加しました"); }
-    else toast("⚠ 画像を読み込めませんでした");
-    pendingStepId = null;
-  });
-};
-
-$("#btn-clear").onclick = () => {
-  if(state.steps.length===0 && !state.title){ toast("消去するものがありません"); return; }
-  if(confirm("すべての内容を消去します。よろしいですか？")){
-    state = { title:"", place:"", author:"", steps:[] };
-    localStorage.removeItem(KEY); render(); $("#savenote").textContent="— 未保存 —";
-    toast("消去しました");
+/* ================= photo annotation ================= */
+const anCv=document.getElementById("an-cv");
+const anCtx=anCv.getContext("2d");
+let anStep=null, anImg=null, anMarks=[], anTool="circle", anColor="#dc2626", anDrag=null;
+function openAnnot(st){
+  anStep=st;
+  anMarks=(st.marks||[]).map(m=>JSON.parse(JSON.stringify(m)));
+  anImg=new Image();
+  anImg.onload=()=>{
+    anCv.width=anImg.naturalWidth; anCv.height=anImg.naturalHeight;
+    anDrawAll(); $("#annot").hidden=false;
+  };
+  anImg.src=st.photoOrig||st.photo;
+}
+function closeAnnot(){ $("#annot").hidden=true; anStep=null; anImg=null; anDrag=null; }
+function anLw(){ return Math.max(4, anCv.width*0.008); }
+function anDrawAll(preview){
+  if(!anImg) return;
+  anCtx.clearRect(0,0,anCv.width,anCv.height);
+  anCtx.drawImage(anImg,0,0);
+  anMarks.forEach(m=>drawMark(anCtx,m));
+  if(preview) drawMark(anCtx,preview);
+}
+function drawMark(ctx,m){
+  ctx.strokeStyle=m.c; ctx.fillStyle=m.c;
+  ctx.lineWidth=anLw(); ctx.lineCap="round"; ctx.lineJoin="round";
+  if(m.t==="circle"){
+    ctx.beginPath();
+    ctx.ellipse((m.x1+m.x2)/2,(m.y1+m.y2)/2,Math.max(Math.abs(m.x2-m.x1)/2,1),Math.max(Math.abs(m.y2-m.y1)/2,1),0,0,Math.PI*2);
+    ctx.stroke();
+  } else if(m.t==="rect"){
+    ctx.strokeRect(Math.min(m.x1,m.x2),Math.min(m.y1,m.y2),Math.abs(m.x2-m.x1),Math.abs(m.y2-m.y1));
+  } else if(m.t==="arrow"){
+    const ang=Math.atan2(m.y2-m.y1,m.x2-m.x1), hl=anLw()*3.5;
+    ctx.beginPath(); ctx.moveTo(m.x1,m.y1); ctx.lineTo(m.x2,m.y2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(m.x2,m.y2);
+    ctx.lineTo(m.x2-hl*Math.cos(ang-0.45), m.y2-hl*Math.sin(ang-0.45));
+    ctx.lineTo(m.x2-hl*Math.cos(ang+0.45), m.y2-hl*Math.sin(ang+0.45));
+    ctx.closePath(); ctx.fill();
+  } else if(m.t==="pen"){
+    ctx.beginPath();
+    (m.pts||[]).forEach((p,i)=>{ if(i) ctx.lineTo(p[0],p[1]); else ctx.moveTo(p[0],p[1]); });
+    ctx.stroke();
+  } else if(m.t==="num"){
+    const r=Math.max(16, anCv.width*0.028);
+    ctx.beginPath(); ctx.arc(m.x1,m.y1,r,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#fff";
+    ctx.font="bold "+Math.round(r*1.2)+"px sans-serif";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(String(m.n),m.x1,m.y1+r*0.06);
   }
+}
+function anPos(e){
+  const r=anCv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)*anCv.width/r.width, y:(e.clientY-r.top)*anCv.height/r.height };
+}
+anCv.addEventListener("pointerdown",e=>{
+  if(!anImg) return;
+  e.preventDefault();
+  anCv.setPointerCapture(e.pointerId);
+  const p=anPos(e);
+  if(anTool==="num"){
+    const n=anMarks.filter(m=>m.t==="num").length+1;
+    anMarks.push({t:"num",x1:p.x,y1:p.y,c:anColor,n});
+    anDrawAll(); return;
+  }
+  anDrag={t:anTool,c:anColor,x1:p.x,y1:p.y,x2:p.x,y2:p.y,pts:[[p.x,p.y]]};
+});
+anCv.addEventListener("pointermove",e=>{
+  if(!anDrag) return;
+  e.preventDefault();
+  const p=anPos(e);
+  anDrag.x2=p.x; anDrag.y2=p.y;
+  if(anDrag.t==="pen") anDrag.pts.push([p.x,p.y]);
+  anDrawAll(anDrag);
+});
+function anUp(e){
+  if(!anDrag) return;
+  const moved=Math.hypot(anDrag.x2-anDrag.x1,anDrag.y2-anDrag.y1)>3 || anDrag.pts.length>3;
+  if(moved) anMarks.push(anDrag);
+  anDrag=null; anDrawAll();
+}
+anCv.addEventListener("pointerup",anUp);
+anCv.addEventListener("pointercancel",anUp);
+document.querySelectorAll(".an-tools .tl[data-tool]").forEach(b=>{
+  b.onclick=()=>{
+    anTool=b.dataset.tool;
+    document.querySelectorAll(".an-tools .tl[data-tool]").forEach(x=>x.classList.toggle("on",x===b));
+  };
+});
+document.querySelectorAll(".an-tools .dot").forEach(b=>{
+  b.onclick=()=>{
+    anColor=b.dataset.c;
+    document.querySelectorAll(".an-tools .dot").forEach(x=>x.classList.toggle("on",x===b));
+  };
+});
+$("#an-undo").onclick=()=>{ anMarks.pop(); anDrawAll(); };
+$("#an-clear").onclick=()=>{ if(anMarks.length&&confirm("書き込みを全部消しますか？")){ anMarks=[]; anDrawAll(); } };
+$("#an-cancel").onclick=closeAnnot;
+$("#an-save").onclick=()=>{
+  if(!anStep) return;
+  if(!anStep.photoOrig) anStep.photoOrig=anStep.photo;
+  anStep.marks=anMarks;
+  anDrawAll();
+  anStep.photo=anCv.toDataURL("image/jpeg",0.85);
+  closeAnnot(); save(); renderSteps();
+  toast("✓ 書き込みを保存しました");
 };
 
-$("#btn-print").onclick = () => {
-  if(state.steps.length===0){ toast("先に手順を追加してください"); return; }
-  const w = window.open("", "_blank");
-  w.document.write(buildDoc(true));
-  w.document.close();
-  w.onload = () => setTimeout(()=>w.print(), 300);
-};
 
-$("#btn-export").onclick = () => {
-  if(state.steps.length===0){ toast("先に手順を追加してください"); return; }
-  const blob = new Blob([buildDoc(false)], {type:"text/html;charset=utf-8"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const safe = (state.title||"現場マニュアル").replace(/[\\/:*?"<>|]/g,"_").slice(0,40);
-  a.href = url; a.download = `${safe}.html`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url), 1000);
-  toast("⬇ HTMLを書き出しました");
-};
+/* ================= exported viewer: CSS ================= */
+const VIEWER_CSS = `
+*{box-sizing:border-box}
+body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.7;margin:0;background:#fff}
+.vwrap{max-width:820px;margin:0 auto;padding:28px 20px 120px}
+header.vh{border-bottom:4px solid #0f766e;padding-bottom:14px;margin-bottom:22px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
+.vh-l{flex:1;min-width:240px}
+h1{font-size:25px;margin:0 0 6px}
+.vmeta{color:#475569;font-size:13px}
+.vmeta span{margin-right:14px;white-space:nowrap}
+.note{background:#f8fafc;border-left:4px solid #0f766e;padding:8px 12px;font-size:13px;color:#334155;margin:10px 0 0}
+.stamps{border-collapse:collapse;text-align:center;font-size:11px}
+.stamps th{border:1px solid #94a3b8;padding:3px 0;width:64px;background:#f1f5f9;font-weight:600}
+.stamps td{border:1px solid #94a3b8;height:56px;vertical-align:bottom;font-size:10px;color:#64748b;padding:2px}
+.banner{background:#fef2f2;border:2px solid #dc2626;color:#b91c1c;font-weight:700;padding:12px 16px;border-radius:10px;margin-bottom:18px;font-size:14px}
+.sec-h{font-size:15px;font-weight:700;color:#0f766e;margin:22px 0 8px;border-left:4px solid #0f766e;padding-left:8px}
+ul.tools{margin:0;padding-left:22px;font-size:14px}
+ol.toc{margin:0;padding-left:24px;font-size:14px}
+.toc a{color:#0f766e;text-decoration:none}
+.record{display:flex;gap:18px;align-items:center;border:1.5px solid #cbd5e1;border-radius:10px;padding:10px 14px;margin:14px 0;font-size:13px;flex-wrap:wrap}
+.record input{border:none;border-bottom:1.5px solid #94a3b8;font-size:14px;padding:2px 4px;font-family:inherit;width:130px}
+.record input:focus{outline:none;border-color:#0f766e}
+.vchip{font-size:12px;font-weight:700;background:#f1f5f9;border-radius:999px;padding:4px 10px;color:#475569}
+.vchip.done{background:#dcfce7;color:#166534}
+.rst{border:none;background:none;color:#dc2626;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline}
+.s{margin-bottom:24px;page-break-inside:avoid;border:1px solid #e2e8f0;border-radius:12px;padding:18px;background:#fff}
+.s-h{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.s-n{width:32px;height:32px;flex:none;border-radius:50%;background:#0f766e;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:16px}
+.s-n.warn{background:#f59e0b}
+.wchip{background:#fef3c7;color:#b45309;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.ckl input{width:22px;height:22px;accent-color:#0f766e;cursor:pointer}
+.s h2{font-size:18px;margin:0;flex:1}
+.s img{width:100%;max-width:540px;border-radius:8px;border:1px solid #e2e8f0;display:block;margin:6px 0 12px}
+.s p{margin:0;color:#1e293b}
+footer{margin-top:32px;padding-top:14px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:12px;text-align:center}
+.vtb{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e2e8f0;display:flex;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));max-width:820px;margin:0 auto;z-index:30}
+.vtb button{flex:1;padding:12px 6px;border-radius:10px;border:none;font-weight:700;font-family:inherit;font-size:13.5px;cursor:pointer;background:#f1f5f9;color:#0f172a}
+.vtb button.pri{background:#0f766e;color:#fff}
+#genba{position:fixed;inset:0;background:#0f172a;color:#fff;z-index:60;display:flex;flex-direction:column;padding:14px}
+.g-top{display:flex;align-items:center;gap:10px}
+#g-num{font-weight:700;font-size:15px;background:rgba(255,255,255,.15);padding:4px 12px;border-radius:999px}
+#g-close{margin-left:auto;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:20px;width:42px;height:42px;border-radius:10px;cursor:pointer}
+#g-body{flex:1;overflow-y:auto;padding:14px 2px}
+#g-warn{display:none;background:#f59e0b;color:#3b2503;font-weight:700;border-radius:999px;padding:4px 12px;font-size:13px;margin-bottom:8px;align-items:center;gap:4px}
+#g-title{font-size:22px;font-weight:700;margin:0 0 10px}
+#g-img{width:100%;border-radius:12px;display:none;margin-bottom:14px}
+#g-desc{font-size:17px;line-height:1.8;color:#e2e8f0;white-space:pre-wrap;margin:0}
+#g-check{display:none;align-items:center;gap:10px;background:rgba(255,255,255,.1);padding:12px;border-radius:12px;margin-top:14px;font-size:17px;font-weight:700;cursor:pointer}
+#g-ckbox{width:26px;height:26px;accent-color:#2dd4bf}
+.g-nav{display:flex;gap:10px;padding-top:10px}
+.g-nav button{flex:1;padding:16px;font-size:17px;font-weight:700;border:none;border-radius:12px;font-family:inherit;cursor:pointer}
+#g-prev{background:rgba(255,255,255,.15);color:#fff}
+#g-prev:disabled{opacity:.3}
+#g-next{background:#14b8a6;color:#04302b}
+#fbm{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:70;display:flex;align-items:flex-end;justify-content:center}
+.fb-box{background:#fff;width:100%;max-width:640px;border-radius:16px 16px 0 0;padding:16px;max-height:80vh;overflow-y:auto}
+.fb-box h3{margin:0 0 6px;font-size:16px}
+.fb-note{font-size:12px;color:#64748b;margin:0 0 10px}
+#fb-step,#fb-text{width:100%;font-family:inherit;font-size:14px;border:1.5px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px}
+#fb-text{min-height:70px;resize:vertical}
+.fb-row{display:flex;gap:8px;margin-bottom:6px}
+.fb-row button{flex:1;padding:11px;border-radius:9px;border:none;font-weight:700;font-family:inherit;cursor:pointer;background:#f1f5f9;font-size:13.5px}
+#fb-add{background:#0f766e;color:#fff}
+#fb-list{padding-left:18px;font-size:13px;color:#334155;margin:10px 0}
+.fb-empty{list-style:none;color:#94a3b8}
+[hidden]{display:none!important}
+@media print{
+  .vtb,#genba,#fbm,.no-print{display:none!important}
+  .vwrap{padding:0}
+  .s{border-color:#cbd5e1}
+  a{color:#0f172a;text-decoration:none}
+  @page{margin:13mm}
+}
+`;
 
-/* ---------- build standalone / print document ---------- */
-function buildDoc(forPrint){
-  const t = esc(state.title) || "現場マニュアル";
-  const meta = [];
-  if(state.place)  meta.push(`現場・設備：${esc(state.place)}`);
-  if(state.author) meta.push(`作成者：${esc(state.author)}`);
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
-  meta.push(`発行日：${dateStr}`);
+/* ================= exported viewer: JS (no backticks / no dollar-brace) ================= */
+const VIEWER_JS = `
+(function(){
+  function q(s){ return document.querySelector(s) }
+  var el=document.getElementById('__manualdata'); if(!el) return;
+  var D; try{ D=JSON.parse(el.textContent) }catch(e){ return }
+  var i;
 
-  const stepsHtml = state.steps.map((st,i)=>`
-    <section class="s">
-      <div class="s-h"><span class="s-n">${i+1}</span><h2>${esc(st.title)||"（無題）"}</h2></div>
-      ${st.photo?`<img src="${st.photo}" alt="手順${i+1}">`:""}
-      ${st.desc?`<p>${esc(st.desc).replace(/\n/g,"<br>")}</p>`:""}
-    </section>`).join("");
+  var imgs=document.querySelectorAll('img[data-p]');
+  for(i=0;i<imgs.length;i++){
+    (function(im){
+      var st=D.steps[parseInt(im.getAttribute('data-p'),10)];
+      if(st&&st.photo){ im.src=st.photo } else { im.style.display='none' }
+    })(imgs[i]);
+  }
+
+  if(D.reviewDate){
+    var due=new Date(D.reviewDate+'T23:59:59');
+    if(!isNaN(due.getTime()) && new Date().getTime()>due.getTime()){
+      var bn=q('#ov-banner'); if(bn) bn.hidden=false;
+    }
+  }
+
+  var CK='gm_ck_'+D.id+'_v'+(D.version||'');
+  var cks=document.querySelectorAll('input[data-ck]');
+  var nameIn=q('#ck-name'), dateIn=q('#ck-date');
+  function ckFor(idx){ return document.querySelector('input[data-ck="'+idx+'"]') }
+  function prog(){
+    var p=q('#ck-prog'); if(!p) return;
+    var n=0,k; for(k=0;k<cks.length;k++) if(cks[k].checked) n++;
+    p.textContent='チェック '+n+' / '+cks.length;
+    p.className='vchip'+((cks.length&&n===cks.length)?' done':'');
+  }
+  function saveCk(){
+    var o={},k;
+    for(k=0;k<cks.length;k++) o[cks[k].getAttribute('data-ck')]=cks[k].checked;
+    if(nameIn) o._name=nameIn.value;
+    if(dateIn) o._date=dateIn.value;
+    try{ localStorage.setItem(CK,JSON.stringify(o)) }catch(e){}
+    prog();
+  }
+  (function(){
+    var o={}; try{ o=JSON.parse(localStorage.getItem(CK)||'{}') }catch(e){}
+    var k; for(k=0;k<cks.length;k++) cks[k].checked=!!o[cks[k].getAttribute('data-ck')];
+    if(nameIn&&o._name) nameIn.value=o._name;
+    if(dateIn&&o._date) dateIn.value=o._date;
+    prog();
+  })();
+  for(i=0;i<cks.length;i++) cks[i].addEventListener('change',saveCk);
+  if(nameIn) nameIn.addEventListener('input',saveCk);
+  if(dateIn) dateIn.addEventListener('input',saveCk);
+  var rst=q('#ck-reset');
+  if(rst) rst.onclick=function(){
+    if(!confirm('チェック状態をリセットしますか？')) return;
+    try{ localStorage.removeItem(CK) }catch(e){}
+    var k; for(k=0;k<cks.length;k++) cks[k].checked=false;
+    if(nameIn) nameIn.value='';
+    if(dateIn) dateIn.value='';
+    prog();
+  };
+
+  var pb=q('#v-print'); if(pb) pb.onclick=function(){ window.print() };
+
+  var gi=0, gv=q('#genba');
+  function gRender(){
+    var st=D.steps[gi]; if(!st) return;
+    q('#g-num').textContent=(gi+1)+' / '+D.steps.length;
+    q('#g-title').textContent=st.title||'（無題）';
+    q('#g-desc').textContent=st.desc||'';
+    var im=q('#g-img');
+    if(st.photo){ im.src=st.photo; im.style.display='block' } else { im.style.display='none' }
+    q('#g-warn').style.display = st.type==='warn' ? 'inline-flex' : 'none';
+    var gc=q('#g-check');
+    if(st.type==='check'){
+      gc.style.display='flex';
+      var c=ckFor(gi);
+      q('#g-ckbox').checked=!!(c&&c.checked);
+    } else { gc.style.display='none' }
+    q('#g-prev').disabled = gi===0;
+    q('#g-next').textContent = gi>=D.steps.length-1 ? '完了 ✓' : '次へ ▶';
+  }
+  var gb=q('#v-genba');
+  if(gb) gb.onclick=function(){ if(!D.steps.length) return; gi=0; gv.hidden=false; gRender(); };
+  q('#g-close').onclick=function(){ gv.hidden=true };
+  q('#g-prev').onclick=function(){ if(gi>0){ gi--; gRender(); } };
+  q('#g-next').onclick=function(){ if(gi<D.steps.length-1){ gi++; gRender(); } else { gv.hidden=true } };
+  q('#g-ckbox').onchange=function(){ var c=ckFor(gi); if(c){ c.checked=this.checked; saveCk(); } };
+
+  var FB='gm_fb_'+D.id;
+  function fbList(){ try{ return JSON.parse(localStorage.getItem(FB)||'[]') }catch(e){ return [] } }
+  function fbSave(a){ try{ localStorage.setItem(FB,JSON.stringify(a)) }catch(e){} }
+  function fbRender(){
+    var a=fbList(), ul=q('#fb-list'), k;
+    ul.innerHTML='';
+    if(!a.length){
+      var e0=document.createElement('li');
+      e0.className='fb-empty'; e0.textContent='まだ報告はありません';
+      ul.appendChild(e0); return;
+    }
+    for(k=0;k<a.length;k++){
+      var li=document.createElement('li');
+      var tgt = a[k].s>=0 ? '手順'+(a[k].s+1) : '全体';
+      li.textContent='['+tgt+'] '+a[k].t+'（'+a[k].d+'）';
+      ul.appendChild(li);
+    }
+  }
+  var fv=q('#fbm');
+  q('#v-fb').onclick=function(){ fv.hidden=false; fbRender(); };
+  q('#fb-close').onclick=function(){ fv.hidden=true };
+  q('#fb-add').onclick=function(){
+    var t=q('#fb-text').value.trim();
+    if(!t){ alert('内容を入力してください'); return; }
+    var a=fbList(), d=new Date();
+    a.push({ s:parseInt(q('#fb-step').value,10), t:t, d:d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate() });
+    fbSave(a); q('#fb-text').value=''; fbRender();
+  };
+  q('#fb-copy').onclick=function(){
+    var a=fbList(); if(!a.length){ alert('報告がまだありません'); return; }
+    var lines=['【手順書フィードバック】'+(D.title||'')+'（v'+(D.version||'')+'）'], k;
+    for(k=0;k<a.length;k++){
+      var st=a[k].s>=0?D.steps[a[k].s]:null;
+      var tgt=st?('手順'+(a[k].s+1)+'「'+(st.title||'')+'」'):'全体';
+      lines.push('・'+tgt+'：'+a[k].t+'（'+a[k].d+'）');
+    }
+    lines.push('報告者：');
+    var txt=lines.join('\\n');
+    var btn=q('#fb-copy');
+    function done(){ btn.textContent='✓ コピーしました'; setTimeout(function(){ btn.textContent='📋 まとめてコピー' },1600); }
+    function fallback(){
+      var ta=document.createElement('textarea'); ta.value=txt;
+      document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); done(); }catch(e){ alert(txt) }
+      document.body.removeChild(ta);
+    }
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done,fallback) } else { fallback() }
+  };
+  q('#fb-clear').onclick=function(){ if(confirm('報告一覧を消去しますか？')){ fbSave([]); fbRender(); } };
+})();
+`;
+
+/* ================= build standalone manual (viewer) ================= */
+function buildDoc(m){
+  const t=esc(m.title)||"現場マニュアル";
+  const steps=m.steps||[];
+  const hasCk=steps.some(s=>s.type==="check");
+  const d=new Date();
+  const chips=[];
+  if(m.place) chips.push("現場・設備："+esc(m.place));
+  chips.push("版数：v"+esc(m.version||"1.0"));
+  chips.push("発行日："+d.getFullYear()+"年"+(d.getMonth()+1)+"月"+d.getDate()+"日");
+  if(m.reviewDate) chips.push("次回見直し："+esc(m.reviewDate));
+
+  const toolLines=(m.tools||"").split("\n").map(s=>s.trim()).filter(Boolean);
+  const toolsHtml = toolLines.length
+    ? `<div class="sec-h">準備するもの</div><ul class="tools">${toolLines.map(l=>`<li>${esc(l)}</li>`).join("")}</ul>` : "";
+
+  const tocHtml = steps.length
+    ? `<div class="sec-h">目次</div><ol class="toc">${steps.map((s,i)=>{
+        const ic = s.type==="warn"?"⚠ ":(s.type==="check"?"☑ ":"");
+        return `<li><a href="#s-${i}">${ic}${esc(s.title)||"（無題）"}</a></li>`;
+      }).join("")}</ol>` : "";
+
+  const recordHtml = hasCk
+    ? `<div class="record"><strong>点検記録</strong>
+        <label>実施者 <input id="ck-name"></label>
+        <label>日付 <input id="ck-date" placeholder="2026/7/7"></label>
+        <span class="vchip" id="ck-prog"></span>
+        <button id="ck-reset" class="rst no-print">リセット</button></div>` : "";
+
+  const stepsHtml = steps.map((s,i)=>{
+    const isW=s.type==="warn", isC=s.type==="check";
+    return `<section class="s" id="s-${i}">
+      <div class="s-h">
+        <span class="s-n${isW?" warn":""}">${i+1}</span>
+        ${isC?`<label class="ckl"><input type="checkbox" data-ck="${i}"></label>`:""}
+        <h2>${esc(s.title)||"（無題）"}</h2>
+        ${isW?'<span class="wchip">⚠ 注意</span>':""}
+      </div>
+      ${s.photo?`<img data-p="${i}" alt="手順${i+1}の写真">`:""}
+      ${s.desc?`<p>${esc(s.desc).replace(/\n/g,"<br>")}</p>`:""}
+    </section>`;
+  }).join("");
+
+  const fbOptions = `<option value="-1">全体について</option>`+
+    steps.map((s,i)=>`<option value="${i}">手順${i+1}：${esc(s.title)||"（無題）"}</option>`).join("");
+
+  const embed={ id:m.id, title:m.title, place:m.place, author:m.author, approver:m.approver,
+    version:m.version, note:m.note, reviewDate:m.reviewDate, tools:m.tools, status:m.status,
+    createdAt:m.createdAt,
+    steps:steps.map(s=>({ id:s.id, type:s.type||"step", title:s.title, desc:s.desc, photo:s.photo })) };
+  const json=JSON.stringify(embed).replace(/<\//g,"<\\/");
 
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t}</title>
-<style>
-  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,sans-serif;
-    color:#0f172a; line-height:1.7; max-width:800px; margin:0 auto; padding:32px 24px; background:#fff}
-  header{border-bottom:4px solid #0f766e; padding-bottom:16px; margin-bottom:28px}
-  h1{font-size:26px; margin:0 0 8px}
-  .meta{color:#475569; font-size:13px}
-  .meta span{margin-right:16px; white-space:nowrap}
-  .s{margin-bottom:26px; page-break-inside:avoid; border:1px solid #e2e8f0; border-radius:12px; padding:18px; background:#fff}
-  .s-h{display:flex; align-items:center; gap:12px; margin-bottom:12px}
-  .s-n{width:32px; height:32px; flex:none; border-radius:50%; background:#0f766e; color:#fff;
-    font-weight:700; display:flex; align-items:center; justify-content:center; font-size:16px}
-  .s h2{font-size:18px; margin:0}
-  .s img{width:100%; max-width:520px; border-radius:8px; border:1px solid #e2e8f0; display:block; margin:6px 0 12px}
-  .s p{margin:0; white-space:normal; color:#1e293b}
-  footer{margin-top:32px; padding-top:14px; border-top:1px solid #e2e8f0; color:#94a3b8; font-size:12px; text-align:center}
-  @media print{ body{padding:0} .s{border-color:#cbd5e1} @page{margin:14mm} }
-</style></head><body>
-<header>
-  <h1>${t}</h1>
-  <div class="meta">${meta.map(m=>`<span>${m}</span>`).join("")}</div>
-</header>
-${stepsHtml}
-<footer>全 ${state.steps.length} 手順 ・ 現場マニュアル作成ツールで生成</footer>
+<style>${VIEWER_CSS}</style></head><body>
+<div class="vwrap">
+  <div id="ov-banner" class="banner" hidden>⚠ この手順書は見直し期限（${esc(m.reviewDate||"")}）を過ぎています。内容が現状と合っているか確認し、管理者へ連絡してください。</div>
+  <header class="vh">
+    <div class="vh-l">
+      <h1>${t}</h1>
+      <div class="vmeta">${chips.map(c=>`<span>${c}</span>`).join("")}</div>
+      ${m.note?`<div class="note">改訂メモ：${esc(m.note)}</div>`:""}
+    </div>
+    <table class="stamps">
+      <tr><th>作成</th><th>確認</th><th>承認</th></tr>
+      <tr><td>${esc(m.author||"")}</td><td></td><td>${esc(m.approver||"")}</td></tr>
+    </table>
+  </header>
+  ${toolsHtml}
+  ${tocHtml}
+  ${recordHtml}
+  ${stepsHtml}
+  <footer>全 ${steps.length} 手順 ・ v${esc(m.version||"1.0")} ・ このファイルは「現場マニュアル作成ツール」に再取り込みして改訂できます</footer>
+</div>
+<div class="vtb no-print">
+  <button class="pri" id="v-genba">▶ 現場モード</button>
+  <button id="v-fb">📢 フィードバック</button>
+  <button id="v-print">🖨 印刷 / PDF</button>
+</div>
+<div id="genba" hidden>
+  <div class="g-top"><span id="g-num"></span><button id="g-close">✕</button></div>
+  <div id="g-body">
+    <span id="g-warn">⚠ 注意</span>
+    <h2 id="g-title"></h2>
+    <img id="g-img" alt="">
+    <p id="g-desc"></p>
+    <label id="g-check"><input type="checkbox" id="g-ckbox"> 実施した</label>
+  </div>
+  <div class="g-nav"><button id="g-prev">◀ 前へ</button><button id="g-next">次へ ▶</button></div>
+</div>
+<div id="fbm" hidden>
+  <div class="fb-box">
+    <h3>📢 フィードバック（現場からの指摘）</h3>
+    <p class="fb-note">内容が実際と違う点・改善したい点を記録し、「まとめてコピー」して Teams / Kintone に貼り付けてください。</p>
+    <select id="fb-step">${fbOptions}</select>
+    <textarea id="fb-text" placeholder="例：手順3のバルブは電動化されており操作が異なる"></textarea>
+    <div class="fb-row"><button id="fb-add">追加</button><button id="fb-copy">📋 まとめてコピー</button></div>
+    <ul id="fb-list"></ul>
+    <div class="fb-row"><button id="fb-clear">一覧を消去</button><button id="fb-close">閉じる</button></div>
+  </div>
+</div>
+<script type="application/json" id="__manualdata">${json}<\/script>
+<script>${VIEWER_JS}<\/script>
 </body></html>`;
 }
 
-/* ---------- init ---------- */
-load(); render();
-if(state.steps.length || state.title) stampSaved();
+/* ================= export / preview / import ================= */
+function exportHTML(m){
+  if(!(m.steps||[]).length){ toast("先に手順を追加してください"); return; }
+  const safe=(m.title||"現場マニュアル").replace(/[\\/:*?"<>|]/g,"_").slice(0,40);
+  downloadFile(buildDoc(m), `${safe}_v${(m.version||"1.0")}.html`, "text/html");
+  toast("⬇ HTMLを書き出しました");
+}
+function previewDoc(m){
+  if(!(m.steps||[]).length){ toast("先に手順を追加してください"); return; }
+  const w=window.open("about:blank");
+  if(!w){ toast("⚠ ポップアップがブロックされました"); return; }
+  w.document.write(buildDoc(m));
+  w.document.close();
+}
+function normalizeManual(x){
+  return {
+    id:x.id||uid(), title:x.title||"", place:x.place||"", author:x.author||"",
+    approver:x.approver||"", version:x.version||"1.0", status:x.status||"draft",
+    reviewDate:x.reviewDate||"", note:x.note||"", tools:x.tools||"",
+    createdAt:x.createdAt||Date.now(), updatedAt:Date.now(),
+    steps:(x.steps||[]).map(s=>({
+      id:s.id||uid(), type:s.type||"step", title:s.title||"", desc:s.desc||"",
+      photo:s.photo||null, photoOrig:s.photoOrig||null, marks:s.marks||null
+    }))
+  };
+}
+function parseImport(text){
+  text=String(text||"").trim();
+  let data=null;
+  if(text.startsWith("{")||text.startsWith("[")){
+    try{ data=JSON.parse(text); }catch(e){ return []; }
+  } else {
+    const mm=text.match(/<script type="application\/json" id="__manualdata">([\s\S]*?)<\/script>/);
+    if(mm){ try{ data=JSON.parse(mm[1]); }catch(e){ return []; } }
+  }
+  if(!data) return [];
+  const arr=Array.isArray(data)?data:(Array.isArray(data.manuals)?data.manuals:[data]);
+  return arr.filter(x=>x&&Array.isArray(x.steps)).map(normalizeManual);
+}
+async function importFile(file){
+  const text=await file.text();
+  const arr=parseImport(text);
+  if(!arr.length){ toast("⚠ 取り込めるデータが見つかりません"); return; }
+  for(const m of arr){
+    const exists=manuals.find(x=>x.id===m.id);
+    if(exists){
+      const ok=confirm(`「${m.title||"無題"}」は既に存在します。\nOK：上書き（改訂として取り込み）\nキャンセル：複製として追加`);
+      if(!ok){ m.id=uid(); m.title=(m.title||"無題")+"（取込）"; }
+    }
+    await dbPut(m);
+  }
+  renderHome();
+  toast(`✓ ${arr.length}件 取り込みました`);
+}
+
+/* ================= wiring ================= */
+$("#btn-new").onclick=newManual;
+$("#btn-import").onclick=()=>{ $("#importpick").value=""; $("#importpick").click(); };
+$("#importpick").onchange=e=>{ const f=e.target.files[0]; if(f) importFile(f); };
+$("#btn-backup").onclick=backupAll;
+$("#btn-back").onclick=goHome;
+$("#add").onclick=addStep;
+$("#btn-preview").onclick=()=>previewDoc(cur);
+$("#btn-export").onclick=()=>exportHTML(cur);
+function bindMeta(id,key){
+  $("#"+id).oninput=e=>{ if(!cur) return; cur[key]=e.target.value; save(); };
+}
+bindMeta("m-title","title"); bindMeta("m-place","place"); bindMeta("m-author","author");
+bindMeta("m-tools","tools"); bindMeta("m-version","version"); bindMeta("m-approver","approver");
+bindMeta("m-review","reviewDate"); bindMeta("m-note","note");
+$("#m-status").onchange=e=>{ if(cur){ cur.status=e.target.value; save(); } };
+$("#filepick").onchange=e=>{
+  const file=e.target.files[0];
+  if(!file||!pendingStepId||!cur) return;
+  toast("画像を処理中…");
+  processImage(file,dataUrl=>{
+    const st=cur&&cur.steps.find(s=>s.id===pendingStepId);
+    if(st&&dataUrl){
+      st.photo=dataUrl; st.photoOrig=null; st.marks=null;
+      save(); renderSteps(); toast("✓ 写真を追加しました");
+    } else {
+      toast("⚠ 画像を読み込めませんでした");
+    }
+    pendingStepId=null;
+  });
+};
+
+/* ================= v1 migration & init ================= */
+async function migrateV1(){
+  const FLAG="genba_manual_v1_migrated";
+  try{
+    const raw=localStorage.getItem("genba_manual_v1");
+    if(!raw||localStorage.getItem(FLAG)) return;
+    const old=JSON.parse(raw);
+    if(old&&(old.title||(old.steps||[]).length)){
+      const m=blankManual();
+      m.title=old.title||""; m.place=old.place||""; m.author=old.author||"";
+      m.steps=(old.steps||[]).map(s=>({ id:s.id||uid(), type:"step", title:s.title||"", desc:s.desc||"", photo:s.photo||null, photoOrig:null, marks:null }));
+      await dbPut(m);
+    }
+    localStorage.setItem(FLAG,"1");
+    localStorage.removeItem("genba_manual_v1");
+  }catch(e){ /* 旧データが壊れていても起動は続行 */ }
+}
+(async function init(){
+  manuals=await dbAll();
+  await migrateV1();
+  renderHome();
+  showView("v-home");
+})();
+
 </script>
 </body>
 </html>
