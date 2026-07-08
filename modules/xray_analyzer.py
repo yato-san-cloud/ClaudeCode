@@ -307,9 +307,10 @@ def _detect_pelvis_full(gray, edges, h, w):
     fem_y = (fl["y"] + fr["y"]) // 2
     crest_y = (il["y"] + ir["y"]) // 2
 
-    # 坐骨結節: 大腿骨頭の下方やや内側。最下点付近を初期値に。
+    # 坐骨結節: 大腿骨頭の下方やや内側。実X線で確認し、頭からの落差を大きめに取る
+    # (旧 0.07h は大腿骨頸付近で高すぎた)。骨盤下部の坐骨結節寄りに初期化する。
     def ischium(fx, fy):
-        return int(fx + (mid_x - fx) * 0.25), int(min(h - 3, fy + h * 0.07))
+        return int(fx + (mid_x - fx) * 0.2), int(min(h - 3, fy + h * 0.15))
 
     lix, liy = ischium(fl["x"], fl["y"])
     rix, riy = ischium(fr["x"], fr["y"])
