@@ -476,26 +476,27 @@ export function mountCody(targetEl, opts = {}) {
     const dir = driftDir();
     const soft = bubbleHasContent;
     switch (kind) {
-      case "hop":                     // a little squash-and-stretch jump
-        sp.vy -= soft ? 120 : 210; sp.sq = Math.max(sp.sq, soft ? 0.1 : 0.16); break;
+      case "hop":                     // a springy squash-and-stretch jump
+        sp.vy -= soft ? 150 : 300; sp.sq = Math.max(sp.sq, soft ? 0.12 : 0.22);
+        sp.vx += dir * (soft ? 60 : 130) * (Math.random() < 0.6 ? 1 : -0.4); break;
       case "spin":                    // a quick comical whirl (quiet views only)
-        sp.vr += 700 * (Math.random() < 0.5 ? 1 : -1);
-        sp.vy -= 90; sp.sq = Math.max(sp.sq, 0.1); break;
+        sp.vr += 820 * (Math.random() < 0.5 ? 1 : -1);
+        sp.vy -= 140; sp.sq = Math.max(sp.sq, 0.14); break;
       case "wobble":                  // a jelly wiggle (+ tentacle flutter)
-        sp.vr += (soft ? 190 : 300) * (Math.random() < 0.5 ? 1 : -1);
+        sp.vr += (soft ? 230 : 380) * (Math.random() < 0.5 ? 1 : -1);
         svg.classList.add("octa-jelly");
         setTimeout(() => { if (!destroyed) svg.classList.remove("octa-jelly"); }, 900);
         break;
       case "peek":                    // duck part-way off the edge, then pop in
-        sp.tx = -dir * (18 + Math.random() * 14);
-        sp.ty = (soft ? 3 : 6) + Math.random() * 6;
-        revertAt = performance.now() + 620; break;
-      case "drift":                   // amble to a nearby edge spot and linger
+        sp.tx = -dir * (24 + Math.random() * 20);
+        sp.ty = (soft ? 4 : 8) + Math.random() * 8;
+        revertAt = performance.now() + 640; break;
+      case "drift":                   // amble along the edge band and linger
       default:
-        sp.tx = dir * ((soft ? 20 : 34) + Math.random() * (soft ? 26 : 46));
-        sp.ty = -((soft ? 10 : 14) + Math.random() * (soft ? 20 : 34));
-        sp.vy -= 60;
-        revertAt = performance.now() + 2200 + Math.random() * 1700; break;
+        sp.tx = dir * ((soft ? 30 : 48) + Math.random() * (soft ? 40 : 70));
+        sp.ty = -((soft ? 14 : 22) + Math.random() * (soft ? 26 : 40));
+        sp.vy -= 90;
+        revertAt = performance.now() + 1900 + Math.random() * 1500; break;
     }
   }
 
@@ -504,10 +505,11 @@ export function mountCody(targetEl, opts = {}) {
   // repertoire (incl. spin/hop); while a bubble is open we drop the big spin so
   // the reader isn't jolted — the bubble rides along for the gentle gestures.
   const GESTURE_BAG = [
-    "drift", "drift", "drift", "peek", "peek", "hop", "wobble", "spin", "hop",
+    "drift", "drift", "drift", "peek", "peek", "peek",
+    "hop", "hop", "hop", "wobble", "wobble", "spin", "spin",
   ];
   const GESTURE_BAG_GENTLE = [
-    "drift", "drift", "drift", "peek", "peek", "hop", "wobble",
+    "drift", "drift", "drift", "peek", "peek", "hop", "hop", "wobble", "wobble",
   ];
   let firstGesture = true;
   function pickGesture() {
@@ -551,8 +553,8 @@ export function mountCody(targetEl, opts = {}) {
     if (now >= nextGestureAt && idleForWander(now)) {
       fireGesture(pickGesture());
       nextGestureAt = now + (bubbleHasContent
-        ? 8000 + Math.random() * 6000
-        : 6000 + Math.random() * 6000);
+        ? 3000 + Math.random() * 2600   // ~3–5.6s while a bubble rides along
+        : 1700 + Math.random() * 2100); // ~1.7–3.8s on quiet views — lively
     }
     // Return a held drift/peek to the anchor.
     if (revertAt && now >= revertAt) { sp.tx = 0; sp.ty = 0; revertAt = 0; }
@@ -592,9 +594,12 @@ export function mountCody(targetEl, opts = {}) {
     s = springStep(sp.sq, sp.vsq, 0, 220, 16, dt); sp.sq = s.pos; sp.vsq = s.vel;
 
     // Gentle idle breathing/float — always present so OCTA feels alive at rest.
-    const bob = Math.sin(breatheT * 1.1) * 2.4;
-    const sway = Math.sin(breatheT * 0.7) * 1.1;
-    const breathRot = Math.sin(breatheT * 0.9) * 1.3;
+    // Always-on ambient float — pronounced enough that OCTA visibly bobs/sways
+    // even between gestures, so it never reads as static (a corner-mascot, not a
+    // frozen icon). Two combined sines give an unpredictable, alive drift.
+    const bob = Math.sin(breatheT * 1.5) * 6.5 + Math.sin(breatheT * 2.7) * 2.0;
+    const sway = Math.sin(breatheT * 0.95) * 4.2 + Math.sin(breatheT * 1.9) * 1.4;
+    const breathRot = Math.sin(breatheT * 1.15) * 2.6;
 
     // The MOVER carries the translation (wander + breathing) so the speech
     // bubble rides along with OCTA; the FIGURE keeps only rotate/squash (its
