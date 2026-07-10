@@ -78,6 +78,14 @@
   .card:active{border-color:var(--accent);}
   .card canvas{width:46px;height:46px;flex:0 0 46px;} .card .t{font-size:14px;font-weight:800;} .card .d{font-size:11px;color:var(--sub);margin-top:2px;}
   #menu .close{align-self:center; background:#26304a; color:var(--ink); border:0; border-radius:9px; padding:9px 20px; font-weight:700;}
+  /* チュートリアル解説ポップアップ（要所で自動停止して「ぴゅっ」と出る） */
+  #tutorPop{position:fixed; left:50%; bottom:60px; transform:translateX(-50%); z-index:38; display:none; width:min(88vw,500px);}
+  #tutorPop.show{display:block; animation:pyu .22s cubic-bezier(.2,1.7,.45,1);}
+  #tutorPop .tp-box{background:#0f2038; border:2px solid #4da3ff; border-radius:13px; padding:11px 14px; box-shadow:0 10px 30px rgba(0,0,0,.55);}
+  #tutorPop .tp-tag{font-size:10.5px; font-weight:800; color:#4da3ff; letter-spacing:.06em; margin-bottom:3px;}
+  #tutorPop .tp-txt{font-size:13px; line-height:1.7; white-space:pre-line;}
+  #tutorPop button{margin-top:9px; width:100%; border:0; border-radius:9px; padding:9px 0; font-weight:800; background:var(--accent); color:#04101f; font-size:13.5px;}
+  @keyframes pyu{from{transform:translateX(-50%) scale(.45); opacity:0;} to{transform:translateX(-50%) scale(1); opacity:1;}}
   #rotate{position:fixed; inset:0; background:#0d1118; color:var(--ink); display:none; align-items:center; justify-content:center; text-align:center; z-index:50; font-size:15px; padding:24px;}
   @media (orientation:portrait){ #rotate{display:flex;} }
 </style>
@@ -89,6 +97,7 @@
     <span class="t" id="title">方向転換（右バック）</span>
     <span class="sp"></span>
     <button id="btnDemo">▶実演</button>
+    <button id="btnTutor">🎓解説付き</button>
     <button id="btnExam">検定</button>
     <button id="btnGuide" class="on">お手本</button>
     <button id="btnLines" class="on">タイヤ線</button>
@@ -112,6 +121,8 @@
     <div id="shifter"><button data-g="P" class="act">P</button><button data-g="R">R</button><button data-g="N">N</button><button data-g="D">D</button></div>
     <div id="wheelBox"><button id="recenter">まっすぐ</button><canvas id="wheel"></canvas></div>
   </div>
+
+  <div id="tutorPop"><div class="tp-box"><div class="tp-tag">🎓 ここがポイント</div><div class="tp-txt" id="tutorTxt"></div><button id="tutorNext">つづける ▶</button></div></div>
 
   <div id="resultPanel"><div class="box">
     <h3 id="resTitle">結果</h3><div class="score" id="resScore"></div>
@@ -141,7 +152,7 @@ const DEG=Math.PI/180;
 const CONFIG={
   car:{ length:4.58, width:1.795, wheelbase:2.70, frontOverhang:0.92, track:1.54,
         maxSteerDeg:36, steerPlayDeg:8, creep:0.55, maxSpeed:1.9 },
-  perp:{ bayWidth:3.0, bayDepth:5.5, turninX:6.0 },
+  perp:{ bayWidth:3.0, bayDepth:5.5, turninX:6.0, roadWidth:3.0, approachGap:0.40 },
   parallel:{ approachY:3.2, turninX:8.0, theta1Deg:42, slotDepth:2.5, parkedLen:4.5,
              parkedW:1.75, curbGap:0.25, frontClear:2.0, rearClear:0.5, bayPad:0.4 }
 };
@@ -176,7 +187,7 @@ function inRect(r,x,y){ return x>=r.x0&&x<=r.x1&&y>=r.y0&&y<=r.y1; }
 
 /* ==================== 課題ビルダー（検証済み） ==================== */
 function buildPerpR(){
-  const P=CONFIG.perp, APP_Y=C.width/2+0.60, TX=P.turninX;   // ポールラインから60cm離して進入（実車の寄せ方）
+  const P=CONFIG.perp, APP_Y=C.width/2+P.approachGap, TX=P.turninX; // 縁石ラインから40cm寄せて進入（3m道路では寄せないと前外輪が反対縁石を越える）
   const s={x:TX,y:APP_Y,th:0,steer:-MAXSTEER,v:-C.creep}; const path=[{x:s.x,y:s.y,th:s.th}]; let n=0;
   while(n++<8000){ bicycle(s,0.01); path.push({x:s.x,y:s.y,th:s.th}); if(s.th>=Math.PI/2)break; }
   const end={...s};
@@ -188,16 +199,19 @@ function buildPerpR(){
     if(c.y<0.30&&c.y>-0.35){ const yy=Math.min(0.09,c.y*c.y); mouthMaxX=Math.max(mouthMaxX,c.x+Math.sqrt(0.09-yy)); } }
   const bayX1=mouthMaxX, bayX0=Math.min(pMinX-0.30, bayX1-P.bayWidth);
   const bayDepth=Math.max(P.bayDepth, -pMinY+0.5);
-  const aisleY1=Math.max(APP_Y+C.width/2+0.8,sMaxY+0.4), aX0=Math.min(-1.2,sMinX-0.4), aX1=Math.max(TX+(C.wheelbase+C.frontOverhang)+0.8,sMaxX+0.4);
+  // 道路幅は実コース3.0m固定。車体（鼻先）は反対縁石の上空にはみ出すが、タイヤが越えなければ脱輪ではない
+  const aisleY1=P.roadWidth, aX0=Math.min(-1.2,sMinX-0.4), aX1=Math.max(TX+(C.wheelbase+C.frontOverhang)+0.8,sMaxX+0.4);
   return { id:'perpR', title:'方向転換（右バック）', lockLabel:'右', successKind:'perp', turnRefX:TX, appY:APP_Y,
     rects:[rect(aX0,0,aX1,aisleY1),rect(bayX0,-bayDepth,bayX1,0)], obstacles:[],
     bay:rect(bayX0,-bayDepth,bayX1,0), poles:[{x:bayX0,y:0},{x:bayX1,y:0}], parkedCars:[], curbY:null,
+    curbs:[{x0:aX0,x1:aX1,y:aisleY1,dir:+1}],
     ideal:{path,end}, start:{x:Math.max(0.6,aX0+C.rearOverhang+0.5),y:APP_Y,th:0},
     coach:'前進(D)で青ラインまで→止まって、後退(R)＋右いっぱいでポケットへ' };
 }
 function reflectModel(m){ const A=m.appY, ry=y=>2*A-y, rr=r=>rect(r.x0,ry(r.y0),r.x1,ry(r.y1)), rp=p=>({x:p.x,y:ry(p.y),th:-p.th});
   return { id:'perpL', title:'方向転換（左バック）', lockLabel:'左', successKind:'perp', turnRefX:m.turnRefX, appY:A,
     rects:m.rects.map(rr), obstacles:[], bay:rr(m.bay), poles:m.poles.map(p=>({x:p.x,y:ry(p.y)})), parkedCars:[], curbY:null,
+    curbs:(m.curbs||[]).map(cb=>({x0:cb.x0,x1:cb.x1,y:ry(cb.y),dir:-cb.dir})),
     ideal:{path:m.ideal.path.map(rp), end:rp(m.ideal.end)}, start:rp(m.start),
     coach:m.coach.replace('右いっぱい','左いっぱい') }; }
 function buildParallel(){
@@ -226,9 +240,10 @@ let wheelAngle=0, gear='P', brakeHeld=false, accelHeld=false, creepMode=true;
 let reverses=0, wasReversing=false, result=null, cutRecorded=false, parPhase=0;
 let showGuide=true, showLines=true, examMode=false;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
-let deductions=[], advice='', contactFail=false;
+let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
 let demoMode=false, demoPhase=0, demoT=0, demoTargetV=0, demoWheelTarget=0, demoChecksDone=false;
+let tutorMode=false, tutorWait=false, tutorFired=new Set();
 const DEMO_WHEEL_RATE=WHEEL_LOCK/2.0;   // 約2秒で回し切る（実車の据え切りの手応え感）
 const checks={room:-1e9,L:-1e9,R:-1e9,back:-1e9};
 const trail=[];
@@ -244,7 +259,8 @@ function drivable(x,y){ let ok=false; for(const r of M.rects) if(inRect(r,x,y)){
 function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=M.start.th;car.steer=0;car.v=0;
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
   handbrake=true; hbWarned=false; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
-  deductions=[]; advice=''; contactFail=false; trail.length=0;
+  deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
+  tutorMode=false; tutorWait=false; document.getElementById('tutorPop').classList.remove('show');
   demoMode=false; demoPhase=0; demoT=0; demoTargetV=0; demoWheelTarget=0; demoChecksDone=false;
   poleInMirror=false; poleSeenEver=false; earlyReverseWarned=false;
   cuePoleRef=M.poles.length?M.poles.reduce((a,b)=>Math.abs(b.x-M.turnRefX)<Math.abs(a.x-M.turnRefX)?b:a):null;
@@ -308,7 +324,9 @@ bindTap(document.getElementById('btnExam'),function(){ examMode=!examMode; this.
 function updateHbUI(){ document.getElementById('handbrake').classList.toggle('on',handbrake); }
 bindTap(document.getElementById('handbrake'),()=>{ if(result||demoMode)return; handbrake=!handbrake; updateHbUI(); });
 bindTap(document.getElementById('lookback'),()=>{ if(result||demoMode)return; checks.back=tick; setCoach('後方ヨシ！','ok'); });
-bindTap(document.getElementById('btnDemo'),()=>startDemo());
+bindTap(document.getElementById('btnDemo'),()=>startDemo(false));
+bindTap(document.getElementById('btnTutor'),()=>startDemo(true));
+bindTap(document.getElementById('tutorNext'),()=>{ tutorWait=false; document.getElementById('tutorPop').classList.remove('show'); });
 // 結果パネル
 bindTap(document.getElementById('resRetry'),()=>resetCar());
 bindTap(document.getElementById('resMenu'),()=>{ document.getElementById('resultPanel').classList.remove('show'); openMenu(); });
@@ -387,11 +405,18 @@ function updateLogic(){
     else if(d<-0.4){ advice=`切り遅れ：${((-d)*100)|0}cmほど手前で切り始めると余裕が出る`; if(!examMode)setCoach(advice,'warn'); }
     else { advice=''; if(!examMode)setCoach(`切り始めOK！このまま${M.lockLabel}いっぱいで奥まで`,'ok'); } }
   if(M.successKind==='parallel' && reversing && parPhase===0 && Math.abs(normAng(car.th))>=M.theta1*0.85){ parPhase=1; if(!examMode)setCoach('今！ここから「左いっぱい」に切り返して真っ直ぐに','warn'); }
-  // 接触・脱輪＝検定中止（車体の外周を細かくサンプリング＋ポールは円柱当たり）
+  // 検定基準の当たり判定：タイヤが縁石を越える＝脱輪／車体がポール・駐車車両に触れる＝接触
+  // （鼻先やオーバーハングが縁石の上空にはみ出すだけなら減点なし＝実際の検定と同じ）
   const cs=carCorners(car);
-  for(const p of carPerimeter(car)){ if(!drivable(p.x,p.y)){ contactFail=true;
-    finish('fail',M.parkedCars.length?'接触（車・縁石）':'脱輪・コース外'); return; } }
+  for(const o of M.obstacles){ for(const p of carPerimeter(car)) if(inRect(o,p.x,p.y)){ contactFail=true;
+    finish('fail','接触（駐車車両）'); return; } }
   if(poleHit(car)){ contactFail=true; finish('fail','ポール接触'); return; }
+  const wpz=wheelPositions(car);
+  for(const k in wpz){ if(!drivable(wpz[k].x,wpz[k].y)){ contactFail=true;
+    finish('fail','脱輪（タイヤが縁石を越えた）'); return; } }
+  // 鼻先のはみ出しは正常な挙動であることを一度だけ通知
+  if(!examMode&&!noseInfoShown){ for(const p of carPerimeter(car)) if(!drivable(p.x,p.y)){ noseInfoShown=true;
+    setCoach('鼻先が縁石の上に出るのは正常。タイヤが越えなければ脱輪ではない','ok'); break; } }
   // 正着判定 → 完了手順（停止→P→サイド）で終了
   const posOK = M.successKind==='perp'
     ? (inRect(M.bay,cs[2].x,cs[2].y)&&inRect(M.bay,cs[3].x,cs[3].y)&&alignedV(car.th))
@@ -406,10 +431,21 @@ function updateLogic(){
 // （切り始め・戻し始めが遅れて切り量が増える癖への矯正教材）
 const sideTurns=(WHEEL_LOCK/(2*Math.PI)).toFixed(1);           // 中央→ロック ≈1.4回転
 const fullTurns=(WHEEL_LOCK*2/(2*Math.PI)).toFixed(1);         // ロック→逆ロック ≈2.8回転
-function startDemo(){ loadScenario(M.id); demoMode=true;
+function startDemo(withTutor){ loadScenario(M.id); demoMode=true; tutorMode=!!withTutor; tutorFired=new Set();
   handbrake=false; updateHbUI(); gear='D'; setGearUI();
-  setCoach('【お手本】① 前進：切り始めラインまで進む（ポールが見えてもラインまで）','ok'); }
+  setCoach('【お手本】① 前進：切り始めラインまで進む（ポールが見えてもラインまで）','ok');
+  if(M.successKind==='perp')
+    tutor('t0',`進入の「寄せ」は縁石から約40cm。\n道路幅3mでは寄せないと前タイヤが反対の縁石を越えて脱輪。\n逆にベタ寄せは内側後輪が角を巻き込むので、40cm前後が正解。`);
+  else
+    tutor('p0',`前の車と50cmほど間隔をとって、平行に並ぶ位置まで前進。\nここでも寄せすぎ・離れすぎは後の弧がズレる原因。`); }
+// 解説付きモード：要所で自動停止して解説をポップアップ（タップで再開）
+function tutor(id,text){ if(!tutorMode||tutorFired.has(id))return; tutorFired.add(id);
+  tutorWait=true; demoTargetV=0;
+  document.getElementById('tutorTxt').textContent=text;
+  const p=document.getElementById('tutorPop');
+  p.classList.remove('show'); void p.offsetWidth; p.classList.add('show'); }
 function demoUpdate(dt){
+  if(tutorWait){ demoTargetV=0; return; }
   demoT+=dt;
   const dw=demoWheelTarget-wheelAngle;
   wheelAngle+=clamp(dw,-DEMO_WHEEL_RATE*dt,DEMO_WHEEL_RATE*dt);
@@ -420,16 +456,24 @@ function demoUpdate(dt){
     const targetTh=lockSign*Math.PI/2;
     switch(demoPhase){
       case 0: demoTargetV=C.creep;
-        if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認（ミラー3枚＋目視）→ R','ok'); } break;
+        if(poleInMirror) tutor('t1',`${M.lockLabel}ミラーに角ポールが見えた！\nでも、ここではまだ下がらない。見えてから「さらに青ラインまで」進む。\n（ここで下がるのが“手前すぎ”＝入りきらない典型原因）`);
+        if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認（ミラー3枚＋目視）→ R','ok');
+          tutor('t2',`停止位置がすべて。青ライン＝「後輪」を合わせる。\n体感の目安：自分のお尻（車の後端）が角ポールを過ぎて半歩。\n浅い（手前）と後からは絶対に直せない→切り返し確定。`); } break;
       case 1: demoTargetV=0;
         if(Math.abs(car.v)<0.02){ if(demoT>0.4) doChecks();
           if(demoT>2.0){ gear='R'; setGearUI(); demoPhase=2; demoT=0; demoWheelTarget=lockSign*WHEEL_LOCK;
-            setCoach(`【お手本】③ 止まったまま${M.lockLabel}へ回し切る（約${sideTurns}回転）`,'ok'); } } break;
+            setCoach(`【お手本】③ 止まったまま${M.lockLabel}へ回し切る（約${sideTurns}回転）`,'ok');
+            tutor('t3',`後退の前に${M.lockLabel}ミラーを下向きに調整して「後輪」を映す（停止中の調整は減点なし）。\n後退中に見るのは“後輪と縁石の間隔”だけでいい。`); } } break;
       case 2: demoTargetV=0;
-        if(Math.abs(dw)<0.03){ demoPhase=3; setCoach('【お手本】④ ハンドル保持のまま、ゆっくり後退（弧の間は動かさない）','ok'); } break;
+        if(Math.abs(dw)<0.03){ demoPhase=3; setCoach('【お手本】④ ハンドル保持のまま、ゆっくり後退（弧の間は動かさない）','ok');
+          tutor('t4',`止まったまま${M.lockLabel}いっぱいへ回し切った（約${sideTurns}回転）。\nこれで軌道は決まった。弧の間はハンドルを動かさず「保持」。`); } break;
       case 3: demoTargetV=-C.creep;
+        { const prog=Math.abs(normAng(car.th));
+          if(prog>25*DEG) tutor('t5',`ミラーで後輪と縁石の間隔をチェック。\n・近すぎ → 少しだけ戻せば離れる（直せる）\n・遠い → もう直せない（＝開始位置が浅かった証拠）`);
+          if(prog>52*DEG) tutor('t6',`鼻先が反対側の縁石の上に出るのは「正常」。\nタイヤさえ越えなければ脱輪ではない（検定基準）。\n慌ててハンドルを戻さないこと。`); }
         if(Math.abs(normAng(car.th-targetTh))<2.5*DEG){ demoPhase=4; demoT=0; demoWheelTarget=0;
-          setCoach(`【お手本】⑤ 止まって逆へ戻し切る（約${sideTurns}回転でまっすぐ）`,'ok'); } break;
+          setCoach(`【お手本】⑤ 止まって逆へ戻し切る（約${sideTurns}回転でまっすぐ）`,'ok');
+          tutor('t7',`車が直角になったら停止 → 止まったまま逆へ戻し切る（約${sideTurns}回転）。\n動きながらダラダラ戻すと戻し量が分からなくなる。`); } break;
       case 4: demoTargetV=0;
         if(Math.abs(car.v)<0.02&&Math.abs(wheelAngle)<0.03){ demoPhase=5; setCoach('【お手本】⑥ まっすぐ奥まで後退','ok'); } break;
       case 5: demoTargetV=-C.creep*0.8;
@@ -441,7 +485,8 @@ function demoUpdate(dt){
   } else { // 縦列
     switch(demoPhase){
       case 0: demoTargetV=C.creep;
-        if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認 → R','ok'); } break;
+        if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認 → R','ok');
+          tutor('p1','自分の後輪が「前の車の後端」と並んだあたりで停止。\nここが縦列の切り始めの基準点。'); } break;
       case 1: demoTargetV=0;
         if(Math.abs(car.v)<0.02){ if(demoT>0.4) doChecks();
           if(demoT>2.0){ gear='R'; setGearUI(); demoPhase=2; demoT=0; demoWheelTarget=WHEEL_LOCK;
@@ -450,7 +495,8 @@ function demoUpdate(dt){
         if(Math.abs(dw)<0.03){ demoPhase=3; setCoach('【お手本】④ 後退：車が斜め約40°になるまで','ok'); } break;
       case 3: demoTargetV=-C.creep;
         if(Math.abs(normAng(car.th))>=M.theta1){ demoPhase=4; demoT=0; demoWheelTarget=-WHEEL_LOCK;
-          setCoach(`【お手本】⑤ 止まって左へ回し切る（逆いっぱいまで約${fullTurns}回転）`,'ok'); } break;
+          setCoach(`【お手本】⑤ 止まって左へ回し切る（逆いっぱいまで約${fullTurns}回転）`,'ok');
+          tutor('p4',`ここが切り返し点：車が斜め約40°になった瞬間。\n止まって「左いっぱい」へ（逆ロックまで約${fullTurns}回転）。\n遅れると後輪が縁石に刺さる。`); } break;
       case 4: demoTargetV=0;
         if(Math.abs(car.v)<0.02&&Math.abs(dw)<0.03){ demoPhase=5; setCoach('【お手本】⑥ 左いっぱいのまま後退、まっすぐになるまで','ok'); } break;
       case 5: demoTargetV=-C.creep;
@@ -535,6 +581,11 @@ function renderScene(){ ctx.clearRect(0,0,W,H); if(!M||!bounds)return;
   // 縁石ハッチング（走行可能域の外周を強調）
   if(M.curbY!=null){ ctx.strokeStyle='#6d7f9c'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(wx(bounds.minX),wy(M.curbY)); ctx.lineTo(wx(bounds.maxX),wy(M.curbY)); ctx.stroke();
     ctx.strokeStyle='rgba(140,150,170,.5)'; ctx.lineWidth=1; for(let x=bounds.minX;x<bounds.maxX;x+=0.4){ ctx.beginPath(); ctx.moveTo(wx(x),wy(M.curbY)); ctx.lineTo(wx(x-0.25),wy(M.curbY)-6); ctx.stroke(); } }
+  // 反対側の縁石（3m道路の外縁。タイヤが越えたら脱輪、車体のはみ出しはOK）
+  for(const cb of (M.curbs||[])){ const sy=wy(cb.y), off=cb.dir>0?-6:6;
+    ctx.strokeStyle='#6d7f9c'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(wx(cb.x0),sy); ctx.lineTo(wx(cb.x1),sy); ctx.stroke();
+    ctx.strokeStyle='rgba(140,150,170,.5)'; ctx.lineWidth=1;
+    for(let x=cb.x0;x<cb.x1;x+=0.4){ ctx.beginPath(); ctx.moveTo(wx(x),sy); ctx.lineTo(wx(x-0.25),sy+off); ctx.stroke(); } }
   for(const o of M.parkedCars){ fillR(o,'#3a445d'); strokeR(o,'#5a6a8c',1.5); ctx.fillStyle='#7f8ea8'; }
   // お手本（検定モードでは非表示）
   if(showGuide&&!examMode){ ctx.strokeStyle='rgba(77,163,255,.5)'; ctx.lineWidth=3; ctx.setLineDash([8,7]); ctx.beginPath();
