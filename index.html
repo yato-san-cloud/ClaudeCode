@@ -88,6 +88,7 @@
     <button class="menu" id="btnMenu">≡課題</button>
     <span class="t" id="title">方向転換（右バック）</span>
     <span class="sp"></span>
+    <button id="btnDemo">▶実演</button>
     <button id="btnExam">検定</button>
     <button id="btnGuide" class="on">お手本</button>
     <button id="btnLines" class="on">タイヤ線</button>
@@ -146,7 +147,7 @@ const CONFIG={
 };
 const C=CONFIG.car; C.rearOverhang=C.length-C.wheelbase-C.frontOverhang;
 const MAXSTEER=C.maxSteerDeg*DEG;
-const WHEEL_LOCK=1.25*2*Math.PI;   // ロック・トゥ・ロック2.5回転（片側1.25回転）
+const WHEEL_LOCK=1.375*2*Math.PI;  // ロック・トゥ・ロック2.75回転（アクセラ実車相当。片側約1.4回転）
 const WHEEL_PLAY=(C.steerPlayDeg||0)*DEG; // ハンドルの遊び（実車の感覚）
 
 /* ==================== 物理・車体 ==================== */
@@ -227,6 +228,8 @@ let showGuide=true, showLines=true, examMode=false;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
 let deductions=[], advice='', contactFail=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
+let demoMode=false, demoPhase=0, demoT=0, demoTargetV=0, demoWheelTarget=0, demoChecksDone=false;
+const DEMO_WHEEL_RATE=WHEEL_LOCK/2.0;   // 約2秒で回し切る（実車の据え切りの手応え感）
 const checks={room:-1e9,L:-1e9,R:-1e9,back:-1e9};
 const trail=[];
 const mirrorPan={L:0,R:0,C:0}, mirrorPitch={L:-0.05,R:-0.05,C:-0.05};
@@ -242,6 +245,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
   handbrake=true; hbWarned=false; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; trail.length=0;
+  demoMode=false; demoPhase=0; demoT=0; demoTargetV=0; demoWheelTarget=0; demoChecksDone=false;
   poleInMirror=false; poleSeenEver=false; earlyReverseWarned=false;
   cuePoleRef=M.poles.length?M.poles.reduce((a,b)=>Math.abs(b.x-M.turnRefX)<Math.abs(a.x-M.turnRefX)?b:a):null;
   checks.room=checks.L=checks.R=checks.back=-1e9;
@@ -280,19 +284,19 @@ function bindTap(el,fn){
 const wheelCv=document.getElementById('wheel');
 let wdrag=false, wlast=0;
 function angAt(x,y){ const r=wheelCv.getBoundingClientRect(); return Math.atan2(y-(r.top+r.height/2), x-(r.left+r.width/2)); }
-bindDrag(wheelCv,{ start:(x,y)=>{ wdrag=true; wlast=angAt(x,y); },
-  move:(x,y)=>{ if(!wdrag)return; const a=angAt(x,y); wheelAngle=clamp(wheelAngle+normAng(a-wlast),-WHEEL_LOCK,WHEEL_LOCK); wlast=a; },
+bindDrag(wheelCv,{ start:(x,y)=>{ if(demoMode)return; wdrag=true; wlast=angAt(x,y); },
+  move:(x,y)=>{ if(!wdrag||demoMode)return; const a=angAt(x,y); wheelAngle=clamp(wheelAngle+normAng(a-wlast),-WHEEL_LOCK,WHEEL_LOCK); wlast=a; },
   end:()=>{ wdrag=false; } });
-bindTap(document.getElementById('recenter'),()=>{ recenterWheel=true; });
+bindTap(document.getElementById('recenter'),()=>{ if(!demoMode)recenterWheel=true; });
 let recenterWheel=false;
 
 // ペダル・ギア
 function bindPedal(id,set){ const el=document.getElementById(id);
   bindDrag(el,{ start:()=>{ set(true); el.classList.add('held'); }, end:()=>{ set(false); el.classList.remove('held'); } }); }
-bindPedal('brake',v=>brakeHeld=v); bindPedal('accel',v=>accelHeld=v);
+bindPedal('brake',v=>{ if(!demoMode)brakeHeld=v; }); bindPedal('accel',v=>{ if(!demoMode)accelHeld=v; });
 function setGearUI(){ document.querySelectorAll('#shifter button').forEach(b=>b.classList.toggle('act',b.dataset.g===gear));
   document.querySelectorAll('#spd .gear b').forEach(b=>b.classList.toggle('act',b.dataset.g===gear)); }
-document.querySelectorAll('#shifter button').forEach(b=>bindTap(b,()=>{ gear=b.dataset.g; setGearUI();
+document.querySelectorAll('#shifter button').forEach(b=>bindTap(b,()=>{ if(demoMode)return; gear=b.dataset.g; setGearUI();
   if(gear==='R'&&!allChecked()&&!examMode&&!result) setCoach('後退前の安全確認：ルームミラー→左右ミラー→👀後方目視 をタップ','warn'); }));
 bindTap(document.getElementById('creep'),function(){ creepMode=!creepMode; this.classList.toggle('on',creepMode); this.textContent='クリープ '+(creepMode?'ON':'OFF'); });
 bindTap(document.getElementById('btnGuide'),function(){ showGuide=!showGuide; this.classList.toggle('on',showGuide); });
@@ -302,8 +306,9 @@ bindTap(document.getElementById('btnExam'),function(){ examMode=!examMode; this.
   if(examMode) setCoach('検定モード：お手本・ヒントなし。手順どおりに！','warn'); });
 // サイドブレーキ・後方目視
 function updateHbUI(){ document.getElementById('handbrake').classList.toggle('on',handbrake); }
-bindTap(document.getElementById('handbrake'),()=>{ if(result)return; handbrake=!handbrake; updateHbUI(); });
-bindTap(document.getElementById('lookback'),()=>{ if(result)return; checks.back=tick; setCoach('後方ヨシ！','ok'); });
+bindTap(document.getElementById('handbrake'),()=>{ if(result||demoMode)return; handbrake=!handbrake; updateHbUI(); });
+bindTap(document.getElementById('lookback'),()=>{ if(result||demoMode)return; checks.back=tick; setCoach('後方ヨシ！','ok'); });
+bindTap(document.getElementById('btnDemo'),()=>startDemo());
 // 結果パネル
 bindTap(document.getElementById('resRetry'),()=>resetCar());
 bindTap(document.getElementById('resMenu'),()=>{ document.getElementById('resultPanel').classList.remove('show'); openMenu(); });
@@ -336,9 +341,10 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     // ハンドルを時計回り(右)に回す=wheelAngle正 → 前輪は右に切れる=car.steer負、という向きなので符号を反転する
     const eff=Math.max(0,Math.abs(wheelAngle)-WHEEL_PLAY)*Math.sign(wheelAngle);
     car.steer=-MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
-    // 速度：ギア＋サイド＋クリープ＋アクセル−ブレーキ
+    // 速度：ギア＋サイド＋クリープ＋アクセル−ブレーキ（実演中は自動制御）
     const dir=gear==='D'?1:gear==='R'?-1:0; let target=0, rate=6;
-    if(gear==='P'){ target=0; rate=12; }
+    if(demoMode){ target=demoTargetV; rate=5; }
+    else if(gear==='P'){ target=0; rate=12; }
     else if(handbrake){ target=0; rate=10;
       if(accelHeld&&dir&&!hbWarned){ hbWarned=true; deduct('サイドブレーキ戻し忘れ',10); setCoach('サイドブレーキが掛かっています！左下で解除','bad'); } }
     else if(brakeHeld){ target=0; rate=10; }
@@ -350,7 +356,7 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     // 自分の軌跡（後車軸）を記録
     if(Math.abs(car.v)>0.03){ const lt=trail[trail.length-1];
       if(!lt||Math.hypot(car.x-lt.x,car.y-lt.y)>0.12){ trail.push({x:car.x,y:car.y}); if(trail.length>2500)trail.shift(); } }
-    updateLogic();
+    if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
   }
   renderScene(); renderFront(); renderWheel(); renderMirror('L'); renderMirror('R'); renderRearview(); updateGauges();
@@ -395,6 +401,68 @@ function updateLogic(){
     else if(tick%40===0) setCoach('OK！ここで停止 → シフトP → サイドを掛けて完了','ok');
   }
 }
+/* ==================== お手本実演（自動運転チュートリアル） ==================== */
+// 教習所の標準技法をそのまま見せる：「止まって回し切る → 弧の間は保持 → 止まって戻し切る」
+// （切り始め・戻し始めが遅れて切り量が増える癖への矯正教材）
+const sideTurns=(WHEEL_LOCK/(2*Math.PI)).toFixed(1);           // 中央→ロック ≈1.4回転
+const fullTurns=(WHEEL_LOCK*2/(2*Math.PI)).toFixed(1);         // ロック→逆ロック ≈2.8回転
+function startDemo(){ loadScenario(M.id); demoMode=true;
+  handbrake=false; updateHbUI(); gear='D'; setGearUI();
+  setCoach('【お手本】① 前進：切り始めラインまで進む（ポールが見えてもラインまで）','ok'); }
+function demoUpdate(dt){
+  demoT+=dt;
+  const dw=demoWheelTarget-wheelAngle;
+  wheelAngle+=clamp(dw,-DEMO_WHEEL_RATE*dt,DEMO_WHEEL_RATE*dt);
+  const lockSign=M.lockLabel==='右'?1:-1;                       // wheelAngle正＝右回し
+  const doChecks=()=>{ if(demoChecksDone)return; demoChecksDone=true;
+    registerCheck('C'); setTimeout(()=>registerCheck('L'),350); setTimeout(()=>registerCheck('R'),700); setTimeout(()=>{checks.back=tick;},1050); };
+  if(M.successKind==='perp'){
+    const targetTh=lockSign*Math.PI/2;
+    switch(demoPhase){
+      case 0: demoTargetV=C.creep;
+        if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認（ミラー3枚＋目視）→ R','ok'); } break;
+      case 1: demoTargetV=0;
+        if(Math.abs(car.v)<0.02){ if(demoT>0.4) doChecks();
+          if(demoT>2.0){ gear='R'; setGearUI(); demoPhase=2; demoT=0; demoWheelTarget=lockSign*WHEEL_LOCK;
+            setCoach(`【お手本】③ 止まったまま${M.lockLabel}へ回し切る（約${sideTurns}回転）`,'ok'); } } break;
+      case 2: demoTargetV=0;
+        if(Math.abs(dw)<0.03){ demoPhase=3; setCoach('【お手本】④ ハンドル保持のまま、ゆっくり後退（弧の間は動かさない）','ok'); } break;
+      case 3: demoTargetV=-C.creep;
+        if(Math.abs(normAng(car.th-targetTh))<2.5*DEG){ demoPhase=4; demoT=0; demoWheelTarget=0;
+          setCoach(`【お手本】⑤ 止まって逆へ戻し切る（約${sideTurns}回転でまっすぐ）`,'ok'); } break;
+      case 4: demoTargetV=0;
+        if(Math.abs(car.v)<0.02&&Math.abs(wheelAngle)<0.03){ demoPhase=5; setCoach('【お手本】⑥ まっすぐ奥まで後退','ok'); } break;
+      case 5: demoTargetV=-C.creep*0.8;
+        if(lockSign>0? car.y<=M.ideal.end.y+0.05 : car.y>=M.ideal.end.y-0.05){ demoPhase=6; demoT=0; } break;
+      case 6: demoTargetV=0;
+        if(Math.abs(car.v)<0.02&&demoT>0.3){ gear='P'; setGearUI(); handbrake=true; updateHbUI(); result='demo'; demoMode=false;
+          setCoach('【お手本】⑦ P→サイドで完了！コツ＝「止まって回し切る・弧は保持・止まって戻し切る」','ok'); } break;
+    }
+  } else { // 縦列
+    switch(demoPhase){
+      case 0: demoTargetV=C.creep;
+        if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認 → R','ok'); } break;
+      case 1: demoTargetV=0;
+        if(Math.abs(car.v)<0.02){ if(demoT>0.4) doChecks();
+          if(demoT>2.0){ gear='R'; setGearUI(); demoPhase=2; demoT=0; demoWheelTarget=WHEEL_LOCK;
+            setCoach(`【お手本】③ 止まったまま右へ回し切る（約${sideTurns}回転）`,'ok'); } } break;
+      case 2: demoTargetV=0;
+        if(Math.abs(dw)<0.03){ demoPhase=3; setCoach('【お手本】④ 後退：車が斜め約40°になるまで','ok'); } break;
+      case 3: demoTargetV=-C.creep;
+        if(Math.abs(normAng(car.th))>=M.theta1){ demoPhase=4; demoT=0; demoWheelTarget=-WHEEL_LOCK;
+          setCoach(`【お手本】⑤ 止まって左へ回し切る（逆いっぱいまで約${fullTurns}回転）`,'ok'); } break;
+      case 4: demoTargetV=0;
+        if(Math.abs(car.v)<0.02&&Math.abs(dw)<0.03){ demoPhase=5; setCoach('【お手本】⑥ 左いっぱいのまま後退、まっすぐになるまで','ok'); } break;
+      case 5: demoTargetV=-C.creep;
+        if(Math.abs(normAng(car.th))<2*DEG){ demoPhase=6; demoT=0; demoWheelTarget=0;
+          setCoach(`【お手本】⑦ 止まってまっすぐに戻す（約${sideTurns}回転）`,'ok'); } break;
+      case 6: demoTargetV=0;
+        if(Math.abs(car.v)<0.02&&Math.abs(wheelAngle)<0.03&&demoT>0.3){ gear='P'; setGearUI(); handbrake=true; updateHbUI(); result='demo'; demoMode=false;
+          setCoach('【お手本】完了！コツ＝「回し切る↔戻し切る」は毎回止まってから','ok'); } break;
+    }
+  }
+}
+
 /* ==================== 採点・結果 ==================== */
 function finish(kind,reason){ result=kind; car.v=0;
   if(kind==='fail'&&reason) deductions.push({name:reason+'＝検定中止',pts:100});
