@@ -50,8 +50,11 @@
   .st-active{background:#dcfce7; color:#166534}
   .st-retired{background:#e2e8f0; color:#334155; text-decoration:line-through}
   .st-over{background:#fee2e2; color:#b91c1c}
+  .st-dirty{background:#e0e7ff; color:#3730a3}
   .macts{display:flex; flex-direction:column; gap:2px}
   .linkbtn{border:none; background:none; color:var(--sub); text-decoration:underline; font-size:12px; cursor:pointer; font-family:inherit}
+  .searchbox{width:100%; padding:11px 14px; border-radius:11px; border:1.5px solid var(--line); font-family:inherit; font-size:14px; margin-bottom:12px; background:var(--card); color:var(--ink)}
+  .searchbox:focus{outline:none; border-color:var(--brand)}
 
   /* ---- meta card ---- */
   .meta{background:var(--card); border-radius:14px; box-shadow:var(--shadow); padding:16px; margin-bottom:16px}
@@ -99,9 +102,13 @@
   .photo-slot .cam{font-size:38px}
   .photo-slot .hint{font-size:13px; font-weight:600}
   .photo-slot img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover}
-  .p-chip{position:absolute; background:rgba(15,23,42,.72); color:#fff; font-size:12px; padding:5px 10px; border-radius:999px; font-weight:600; display:flex; gap:4px; align-items:center}
+  .p-chip{position:absolute; background:rgba(15,23,42,.72); color:#fff; font-size:12px; padding:5px 10px; border-radius:999px; font-weight:600; display:flex; gap:4px; align-items:center; border:none; font-family:inherit; cursor:pointer}
   .p-edit{left:8px; bottom:8px}
   .retake{right:8px; bottom:8px}
+  .alb2{right:8px; top:8px}
+  .src-row{display:flex; gap:8px}
+  .src-btn{border:none; background:var(--brand); color:#fff; font-family:inherit; font-weight:700; font-size:13px; padding:9px 16px; border-radius:999px; cursor:pointer}
+  .src-btn.alb{background:#fff; color:var(--brand); border:1.5px solid var(--brand)}
   .step-body input.s-title{width:100%; border:none; font-size:16px; font-weight:700; font-family:inherit; padding:4px 2px; margin-bottom:6px; color:var(--ink); border-bottom:2px solid transparent}
   .step-body input.s-title:focus{outline:none; border-bottom-color:var(--brand)}
   .step-body textarea{width:100%; border:none; resize:vertical; min-height:52px; font-size:14px; font-family:inherit; color:var(--ink); padding:4px 2px; line-height:1.6}
@@ -154,13 +161,16 @@
       <button id="btn-new">＋ 新規作成</button>
       <button id="btn-import">📥 取り込み</button>
     </div>
+    <input class="searchbox" id="search" placeholder="🔍 タイトル・設備名で検索" autocomplete="off">
     <div id="mlist"></div>
+    <div id="no-hit" class="empty" hidden>検索に一致するマニュアルがありません</div>
     <div id="home-empty" class="empty">
       <div class="big">📸</div>
       「新規作成」から、写真を撮るだけでマニュアルが作れます。<br>
       書き出したHTMLやバックアップは「取り込み」で戻せます。
     </div>
     <p class="save-note"><button class="linkbtn" id="btn-backup">全データをバックアップ（.json）</button></p>
+    <p class="save-note" id="quota"></p>
   </div>
 </div>
 
@@ -223,6 +233,7 @@
       <button class="tl" data-tool="rect" title="四角">▢</button>
       <button class="tl" data-tool="pen" title="ペン">✏</button>
       <button class="tl" data-tool="num" title="番号スタンプ">①</button>
+      <button class="tl" data-tool="text" title="文字入れ">あ</button>
       <button class="dot on" data-c="#dc2626" style="background:#dc2626" title="赤"></button>
       <button class="dot" data-c="#facc15" style="background:#facc15" title="黄"></button>
       <button class="dot" data-c="#2563eb" style="background:#2563eb" title="青"></button>
@@ -240,6 +251,7 @@
 
 <div class="toast" id="toast"></div>
 <input type="file" id="filepick" accept="image/*" capture="environment" style="display:none">
+<input type="file" id="filepick2" accept="image/*" style="display:none">
 <input type="file" id="importpick" accept=".html,.json,text/html,application/json" style="display:none">
 
 <script>
@@ -337,13 +349,28 @@ function statusChips(m){
   const [tx,cls]=map[m.status]||map.draft;
   const out=[{tx,cls}];
   if(m.status==="active" && isOverdue(m)) out.push({tx:"⚠ 要見直し",cls:"st-over"});
+  if(m.exportedAt && (m.updatedAt||0)>m.exportedAt) out.push({tx:"✎ 未提出の変更",cls:"st-dirty"});
   return out;
+}
+function updQuota(){
+  const el=$("#quota"); if(!el) return;
+  if(navigator.storage && navigator.storage.estimate){
+    navigator.storage.estimate().then(e=>{
+      if(e && e.usage!=null) el.textContent="端末内データ使用量：約 "+(e.usage/1048576).toFixed(1)+" MB";
+    }).catch(()=>{});
+  }
 }
 function renderHome(){
   $("#hcount").textContent=manuals.length+" 件";
   $("#home-empty").hidden = manuals.length>0;
+  const q=($("#search").value||"").trim().toLowerCase();
+  const hits=manuals.filter(m=> !q
+    || (m.title||"").toLowerCase().includes(q)
+    || (m.place||"").toLowerCase().includes(q));
+  $("#no-hit").hidden = !(manuals.length && !hits.length);
+  updQuota();
   const list=$("#mlist"); list.innerHTML="";
-  manuals.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(m=>{
+  hits.slice().sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).forEach(m=>{
     const ph=(m.steps||[]).find(s=>s.photo);
     const card=document.createElement("div"); card.className="mcard";
     card.innerHTML=`
@@ -369,7 +396,11 @@ function renderHome(){
 function blankManual(){
   return { id:uid(), title:"", place:"", author:"", approver:"", version:"1.0",
     status:"draft", reviewDate:"", note:"", tools:"", steps:[],
-    createdAt:Date.now(), updatedAt:Date.now() };
+    createdAt:Date.now(), updatedAt:Date.now(), exportedAt:0 };
+}
+function isEmptyManual(m){
+  return !(m.title||"").trim() && !(m.place||"").trim() && !(m.author||"").trim()
+    && !(m.tools||"").trim() && !(m.steps||[]).length;
 }
 function newManual(){ const m=blankManual(); dbPut(m); openEditor(m); }
 function dupManual(m){
@@ -418,7 +449,12 @@ function openEditor(m){
   showView("v-edit");
 }
 async function goHome(){
-  await flushSave();
+  if(cur && isEmptyManual(cur)){
+    clearTimeout(saveTimer);       // 何も書かずに戻ったら空マニュアルを残さない
+    await dbDel(cur.id);
+  } else {
+    await flushSave();
+  }
   cur=null;
   renderHome();
   showView("v-home");
@@ -437,6 +473,7 @@ function renderSteps(){
       <div class="step-head">
         <span class="step-num${type==="warn"?" n-warn":""}${type==="check"?" n-check":""}">${i+1}</span>
         <span class="sp"></span>
+        <button class="icon-btn sdup" title="この手順を複製">⧉</button>
         <button class="icon-btn up" title="上へ" ${i===0?"disabled":""}>▲</button>
         <button class="icon-btn down" title="下へ" ${i===steps.length-1?"disabled":""}>▼</button>
         <button class="icon-btn del sdel" title="削除">✕</button>
@@ -449,8 +486,8 @@ function renderSteps(){
         </div>
         <div class="photo-slot">
           ${st.photo
-            ?`<img src="${st.photo}" alt=""><span class="p-chip p-edit">✏ 書き込み</span><span class="p-chip retake">🔄 撮り直し</span>`
-            :`<span class="cam">📷</span><span class="hint">タップして写真を撮る</span>`}
+            ?`<img src="${st.photo}" alt=""><button class="p-chip p-edit">✏ 書き込み</button><button class="p-chip retake">📷 撮り直し</button><button class="p-chip alb2" title="アルバムから選ぶ">🖼</button>`
+            :`<span class="cam">📷</span><span class="hint">写真を追加</span><span class="src-row"><button class="src-btn s-cam">📷 撮影</button><button class="src-btn alb s-alb">🖼 アルバム</button></span>`}
         </div>
         <input class="s-title" placeholder="手順のタイトル（例：電源スイッチを確認）" value="${esc(st.title)}">
         <div class="field-lbl">説明・注意点</div>
@@ -459,13 +496,22 @@ function renderSteps(){
     const slot=el.querySelector(".photo-slot");
     slot.onclick=()=>{
       if(st.photo){ openAnnot(st); }
-      else { pendingStepId=st.id; $("#filepick").value=""; $("#filepick").click(); }
+      else { openPick(st.id,false); }
     };
-    const rt=el.querySelector(".retake");
-    if(rt) rt.onclick=e=>{ e.stopPropagation(); pendingStepId=st.id; $("#filepick").value=""; $("#filepick").click(); };
+    const bindChip=(sel,album)=>{
+      const b=el.querySelector(sel);
+      if(b) b.onclick=e=>{ e.stopPropagation(); openPick(st.id,album); };
+    };
+    bindChip(".retake",false); bindChip(".alb2",true);
+    bindChip(".s-cam",false); bindChip(".s-alb",true);
     el.querySelectorAll(".seg button").forEach(b=>{
       b.onclick=()=>{ st.type=b.dataset.t; save(); renderSteps(); };
     });
+    el.querySelector(".sdup").onclick=()=>{
+      const c=JSON.parse(JSON.stringify(st)); c.id=uid();
+      cur.steps.splice(i+1,0,c); save(); renderSteps();
+      toast("⧉ 手順を複製しました");
+    };
     el.querySelector(".s-title").oninput=e=>{ st.title=e.target.value; save(); };
     el.querySelector("textarea").oninput=e=>{ st.desc=e.target.value; save(); };
     el.querySelector(".up").onclick=()=>moveStep(i,-1);
@@ -482,11 +528,15 @@ function moveStep(i,dir){
   [cur.steps[i],cur.steps[j]]=[cur.steps[j],cur.steps[i]];
   save(); renderSteps();
 }
+function openPick(stepId, album){
+  pendingStepId=stepId;
+  const inp=album?$("#filepick2"):$("#filepick");
+  inp.value=""; inp.click();
+}
 function addStep(){
   cur.steps.push({ id:uid(), type:"step", title:"", desc:"", photo:null, photoOrig:null, marks:null });
   save(); renderSteps();
-  const last=cur.steps[cur.steps.length-1];
-  pendingStepId=last.id; $("#filepick").value=""; $("#filepick").click();
+  openPick(cur.steps[cur.steps.length-1].id,false);
   setTimeout(()=>window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"}),50);
 }
 
@@ -561,6 +611,13 @@ function drawMark(ctx,m){
     ctx.font="bold "+Math.round(r*1.2)+"px sans-serif";
     ctx.textAlign="center"; ctx.textBaseline="middle";
     ctx.fillText(String(m.n),m.x1,m.y1+r*0.06);
+  } else if(m.t==="text"){
+    const fs=Math.max(22, anCv.width*0.04);
+    ctx.font="bold "+Math.round(fs)+"px sans-serif";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.lineWidth=Math.max(3, fs*0.18); ctx.strokeStyle="#fff";
+    ctx.strokeText(m.s,m.x1,m.y1);
+    ctx.fillText(m.s,m.x1,m.y1);
   }
 }
 function anPos(e){
@@ -575,6 +632,11 @@ anCv.addEventListener("pointerdown",e=>{
   if(anTool==="num"){
     const n=anMarks.filter(m=>m.t==="num").length+1;
     anMarks.push({t:"num",x1:p.x,y1:p.y,c:anColor,n});
+    anDrawAll(); return;
+  }
+  if(anTool==="text"){
+    const s=prompt("写真に入れる文字（例：ここを確認）");
+    if(s && s.trim()){ anMarks.push({t:"text",x1:p.x,y1:p.y,c:anColor,s:s.trim()}); }
     anDrawAll(); return;
   }
   anDrag={t:anTool,c:anColor,x1:p.x,y1:p.y,x2:p.x,y2:p.y,pts:[[p.x,p.y]]};
@@ -686,6 +748,9 @@ footer{margin-top:32px;padding-top:14px;border-top:1px solid #e2e8f0;color:#94a3
 #fb-add{background:#0f766e;color:#fff}
 #fb-list{padding-left:18px;font-size:13px;color:#334155;margin:10px 0}
 .fb-empty{list-style:none;color:#94a3b8}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:80;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+#lb img{max-width:100%;max-height:100%}
+.ckbtn{border:none;background:#0f766e;color:#fff;font-weight:700;font-family:inherit;font-size:12px;padding:6px 12px;border-radius:999px;cursor:pointer}
 [hidden]{display:none!important}
 @media print{
   .vtb,#genba,#fbm,.no-print{display:none!important}
@@ -710,6 +775,26 @@ const VIEWER_JS = `
       var st=D.steps[parseInt(im.getAttribute('data-p'),10)];
       if(st&&st.photo){ im.src=st.photo } else { im.style.display='none' }
     })(imgs[i]);
+  }
+
+  function copyTxt(txt,btn,orig){
+    function done(){ btn.textContent='✓ コピーしました'; setTimeout(function(){ btn.textContent=orig },1600); }
+    function fallback(){
+      var ta=document.createElement('textarea'); ta.value=txt;
+      document.body.appendChild(ta); ta.select();
+      try{ document.execCommand('copy'); done(); }catch(e){ alert(txt) }
+      document.body.removeChild(ta);
+    }
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done,fallback) } else { fallback() }
+  }
+
+  var lb=q('#lb'), lbi=q('#lb-img');
+  if(lb){
+    for(i=0;i<imgs.length;i++){
+      imgs[i].style.cursor='zoom-in';
+      imgs[i].onclick=function(){ lbi.src=this.src; lb.hidden=false; };
+    }
+    lb.onclick=function(){ lb.hidden=true };
   }
 
   if(D.reviewDate){
@@ -755,6 +840,20 @@ const VIEWER_JS = `
     if(nameIn) nameIn.value='';
     if(dateIn) dateIn.value='';
     prog();
+  };
+  var ckc=q('#ck-copy');
+  if(ckc) ckc.onclick=function(){
+    var lines=['【点検記録】'+(D.title||'')+'（v'+(D.version||'')+'）'];
+    lines.push('日付：'+(dateIn?dateIn.value:'')+'　実施者：'+(nameIn?nameIn.value:''));
+    var done=0,k;
+    for(k=0;k<cks.length;k++){
+      var idx=parseInt(cks[k].getAttribute('data-ck'),10);
+      var stp=D.steps[idx];
+      if(cks[k].checked) done++;
+      lines.push((cks[k].checked?'☑':'☐')+' 手順'+(idx+1)+'：'+(stp?(stp.title||'（無題）'):''));
+    }
+    lines.push('結果：'+done+' / '+cks.length+' 完了');
+    copyTxt(lines.join('\\n'), ckc, '📋 記録をコピー');
   };
 
   var pb=q('#v-print'); if(pb) pb.onclick=function(){ window.print() };
@@ -821,16 +920,7 @@ const VIEWER_JS = `
       lines.push('・'+tgt+'：'+a[k].t+'（'+a[k].d+'）');
     }
     lines.push('報告者：');
-    var txt=lines.join('\\n');
-    var btn=q('#fb-copy');
-    function done(){ btn.textContent='✓ コピーしました'; setTimeout(function(){ btn.textContent='📋 まとめてコピー' },1600); }
-    function fallback(){
-      var ta=document.createElement('textarea'); ta.value=txt;
-      document.body.appendChild(ta); ta.select();
-      try{ document.execCommand('copy'); done(); }catch(e){ alert(txt) }
-      document.body.removeChild(ta);
-    }
-    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done,fallback) } else { fallback() }
+    copyTxt(lines.join('\\n'), q('#fb-copy'), '📋 まとめてコピー');
   };
   q('#fb-clear').onclick=function(){ if(confirm('報告一覧を消去しますか？')){ fbSave([]); fbRender(); } };
 })();
@@ -863,6 +953,7 @@ function buildDoc(m){
         <label>実施者 <input id="ck-name"></label>
         <label>日付 <input id="ck-date" placeholder="2026/7/7"></label>
         <span class="vchip" id="ck-prog"></span>
+        <button id="ck-copy" class="ckbtn no-print">📋 記録をコピー</button>
         <button id="ck-reset" class="rst no-print">リセット</button></div>` : "";
 
   const stepsHtml = steps.map((s,i)=>{
@@ -915,6 +1006,7 @@ function buildDoc(m){
   <button id="v-fb">📢 フィードバック</button>
   <button id="v-print">🖨 印刷 / PDF</button>
 </div>
+<div id="lb" hidden><img id="lb-img" alt=""></div>
 <div id="genba" hidden>
   <div class="g-top"><span id="g-num"></span><button id="g-close">✕</button></div>
   <div id="g-body">
@@ -947,6 +1039,8 @@ function exportHTML(m){
   if(!(m.steps||[]).length){ toast("先に手順を追加してください"); return; }
   const safe=(m.title||"現場マニュアル").replace(/[\\/:*?"<>|]/g,"_").slice(0,40);
   downloadFile(buildDoc(m), `${safe}_v${(m.version||"1.0")}.html`, "text/html");
+  m.exportedAt=Date.now();          // 提出済みマーク（以後の編集で「未提出の変更」表示）
+  dbPut(m);
   toast("⬇ HTMLを書き出しました");
 }
 function previewDoc(m){
@@ -957,11 +1051,12 @@ function previewDoc(m){
   w.document.close();
 }
 function normalizeManual(x){
+  const now=Date.now();
   return {
     id:x.id||uid(), title:x.title||"", place:x.place||"", author:x.author||"",
     approver:x.approver||"", version:x.version||"1.0", status:x.status||"draft",
     reviewDate:x.reviewDate||"", note:x.note||"", tools:x.tools||"",
-    createdAt:x.createdAt||Date.now(), updatedAt:Date.now(),
+    createdAt:x.createdAt||now, updatedAt:now, exportedAt:x.exportedAt||now,
     steps:(x.steps||[]).map(s=>({
       id:s.id||uid(), type:s.type||"step", title:s.title||"", desc:s.desc||"",
       photo:s.photo||null, photoOrig:s.photoOrig||null, marks:s.marks||null
@@ -1013,7 +1108,8 @@ bindMeta("m-title","title"); bindMeta("m-place","place"); bindMeta("m-author","a
 bindMeta("m-tools","tools"); bindMeta("m-version","version"); bindMeta("m-approver","approver");
 bindMeta("m-review","reviewDate"); bindMeta("m-note","note");
 $("#m-status").onchange=e=>{ if(cur){ cur.status=e.target.value; save(); } };
-$("#filepick").onchange=e=>{
+$("#search").oninput=()=>renderHome();
+function handlePick(e){
   const file=e.target.files[0];
   if(!file||!pendingStepId||!cur) return;
   toast("画像を処理中…");
@@ -1027,7 +1123,9 @@ $("#filepick").onchange=e=>{
     }
     pendingStepId=null;
   });
-};
+}
+$("#filepick").onchange=handlePick;
+$("#filepick2").onchange=handlePick;
 
 /* ================= v1 migration & init ================= */
 async function migrateV1(){

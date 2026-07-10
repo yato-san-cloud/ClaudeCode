@@ -26,10 +26,15 @@ function check(name, ok, detail) {
 (async () => {
   const browser = await pw.chromium.launch(CHROMIUM ? { executablePath: CHROMIUM } : {});
   const ctx = await browser.newContext();
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"]);
   const page = await ctx.newPage();
   const errs = [];
   page.on("pageerror", e => errs.push("PAGEERR: " + e.message));
   page.on("console", m => { if (m.type() === "error") errs.push(m.text()); });
+  page.on("dialog", d => {
+    if (d.type() === "prompt") d.accept("ここを確認");
+    else d.accept();
+  });
 
   console.log("[1] エディタ: 作成 → 写真 → 書き込み → 点検タイプ");
   await page.goto(APP);
@@ -78,6 +83,23 @@ function check(name, ok, detail) {
   const hasOrig = await page.evaluate(() => !!cur.steps[0].photoOrig);
   check("元写真(photoOrig)を保持", hasOrig);
 
+  // 文字入れツール（promptは dialog ハンドラで自動入力）
+  await page.click(".photo-slot img");
+  await page.waitForSelector("#annot:not([hidden])");
+  await page.click('.tl[data-tool="text"]');
+  const box2 = await page.locator("#an-cv").boundingBox();
+  await page.mouse.click(box2.x + box2.width * 0.5, box2.y + box2.height * 0.5);
+  await page.click("#an-save");
+  const marks2 = await page.evaluate(() => (cur.steps[0].marks || []).length);
+  check("文字入れが追加される", marks2 === 2, "marks=" + marks2);
+
+  // 手順の複製（直下に挿入）
+  await page.click(".step .sdup");
+  const dupCount = await page.evaluate(() => cur.steps.length);
+  const dupTitle = await page.evaluate(() => cur.steps[1].title);
+  check("手順の複製", dupCount === 2 && dupTitle === "電源スイッチ確認", `count=${dupCount} title=${dupTitle}`);
+  await page.evaluate(() => { cur.steps.splice(1,1); save(); renderSteps(); });
+
   await page.evaluate(() => { cur.reviewDate = "2020-01-01"; cur.status = "active"; save(); });
   await page.waitForTimeout(700); // autosave debounce
 
@@ -88,6 +110,36 @@ function check(name, ok, detail) {
   check("一覧にカード表示", cardTitle.includes("テスト点検マニュアル"), cardTitle);
   const overChip = await page.locator(".chip.st-over").count();
   check("期限切れ→要見直しチップ", overChip === 1, "count=" + overChip);
+
+  // 検索フィルタ
+  await page.fill("#search", "存在しない設備");
+  check("検索：0件で該当なし表示", await page.locator(".mcard").count() === 0 && await page.isVisible("#no-hit"));
+  await page.fill("#search", "点検");
+  check("検索：ヒットで再表示", await page.locator(".mcard").count() === 1);
+  await page.fill("#search", "");
+
+  // 空マニュアルのゴミ掃除（新規→即戻る）
+  await page.click("#btn-new");
+  await page.waitForSelector("#v-edit:not([hidden])");
+  await page.click("#btn-back");
+  await page.waitForSelector("#v-home:not([hidden])");
+  check("空マニュアルは残らない", await page.locator(".mcard").count() === 1);
+
+  // 未提出の変更チップ（書き出し→クリア、編集→再表示）
+  await page.click(".mcard");
+  await page.waitForSelector("#v-edit:not([hidden])");
+  await page.evaluate(() => exportHTML(cur));
+  await page.waitForTimeout(300);
+  await page.click("#btn-back");
+  const dirtyAfterExport = await page.locator(".chip.st-dirty").count();
+  await page.click(".mcard");
+  await page.click("details.mgmt summary");
+  await page.fill("#m-note", "手順3を修正");
+  await page.waitForTimeout(600);
+  await page.click("#btn-back");
+  const dirtyAfterEdit = await page.locator(".chip.st-dirty").count();
+  check("未提出の変更チップ", dirtyAfterExport === 0 && dirtyAfterEdit === 1,
+    `afterExport=${dirtyAfterExport} afterEdit=${dirtyAfterEdit}`);
 
   console.log("[3] 書き出しHTML(ビューア)");
   await page.click(".mcard");
@@ -125,6 +177,20 @@ function check(name, ok, detail) {
   await v.click("#fb-add");
   const fbCount = await v.locator("#fb-list li:not(.fb-empty)").count();
   check("フィードバック追加", fbCount === 1, "count=" + fbCount);
+  await v.click("#fb-close");
+
+  // 写真タップで拡大（ライトボックス）
+  await v.click("img[data-p]");
+  check("写真タップで拡大表示", await v.isVisible("#lb"));
+  await v.click("#lb");
+  check("拡大を閉じる", await v.isHidden("#lb"));
+
+  // 点検記録コピー
+  await v.fill("#ck-name", "山田");
+  await v.click("#ck-copy");
+  await v.waitForTimeout(300);
+  const ckBtnTxt = await v.textContent("#ck-copy");
+  check("点検記録コピー", ckBtnTxt.includes("コピーしました"), ckBtnTxt);
 
   check("エディタ側 JSエラーなし", errs.length === 0, errs.join(" | "));
   check("ビューア側 JSエラーなし", verrs.length === 0, verrs.join(" | "));
