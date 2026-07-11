@@ -292,9 +292,21 @@ function bindDrag(el,{start,move,end}){
     window.addEventListener('mouseup',()=>{ if(mdown){ mdown=false; end&&end(); } });
   }
 }
+// タップは click ではなく pointerup で直接発火させる。
+// 理由：ブレーキを別の指で押さえたまま（pointerキャプチャ中／別タッチ継続中）だと
+// clickが抑制される端末があるため。pointerupなら他の指の保持中でも確実に反応する＝
+// 実車のように「ブレーキを踏みながらシフト・サイドを操作」ができる。
 function bindTap(el,fn){
-  if(HAS_POINTER){ el.addEventListener('click',fn); }
-  else { el.addEventListener('touchend',e=>{ e.preventDefault(); fn(e); },{passive:false}); }
+  if(HAS_POINTER){
+    let sx=null,sy=null,moved=false;
+    el.addEventListener('pointerdown',e=>{ sx=e.clientX; sy=e.clientY; moved=false; });
+    el.addEventListener('pointermove',e=>{ if(sx!=null&&Math.hypot(e.clientX-sx,e.clientY-sy)>12) moved=true; });
+    el.addEventListener('pointerup',e=>{ if(sx!=null&&!moved){ e.preventDefault(); fn(e); } sx=null; });
+    el.addEventListener('pointercancel',()=>{ sx=null; });
+  } else {
+    el.addEventListener('touchend',e=>{ e.preventDefault(); fn(e); },{passive:false});
+    el.addEventListener('click',e=>{ fn(e); });   // PointerEvent非対応のデスクトップ（マウス）向け
+  }
 }
 
 // ステアリング：ドラッグで連続回転（微調整可・2.5回転）
