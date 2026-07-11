@@ -757,6 +757,7 @@ function roundRectG(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,
 
 /* ==================== ミラー（3D投影・リアル化：自車の車体＋タイヤ＋ルームミラー） ==================== */
 const CARCOL='#c23a34';
+let POST_LW_CAP=Infinity;   // 柵支柱の描画太さ上限（小さいドアミラーだけ制限。俯瞰/振り返り/フロントは無制限）
 function mkProj(camx,camy,camH,look,focal,horizon,w,sgn=-1){ const cs=Math.cos(look), sn=Math.sin(look);
   return (px,py,pz)=>{ const dx=px-camx,dy=py-camy, depth=dx*cs+dy*sn; if(depth<=0.18)return null;
     const cr=dx*sn-dy*cs; return {x:w/2 + sgn*focal*(cr/depth), y:horizon - focal*((pz-camH)/depth), depth}; }; }
@@ -772,8 +773,8 @@ function mRect(proj,g,r,col,wd,z){ const pts=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1
   for(const [x,y] of pts){ const p=proj(x,y,z||0); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
 /* 柵の支柱（銀色パイプ＋キャップ）。角の支柱は目印なので少し明るく太く */
 function mFencePost(proj,g,x,y,top,corner){ const a=proj(x,y,0); if(!a)return;
-  // 至近距離で巨大な円盤にならないよう上限を設ける（実運用でポールが近づく側ミラー対策）
-  const lw=clamp((corner?46:34)/a.depth,2,corner?18:13), shR=clamp(26/a.depth,3,22);
+  // 描画太さはビュー相対の上限でクランプ（小さいドアミラーでの至近巨大化のみ抑制）
+  const lw=clamp((corner?46:34)/a.depth,2,POST_LW_CAP), shR=clamp(26/a.depth,3,POST_LW_CAP*1.4);
   g.fillStyle='rgba(0,0,0,.38)'; g.beginPath(); g.ellipse(a.x,a.y,shR,shR*0.32,0,0,7); g.fill();
   const t=proj(x,y,top); if(!t)return;
   const gp=g.createLinearGradient(a.x-lw,0,a.x+lw,0);
@@ -786,14 +787,14 @@ function mFencePost(proj,g,x,y,top,corner){ const a=proj(x,y,0); if(!a)return;
 /* 柵の1辺：支柱＋上下2本の横パイプ＋足元の縁石で「囲い」を表現 */
 function mRailSeg(proj,g,x0,y0,x1,y1){
   const len=Math.hypot(x1-x0,y1-y0), n=Math.max(1,Math.round(len/0.9));
-  // 縁石ベース（立ち上がり）
+  // 縁石ベース（立ち上がり）。至近で巨大な板にならないよう最小depthで足切り
   const cb0=proj(x0,y0,0.12), cb1=proj(x1,y1,0.12), gb0=proj(x0,y0,0), gb1=proj(x1,y1,0);
-  if(cb0&&cb1&&gb0&&gb1){ g.fillStyle='#7f8b9e'; g.beginPath();
+  if(cb0&&cb1&&gb0&&gb1 && Math.min(cb0.depth,cb1.depth)>0.8){ g.fillStyle='#7f8b9e'; g.beginPath();
     g.moveTo(cb0.x,cb0.y); g.lineTo(cb1.x,cb1.y); g.lineTo(gb1.x,gb1.y); g.lineTo(gb0.x,gb0.y); g.closePath(); g.fill();
     g.strokeStyle='#dfe6ef'; g.lineWidth=1.5; g.beginPath(); g.moveTo(cb0.x,cb0.y); g.lineTo(cb1.x,cb1.y); g.stroke(); }
-  // 横パイプ（上・中）
+  // 横パイプ（上・中）。太さは上下限クランプ
   for(const z of [0.78,0.45]){ const a=proj(x0,y0,z), b=proj(x1,y1,z);
-    if(a&&b){ g.strokeStyle='rgba(200,208,220,.85)'; g.lineWidth=Math.max(1.4,20/Math.min(a.depth,b.depth));
+    if(a&&b && Math.min(a.depth,b.depth)>0.5){ g.strokeStyle='rgba(200,208,220,.85)'; g.lineWidth=clamp(20/Math.min(a.depth,b.depth),1.4,10);
       g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); } }
   // 支柱
   for(let i=0;i<=n;i++){ const t=i/n; mFencePost(proj,g,x0+(x1-x0)*t,y0+(y1-y0)*t,0.82,false); }
@@ -811,6 +812,7 @@ function mCurb(proj,g,y){
   for(let x=bounds.minX;x<bounds.maxX;x+=0.5){
     const a0=proj(x,y,0.13),a1=proj(x+0.5,y,0.13),b0=proj(x,y,0),b1=proj(x+0.5,y,0);
     if(!a0||!a1||!b0||!b1)continue;
+    if(Math.min(a0.depth,a1.depth)<0.5)continue;   // 至近で巨大化しないよう足切り
     g.fillStyle='#8a97ab'; g.beginPath(); g.moveTo(a0.x,a0.y); g.lineTo(a1.x,a1.y); g.lineTo(b1.x,b1.y); g.lineTo(b0.x,b0.y); g.closePath(); g.fill();
     g.strokeStyle='#e8edf4'; g.lineWidth=2; g.beginPath(); g.moveTo(a0.x,a0.y); g.lineTo(a1.x,a1.y); g.stroke(); }
 }
@@ -864,10 +866,13 @@ function mWheelSolid(proj,g,rwx,rwy,side){
   g.beginPath(); hull.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.closePath();  // タイヤ本体
   const c=hull.reduce((a,p)=>({x:a.x+p.x/hull.length,y:a.y+p.y/hull.length}),{x:0,y:0});
   const rad=Math.max(6,Math.hypot(hull[0].x-c.x,hull[0].y-c.y));
-  const gg=g.createRadialGradient(c.x,c.y-rad*0.3,rad*0.1,c.x,c.y,rad*1.1);
-  gg.addColorStop(0,'#2a2e35'); gg.addColorStop(1,'#0e1013'); g.fillStyle=gg; g.fill();
+  const gg=g.createRadialGradient(c.x,c.y-rad*0.35,rad*0.08,c.x,c.y,rad*1.15);
+  gg.addColorStop(0,'#34383f'); gg.addColorStop(0.7,'#181b20'); gg.addColorStop(1,'#0b0d10'); g.fillStyle=gg; g.fill();
   g.strokeStyle='#080a0c'; g.lineWidth=1; g.stroke();
-  if(outer.length>3){ g.strokeStyle='rgba(70,78,88,.65)'; g.lineWidth=1.4;               // 外側面リング（細い弧）
+  // トレッド溝（外側面〜内側面を数本つなぐ＝丸いゴムの質感）
+  if(outer.length>4 && outer.length===inner.length){ g.strokeStyle='rgba(150,160,172,.13)'; g.lineWidth=1;
+    for(let i=3;i<outer.length-3;i+=2){ g.beginPath(); g.moveTo(outer[i].x,outer[i].y); g.lineTo(inner[i].x,inner[i].y); g.stroke(); } }
+  if(outer.length>3){ g.strokeStyle='rgba(120,130,142,.5)'; g.lineWidth=1.6;                // 外側サイドウォールのハイライト弧
     g.beginPath(); outer.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.stroke(); }
 }
 function mEgoFlank(proj,g,side){                 // 自車の側面（ドアミラー内側）＝ボディ＋ガラス＋後輪
@@ -933,36 +938,26 @@ function asphaltTile(){ if(_asphaltTile) return _asphaltTile;
   _asphaltTile=t; return t;
 }
 // 凸面に沿って曲がる地平線で空／路面を塗り分け＋アスファルト質感。hzMid を返す。
-function mMirGround(g,w,h,horizon,cx,cy,A,aspheric){
-  const N=22, top=[]; let hzMid=horizon;
-  for(let i=0;i<=N;i++){ const sx=w*i/N; const wy=mirWarp(sx,horizon,cx,cy,A,aspheric).y; top.push({x:sx,y:Math.max(-40,wy)}); if(i===(N>>1))hzMid=Math.max(-40,wy); }
-  const gr=g.createLinearGradient(0,Math.max(1,hzMid),0,h);
+// 空／路面（フラットな地平線＝安定。歪みは掛けない）＋昼のアスファルト質感
+function mMirGround(g,w,h,horizon){
+  const hz=Math.max(0,Math.min(h,horizon));
+  const gr=g.createLinearGradient(0,Math.max(1,hz),0,h);
   gr.addColorStop(0,'#868e96'); gr.addColorStop(0.6,'#9aa2aa'); gr.addColorStop(1,'#b4bcc3');
   g.fillStyle=gr; g.fillRect(0,0,w,h);
-  if(hzMid>1){                                     // 空（下向きチルト時はほぼ消える）
-    g.beginPath(); g.moveTo(0,0); g.lineTo(w,0);
-    for(let i=N;i>=0;i--) g.lineTo(top[i].x,top[i].y); g.closePath();
-    const sky=g.createLinearGradient(0,0,0,Math.max(2,hzMid));
-    sky.addColorStop(0,'#8fc1ea'); sky.addColorStop(1,'#dbeaf4'); g.fillStyle=sky; g.fill();
-    g.save(); g.beginPath(); g.moveTo(top[0].x,top[0].y); for(let i=1;i<=N;i++) g.lineTo(top[i].x,top[i].y);
-    g.lineWidth=Math.max(4,h*0.05); g.strokeStyle='rgba(122,150,112,.75)'; g.lineJoin='round'; g.stroke();
-    g.lineWidth=1.5; g.strokeStyle='rgba(70,90,66,.5)'; g.stroke(); g.restore();
+  if(hz>1){                                        // 空＋遠景の樹林帯（下向きチルト時はほぼ消える）
+    const sky=g.createLinearGradient(0,0,0,Math.max(2,hz)); sky.addColorStop(0,'#8fc1ea'); sky.addColorStop(1,'#dbeaf4');
+    g.fillStyle=sky; g.fillRect(0,0,w,hz);
+    const tb=Math.max(3,h*0.05); g.fillStyle='#7f9c76'; g.fillRect(0,Math.max(0,hz-tb),w,tb);
+    g.fillStyle='rgba(110,140,100,.5)'; g.fillRect(0,Math.max(0,hz-tb*0.5),w,tb*0.5);
   }
-  const clipTop=Math.max(0,hzMid-4);               // アスファルト質感（地面のみ、遠方フェード）
-  g.save(); g.beginPath(); g.moveTo(top[0].x,Math.max(clipTop,top[0].y));
-  for(let i=1;i<=N;i++) g.lineTo(top[i].x,Math.max(clipTop,top[i].y));
-  g.lineTo(w,h); g.lineTo(0,h); g.closePath(); g.clip();
-  const pat=g.createPattern(asphaltTile(),'repeat'); if(pat){ g.globalAlpha=0.55; g.fillStyle=pat; g.fillRect(0,clipTop,w,h-clipTop); g.globalAlpha=1; }
-  const fade=g.createLinearGradient(0,Math.max(1,hzMid),0,h);
-  fade.addColorStop(0,'rgba(150,158,166,.55)'); fade.addColorStop(0.35,'rgba(150,158,166,0)');
+  const clipTop=Math.max(0,hz);                    // アスファルト質感（地面のみ・遠方フェード）
+  g.save(); g.beginPath(); g.rect(0,clipTop,w,h-clipTop); g.clip();
+  const pat=g.createPattern(asphaltTile(),'repeat'); if(pat){ g.globalAlpha=0.5; g.fillStyle=pat; g.fillRect(0,clipTop,w,h-clipTop); g.globalAlpha=1; }
+  const fade=g.createLinearGradient(0,Math.max(1,hz),0,h);
+  fade.addColorStop(0,'rgba(150,158,166,.5)'); fade.addColorStop(0.35,'rgba(150,158,166,0)');
   g.fillStyle=fade; g.fillRect(0,clipTop,w,h-clipTop);
   g.restore();
-  return hzMid;
 }
-// アスフェリック境界のシーム線（凸面・助手席=L側ミラーのみ）
-function mAsphericSeam(g,w,h,cx,cy,A){ const R=A*MIR.rSeam;
-  g.save(); g.strokeStyle='rgba(255,255,255,.06)'; g.lineWidth=1;
-  g.beginPath(); g.ellipse(cx,cy,R,R,0,-Math.PI*0.62,Math.PI*0.62); g.stroke(); g.restore(); }
 // 短バー（ドアハンドル）
 function mBar(g,x0,y0,x1,y1,wd,col){ g.strokeStyle=col; g.lineWidth=wd; g.lineCap='round';
   g.beginPath(); g.moveTo(x0,y0); g.lineTo(x1,y1); g.stroke(); g.lineCap='butt'; }
@@ -1107,16 +1102,16 @@ function renderDoorMirror(side){
   const look=car.th+Math.PI + sgn*0.36 + mirrorPan[side];
   const effPitch=clamp(mirrorPitch[side]+autoPitch,-0.4,0.55);
   const focal=w*0.48, horizon=clamp(h*0.46 - effPitch*h, -0.30*h, h-8);
-  const aspheric=(side==='L');                      // Japan RHD：助手席=左=凸面アスフェリック
-  const cx=side==='R'?w*0.55:w*0.45, cy=0.90*Math.max(2,horizon), A=0.5*w;
-  const base=mkProj(cam.x,cam.y,camH,look,focal,horizon,w);   // sgn 既定=-1（鏡像）
-  const proj=convexProj(base,cx,cy,A,aspheric);
+  // 凸面バレル歪みは前進時にシーン（柵・レール）が破綻して波打つため不採用。広角感は
+  // 「側面より外側＋やや外向き」のカメラ配置で表現し、投影は素直な鏡像ピンホールで安定描画。
+  const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w);   // sgn 既定=-1（鏡像）
   const inset=Math.max(3,Math.min(w,h)*0.05), r=Math.min(w,h)*0.10;
   g.save(); roundRectG(g,inset,inset,w-2*inset,h-2*inset,r); g.clip();
-  mMirGround(g,w,h,horizon,cx,cy,A,aspheric);       // 1) 空／路面（バレル地平線＋質感）
-  drawMirrorGrid(g,proj,cam.x,cam.y,look);          // 2) 奥行きグリッド
+  POST_LW_CAP=Math.min(w,h)*0.05;                   // 小さいドアミラーだけ柵支柱の太さを制限
+  mMirGround(g,w,h,horizon);                        // 1) 空／路面（フラット地平線＋質感）
+  if(showGuide&&!examMode) drawMirrorGrid(g,proj,cam.x,cam.y,look);  // 2) 奥行きグリッド（練習補助・検定では消す）
   mWorld(proj,g);                                   // 3) コース（縁石・白線・柵・駐車車両）
-  if(aspheric) mAsphericSeam(g,w,h,cx,cy,A);        //    アスフェリック・シーム
+  POST_LW_CAP=Infinity;
   // 4) 柵の角 検知（poleInMirror は常時更新）＋コーチングリング（検定では非表示）
   if(M.successKind==='perp' && cuePoleRef && side===(M.lockLabel==='右'?'R':'L') && !result){
     const pr=proj(cuePoleRef.x,cuePoleRef.y,0.5);
@@ -1130,10 +1125,8 @@ function renderDoorMirror(side){
       g.fillText('柵の角',pr.x,Math.max(14,pr.y-rr*1.9)); g.textAlign='left';
     }
   }
-  // 自車と隙間読みは「歪みなし(base)」で描く：至近の自車フランクにバレル歪みを掛けると
-  // 半径が大きく変動して像が破綻するため。凸面歪みはシーン（路面・縁石・柵）のみに適用。
-  mEgoPano(base,g,side,w,h);                         // 5) 自車フランク（フルパネル＋後輪）
-  mGapRead(base,g,side);                             // 6) 教習の隙間読み（後退中のみ）
+  mEgoPano(proj,g,side,w,h);                         // 5) 自車フランク（フルパネル＋後輪）
+  mGapRead(proj,g,side);                             // 6) 教習の隙間読み（後退中のみ）
   g.restore();
   mMirHousing(g,w,h,inset,r);                       // 7) ハウジング（生画面空間）
 }
