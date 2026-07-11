@@ -104,7 +104,7 @@
     <button id="creep" class="on">クリープON</button>
     <button id="reset">やり直し</button>
   </div>
-  <div id="frontBox"><canvas id="frontCv"></canvas><span class="flab">フロント</span></div>
+  <div id="frontBox"><canvas id="frontCv"></canvas><span class="flab" id="frontLab">フロント</span></div>
   <div class="mir" id="mirLbox"><canvas id="mirL"></canvas><span class="lab">左ミラー</span><span class="adj">調整:ドラッグ</span></div>
   <div class="mir" id="mirRbox"><canvas id="mirR"></canvas><span class="lab">右ミラー</span><span class="adj">調整:ドラッグ</span></div>
   <div class="mir" id="mirCbox"><canvas id="mirC"></canvas><span class="lab">ルームミラー</span></div>
@@ -152,7 +152,7 @@ const DEG=Math.PI/180;
 const CONFIG={
   car:{ length:4.58, width:1.795, wheelbase:2.70, frontOverhang:0.92, track:1.54,
         maxSteerDeg:36, steerPlayDeg:8, creep:0.55, maxSpeed:1.9 },
-  perp:{ bayWidth:3.0, bayDepth:5.5, turninX:6.0, roadWidth:3.0, approachGap:0.40 },
+  perp:{ bayWidth:3.0, bayDepth:5.5, turninX:6.0, roadWidth:3.5, approachGap:0.40 },
   parallel:{ approachY:3.2, turninX:8.0, theta1Deg:42, slotDepth:2.5, parkedLen:4.5,
              parkedW:1.75, curbGap:0.25, frontClear:2.0, rearClear:0.5, bayPad:0.4 }
 };
@@ -238,7 +238,7 @@ let M=null, bounds=null;
 const car={x:0,y:0,th:0,steer:0,v:0};
 let wheelAngle=0, gear='P', brakeHeld=false, accelHeld=false, creepMode=true;
 let reverses=0, wasReversing=false, result=null, cutRecorded=false, parPhase=0;
-let showGuide=true, showLines=true, examMode=false;
+let showGuide=true, showLines=true, examMode=false, rearGlance=false;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
 let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
@@ -263,6 +263,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   tutorMode=false; tutorWait=false; document.getElementById('tutorPop').classList.remove('show');
   demoMode=false; demoPhase=0; demoT=0; demoTargetV=0; demoWheelTarget=0; demoChecksDone=false;
   poleInMirror=false; poleSeenEver=false; earlyReverseWarned=false;
+  if(typeof setRearGlance==='function') setRearGlance(false); else rearGlance=false;
   cuePoleRef=M.poles.length?M.poles.reduce((a,b)=>Math.abs(b.x-M.turnRefX)<Math.abs(a.x-M.turnRefX)?b:a):null;
   checks.room=checks.L=checks.R=checks.back=-1e9;
   updateHbUI(); document.getElementById('resultPanel').classList.remove('show');
@@ -323,7 +324,12 @@ bindTap(document.getElementById('btnExam'),function(){ examMode=!examMode; this.
 // サイドブレーキ・後方目視
 function updateHbUI(){ document.getElementById('handbrake').classList.toggle('on',handbrake); }
 bindTap(document.getElementById('handbrake'),()=>{ if(result||demoMode)return; handbrake=!handbrake; updateHbUI(); });
-bindTap(document.getElementById('lookback'),()=>{ if(result||demoMode)return; checks.back=tick; setCoach('後方ヨシ！','ok'); });
+function setRearGlance(on){ rearGlance=on;
+  const lb=document.getElementById('lookback'), fl=document.getElementById('frontLab');
+  lb.classList.toggle('on',on); if(fl) fl.textContent=on?'後方（振り返り）':'フロント';
+  for(const id of ['mirLbox','mirRbox','mirCbox']){ const el=document.getElementById(id); if(el) el.style.display=on?'none':''; } }
+bindTap(document.getElementById('lookback'),()=>{ if(result)return; checks.back=tick;
+  setRearGlance(!rearGlance); if(!demoMode) setCoach(rearGlance?'後方を目視：柵の角がCピラー際に来る位置で止める':'後方ヨシ！','ok'); });
 bindTap(document.getElementById('btnDemo'),()=>startDemo(false));
 bindTap(document.getElementById('btnTutor'),()=>startDemo(true));
 bindTap(document.getElementById('tutorNext'),()=>{ tutorWait=false; document.getElementById('tutorPop').classList.remove('show'); });
@@ -391,13 +397,13 @@ function updateLogic(){
     if(!safetyOK){ deduct('後退時の安全不確認',10); if(!examMode)setCoach('安全確認が不足！ルーム→左右ミラー→👀目視をタップしてから後退','bad'); } }
   // 速度の出しすぎ
   if(Math.abs(car.v)>1.7){ if(++spdTicks>50&&!spdWarned){ spdWarned=true; deduct('速度の出しすぎ',5); if(!examMode)setCoach('課題中はもっとゆっくり（クリープ＋ブレーキ）','warn'); } } else spdTicks=0;
-  // 「角ポールが見えてから下がる」の癖づけ（＝手前すぎ後退の矯正。今回の検定NGの真因対策）
+  // 「柵の角が見えてから下がる」の癖づけ（＝手前すぎ後退の矯正。今回の検定NGの真因対策）
   if(M.successKind==='perp' && cuePoleRef){
     if(!poleSeenEver && poleInMirror && !reversing){ poleSeenEver=true;
-      if(!examMode) setCoach(`${M.lockLabel}ミラーに角ポールが見えた！青ラインまで進んで止まる`,'ok'); }
+      if(!examMode) setCoach(`${M.lockLabel}ミラーに柵の角が見えた！青ラインまで進んで止まる`,'ok'); }
     if(reversing && !earlyReverseWarned && !poleSeenEver){ earlyReverseWarned=true;
-      advice=`後退開始が手前すぎ：${M.lockLabel}ミラーに角ポールがはっきり見えてから下がる癖を`;
-      if(!examMode) setCoach('まだ早い！ミラーに角ポールが見えてから後退','bad'); }
+      advice=`後退開始が手前すぎ：${M.lockLabel}ミラーに柵の角がはっきり見えてから下がる癖を`;
+      if(!examMode) setCoach('まだ早い！ミラーに柵の角が見えてから後退','bad'); }
   }
   // 基準点タイミング（結果パネル用にadviceも保存）
   if(M.successKind==='perp' && reversing && !cutRecorded && Math.abs(car.steer)>MAXSTEER*0.5){ cutRecorded=true; const d=M.turnRefX-car.x;
@@ -456,11 +462,12 @@ function demoUpdate(dt){
     const targetTh=lockSign*Math.PI/2;
     switch(demoPhase){
       case 0: demoTargetV=C.creep;
-        if(poleInMirror) tutor('t1',`${M.lockLabel}ミラーに角ポールが見えた！\nでも、ここではまだ下がらない。見えてから「さらに青ラインまで」進む。\n（ここで下がるのが“手前すぎ”＝入りきらない典型原因）`);
+        if(poleInMirror) tutor('t1',`${M.lockLabel}ミラーに柵の角が見えた！\nでも、ここではまだ下がらない。見えてから「さらに青ラインまで」進む。\n（ここで下がるのが“手前すぎ”＝入りきらない典型原因）`);
         if(car.x>=M.turnRefX){ demoPhase=1; demoT=0; setCoach('【お手本】② 停止 → 安全確認（ミラー3枚＋目視）→ R','ok');
-          tutor('t2',`停止位置がすべて。青ライン＝「後輪」を合わせる。\n体感の目安：自分のお尻（車の後端）が角ポールを過ぎて半歩。\n浅い（手前）と後からは絶対に直せない→切り返し確定。`); } break;
+          tutor('t2',`停止位置がすべて。青ライン＝「後輪」を合わせる。\n体感の目安：自分のお尻（車の後端）が柵の角を過ぎて半歩。\n浅い（手前）と後からは絶対に直せない→切り返し確定。`); } break;
       case 1: demoTargetV=0;
-        if(Math.abs(car.v)<0.02){ if(demoT>0.4) doChecks();
+        if(Math.abs(car.v)<0.02){ if(demoT>0.4){ doChecks(); setRearGlance(true);      // 振り返り視界に切替
+            tutor('t2b',`後方目視に切替：後ろを振り返ると、リヤウインド越しに「柵の角」が見える。\n角がCピラーの際（🎯）に来ていれば、切り始めの位置に正しく止まれている証拠。`); }
           if(demoT>2.0){ gear='R'; setGearUI(); demoPhase=2; demoT=0; demoWheelTarget=lockSign*WHEEL_LOCK;
             setCoach(`【お手本】③ 止まったまま${M.lockLabel}へ回し切る（約${sideTurns}回転）`,'ok');
             tutor('t3',`後退の前に${M.lockLabel}ミラーを下向きに調整して「後輪」を映す（停止中の調整は減点なし）。\n後退中に見るのは“後輪と縁石の間隔”だけでいい。`); } } break;
@@ -479,7 +486,7 @@ function demoUpdate(dt){
       case 5: demoTargetV=-C.creep*0.8;
         if(lockSign>0? car.y<=M.ideal.end.y+0.05 : car.y>=M.ideal.end.y-0.05){ demoPhase=6; demoT=0; } break;
       case 6: demoTargetV=0;
-        if(Math.abs(car.v)<0.02&&demoT>0.3){ gear='P'; setGearUI(); handbrake=true; updateHbUI(); result='demo'; demoMode=false;
+        if(Math.abs(car.v)<0.02&&demoT>0.3){ gear='P'; setGearUI(); handbrake=true; updateHbUI(); result='demo'; demoMode=false; setRearGlance(false);
           setCoach('【お手本】⑦ P→サイドで完了！コツ＝「止まって回し切る・弧は保持・止まって戻し切る」','ok'); } break;
     }
   } else { // 縦列
@@ -544,7 +551,7 @@ const asphPat=(()=>{ const c=document.createElement('canvas'); c.width=c.height=
 function resize(){ const r=document.getElementById('app').getBoundingClientRect(), dpr=window.devicePixelRatio||1;
   cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); W=r.width;H=r.height;
   frontBottom=28+H*0.40;
-  // ミラーを大きめ・レスポンシブに配置（角ポールの視認性重視）
+  // ミラーを大きめ・レスポンシブに配置（柵の角の視認性重視）
   const mw=Math.round(Math.min(260,W*0.28)), mh=Math.round(mw*0.46);
   const Lb=document.getElementById('mirLbox'), Rb=document.getElementById('mirRbox'), Cb=document.getElementById('mirCbox');
   Lb.style.width=Rb.style.width=mw+'px'; Lb.style.height=Rb.style.height=mh+'px';
@@ -595,12 +602,18 @@ function renderScene(){ ctx.clearRect(0,0,W,H); if(!M||!bounds)return;
   // 自分の軌跡（後車軸の通った跡＝癖が見える）
   if(trail.length>1){ ctx.strokeStyle='rgba(240,246,255,.45)'; ctx.lineWidth=2; ctx.beginPath();
     trail.forEach((p,i)=>{const X=wx(p.x),Y=wy(p.y);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);}); ctx.lineTo(wx(car.x),wy(car.y)); ctx.stroke(); }
-  // ポール（縞模様＋影：ミラー内の見た目と統一）
-  for(const p of M.poles){ const X=wx(p.x),Y=wy(p.y);
-    ctx.fillStyle='rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(X+3,Y+3,6,3,0,0,7); ctx.fill();
-    ctx.fillStyle='#ff8c1a'; ctx.beginPath(); ctx.arc(X,Y,6.5,0,7); ctx.fill();
-    ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(X,Y,3.8,0,7); ctx.stroke();
-    ctx.strokeStyle='#7a4200'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(X,Y,6.5,0,7); ctx.stroke(); }
+  // ポケットを囲う縁石＋柵（俯瞰）。入口辺は開けて左右の角支柱を強調
+  if(M.bay&&M.poles.length){ const b=M.bay;
+    const entY=Math.abs(b.y0-M.appY)<Math.abs(b.y1-M.appY)?b.y0:b.y1, backY=entY===b.y0?b.y1:b.y0;
+    ctx.strokeStyle='#8793a6'; ctx.lineWidth=3; ctx.beginPath();
+    ctx.moveTo(wx(b.x0),wy(entY)); ctx.lineTo(wx(b.x0),wy(backY)); ctx.lineTo(wx(b.x1),wy(backY)); ctx.lineTo(wx(b.x1),wy(entY)); ctx.stroke();
+    ctx.strokeStyle='rgba(200,208,220,.5)'; ctx.lineWidth=1;   // 柵のレール感（破線）
+    ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+    for(const p of M.poles){ const X=wx(p.x),Y=wy(p.y);        // 角支柱＝目印
+      ctx.fillStyle='rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(X+2.5,Y+2.5,5,2.6,0,0,7); ctx.fill();
+      ctx.fillStyle='#eef2f7'; ctx.beginPath(); ctx.arc(X,Y,5.5,0,7); ctx.fill();
+      ctx.fillStyle='#ffcf3f'; ctx.beginPath(); ctx.arc(X,Y,3,0,7); ctx.fill();
+      ctx.strokeStyle='#5a6472'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(X,Y,5.5,0,7); ctx.stroke(); } }
   if(showLines&&!examMode) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
@@ -740,16 +753,40 @@ function mSky(g,w,h,horizon){ const hz=clamp(horizon,0,h);
   let gr=g.createLinearGradient(0,hz,0,h); gr.addColorStop(0,'#212a3b'); gr.addColorStop(1,'#12181f'); g.fillStyle=gr; g.fillRect(0,hz,w,h-hz); }
 function mRect(proj,g,r,col,wd,z){ const pts=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x0,r.y1],[r.x0,r.y0]]; g.strokeStyle=col; g.lineWidth=wd; let prev=null;
   for(const [x,y] of pts){ const p=proj(x,y,z||0); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
-/* 縞々の角ポール（接地影・キャップ付き）＝一番の目印なので目立たせる */
-function mPole(proj,g,x,y,top){ const a=proj(x,y,0); if(!a)return;
-  const lw=Math.max(3,60/a.depth), shR=Math.max(3,30/a.depth);
-  g.fillStyle='rgba(0,0,0,.4)'; g.beginPath(); g.ellipse(a.x,a.y,shR,shR*0.32,0,0,7); g.fill();
-  const SEG=4;
-  for(let i=0;i<SEG;i++){ const p0=proj(x,y,top*i/SEG), p1=proj(x,y,top*(i+1)/SEG); if(!p0||!p1)continue;
-    g.strokeStyle=i%2?'#f4f6fa':'#ff8c1a'; g.lineWidth=lw;
-    g.beginPath(); g.moveTo(p0.x,p0.y); g.lineTo(p1.x,p1.y); g.stroke(); }
-  const t=proj(x,y,top); if(t){ g.fillStyle='#ff8c1a'; g.beginPath(); g.arc(t.x,t.y,lw*0.62,0,7); g.fill();
-    g.strokeStyle='#7a4200'; g.lineWidth=1; g.stroke(); }
+/* 柵の支柱（銀色パイプ＋キャップ）。角の支柱は目印なので少し明るく太く */
+function mFencePost(proj,g,x,y,top,corner){ const a=proj(x,y,0); if(!a)return;
+  const lw=Math.max(2,(corner?46:34)/a.depth), shR=Math.max(3,26/a.depth);
+  g.fillStyle='rgba(0,0,0,.38)'; g.beginPath(); g.ellipse(a.x,a.y,shR,shR*0.32,0,0,7); g.fill();
+  const t=proj(x,y,top); if(!t)return;
+  const gp=g.createLinearGradient(a.x-lw,0,a.x+lw,0);
+  gp.addColorStop(0,'#6b7686'); gp.addColorStop(0.5, corner?'#eef2f7':'#c6cdd7'); gp.addColorStop(1,'#5a6472');
+  g.strokeStyle=gp; g.lineWidth=lw; g.lineCap='round';
+  g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(t.x,t.y); g.stroke(); g.lineCap='butt';
+  g.fillStyle=corner?'#ffcf3f':'#aab3bf'; g.beginPath(); g.arc(t.x,t.y,lw*0.6,0,7); g.fill();       // キャップ
+  g.strokeStyle='#4a525e'; g.lineWidth=1; g.stroke();
+}
+/* 柵の1辺：支柱＋上下2本の横パイプ＋足元の縁石で「囲い」を表現 */
+function mRailSeg(proj,g,x0,y0,x1,y1){
+  const len=Math.hypot(x1-x0,y1-y0), n=Math.max(1,Math.round(len/0.9));
+  // 縁石ベース（立ち上がり）
+  const cb0=proj(x0,y0,0.12), cb1=proj(x1,y1,0.12), gb0=proj(x0,y0,0), gb1=proj(x1,y1,0);
+  if(cb0&&cb1&&gb0&&gb1){ g.fillStyle='#7f8b9e'; g.beginPath();
+    g.moveTo(cb0.x,cb0.y); g.lineTo(cb1.x,cb1.y); g.lineTo(gb1.x,gb1.y); g.lineTo(gb0.x,gb0.y); g.closePath(); g.fill();
+    g.strokeStyle='#dfe6ef'; g.lineWidth=1.5; g.beginPath(); g.moveTo(cb0.x,cb0.y); g.lineTo(cb1.x,cb1.y); g.stroke(); }
+  // 横パイプ（上・中）
+  for(const z of [0.78,0.45]){ const a=proj(x0,y0,z), b=proj(x1,y1,z);
+    if(a&&b){ g.strokeStyle='rgba(200,208,220,.85)'; g.lineWidth=Math.max(1.4,20/Math.min(a.depth,b.depth));
+      g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); } }
+  // 支柱
+  for(let i=0;i<=n;i++){ const t=i/n; mFencePost(proj,g,x0+(x1-x0)*t,y0+(y1-y0)*t,0.82,false); }
+}
+/* ポケット（枠）を囲う縁石＋柵。入口辺は開けて左右の角支柱だけ立てる */
+function mFence(proj,g){ if(!M.bay||!M.poles.length)return; const b=M.bay;
+  const entY=Math.abs(b.y0-M.appY)<Math.abs(b.y1-M.appY)?b.y0:b.y1, backY=entY===b.y0?b.y1:b.y0;
+  mRailSeg(proj,g,b.x0,entY,b.x0,backY);   // 左辺
+  mRailSeg(proj,g,b.x1,entY,b.x1,backY);   // 右辺
+  mRailSeg(proj,g,b.x0,backY,b.x1,backY);  // 奥辺
+  for(const p of M.poles) mFencePost(proj,g,p.x,p.y,0.9,true);   // 入口の角支柱＝目印
 }
 /* 縁石：上面の白線＋立ち上がり面で立体に */
 function mCurb(proj,g,y){
@@ -779,8 +816,9 @@ function mWorld(proj,g){
   for(const r of M.rects) mRect(proj,g,r,'rgba(200,215,235,.10)',1,0);
   mBayFill(proj,g);
   if(M.curbY!=null) mCurb(proj,g,M.curbY);
+  for(const cb of (M.curbs||[])) mCurb(proj,g,cb.y);          // 反対側の縁石（3.5m道路の外縁）
   for(const o of M.parkedCars) mCarBox(proj,g,o,1.42);
-  for(const p of M.poles) mPole(proj,g,p.x,p.y,1.0);
+  mFence(proj,g);                                             // 縁石＋柵（旧・柵の角）
 }
 function mHousing(g,w,h){ let sh=g.createLinearGradient(0,0,0,h); sh.addColorStop(0,'rgba(255,255,255,.12)'); sh.addColorStop(0.18,'rgba(255,255,255,0)');
   g.fillStyle=sh; g.fillRect(0,0,w,h); g.strokeStyle='#05070b'; g.lineWidth=3; g.strokeRect(1.5,1.5,w-3,h-3); }
@@ -819,7 +857,7 @@ function renderMirror(side){
   mSky(g,w,h,horizon); const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w);
   drawMirrorGrid(g,proj,cam.x,cam.y,look);
   mWorld(proj,g);
-  // 「角ポールが見えた」検知＋強調（方向転換のみ・ロック側ミラー）
+  // 「柵の角が見えた」検知＋強調（方向転換のみ・ロック側ミラー）
   if(M.successKind==='perp' && cuePoleRef && side===(M.lockLabel==='右'?'R':'L') && !result){
     const pr=proj(cuePoleRef.x,cuePoleRef.y,0.5);
     const vis=!!pr && pr.x>w*0.10 && pr.x<w*0.96 && pr.depth>0.8;
@@ -829,16 +867,17 @@ function renderMirror(side){
       g.strokeStyle=`rgba(55,214,122,${al})`; g.lineWidth=3;
       g.beginPath(); g.ellipse(pr.x,pr.y,rr,rr*1.6,0,0,7); g.stroke();
       g.fillStyle='#37d67a'; g.font='bold 12px system-ui'; g.textAlign='center';
-      g.fillText('角ポール',pr.x,Math.max(14,pr.y-rr*1.9)); g.textAlign='left';
+      g.fillText('柵の角',pr.x,Math.max(14,pr.y-rr*1.9)); g.textAlign='left';
     }
   }
   mEgoFlank(proj,g,side); mHousing(g,w,h);
 }
-/* フロントガラス視界：前方の目標（ポール・枠・目安ライン）が実際どう見えるか */
+/* フロントガラス視界：前方の目標（柵・枠・目安ライン）が実際どう見えるか */
 function renderFront(){
   const el=document.getElementById('frontCv'); if(!el)return; const g=el.getContext('2d');
   const w=el.getBoundingClientRect().width, h=el.getBoundingClientRect().height; if(!M||w<2)return;
   g.clearRect(0,0,w,h);
+  if(rearGlance){ renderRearGlance(g,w,h); return; }
   const cam=toWorld(car,1.5,-(C.width/2-0.55)), camH=1.22;        // 右ハンドル運転席の目線
   const look=car.th, focal=w*0.46, horizon=h*0.50;
   mSky(g,w,h,horizon);
@@ -870,6 +909,74 @@ function renderFront(){
     if(x0===0){ g.moveTo(0,0); g.lineTo(pw*2.2,0); g.lineTo(pw,h); g.lineTo(0,h); }
     else { g.moveTo(w,0); g.lineTo(w-pw*2.2,0); g.lineTo(w-pw,h); g.lineTo(w,h); }
     g.closePath(); g.fill(); }
+  g.strokeStyle='#05070b'; g.lineWidth=2; g.strokeRect(1,1,w-2,h-2);
+}
+/* 後方目視（振り返り視界）：後ろを振り向いてリヤウインド越しに柵の角を見る。
+   角がCピラーの際に来た瞬間＝切り始めの位置、という体感を作る（鏡像ではなく実像） */
+const PILLAR_INNER=0.28;                                    // Cピラー内側の画面比（幾何校正済み）
+const GLANCE_BIAS=0.30;                                     // 振り返りをロック側へ向ける角度（肩越し）
+function renderRearGlance(g,w,h){
+  const lockSign=M.lockLabel==='右'?1:-1;
+  const cam=toWorld(car,0.62,-0.12), camH=1.24;            // 運転席で振り返った頭の位置
+  const look=car.th+Math.PI+lockSign*GLANCE_BIAS, focal=w*0.50, horizon=h*0.38;  // 肩越しにロック側後方を見る
+  mSky(g,w,h,horizon);
+  // 地面を少し明るくして柵の視認性を上げる（屋外の照度感）
+  const gl=g.createLinearGradient(0,horizon,0,h); gl.addColorStop(0,'rgba(120,140,120,.22)'); gl.addColorStop(1,'rgba(70,90,80,.10)');
+  g.fillStyle=gl; g.fillRect(0,horizon,w,h-horizon);
+  const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w,+1);  // 振り返り＝鏡像なし(sgn=+1)
+  const cs=Math.cos(look), sn=Math.sin(look);
+  g.strokeStyle='rgba(120,140,170,.16)'; g.lineWidth=1;
+  for(let d=1;d<=14;d+=1.5){ let prev=null; for(let o=-7;o<=7;o+=1.75){ const p=proj(cam.x+cs*d-sn*o,cam.y+sn*d+cs*o,0);
+    if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+  mWorld(proj,g);
+  // 切り始めの目安ライン（地面の青ライン）
+  if(showGuide&&!examMode){ let prev=null; g.strokeStyle='rgba(77,163,255,.85)'; g.lineWidth=3;
+    for(let y=bounds.minY;y<=bounds.maxY;y+=0.35){ const p=proj(M.turnRefX,y,0.02); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+  // 角支柱がCピラー際に来たら「切り始め！」（校正済みの位置に来た瞬間に光る）
+  let cueHit=false, cueX=null;
+  if(M.successKind==='perp' && cuePoleRef){
+    const pr=proj(cuePoleRef.x,cuePoleRef.y,0.45);
+    if(pr && pr.x>2 && pr.x<w-2 && pr.depth>0.6){ cueX=pr.x;
+      const edge=Math.abs(pr.x-w*PILLAR_INNER)<Math.abs(pr.x-w*(1-PILLAR_INNER))?w*PILLAR_INNER:w*(1-PILLAR_INNER);
+      cueHit=Math.abs(pr.x-edge)<w*0.055 && !examMode;
+      const rr=Math.max(9,52/pr.depth), al=0.5+0.4*Math.abs(Math.sin(tick*0.15));
+      g.strokeStyle=cueHit?`rgba(255,207,63,${0.55+0.4*Math.abs(Math.sin(tick*0.2))})`:`rgba(55,214,122,${al})`;
+      g.lineWidth=3; g.beginPath(); g.ellipse(pr.x,pr.y,rr,rr*1.6,0,0,7); g.stroke();
+      g.fillStyle=cueHit?'#ffcf3f':'#37d67a'; g.font='bold 12px system-ui'; g.textAlign='center';
+      g.fillText(cueHit?'🎯 切り始め！':'柵の角',pr.x,Math.max(14,pr.y-rr*1.7)); g.textAlign='left'; }
+  }
+  drawRearCabin(g,w,h);
+  // ヘッダー表示
+  g.fillStyle='rgba(0,0,0,.55)'; g.fillRect(0,0,w,20);
+  g.fillStyle='#dfe6ef'; g.font='bold 11px system-ui'; g.textAlign='left';
+  g.fillText('👀 後方（振り返り）',6,14);
+  const hy=h*0.66;
+  if(cueHit){ g.fillStyle='rgba(0,0,0,.5)'; g.fillRect(w*0.14,hy-13,w*0.72,18);
+    g.fillStyle='#ffcf3f'; g.textAlign='center'; g.font='bold 12.5px system-ui';
+    g.fillText('角がピラー際＝ここで止めて切り始め',w/2,hy); g.textAlign='left'; }
+  else if(!examMode){ g.fillStyle='rgba(0,0,0,.4)'; g.fillRect(w*0.18,hy-12,w*0.64,17);
+    g.fillStyle='rgba(230,236,244,.9)'; g.textAlign='center'; g.font='11px system-ui';
+    g.fillText('柵の角がCピラーの際に来る位置まで',w/2,hy); g.textAlign='left'; }
+}
+function rrect(g,x,y,ww,hh,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+ww,y,x+ww,y+hh,r); g.arcTo(x+ww,y+hh,x,y+hh,r); g.arcTo(x,y+hh,x,y,r); g.arcTo(x,y,x+ww,y,r); g.closePath(); }
+function drawRearCabin(g,w,h){
+  const pin=PILLAR_INNER, deckY=h*0.82, topIn=0.11;
+  // リヤデッキ（下の棚）＋ヘッドレスト
+  const shelf=g.createLinearGradient(0,deckY,0,h); shelf.addColorStop(0,'#2b2f38'); shelf.addColorStop(1,'#111318');
+  g.fillStyle=shelf; g.fillRect(0,deckY,w,h-deckY);
+  g.strokeStyle='#3a3f4b'; g.lineWidth=1.5; g.beginPath(); g.moveTo(0,deckY); g.lineTo(w,deckY); g.stroke();
+  for(const cx of [w*0.41,w*0.59]){ g.fillStyle='#15171c'; rrect(g,cx-w*0.05,deckY-h*0.09,w*0.10,h*0.11,5); g.fill();
+    g.strokeStyle='#242832'; g.lineWidth=1.3; g.stroke(); }
+  // Cピラー（左右）＝上外側から下内側へ。窓は上広がりの台形
+  g.fillStyle='#0a0c10';
+  g.beginPath(); g.moveTo(0,0); g.lineTo(w*topIn,0); g.lineTo(w*pin,deckY); g.lineTo(0,deckY); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(w,0); g.lineTo(w*(1-topIn),0); g.lineTo(w*(1-pin),deckY); g.lineTo(w,deckY); g.closePath(); g.fill();
+  // ルーフヘッダ
+  const hdr=g.createLinearGradient(0,0,0,h*0.09); hdr.addColorStop(0,'#05070b'); hdr.addColorStop(1,'#12151b');
+  g.fillStyle=hdr; g.fillRect(0,0,w,h*0.07);
+  // リヤウインドの熱線
+  g.strokeStyle='rgba(150,120,60,.10)'; g.lineWidth=1;
+  for(let i=1;i<6;i++){ const yy=h*0.09+i*(deckY-h*0.09)/6; g.beginPath(); g.moveTo(w*(pin*0.92),yy); g.lineTo(w*(1-pin*0.92),yy); g.stroke(); }
   g.strokeStyle='#05070b'; g.lineWidth=2; g.strokeRect(1,1,w-2,h-2);
 }
 function renderRearview(){
