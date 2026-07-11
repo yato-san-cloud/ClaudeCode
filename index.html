@@ -839,6 +839,36 @@ function mWorld(proj,g){
 }
 function mHousing(g,w,h){ let sh=g.createLinearGradient(0,0,0,h); sh.addColorStop(0,'rgba(255,255,255,.12)'); sh.addColorStop(0.18,'rgba(255,255,255,0)');
   g.fillStyle=sh; g.fillRect(0,0,w,h); g.strokeStyle='#05070b'; g.lineWidth=3; g.strokeRect(1.5,1.5,w-3,h-3); }
+// 点群の凸包（Andrew's monotone chain）
+function convexHull(pts){ if(pts.length<3)return pts.slice();
+  const P=pts.slice().sort((a,b)=>a.x-b.x||a.y-b.y);
+  const cr=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+  const lo=[]; for(const p of P){ while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop(); lo.push(p); }
+  const hi=[]; for(let i=P.length-1;i>=0;i--){ const p=P[i]; while(hi.length>=2&&cr(hi[hi.length-2],hi[hi.length-1],p)<=0)hi.pop(); hi.push(p); }
+  lo.pop(); hi.pop(); return lo.concat(hi); }
+// 後輪を3D円柱として投影して描く。ドアミラーは後輪を斜め前・上から見るため
+// リム面はほぼエッジオン＝見えず、見えるのは前〜上へ回り込むトレッド面だけ。
+function mWheelSolid(proj,g,rwx,rwy,side){
+  const R=0.31, halfW=0.11, th=car.th;
+  const fwd=[Math.cos(th),Math.sin(th)], axle=[-Math.sin(th),Math.cos(th)], S=side==='L'?1:-1;
+  const face=off=>{ const arr=[]; for(let i=0;i<=18;i++){ const a=2*Math.PI*i/18;
+    const wx=rwx+axle[0]*S*off+fwd[0]*Math.cos(a)*R, wy=rwy+axle[1]*S*off+fwd[1]*Math.cos(a)*R, wz=R+Math.sin(a)*R;
+    const p=proj(wx,wy,wz); if(p)arr.push(p); } return arr; };
+  const outer=face(halfW), inner=face(-halfW), all=outer.concat(inner);
+  if(all.length<3)return;
+  const g0=proj(rwx,rwy,0);
+  if(g0){ const rr=Math.max(4,50/g0.depth); g.fillStyle='rgba(0,0,0,.28)';
+    g.beginPath(); g.ellipse(g0.x,g0.y,rr*1.05,rr*0.28,0,0,7); g.fill(); }                 // 接地影
+  const hull=convexHull(all);
+  g.beginPath(); hull.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.closePath();  // タイヤ本体
+  const c=hull.reduce((a,p)=>({x:a.x+p.x/hull.length,y:a.y+p.y/hull.length}),{x:0,y:0});
+  const rad=Math.max(6,Math.hypot(hull[0].x-c.x,hull[0].y-c.y));
+  const gg=g.createRadialGradient(c.x,c.y-rad*0.3,rad*0.1,c.x,c.y,rad*1.1);
+  gg.addColorStop(0,'#2a2e35'); gg.addColorStop(1,'#0e1013'); g.fillStyle=gg; g.fill();
+  g.strokeStyle='#080a0c'; g.lineWidth=1; g.stroke();
+  if(outer.length>3){ g.strokeStyle='rgba(70,78,88,.65)'; g.lineWidth=1.4;               // 外側面リング（細い弧）
+    g.beginPath(); outer.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.stroke(); }
+}
 function mEgoFlank(proj,g,side){                 // 自車の側面（ドアミラー内側）＝ボディ＋ガラス＋後輪
   const S=side==='L'?1:-1, ly=S*(C.width/2);
   const lxs=[0.7,0.0,-0.8,-1.5,-C.rearOverhang-0.05], beltZ=0.74, roofZ=1.02;
@@ -856,20 +886,9 @@ function mEgoFlank(proj,g,side){                 // 自車の側面（ドアミ�
   const grd=g.createLinearGradient(0,belt[0].y,0,bot[0].y); grd.addColorStop(0,'#ec6a60'); grd.addColorStop(0.5,CARCOL); grd.addColorStop(1,'#7c231d');
   g.fillStyle=grd; g.fill();
   g.strokeStyle='#f4b0aa'; g.lineWidth=1.4; g.beginPath(); g.moveTo(belt[0].x,belt[0].y); for(let i=1;i<belt.length;i++)g.lineTo(belt[i].x,belt[i].y); g.stroke(); // キャラクターライン
-  // 後輪：接地点(wg)を基準に、横長のタイヤ＋ホイール＋ボディ色フェンダーアーチ
+  // 後輪：3D円柱として投影（ドアミラーの角度では側面リムは見えずトレッドだけ見える）
   const rw=side==='L'?wheelPositions(car).RL:wheelPositions(car).RR;
-  const wg=proj(rw.x,rw.y,0), wc=proj(rw.x,rw.y,0.30);
-  if(wg&&wc){ const rr=Math.max(6,58/wg.depth), cx=wc.x, cy=wg.y-rr*0.72;
-    g.save();
-    g.fillStyle='rgba(0,0,0,.30)'; g.beginPath(); g.ellipse(wg.x,wg.y,rr*1.05,rr*0.30,0,0,7); g.fill();     // 接地影
-    g.fillStyle='#15171b'; g.beginPath(); g.ellipse(cx,cy,rr*0.98,rr*0.78,0,0,7); g.fill();                 // タイヤ（横長）
-    g.fillStyle='#2b3038'; g.beginPath(); g.ellipse(cx,cy,rr*0.62,rr*0.5,0,0,7); g.fill();                  // ホイール外
-    g.fillStyle='#565d68'; g.beginPath(); g.ellipse(cx,cy,rr*0.40,rr*0.32,0,0,7); g.fill();                 // スポーク面
-    g.fillStyle='#1c2027'; g.beginPath(); g.ellipse(cx,cy,rr*0.14,rr*0.12,0,0,7); g.fill();                 // ハブ
-    // フェンダーアーチ（ボディ色でタイヤ上半分に被せる＝ホイールハウス）
-    g.strokeStyle=CARCOL; g.lineWidth=rr*0.42; g.beginPath(); g.arc(cx,cy,rr*1.12,Math.PI*1.02,Math.PI*1.98); g.stroke();
-    g.strokeStyle='#f4b0aa'; g.lineWidth=1.2; g.beginPath(); g.arc(cx,cy,rr*1.32,Math.PI*1.05,Math.PI*1.95); g.stroke();
-    g.restore(); }
+  mWheelSolid(proj,g,rw.x,rw.y,side);
 }
 function renderMirror(side){
   const el=document.getElementById(side==='L'?'mirL':'mirR'); if(!el)return; const g=el.getContext('2d');
