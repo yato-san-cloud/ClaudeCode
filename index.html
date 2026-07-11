@@ -851,7 +851,7 @@ function convexHull(pts){ if(pts.length<3)return pts.slice();
   lo.pop(); hi.pop(); return lo.concat(hi); }
 // 後輪を3D円柱として投影して描く。ドアミラーは後輪を斜め前・上から見るため
 // リム面はほぼエッジオン＝見えず、見えるのは前〜上へ回り込むトレッド面だけ。
-function mWheelSolid(proj,g,rwx,rwy,side){
+function mWheelSolid(proj,g,rwx,rwy,side,fender){
   const R=0.31, halfW=0.11, th=car.th;
   const fwd=[Math.cos(th),Math.sin(th)], axle=[-Math.sin(th),Math.cos(th)], S=side==='L'?1:-1;
   const face=off=>{ const arr=[]; for(let i=0;i<=18;i++){ const a=2*Math.PI*i/18;
@@ -874,6 +874,15 @@ function mWheelSolid(proj,g,rwx,rwy,side){
     for(let i=3;i<outer.length-3;i+=2){ g.beginPath(); g.moveTo(outer[i].x,outer[i].y); g.lineTo(inner[i].x,inner[i].y); g.stroke(); } }
   if(outer.length>3){ g.strokeStyle='rgba(120,130,142,.5)'; g.lineWidth=1.6;                // 外側サイドウォールのハイライト弧
     g.beginPath(); outer.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.stroke(); }
+  // フェンダーアーチ・リップ：正面の半円リングではなく、タイヤの実投影“上弧”に沿わせた
+  // ボディ色の帯として描く＝透視に整合し「タイヤハウスが正面」に見えない
+  if(fender){ const topArc=hull.filter(p=>p.y<c.y-rad*0.06).sort((a,b)=>a.x-b.x);
+    if(topArc.length>=2){ g.lineJoin='round'; g.lineCap='round';
+      g.strokeStyle=CARCOL; g.lineWidth=Math.max(4,rad*0.5);
+      g.beginPath(); topArc.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.stroke();
+      g.strokeStyle='rgba(245,155,150,.5)'; g.lineWidth=1.4;
+      g.beginPath(); topArc.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.stroke();
+      g.lineJoin='miter'; g.lineCap='butt'; } }
 }
 function mEgoFlank(proj,g,side){                 // 自車の側面（ドアミラー内側）＝ボディ＋ガラス＋後輪
   const S=side==='L'?1:-1, ly=S*(C.width/2);
@@ -1031,14 +1040,9 @@ function mEgoPano(proj,g,side,w,h){
   const hx1=BELT[hj].x, hy1=BELT[hj].y+(SILL[hj].y-BELT[hj].y)*0.3;
   mBar(g,hx0,hy0,hx1,hy1,Math.max(2.5,5*(BELT[hi].D||1)),'rgba(30,12,10,.8)');
   mBar(g,hx0,hy0-1,hx1,hy1-1,Math.max(1,2*(BELT[hi].D||1)),'rgba(255,210,205,.7)');
-  // 8) ホイールアーチ・リップ→後輪（3D）
-  const ac=proj(rw.x,rw.y,0.31);
-  if(ok(ac)){ g.save(); g.strokeStyle='#5c1914'; g.lineWidth=Math.max(3,50/ac.depth);
-    const arX=Math.max(12,56/ac.depth), arY=Math.max(10,50/ac.depth), ay=ac.y+(yGbot-ac.y)*0.12;
-    g.beginPath(); g.ellipse(ac.x,ay,arX,arY,0,Math.PI*1.02,Math.PI*1.98); g.stroke();
-    g.strokeStyle='rgba(240,150,145,.55)'; g.lineWidth=1.4;
-    g.beginPath(); g.ellipse(ac.x,ay,arX,arY,0,Math.PI*1.05,Math.PI*1.95); g.stroke(); g.restore(); }
-  mWheelSolid(proj,g,rw.x,rw.y,side);
+  // 8) 後輪（3D・エッジオン）。フェンダーアーチは正面リングにせず、タイヤの実投影
+  //    上弧に沿わせたボディ色リップとして mWheelSolid 内で描く（透視整合）
+  mWheelSolid(proj,g,rw.x,rw.y,side,true);
   // 9) 手前シルエット・エッジ（カメラ最寄り＝最も明るい稜線）
   g.strokeStyle='rgba(255,220,215,.6)'; g.lineWidth=1.4; g.beginPath();
   g.moveTo(G[0].x,G[0].y); g.lineTo(SILL[0].x,SILL[0].y); g.lineTo(BELT[0].x,BELT[0].y);
