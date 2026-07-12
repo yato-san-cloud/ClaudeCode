@@ -97,8 +97,27 @@ const push = (arr, s, cap = 60) => { if (arr.length < cap) arr.push(s); };
 
   if (!SMOKE && summary.booted) {
     await evalStep('newGame', () => { try { window.Game.test.newGame(); return { ok: true }; } catch (e) { return { ok: false, err: String(e && e.message || e) }; } });
-    await page.waitForTimeout(600);
-    await shot('02-newgame');
+    await page.waitForTimeout(300);
+    // dismiss the title overlay + skip tutorial so we screenshot/interact with the real world
+    const enterGame = async () => {
+      // 1) try clicking a start button by visible text
+      const clicked = await page.evaluate(() => {
+        const wants = ['はじめる', 'つづき', 'あそぶ', 'スタート', 'ゲームをはじめる'];
+        const els = Array.from(document.querySelectorAll('#overlay button, #overlay a, #overlay [role="button"], .title button, button'));
+        for (const el of els) { const t = (el.textContent || '').trim(); if (wants.some(w => t.includes(w))) { el.click(); return t; } }
+        return null;
+      }).catch(() => null);
+      await page.waitForTimeout(250);
+      // 2) belt-and-suspenders: skip tutorial + clear any leftover title/modal overlay
+      await page.evaluate(() => {
+        try { if (window.Game.Tutorial && Game.Tutorial.skip) Game.Tutorial.skip(); } catch (e) { }
+        try { const ov = document.getElementById('overlay'); if (ov && /まきばのしずく|はじめる/.test(ov.textContent || '')) ov.innerHTML = ''; } catch (e) { }
+      }).catch(() => { });
+      return clicked;
+    };
+    summary.startButton = await enterGame();
+    await page.waitForTimeout(500);
+    await shot('02-world');
     summary.snapshots.afterNew = await page.evaluate(() => { try { return window.Game.test.snapshot(); } catch (e) { return { err: String(e) }; } }).catch(e => ({ err: e.message }));
 
     await evalStep('advanceDays(3)', () => { try { window.Game.test.advanceDays(3); return { ok: true }; } catch (e) { return { ok: false, err: String(e && e.message || e) }; } });
