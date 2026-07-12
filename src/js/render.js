@@ -47,6 +47,15 @@ Game.Render = (function () {
     foliage:{ spring: '#FFC7DD', summer: '#FFE27A', autumn: '#E8894B', winter: '#FFFFFF' }
   };
 
+  // Per-season world recolor applied over terrain so each season reads at a glance.
+  // {color, mode, alpha} with an optional second pass {color2, mode2, alpha2}.
+  var SEASON_FX = {
+    spring: { color: '#CBF3A2', mode: 'overlay', alpha: 0.13 },
+    summer: { color: '#83CE44', mode: 'multiply', alpha: 0.12 },
+    autumn: { color: '#D98F2E', mode: 'multiply', alpha: 0.30, mode2: 'screen', color2: '#F4CE6A', alpha2: 0.34 },
+    winter: { color: '#E9F2F8', mode: 'screen', alpha: 0.42, mode2: 'overlay', color2: '#AED2E6', alpha2: 0.16 }
+  };
+
   // Sky keyframes: [fraction-of-day, {top,mid,low}]. Interpolated per channel.
   var SKY_KEYS = [
     [0.00, PAL.sky.night], [0.15, PAL.sky.night], [0.22, PAL.sky.dawn],
@@ -637,14 +646,20 @@ Game.Render = (function () {
         }
       }
     }
-    // gentle season mood tint over the visible world (multiply, very low alpha)
-    var tint = PAL.season[season];
-    if (tint) {
+    // season atmosphere: recolor the whole visible world so each season reads at a glance
+    var fx = SEASON_FX[season];
+    if (fx) {
       ctx.save();
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.globalAlpha = 0.06;
-      ctx.fillStyle = tint;
+      ctx.globalCompositeOperation = fx.mode;
+      ctx.globalAlpha = fx.alpha;
+      ctx.fillStyle = fx.color;
       ctx.fillRect(vr.x - TILE, vr.y - TILE, vr.w + TILE * 2, vr.h + TILE * 2);
+      if (fx.mode2) {
+        ctx.globalCompositeOperation = fx.mode2;
+        ctx.globalAlpha = fx.alpha2;
+        ctx.fillStyle = fx.color2;
+        ctx.fillRect(vr.x - TILE, vr.y - TILE, vr.w + TILE * 2, vr.h + TILE * 2);
+      }
       ctx.restore();
     }
   }
