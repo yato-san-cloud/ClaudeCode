@@ -26,10 +26,13 @@ if (inlined === html) {
   process.exit(1);
 }
 
-// Body-only fragment: the <style> block plus everything inside <body>.
+// Body-only fragment: the <title> and <style> blocks plus everything inside
+// <body>. The <title> lets a host that supplies its own <head> still name the
+// page.
+var title = (inlined.match(/<title>[\s\S]*?<\/title>/) || [''])[0];
 var style = (inlined.match(/<style>[\s\S]*?<\/style>/) || [''])[0];
 var bodyInner = (inlined.match(/<body[^>]*>([\s\S]*)<\/body>/) || [null, ''])[1];
-var fragment = style + '\n' + bodyInner.trim() + '\n';
+var fragment = title + '\n' + style + '\n' + bodyInner.trim() + '\n';
 
 var outDir = path.join(root, 'dist');
 fs.mkdirSync(outDir, { recursive: true });
