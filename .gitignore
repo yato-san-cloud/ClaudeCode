@@ -1,9 +1,13 @@
 # deps
 node_modules/
 
-# build intermediates & QA artifacts (index.html is committed as the deliverable)
+# build intermediates & QA artifacts
 build/
 src/**/*.map
+
+# generated single-file bundle during development; the final build is
+# force-added as the playable deliverable in the release commit
+/index.html
 
 # os / editor
 .DS_Store
