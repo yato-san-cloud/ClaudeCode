@@ -118,6 +118,25 @@ const push = (arr, s, cap = 60) => { if (arr.length < cap) arr.push(s); };
     await shot('04-day30-stress');
     summary.snapshots.afterDay30 = await page.evaluate(() => { try { return window.Game.test.snapshot(); } catch (e) { return { err: String(e) }; } }).catch(e => ({ err: e.message }));
 
+    // ---- UI exploration: click dock/HUD buttons to surface UI runtime errors ----
+    summary.ui = { buttons: 0, clickErrors: [], panelCount: 0 };
+    try {
+      const sels = '#dock button, #dock [role="button"], #dock .dock-btn, #dock .btn, #hud button, #hud .btn';
+      const buttons = await page.$$(sels);
+      summary.ui.buttons = buttons.length;
+      for (let i = 0; i < buttons.length && i < 14; i++) {
+        try {
+          await buttons[i].click({ timeout: 1500, force: true });
+          await page.waitForTimeout(300);
+          await shot('ui-' + String(i).padStart(2, '0'));
+          await page.keyboard.press('Escape').catch(() => { });
+          await page.waitForTimeout(100);
+        } catch (e) { summary.ui.clickErrors.push('btn' + i + ': ' + e.message); }
+      }
+      summary.ui.panelCount = await page.evaluate(() => document.querySelectorAll('#panels .panel, .panel, [data-panel]').length).catch(() => 0);
+      await shot('05-ui-final');
+    } catch (e) { summary.ui.clickErrors.push('enumerate: ' + e.message); }
+
     // internal caught errors
     summary.internalErrors = await page.evaluate(() => { try { return (window.Game.test.errors && window.Game.test.errors()) || []; } catch (e) { return ['errors() failed: ' + e.message]; } }).catch(() => []);
   }
