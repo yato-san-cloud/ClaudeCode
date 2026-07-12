@@ -135,9 +135,9 @@ ${scriptBlock}
 
 fs.mkdirSync(p('build'), { recursive: true });
 fs.writeFileSync(p('index.html'), fullHtml);
-fs.writeFileSync(p('build/artifact.html'), artifactHtml);
+fs.writeFileSync(p('build/makiba-no-shizuku.html'), artifactHtml);
 
 const kb = (s) => (Buffer.byteLength(s, 'utf8') / 1024).toFixed(1) + 'KB';
 console.log(`[build] modules: ${present}/${MODULE_ORDER.length} present`);
 console.log(`[build] content keys: ${Object.keys(content).length}, balance keys: ${Object.keys(balance).length}`);
-console.log(`[build] wrote index.html (${kb(fullHtml)}) and build/artifact.html (${kb(artifactHtml)})`);
+console.log(`[build] wrote index.html (${kb(fullHtml)}) and build/makiba-no-shizuku.html (${kb(artifactHtml)})`);
