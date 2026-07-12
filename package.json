@@ -1,0 +1,15 @@
+{
+  "name": "makiba-no-shizuku",
+  "version": "0.1.0",
+  "private": true,
+  "description": "まきばのしずく — a cute, vast ranch management simulator (single-file browser game)",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node tools/test-playwright.js",
+    "smoke": "node tools/test-playwright.js --smoke"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

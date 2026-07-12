@@ -1,0 +1,10 @@
+# deps
+node_modules/
+
+# build intermediates & QA artifacts (index.html is committed as the deliverable)
+build/
+src/**/*.map
+
+# os / editor
+.DS_Store
+*.swp
