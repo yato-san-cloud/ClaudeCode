@@ -5327,26 +5327,26 @@ Game.Sprites = (function () {
     ctx.beginPath(); ctx.moveTo(-rx * 0.95, cy); ctx.quadraticCurveTo(-rx * 1.2, cy + 0.3 * U, -rx * 1.05, cy + 0.55 * U); ctx.stroke();
     // body
     ell(ctx, 0, cy, rx, ry); ctx.fillStyle = bodyGrad(ctx, cy - ry, cy + ry, body); ctx.fill(); outline(ctx, body, 1.4);
-    // neck + head
-    var nx = rx * 0.55, ny = cy - ry * 0.6;
-    ctx.beginPath(); ctx.moveTo(nx - rx * 0.1, cy - ry * 0.3);
-    ctx.quadraticCurveTo(nx + rx * 0.5, cy - ry * 1.4, nx + rx * 0.75, cy - ry * 2.1);
-    ctx.lineTo(nx + rx * 0.3, cy - ry * 2.0);
-    ctx.quadraticCurveTo(nx + rx * 0.05, cy - ry * 1.2, nx - rx * 0.4, cy - ry * 0.2);
+    // neck + head — compact chibi pony (short, chunky neck; head sits close to body)
+    var nx = rx * 0.5;
+    ctx.beginPath(); ctx.moveTo(nx - rx * 0.18, cy - ry * 0.15);
+    ctx.quadraticCurveTo(nx + rx * 0.42, cy - ry * 0.85, nx + rx * 0.6, cy - ry * 1.35);
+    ctx.lineTo(nx + rx * 0.14, cy - ry * 1.32);
+    ctx.quadraticCurveTo(nx - rx * 0.02, cy - ry * 0.7, nx - rx * 0.46, cy - ry * 0.05);
     ctx.closePath(); ctx.fillStyle = body; ctx.fill(); outline(ctx, body, 1.4);
-    var hx = nx + rx * 0.6, hy = cy - ry * 2.2, hr = 0.24 * U * headBig;
-    // mane
-    ctx.strokeStyle = mane; ctx.lineWidth = 0.09 * U; ctx.lineCap = "round";
-    for (var m = 0; m < 5; m++) { ctx.beginPath(); ctx.moveTo(nx + rx * 0.2 + m * 0.06 * U, cy - ry * (0.6 + m * 0.28)); ctx.lineTo(nx - rx * 0.05 + m * 0.06 * U, cy - ry * (0.5 + m * 0.28)); ctx.stroke(); }
+    var hx = nx + rx * 0.48, hy = cy - ry * 1.5, hr = 0.25 * U * headBig;
+    // mane down the neck
+    ctx.strokeStyle = mane; ctx.lineWidth = 0.1 * U; ctx.lineCap = "round";
+    for (var m = 0; m < 4; m++) { ctx.beginPath(); ctx.moveTo(nx + rx * 0.1 + m * 0.07 * U, cy - ry * (0.35 + m * 0.3)); ctx.lineTo(nx - rx * 0.12 + m * 0.07 * U, cy - ry * (0.22 + m * 0.3)); ctx.stroke(); }
     // ears
     ctx.fillStyle = body;
-    for (var i = -1; i <= 1; i += 2) { ctx.beginPath(); ctx.moveTo(hx + i * hr * 0.3, hy - hr * 0.6); ctx.lineTo(hx + i * hr * 0.5, hy - hr * 1.1); ctx.lineTo(hx - i * hr * 0.02, hy - hr * 0.7); ctx.closePath(); ctx.fill(); }
-    // elongated muzzle head
-    ell(ctx, hx, hy, hr, hr * 1.1); ctx.fillStyle = body; ctx.fill(); outline(ctx, body, 1.3);
-    ell(ctx, hx + hr * 0.2, hy + hr * 0.7, hr * 0.5, hr * 0.4); ctx.fillStyle = dark(body, 0.06); ctx.fill();
+    for (var i = -1; i <= 1; i += 2) { ctx.beginPath(); ctx.moveTo(hx + i * hr * 0.3, hy - hr * 0.62); ctx.lineTo(hx + i * hr * 0.5, hy - hr * 1.05); ctx.lineTo(hx - i * hr * 0.02, hy - hr * 0.72); ctx.closePath(); ctx.fill(); }
+    // rounder head + soft muzzle
+    ell(ctx, hx, hy, hr * 1.02, hr * 1.05); ctx.fillStyle = body; ctx.fill(); outline(ctx, body, 1.3);
+    ell(ctx, hx + hr * 0.16, hy + hr * 0.66, hr * 0.56, hr * 0.42); ctx.fillStyle = dark(body, 0.06); ctx.fill();
     // star blaze
-    ell(ctx, hx, hy - hr * 0.2, hr * 0.18, hr * 0.4); ctx.fillStyle = light(body, 0.5); ctx.fill();
-    face(ctx, hx, hy - hr * 0.1, hr, { blink: blink, mood: mood, look: look, blush: mood === "happy", spacing: 0.5, eyeScale: 0.95 });
+    ell(ctx, hx, hy - hr * 0.16, hr * 0.17, hr * 0.38); ctx.fillStyle = light(body, 0.5); ctx.fill();
+    face(ctx, hx, hy - hr * 0.05, hr, { blink: blink, mood: mood, look: look, blush: mood === "happy", spacing: 0.52, eyeScale: 0.95 });
   }
 
   // ===========================================================================
