@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ook! &amp; Cow Workbench</title>
+<style>
+  /* ---- tokens -------------------------------------------------------- */
+  :root {
+    --bg: #eceef1;
+    --surface: #ffffff;
+    --surface-2: #f3f5f8;
+    --well: #eaecf0;
+    --line: #d7dbe1;
+    --text: #1b1f24;
+    --muted: #5c636d;
+    --good: #3f9a57;
+    --bad: #cf4a38;
+    --shadow: 0 1px 2px rgba(20,24,30,.06), 0 8px 24px rgba(20,24,30,.06);
+    /* accent defaults (Ook!); overridden per language below */
+    --accent: #d68a1f;
+    --accent-soft: #f6e6c8;
+    --accent-ink: #2a1c05;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17161a; --surface: #201f26; --surface-2: #26252d; --well: #191820;
+      --line: #37353f; --text: #ece8e1; --muted: #a09aa8;
+      --good: #8bc36a; --bad: #e5705f;
+      --shadow: 0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.35);
+      --accent: #e8a13a; --accent-soft: #3a2e18; --accent-ink: #1c1305;
+      color-scheme: dark;
+    }
+  }
+  /* explicit toggle wins over the media query, both directions */
+  :root[data-theme="light"] {
+    --bg: #eceef1; --surface: #ffffff; --surface-2: #f3f5f8; --well: #eaecf0;
+    --line: #d7dbe1; --text: #1b1f24; --muted: #5c636d; --good: #3f9a57; --bad: #cf4a38;
+    --shadow: 0 1px 2px rgba(20,24,30,.06), 0 8px 24px rgba(20,24,30,.06);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #17161a; --surface: #201f26; --surface-2: #26252d; --well: #191820;
+    --line: #37353f; --text: #ece8e1; --muted: #a09aa8; --good: #8bc36a; --bad: #e5705f;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+  /* per-language accent (set on <body data-lang>) */
+  body[data-lang="ook"]       { --accent: #d68a1f; --accent-ink: #2a1c05; --accent-soft: #f6e6c8; }
+  body[data-lang="cow"]       { --accent: #2f9e93; --accent-ink: #052220; --accent-soft: #d6efeb; }
+  body[data-lang="brainfuck"] { --accent: #6470c2; --accent-ink: #0f142e; --accent-soft: #dfe2f5; }
+  :root[data-theme="dark"] body[data-lang="ook"],
+  html:not([data-theme]) body[data-lang="ook"]       { --accent: #e8a13a; --accent-ink: #1c1305; --accent-soft: #3a2e18; }
+  :root[data-theme="dark"] body[data-lang="cow"],
+  html:not([data-theme]) body[data-lang="cow"]       { --accent: #57c4b8; --accent-ink: #052220; --accent-soft: #16302d; }
+  :root[data-theme="dark"] body[data-lang="brainfuck"],
+  html:not([data-theme]) body[data-lang="brainfuck"] { --accent: #98a2e6; --accent-ink: #0f142e; --accent-soft: #23253a; }
+  @media (prefers-color-scheme: light) {
+    html:not([data-theme]) body[data-lang="ook"]       { --accent: #d68a1f; --accent-ink: #2a1c05; --accent-soft: #f6e6c8; }
+    html:not([data-theme]) body[data-lang="cow"]       { --accent: #2f9e93; --accent-ink: #052220; --accent-soft: #d6efeb; }
+    html:not([data-theme]) body[data-lang="brainfuck"] { --accent: #6470c2; --accent-ink: #0f142e; --accent-soft: #dfe2f5; }
+  }
+
+  /* ---- base ---------------------------------------------------------- */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    transition: background .3s ease, color .3s ease;
+  }
+  :root {
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 0 20px 64px; display: flex; flex-direction: column; gap: 22px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+  }
+  label.field { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 7px; }
+
+  /* ---- top bar ------------------------------------------------------- */
+  .topbar {
+    max-width: 1180px; margin: 0 auto; padding: 26px 20px 20px;
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  .brand-mark {
+    font-family: var(--mono); font-weight: 700; font-size: clamp(26px, 4.4vw, 40px);
+    letter-spacing: -.02em; line-height: 1; display: inline-flex; align-items: baseline; gap: .08em;
+  }
+  .brand-mark .swap { color: var(--accent); transition: color .3s ease; padding: 0 .12em; }
+  .brand-mark .moo { color: var(--muted); }
+  .brand-sub { margin: 10px 0 0; color: var(--muted); font-size: 14.5px; max-width: 52ch; }
+  .brand-sub b { color: var(--text); font-weight: 600; }
+  .theme-btn {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .05em;
+    background: var(--surface); color: var(--text); border: 1px solid var(--line);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer; display: inline-flex; gap: 8px; align-items: center;
+    transition: border-color .2s ease, transform .1s ease;
+  }
+  .theme-btn:hover { border-color: var(--accent); }
+  .theme-btn:active { transform: translateY(1px); }
+
+  /* ---- language tabs ------------------------------------------------- */
+  .lang-tabs { display: flex; gap: 8px; padding: 14px 16px 0; flex-wrap: wrap; }
+  .tab {
+    font-family: var(--mono); font-size: 13.5px; font-weight: 600;
+    background: transparent; color: var(--muted); border: 1px solid transparent;
+    border-radius: 10px 10px 0 0; padding: 10px 16px 12px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 9px; transition: color .2s, background .2s;
+  }
+  .tab .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; opacity: .55; }
+  .tab[data-l="ook"] { --tab: #d68a1f; } .tab[data-l="cow"] { --tab: #2f9e93; } .tab[data-l="brainfuck"] { --tab: #6470c2; }
+  @media (prefers-color-scheme: dark) {
+    .tab[data-l="ook"] { --tab: #e8a13a; } .tab[data-l="cow"] { --tab: #57c4b8; } .tab[data-l="brainfuck"] { --tab: #98a2e6; }
+  }
+  :root[data-theme="dark"] .tab[data-l="ook"] { --tab: #e8a13a; }
+  :root[data-theme="dark"] .tab[data-l="cow"] { --tab: #57c4b8; }
+  :root[data-theme="dark"] .tab[data-l="brainfuck"] { --tab: #98a2e6; }
+  .tab:hover { color: var(--text); }
+  .tab[aria-selected="true"] {
+    color: var(--text); background: var(--surface-2);
+    border-color: var(--line); border-bottom-color: var(--surface-2);
+  }
+  .tab[aria-selected="true"] .dot { background: var(--tab); opacity: 1; }
+  .tab .hint { font-family: system-ui, sans-serif; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+
+  /* ---- workbench grid ------------------------------------------------ */
+  .workbench { padding-bottom: 4px; }
+  .editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .col { padding: 18px 20px 22px; display: flex; flex-direction: column; gap: 16px; }
+  .col + .col { border-left: 1px solid var(--line); }
+  @media (max-width: 880px) {
+    .editor-grid { grid-template-columns: 1fr; }
+    .col + .col { border-left: none; border-top: 1px solid var(--line); }
+  }
+
+  textarea, .out, .tape, .ops, .cvt-out {
+    font-family: var(--mono); font-size: 13.5px;
+    background: var(--well); border: 1px solid var(--line); border-radius: 10px; color: var(--text);
+  }
+  textarea { width: 100%; padding: 12px; resize: vertical; line-height: 1.5; }
+  textarea#code { min-height: 190px; }
+  textarea.stdin { min-height: 54px; }
+  textarea:focus-visible, select:focus-visible, button:focus-visible, .theme-btn:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn {
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    padding: 9px 15px; border-radius: 9px; border: 1px solid var(--line);
+    background: var(--surface-2); color: var(--text); cursor: pointer;
+    transition: transform .08s ease, border-color .2s ease, background .2s ease;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:active { transform: translateY(1px); }
+  .btn-accent { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn-accent:hover { filter: brightness(1.05); border-color: var(--accent); }
+  .spacer { flex: 1; }
+  select {
+    font-family: var(--mono); font-size: 13px; padding: 8px 10px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--text); cursor: pointer; max-width: 100%;
+  }
+
+  .out { padding: 12px; min-height: 92px; white-space: pre-wrap; word-break: break-word; margin: 0; overflow-x: auto; }
+  .out:empty::before { content: "— run a program to see its output —"; color: var(--muted); }
+
+  .status { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  .status .k { color: var(--text); }
+  .status .err { color: var(--bad); font-weight: 600; width: 100%; }
+  .status .ok { color: var(--good); }
+
+  /* ---- memory tape --------------------------------------------------- */
+  .tape { display: flex; gap: 6px; padding: 12px; overflow-x: auto; min-height: 74px; align-items: stretch; }
+  .cell {
+    flex: 0 0 auto; min-width: 46px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface); display: flex; flex-direction: column; align-items: center; padding: 5px 6px 4px;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .cell .idx { font-size: 9.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cell .val { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .cell .asc { font-size: 9.5px; color: var(--muted); height: 12px; }
+  .cell.nz { border-color: var(--accent); }
+  .cell.ptr { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .cell.ptr .idx, .cell.ptr .asc { color: var(--accent-ink); opacity: .8; }
+  .tape:empty::before, .ops:empty::before { content: "—"; color: var(--muted); padding: 4px; }
+
+  /* ---- compiled ops -------------------------------------------------- */
+  .ops { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; }
+  .op { font-family: var(--mono); font-size: 12px; padding: 3px 6px; border-radius: 6px;
+    background: var(--surface); border: 1px solid var(--line); color: var(--muted); }
+  .op.cur { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+
+  /* ---- toolbox ------------------------------------------------------- */
+  .toolbox { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 880px) { .toolbox { grid-template-columns: 1fr; } }
+  .tool { padding: 18px 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .tool h2 { font-family: var(--mono); font-size: 15px; margin: 0; letter-spacing: -.01em; display: flex; align-items: center; gap: 9px; }
+  .tool h2 .tag { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-ink);
+    background: var(--accent); padding: 3px 7px; border-radius: 999px; }
+  .tool p.lead { margin: -4px 0 0; color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .cvt-out { padding: 11px; min-height: 70px; white-space: pre-wrap; word-break: break-all; overflow-x: auto; }
+  .cvt-out:empty::before { content: "— output appears here —"; color: var(--muted); }
+  .warn { font-family: var(--mono); font-size: 11.5px; color: var(--bad); }
+  .arrow { color: var(--muted); font-family: var(--mono); }
+  input.text {
+    font-family: var(--mono); font-size: 14px; padding: 10px 12px; flex: 1; min-width: 140px;
+    background: var(--well); border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+  }
+  input.text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- reference ----------------------------------------------------- */
+  .reference { padding: 18px 20px 22px; }
+  .ref-head { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+  .ref-head b { color: var(--text); }
+  .ref-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 8px; }
+  .ref-item { display: flex; gap: 10px; align-items: baseline; padding: 7px 10px; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 8px; }
+  .ref-item code { font-family: var(--mono); font-weight: 700; color: var(--accent); font-size: 13px; white-space: nowrap; }
+  .ref-item span { font-size: 12.5px; color: var(--muted); }
+
+  footer { color: var(--muted); font-size: 12.5px; text-align: center; padding-top: 4px; line-height: 1.7; }
+  footer code { font-family: var(--mono); color: var(--text); }
+  a { color: var(--accent); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body data-lang="ook">
+  <header class="topbar">
+    <div>
+      <div class="brand-mark">Ook!<span class="swap">⇄</span><span class="moo">moo</span></div>
+      <p class="brand-sub">A workbench for two gloriously impractical languages — write, run and
+        single-step <b>Ook!</b> and <b>Cow</b>, watch the memory tape move, convert between them and
+        Brainfuck, and compile any text into working code.</p>
+    </div>
+    <button class="theme-btn" id="theme-toggle" title="Toggle light / dark">
+      <span id="theme-icon">◐</span><span id="theme-label">Theme</span>
+    </button>
+  </header>
+
+  <main>
+    <!-- workbench -->
+    <section class="card workbench">
+      <div class="lang-tabs" role="tablist" aria-label="Language">
+        <button class="tab" data-l="ook" role="tab" aria-selected="true">
+          <span class="dot"></span>Ook!<span class="hint">for orangutans</span>
+        </button>
+        <button class="tab" data-l="cow" role="tab" aria-selected="false">
+          <span class="dot"></span>Cow<span class="hint">12 moos</span>
+        </button>
+        <button class="tab" data-l="brainfuck" role="tab" aria-selected="false">
+          <span class="dot"></span>Brainfuck<span class="hint">the ancestor</span>
+        </button>
+      </div>
+      <div class="editor-grid">
+        <div class="col">
+          <div>
+            <label class="field" for="code">Program</label>
+            <textarea id="code" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+          </div>
+          <div>
+            <label class="field" for="stdin">Input · stdin</label>
+            <textarea id="stdin" class="stdin" spellcheck="false" placeholder="fed to , (read) commands"></textarea>
+          </div>
+          <div class="actions">
+            <button class="btn btn-accent" id="run">Run ▶</button>
+            <button class="btn" id="step">Step ▷</button>
+            <button class="btn" id="animate">Animate</button>
+            <button class="btn" id="reset">Reset ↺</button>
+            <span class="spacer"></span>
+            <select id="examples" title="Load an example"><option value="">Examples…</option></select>
+          </div>
+        </div>
+        <div class="col">
+          <div>
+            <label class="field" for="output">Output</label>
+            <pre class="out" id="output"></pre>
+          </div>
+          <div class="status" id="status"></div>
+          <div>
+            <label class="field">Memory tape <span id="tape-note" style="text-transform:none;letter-spacing:0"></span></label>
+            <div class="tape" id="tape"></div>
+          </div>
+          <div>
+            <label class="field">Compiled instructions <span style="text-transform:none;letter-spacing:0">· shared with Brainfuck</span></label>
+            <div class="ops" id="ops"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- toolbox -->
+    <section class="toolbox">
+      <div class="card tool">
+        <h2><span class="tag">Tool</span>Converter</h2>
+        <p class="lead">Translate a program between all three languages. Ook! and Brainfuck are exact
+          twins; Cow is a superset, so a few Cow-only commands can't travel back.</p>
+        <div class="row">
+          <select id="cvt-from"></select><span class="arrow">→</span><select id="cvt-to"></select>
+          <button class="btn btn-accent" id="cvt-go">Convert</button>
+        </div>
+        <div>
+          <label class="field" for="cvt-in">Source</label>
+          <textarea id="cvt-in" class="stdin" spellcheck="false" style="min-height:70px"></textarea>
+        </div>
+        <div>
+          <label class="field">Result <button class="btn" id="cvt-send" style="padding:2px 8px;font-size:11px;float:right">↑ Load in editor</button></label>
+          <div class="cvt-out" id="cvt-out"></div>
+          <div class="warn" id="cvt-warn"></div>
+        </div>
+      </div>
+
+      <div class="card tool">
+        <h2><span class="tag">Tool</span>Text → code</h2>
+        <p class="lead">Type anything — even <span style="font-family:var(--mono)">日本語</span> or emoji —
+          and get a working program that prints it, byte for byte.</p>
+        <div class="row">
+          <input class="text" id="gen-in" value="Hello, World!" spellcheck="false">
+        </div>
+        <div class="row">
+          <span class="field" style="margin:0">Compile to</span>
+          <select id="gen-lang"></select>
+          <button class="btn btn-accent" id="gen-go">Generate</button>
+          <button class="btn" id="gen-send">↑ Load in editor</button>
+        </div>
+        <div>
+          <label class="field">Program <span id="gen-len" style="text-transform:none;letter-spacing:0"></span></label>
+          <div class="cvt-out" id="gen-out"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- reference -->
+    <section class="card reference">
+      <div class="ref-head">Instruction reference — <b id="ref-lang">Ook!</b></div>
+      <div class="ref-grid" id="ref-grid"></div>
+    </section>
+
+    <footer>
+      Cells wrap at 0–255 · pointer starts at cell 0 · <code>,</code> reads UTF-8 bytes, EOF = 0.<br>
+      Built as a single self-contained page around a shared instruction-set engine (<code>esolang.js</code>).
+    </footer>
+  </main>
+
+<script src="esolang.js"></script>
+<script>
+(function () {
+  var E = window.Esolang;
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---- descriptions for the reference panel -----------------------------
+  var REF = {
+    brainfuck: [
+      ['>', 'move pointer right'], ['<', 'move pointer left'],
+      ['+', 'increment cell'], ['-', 'decrement cell'],
+      ['.', 'output cell as a byte'], [',', 'read a byte into cell'],
+      ['[', 'jump past ] if cell is 0'], [']', 'jump back to [ if cell ≠ 0']
+    ],
+    ook: [
+      ['Ook. Ook?', 'move pointer right'], ['Ook? Ook.', 'move pointer left'],
+      ['Ook. Ook.', 'increment cell'], ['Ook! Ook!', 'decrement cell'],
+      ['Ook! Ook.', 'output cell as a byte'], ['Ook. Ook!', 'read a byte into cell'],
+      ['Ook! Ook?', 'loop start (if 0)'], ['Ook? Ook!', 'loop end (if ≠ 0)']
+    ],
+    cow: [
+      ['moO', 'pointer right'], ['mOo', 'pointer left'],
+      ['MoO', 'increment cell'], ['MOo', 'decrement cell'],
+      ['MOO', 'loop start (if 0)'], ['moo', 'loop end (if ≠ 0)'],
+      ['Moo', 'read if cell 0, else print char'], ['OOO', 'set cell to 0'],
+      ['MMM', 'copy / paste register'], ['OOM', 'print cell as integer'],
+      ['oom', 'read an integer'], ['mOO', 'run cell value as a command']
+    ]
+  };
+
+  var lang = 'ook';
+  var vm = null;         // persistent machine for stepping
+  var anim = null;       // animation timer
+
+  // ---- rendering --------------------------------------------------------
+  function printableAscii(v) {
+    return (v >= 33 && v <= 126) ? String.fromCharCode(v) : '';
+  }
+  function renderTape(tape, ptr, note) {
+    var el = $('tape'); el.innerHTML = '';
+    var max = Math.max(tape.length, ptr + 1);
+    var limit = Math.min(max, 240);
+    for (var i = 0; i < limit; i++) {
+      var v = tape[i] || 0;
+      var c = document.createElement('div');
+      c.className = 'cell' + (i === ptr ? ' ptr' : (v ? ' nz' : ''));
+      c.innerHTML = '<div class="idx">' + i + '</div><div class="val">' + v +
+                    '</div><div class="asc">' + printableAscii(v) + '</div>';
+      el.appendChild(c);
+    }
+    $('tape-note').textContent = note || '';
+  }
+  function renderOps(ops, pc) {
+    var el = $('ops'); el.innerHTML = '';
+    var limit = Math.min(ops.length, 400);
+    for (var i = 0; i < limit; i++) {
+      var s = document.createElement('span');
+      s.className = 'op' + (i === pc ? ' cur' : '');
+      s.textContent = ops[i];
+      el.appendChild(s);
+    }
+    if (ops.length > limit) { var m = document.createElement('span'); m.className = 'op'; m.textContent = '+' + (ops.length - limit) + '…'; el.appendChild(m); }
+  }
+  function renderStatus(v, extra) {
+    var st = $('status'); st.innerHTML = '';
+    function part(html) { var s = document.createElement('span'); s.innerHTML = html; st.appendChild(s); }
+    if (v) {
+      part('steps <span class="k">' + v.steps + '</span>');
+      part('pointer <span class="k">' + v.ptr + '</span>');
+      part('ops <span class="k">' + v.ops.length + '</span>');
+      part(v.halted ? '<span class="ok">● halted</span>' : '<span class="k">▷ ready to step</span>');
+    }
+    if (extra) part(extra);
+    if (v && v.error) { var e = document.createElement('span'); e.className = 'err'; e.textContent = '⚠ ' + v.error; st.appendChild(e); }
+  }
+  function renderVM() {
+    if (!vm) return;
+    $('output').textContent = vm.output();
+    renderTape(vm.tape, vm.ptr, vm.maxPtr >= 240 ? '· showing first 240 cells' : '');
+    renderOps(vm.ops, vm.halted ? -1 : vm.pc);
+    renderStatus(vm);
+  }
+
+  // ---- machine lifecycle ------------------------------------------------
+  function buildVM() {
+    stopAnim();
+    try {
+      var ops = E.parse(lang, $('code').value);
+      vm = new E.Machine(ops, { input: $('stdin').value });
+      return true;
+    } catch (err) {
+      vm = null;
+      $('output').textContent = '';
+      renderTape([0], 0, '');
+      renderOps([], -1);
+      var st = $('status'); st.innerHTML = '';
+      var e = document.createElement('span'); e.className = 'err'; e.textContent = '⚠ ' + err.message; st.appendChild(e);
+      return false;
+    }
+  }
+  function ensureVM() { if (!vm) return buildVM(); return true; }
+  function invalidate() { stopAnim(); vm = null; }
+
+  function doRun() {
+    if (!buildVM()) return;
+    try { var guard = 0; while (!vm.halted && guard++ < 60000000) vm.step(); }
+    catch (err) { vm.error = err.message; }
+    renderVM();
+  }
+  function doStep() {
+    if (!ensureVM()) return;
+    if (!vm.halted) { try { vm.step(); } catch (err) { vm.error = err.message; } }
+    renderVM();
+  }
+  function stopAnim() { if (anim) { clearInterval(anim); anim = null; $('animate').textContent = 'Animate'; } }
+  function doAnimate() {
+    if (anim) { stopAnim(); return; }
+    if (!ensureVM()) return;
+    if (vm.halted) buildVM();
+    $('animate').textContent = 'Stop ⏸';
+    anim = setInterval(function () {
+      try { for (var i = 0; i < 3 && !vm.halted; i++) vm.step(); }
+      catch (err) { vm.error = err.message; vm.halted = true; }
+      renderVM();
+      if (vm.halted) stopAnim();
+    }, 55);
+  }
+  function doReset() {
+    invalidate();
+    $('output').textContent = '';
+    renderTape([0], 0, '');
+    renderOps(E.parse(lang, $('code').value).length ? E.parse(lang, $('code').value) : [], -1);
+    renderStatus(null);
+  }
+
+  // ---- language switching ----------------------------------------------
+  function setLang(l, keepCode) {
+    lang = l;
+    document.body.setAttribute('data-lang', l);
+    var tabs = document.querySelectorAll('.tab');
+    tabs.forEach(function (t) { t.setAttribute('aria-selected', t.getAttribute('data-l') === l ? 'true' : 'false'); });
+    $('ref-lang').textContent = E.LANGS[l].name;
+    renderRef(l);
+    if (!keepCode) invalidate();
+  }
+  function renderRef(l) {
+    var g = $('ref-grid'); g.innerHTML = '';
+    REF[l].forEach(function (row) {
+      var d = document.createElement('div'); d.className = 'ref-item';
+      d.innerHTML = '<code>' + row[0].replace(/</g, '&lt;') + '</code><span>' + row[1] + '</span>';
+      g.appendChild(d);
+    });
+  }
+
+  // ---- examples ---------------------------------------------------------
+  function fillExamples() {
+    var sel = $('examples');
+    E.EXAMPLES.forEach(function (ex, i) {
+      var o = document.createElement('option'); o.value = i; o.textContent = ex.name; sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () {
+      if (sel.value === '') return;
+      var ex = E.EXAMPLES[+sel.value];
+      setLang(ex.lang, true);
+      $('code').value = ex.code;
+      $('stdin').value = ex.input || '';
+      invalidate(); doReset();
+      sel.value = '';
+    });
+  }
+
+  // ---- toolbox: converter & generator ----------------------------------
+  function fillLangSelect(sel, val) {
+    Object.keys(E.LANGS).forEach(function (k) {
+      var o = document.createElement('option'); o.value = k; o.textContent = E.LANGS[k].name;
+      if (k === val) o.selected = true; sel.appendChild(o);
+    });
+  }
+  function doConvert() {
+    var from = $('cvt-from').value, to = $('cvt-to').value;
+    try {
+      var r = E.convert(from, to, $('cvt-in').value);
+      $('cvt-out').textContent = r.code;
+      $('cvt-warn').textContent = r.warnings.length ? '⚠ ' + r.warnings.join(' ') : '';
+    } catch (err) {
+      $('cvt-out').textContent = ''; $('cvt-warn').textContent = '⚠ ' + err.message;
+    }
+  }
+  function doGenerate() {
+    var l = $('gen-lang').value;
+    try {
+      var code = E.generate(l, $('gen-in').value);
+      $('gen-out').textContent = code;
+      $('gen-len').textContent = '· ' + code.length + ' chars';
+    } catch (err) { $('gen-out').textContent = '⚠ ' + err.message; }
+  }
+
+  // ---- theme ------------------------------------------------------------
+  function applyThemeLabel() {
+    var t = document.documentElement.getAttribute('data-theme');
+    var dark = t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    $('theme-icon').textContent = dark ? '☾' : '☀';
+  }
+  $('theme-toggle').addEventListener('click', function () {
+    var cur = document.documentElement.getAttribute('data-theme');
+    var dark = cur ? cur === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+    applyThemeLabel();
+  });
+
+  // ---- wire up ----------------------------------------------------------
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () { setLang(t.getAttribute('data-l')); doReset(); });
+  });
+  $('code').addEventListener('input', invalidate);
+  $('stdin').addEventListener('input', invalidate);
+  $('run').addEventListener('click', doRun);
+  $('step').addEventListener('click', doStep);
+  $('animate').addEventListener('click', doAnimate);
+  $('reset').addEventListener('click', doReset);
+  $('cvt-go').addEventListener('click', doConvert);
+  $('gen-go').addEventListener('click', doGenerate);
+  $('cvt-send').addEventListener('click', function () {
+    var to = $('cvt-to').value, code = $('cvt-out').textContent;
+    if (!code) return; setLang(to, true); $('code').value = code; invalidate(); doReset();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  $('gen-send').addEventListener('click', function () {
+    var l = $('gen-lang').value, code = $('gen-out').textContent;
+    if (!code || code[0] === '⚠') return; setLang(l, true); $('code').value = code; $('stdin').value = '';
+    invalidate(); doReset(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // ---- init -------------------------------------------------------------
+  fillLangSelect($('cvt-from'), 'ook');
+  fillLangSelect($('cvt-to'), 'brainfuck');
+  fillLangSelect($('gen-lang'), 'ook');
+  fillExamples();
+  setLang('ook', true);
+  // load the Ook! hello world so the page opens alive
+  var hello = E.EXAMPLES.filter(function (e) { return e.lang === 'ook'; })[0];
+  $('code').value = hello ? hello.code : '';
+  $('cvt-in').value = 'Ook. Ook? Ook. Ook.';
+  doReset();
+  applyThemeLabel();
+})();
+</script>
+</body>
+</html>
