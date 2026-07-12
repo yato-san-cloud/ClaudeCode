@@ -101,6 +101,10 @@ Game.Save = (function () {
     _autosaveDays = days || 1;
     if (_autosaveArmed) return;
     _autosaveArmed = true;
+    // Reset the day-cursor whenever the live state is swapped (new game / load / reset),
+    // otherwise a fresh game starting at day 1 after a long prior session would never
+    // re-arm the scheduled autosave until day count caught back up to the old cursor.
+    Game.bus.on('state:replaced', function () { _lastAutosaveDay = 0; });
     Game.bus.on('day:advance', function (p) {
       if ((p.day - _lastAutosaveDay) >= _autosaveDays) { _lastAutosaveDay = p.day; save(0); }
     });

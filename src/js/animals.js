@@ -320,10 +320,17 @@ Game.Animals = (function () {
       } else {
         b = pickFreeBuilding(breedId);
         if (!b) {
-          var want = homeTypesFor(breedId)[0];
-          var wantName = (D.buildings && D.buildings[want] && D.buildings[want].name) || 'おうち';
-          notify(wantName + 'の あきスペースがないよ', 'warn', def.emoji || '🏠'); sfx('error');
-          return { ok: false, reason: wantName + 'が必要だよ' };
+          // Pets / utility animals (dog, cat, rabbit, horse) roam the ranch and need no
+          // dedicated housing — spawn them free-range instead of failing. Livestock/poultry
+          // still require a proper building.
+          var isPetLike = (def.kind === 'pet' || def.kind === 'utility');
+          if (!isPetLike) {
+            var want = homeTypesFor(breedId)[0];
+            var wantName = (D.buildings && D.buildings[want] && D.buildings[want].name) || 'おうち';
+            notify(wantName + 'の あきスペースがないよ', 'warn', def.emoji || '🏠'); sfx('error');
+            return { ok: false, reason: wantName + 'が必要だよ' };
+          }
+          // b stays null -> free-range spawn below
         }
       }
 
@@ -341,10 +348,12 @@ Game.Animals = (function () {
         }
       }
 
-      // spawn at a free tile near the home
-      var c = buildingCenterTile(b);
-      var spot = freeTileNear(b.tx + (b.w || 1), c.ty);
-      if (!spot) spot = { tx: b.tx, ty: b.ty };
+      // spawn at a free tile near the home (free-range pets spawn near the house/ranch)
+      var homeId = b ? b.id : null;
+      var anchor = b || buildingsOfType('house')[0] || (s.buildings && s.buildings[0]) || null;
+      var spot = null;
+      if (anchor) { var c = buildingCenterTile(anchor); spot = freeTileNear(anchor.tx + (anchor.w || 1), c.ty); }
+      if (!spot) spot = { tx: (s.grid.w >> 1), ty: (s.grid.h >> 1) };
       var startNeeds = { hunger: 80, happiness: 70, health: 82, cleanliness: 80 };
       var temperament = 50;
       if (isCow(breedId) && BYBREED[breedId] && BYBREED[breedId].temperamentBase != null) temperament = BYBREED[breedId].temperamentBase;
@@ -352,7 +361,7 @@ Game.Animals = (function () {
 
       var id = spawn(breedId, spot.tx, spot.ty, {
         adult: true, ageDays: (def.matureAgeDays || 12) + 2,
-        homeBuildingId: b.id, needs: startNeeds, temperament: temperament
+        homeBuildingId: homeId, needs: startNeeds, temperament: temperament
       });
       if (id < 0) {
         // refund if the spawn somehow failed
