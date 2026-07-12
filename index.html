@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bomberman</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="stage">
+    <h1 class="title">BOMBER<span>MAN</span></h1>
+
+    <div class="screen">
+      <canvas id="game" width="660" height="632"></canvas>
+    </div>
+
+    <div class="controls">
+      <span><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> / <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span>
+      <span><kbd>Space</kbd> / <kbd>J</kbd> Bomb</span>
+      <span><kbd>P</kbd> Pause</span>
+      <span><kbd>R</kbd> Restart</span>
+    </div>
+  </main>
+
+  <!-- Classic scripts share one global scope; load in dependency order. -->
+  <script src="js/config.js"></script>
+  <script src="js/sound.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/powerup.js"></script>
+  <script src="js/bomb.js"></script>
+  <script src="js/enemy.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# The game itself has ZERO runtime dependencies — these are only ever present
+# because of local headless-test tooling (playwright-core) and should not be committed.
+node_modules/
+package.json
+package-lock.json
+npm-debug.log*
+.DS_Store

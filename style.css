@@ -1,0 +1,95 @@
+/* Bomberman — page chrome. The game itself is drawn on the canvas. */
+
+:root {
+  --bg-0: #070a14;
+  --bg-1: #0f1526;
+  --ink: #eef2fb;
+  --ink-dim: #93a0bb;
+  --accent: #41a6ff;
+  --accent-2: #ff6a2b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #1a2340 0%, transparent 60%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1));
+  color: var(--ink);
+  font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 44px);
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(65, 166, 255, 0.55), 0 3px 0 #0a0f1e;
+}
+.title span { color: var(--accent-2); text-shadow: 0 0 18px rgba(255, 106, 43, 0.55), 0 3px 0 #0a0f1e; }
+
+.screen {
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #171d31, #0c1120);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.04) inset,
+    0 18px 50px rgba(0, 0, 0, 0.55),
+    0 0 60px rgba(65, 166, 255, 0.10);
+}
+
+canvas#game {
+  display: block;
+  border-radius: 8px;
+  background: #0b1020;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  max-width: 100%;
+  height: auto;
+  touch-action: none;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  justify-content: center;
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+.controls span { white-space: nowrap; }
+
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 2px 6px;
+  margin: 0 1px;
+  text-align: center;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: #222c44;
+  border: 1px solid #33405f;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
