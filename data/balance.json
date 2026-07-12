@@ -1,0 +1,658 @@
+{
+  "_meta": {
+    "schema": "makiba-balance",
+    "version": 1,
+    "unit": "All need bars are 0-100. Money is G. Yields are 'units/day' unless a cycleDays is given. Time is expressed as day-fractions t in [0,1) where t=0 is dawn/morning.",
+    "sourceOfTruth": "docs/design/game-design.md sections 5,6,7,16. Base prices, rank net-worth thresholds and the 12-day/48-day calendar are copied verbatim from that doc; all sibling agents must align to it.",
+    "calendarNote": "daysPerSeason is 12 (NOT the task's generic ~14 default) to match the canonical calendar in game-design.md 5.8/16.6 so seasonal events authored in content.json line up.",
+    "consumedBy": ["state","time","economy","crops","animals","world","ui"],
+    "pairsWith": "data/content.json (owns the upgrades[]/achievements[]/events[]/shop arrays; this file specs their mini-languages and all tuning constants)"
+  },
+
+  "start": {
+    "money": 500,
+    "day": 1,
+    "year": 1,
+    "season": "spring",
+    "weather": "sunny",
+    "startingCow": "holstein",
+    "ranchSize": [16, 12],
+    "worldSize": [96, 72],
+    "_worldNote": "ranchSize is the single rundown starter plot the player begins on; worldSize is the full vast grid revealed plot-by-plot (see landPlots). Vastness pillar: the map is ~36x the starter plot.",
+    "startingBuildings": [
+      { "id": "house", "pos": [2, 2] },
+      { "id": "barn", "pos": [6, 3] },
+      { "id": "pasture", "pos": [9, 6] },
+      { "id": "market_stall", "pos": [3, 8] }
+    ],
+    "_startingBuildingsNote": "Positions are suggested defaults inside the 16x12 starter plot; world/world-gen agent may relocate. No well/silo/dairy at start (those are Stage 2/3 unlocks). market_stall is deliberately the 'rickety' free starter stall.",
+    "startingSeeds": { "grass": 8, "carrot": 2, "turnip": 2 },
+    "startingFeed": { "hay": 6 },
+    "startingCowStats": {
+      "age": "adult",
+      "ageDays": 30,
+      "hunger": 85,
+      "happiness": 70,
+      "health": 85,
+      "cleanliness": 80,
+      "temperament": 52
+    },
+    "tutorialGoalId": "sell_5_milk"
+  },
+
+  "time": {
+    "realSecondsPerGameDay": 120,
+    "daysPerSeason": 12,
+    "seasonsPerYear": 4,
+    "daysPerYear": 48,
+    "seasonOrder": ["spring", "summer", "autumn", "winter"],
+    "dawnIsDayStart": true,
+    "phasesPerDay": {
+      "morning": [0.00, 0.25],
+      "day": [0.25, 0.58],
+      "evening": [0.58, 0.80],
+      "night": [0.80, 1.00]
+    },
+    "phaseClock": { "morningStart": "06:00", "dayStart": "10:00", "eveningStart": "18:00", "nightStart": "22:00" },
+    "ambientLight": { "morning": 0.72, "day": 1.00, "evening": 0.60, "night": 0.30 },
+    "lightTintHint": { "morning": "#ffe6c2", "day": "#ffffff", "evening": "#ffcf99", "night": "#3a4a8c" },
+    "speeds": [1, 2, 3],
+    "defaultSpeed": 1,
+    "canPause": true,
+    "sleepToMorning": true,
+    "autosaveAtMorning": true,
+    "productionRollsAt": "morning",
+    "newDayFraction": 0.0
+  },
+
+  "dailyTick": {
+    "_note": "Canonical order of operations each in-game morning. animals.js/economy.js/crops.js must follow this so results are deterministic and agents agree.",
+    "order": [
+      "1. advance clock: day++, roll season/year on boundary (12/48).",
+      "2. market: step every price index (clamped random walk), decay supplyGlut, recompute today's prices.",
+      "3. weather: roll today's weather from weather.oddsBySeason.",
+      "4. crops: apply water (rain or sprinkler or manual-yesterday), advance growth, run wither/overripe checks.",
+      "5. animals: decay hunger & cleanliness; feed_trough auto-feeds from silo; recompute happinessTarget and ease happiness; update health; decay pet stacks; age babies toward adult.",
+      "6. production: for each adult, compute yield, roll quality tier, deposit to storage (clamped by warehouse capacity; overflow is auto-sold at 70% with a gentle toast).",
+      "7. processing: advance dairy timers; emit finished products into storage.",
+      "8. passive: accumulate manure; apply companion/decor auras; apply dog/cat market aura for the day.",
+      "9. events & goals: evaluate event triggers (chancePerDay/cooldown), fire effects; tally lifetime stats; check achievements; check goal board & rank-up.",
+      "10. autosave."
+    ]
+  },
+
+  "needs": {
+    "scale": [0, 100],
+    "startingDefaults": { "hunger": 80, "happiness": 65, "health": 80, "cleanliness": 78 },
+    "hungerDecayPerDay": 40,
+    "hungerDecayWeatherMult": { "sunny": 1.0, "cloudy": 1.0, "rainy": 1.05, "snowy": 1.2 },
+    "cleanlinessDecayPerDay": 30,
+    "cleanlinessDecayWeatherMult": { "sunny": 1.0, "cloudy": 1.0, "rainy": 1.6, "snowy": 1.3 },
+    "cleanRestore": { "sweep": 60, "sprinklerAuto": 25, "groom": 45, "wellWater": 40 },
+    "happinessBase": 45,
+    "happinessFromFed": 25,
+    "happinessFromClean": 15,
+    "happinessFromPet": 18,
+    "happinessFromCompanion": 8,
+    "happinessFromShelter": 6,
+    "happinessEasePerDay": 0.5,
+    "happinessWeatherPenaltyUnsheltered": { "sunny": 0, "cloudy": -2, "rainy": -6, "snowy": -8 },
+    "petDecayPerDay": 12,
+    "petMaxStacks": 3,
+    "petPerTapHappiness": 6,
+    "companionAuraCap": 24,
+    "healthFromHappyPerDay": 8,
+    "healthLossFromStarvingPerDay": 10,
+    "healthLossFromDirtyPerDay": 5,
+    "healthBaselinePull": 60,
+    "healthBaselineEasePerDay": 0.1,
+    "thresholds": {
+      "starving": 20,
+      "hungry": 45,
+      "dirty": 35,
+      "sick": 30,
+      "unhappy": 35,
+      "content": 60,
+      "happy": 75,
+      "blissful": 88
+    },
+    "formulas": {
+      "hungerUpdate": "hunger = clamp(hunger - hungerDecayPerDay*hungerDecayWeatherMult[weather] + fedThisDay, 0, 100)",
+      "cleanlinessUpdate": "cleanliness = clamp(cleanliness - cleanlinessDecayPerDay*cleanlinessDecayWeatherMult[weather] + cleanedThisDay, 0, 100)",
+      "happinessTarget": "clamp(happinessBase + happinessFromFed*(hunger/100) + happinessFromClean*(cleanliness/100) + petBonus + min(companionBonus, companionAuraCap) + shelterBonus + (sheltered ? 0 : happinessWeatherPenaltyUnsheltered[weather]), 0, 100)",
+      "happinessUpdate": "happiness += (happinessTarget - happiness) * happinessEasePerDay",
+      "petBonus": "petStacks * happinessFromPet, where petStacks decays by (petDecayPerDay/ (happinessFromPet)) worth per day; simplest impl: petBonus = clamp(petBonus - petDecayPerDay, 0, happinessFromPet*petMaxStacks)",
+      "healthUpdate": "health += (happiness>=thresholds.happy ? healthFromHappyPerDay : 0) - (hunger<thresholds.starving ? healthLossFromStarvingPerDay : 0) - (cleanliness<thresholds.dirty ? healthLossFromDirtyPerDay : 0) + (health<healthBaselinePull ? (healthBaselinePull-health)*healthBaselineEasePerDay : 0); clamp 0..100",
+      "neglectIsSoft": "No need ever causes death or debt; low needs only reduce production and quality (see production). Recovery to full is always possible with care."
+    }
+  },
+
+  "speciesTraits": {
+    "_note": "heat/cold resist 0..1 feed seasonMult for every animal's production (cows override with per-breed values in production.byBreed). Higher resist = smaller seasonal yield loss.",
+    "chicken": { "heatResist": 0.5, "coldResist": 0.4 },
+    "duck": { "heatResist": 0.6, "coldResist": 0.6 },
+    "sheep": { "heatResist": 0.3, "coldResist": 0.85 },
+    "goat": { "heatResist": 0.6, "coldResist": 0.6 },
+    "pig": { "heatResist": 0.45, "coldResist": 0.4 },
+    "alpaca": { "heatResist": 0.25, "coldResist": 0.9 },
+    "rabbit": { "heatResist": 0.4, "coldResist": 0.6 },
+    "horse": { "heatResist": 0.5, "coldResist": 0.6 },
+    "dog": { "heatResist": 0.5, "coldResist": 0.6 },
+    "cat": { "heatResist": 0.6, "coldResist": 0.5 }
+  },
+
+  "production": {
+    "milkYield": {
+      "formula": "milkYield = baseMilkPerDay[breed] * happinessMult * healthMult * seasonMult * feedMult * upgradeMult * ageMult",
+      "happinessMult": "clamp(0.40 + 0.008*happiness, 0.40, 1.20)",
+      "healthMult": "clamp(0.55 + 0.0045*health, 0.55, 1.00)",
+      "seasonMult": "spring => 1.05 ; autumn => 1.00 ; summer => 1 - heatStress*(1 - heatResist[breed]) ; winter => 1 - coldStress*(1 - coldResist[breed])",
+      "heatStress": 0.25,
+      "coldStress": 0.30,
+      "feedMult": "premium feed (alfalfa) => 1.15 ; good feed (corn/wheat) => 1.05 ; basic feed (grass/hay/clover) => 0.95 ; starving (hunger<thresholds.starving) => 0.70",
+      "ageMult": "baby => 0.0 ; juvenile => 0.0 ; adult => 1.0 (production begins the day an animal reaches adult; see breeding.babyGrowthDays)",
+      "upgradeMult": "product of all bought upgrade effects whose target is milkYield or allYield (default 1.0)",
+      "uncollectedCapDays": 2,
+      "_uncollectedNote": "Milk keeps accumulating up to 2 days of yield if the player does not collect; beyond that it soft-caps (no waste toast is scary, just 'ミルクがいっぱい！')."
+    },
+    "byBreed": {
+      "holstein":        { "baseMilkPerDay": 7.0, "temperamentBase": 45, "premiumAffinity": 0.5, "heatResist": 0.30, "coldResist": 0.55, "feedEfficiency": 1.00, "tier": 1 },
+      "jersey":          { "baseMilkPerDay": 4.5, "temperamentBase": 70, "premiumAffinity": 1.0, "heatResist": 0.60, "coldResist": 0.35, "feedEfficiency": 1.00, "tier": 3 },
+      "brown_swiss":     { "baseMilkPerDay": 5.5, "temperamentBase": 60, "premiumAffinity": 0.7, "heatResist": 0.55, "coldResist": 0.60, "feedEfficiency": 0.95, "tier": 4 },
+      "highland":        { "baseMilkPerDay": 2.5, "temperamentBase": 65, "premiumAffinity": 0.4, "heatResist": 0.10, "coldResist": 0.95, "feedEfficiency": 0.90, "tier": 4 },
+      "belted_galloway": { "baseMilkPerDay": 3.5, "temperamentBase": 60, "premiumAffinity": 0.5, "heatResist": 0.45, "coldResist": 0.70, "feedEfficiency": 0.95, "tier": 4 },
+      "wagyu":           { "baseMilkPerDay": 2.5, "temperamentBase": 90, "premiumAffinity": 1.2, "heatResist": 0.50, "coldResist": 0.45, "feedEfficiency": 0.85, "tier": 6 },
+      "mini_cow":        { "baseMilkPerDay": 1.0, "temperamentBase": 75, "premiumAffinity": 0.3, "heatResist": 0.50, "coldResist": 0.50, "feedEfficiency": 0.60, "tier": 4 },
+      "dexter":          { "baseMilkPerDay": 3.0, "temperamentBase": 62, "premiumAffinity": 0.6, "heatResist": 0.55, "coldResist": 0.65, "feedEfficiency": 0.75, "tier": 4 }
+    },
+    "quality": {
+      "qualityScoreFormula": "0.40*happiness + 0.25*health + 0.20*(feedQuality*100) + 0.15*temperament",
+      "feedQualityRef": "feedQuality is the 0..1 value of what the animal last ate (see feed.feedItems); unfed defaults to 0.3",
+      "premiumChanceFormula": "clamp((qualityScore - 60)/40, 0, 1) * premiumAffinity[breed]",
+      "premiumOutcome": "each production day, if rng() < premiumChance the whole day's milk is produced as quality_milk instead of milk; otherwise milk.",
+      "tiers": {
+        "normal": "qualityScore < 70",
+        "fine": "70 <= qualityScore < 85 (raw milk sells at +8% if not upgraded to quality_milk)",
+        "premium": "qualityScore >= 85 or a successful premium roll -> yields quality_milk"
+      },
+      "wagyuAlwaysPremium": true,
+      "_wagyuNote": "wagyu milk is always emitted as quality_milk regardless of roll (prestige breed); still scaled by all yield multipliers."
+    },
+    "otherAnimals": {
+      "_note": "egg/wool/goat_milk/etc. reuse the SAME happinessMult, healthMult and seasonMult (using that species' speciesTraits resist) as milk. Only the base rate and product id change.",
+      "chicken":  { "product": "egg",        "perDay": 1.0, "doubleChance": 0.08 },
+      "duck":     { "product": "egg",        "perDay": 0.6, "pondBonusPerDay": 0.3 },
+      "sheep":    { "product": "wool",       "cycleDays": 4, "perCycle": 1, "qualityAffectsSellPrice": true },
+      "alpaca":   { "product": "fine_wool",  "cycleDays": 5, "perCycle": 1 },
+      "goat":     { "product": "goat_milk",  "perDay": 2.5, "premiumAffinity": 0.6 },
+      "pig":      { "product": "truffle",    "cycleDays": 6, "perCycle": 1, "requiresForageTile": true, "foragePenaltyIfNone": 0.4 },
+      "allAnimals": { "product": "manure", "perDay": 0.5 }
+    },
+    "processing": {
+      "_note": "Recipe definitions live here for balance; content.json may reference by id. Times are in in-game hours (a day = 24h; realSecondsPerGameDay=120 so 8h ~ 40s at 1x).",
+      "dairy": {
+        "baseSlots": 2,
+        "speedMultByTier": [1.0, 0.80, 0.65],
+        "slotsByTier": [2, 3, 5],
+        "recipes": {
+          "cheese":      { "in": { "milk": 3 },         "out": { "cheese": 1 }, "hours": 8 },
+          "butter":      { "in": { "milk": 2 },         "out": { "butter": 1 }, "hours": 5 },
+          "yogurt":      { "in": { "milk": 1 },         "out": { "yogurt": 1 }, "hours": 3 },
+          "premium_cheese": { "in": { "quality_milk": 3 }, "out": { "cheese": 1 }, "hours": 8, "outQuality": "premium", "sellMult": 1.6, "tierRequired": 2 },
+          "goat_cheese": { "in": { "goat_milk": 3 },    "out": { "cheese": 1 }, "hours": 8, "sellMult": 1.15 }
+        },
+        "marginNote": "3 milk (75G) -> 1 cheese (120G): +60% before fees, but gated by slots/time so raw-vs-process is a real choice."
+      }
+    }
+  },
+
+  "feed": {
+    "consumptionPerDay": { "cow": 2.0, "sheep": 1.0, "goat": 1.0, "pig": 1.5, "chicken": 0.5, "duck": 0.5, "alpaca": 1.2, "rabbit": 0.3, "horse": 2.5, "default": 1.0 },
+    "consumptionUsesBreedFeedEfficiency": true,
+    "feedItems": {
+      "grass":   { "hunger": 15, "feedQuality": 0.4, "buyCost": 5,  "tier": "basic" },
+      "hay":     { "hunger": 22, "feedQuality": 0.5, "buyCost": 10, "tier": "basic" },
+      "corn":    { "hunger": 28, "feedQuality": 0.7, "buyCost": 18, "tier": "good" },
+      "wheat":   { "hunger": 24, "feedQuality": 0.6, "buyCost": 16, "tier": "good" },
+      "alfalfa": { "hunger": 30, "feedQuality": 1.0, "buyCost": 32, "tier": "premium", "premium": true },
+      "carrot":  { "hunger": 20, "feedQuality": 0.6, "buyCost": 22, "treatHappiness": 6 },
+      "clover":  { "hunger": 18, "feedQuality": 0.6, "buyCost": 14, "treatHappiness": 4 }
+    },
+    "troughAutoFeedFromSilo": true,
+    "troughPrefersPremiumIfStocked": true,
+    "feedCostNote": "Buying feed is the main recurring expense; growing your own (grass->hay->corn->alfalfa) is the mid-game efficiency unlock that closes the loop. Upgrade target feedCost multiplies buyCost."
+  },
+
+  "market": {
+    "sellFeePct": 0.05,
+    "marketStallBonusPct": 0.10,
+    "marketStallTierBonusPct": [0.10, 0.16, 0.22],
+    "baseVolatility": 0.08,
+    "moodJitter": 0.04,
+    "priceBand": [0.60, 1.60],
+    "meanReversion": 0.15,
+    "trendSparklineDays": 7,
+    "buyMarkupPct": 0.0,
+    "basePrices": {
+      "milk": 25, "quality_milk": 60, "cheese": 120, "butter": 90, "yogurt": 70,
+      "egg": 15, "wool": 40, "fine_wool": 150, "truffle": 400, "goat_milk": 35, "manure": 5,
+      "grass": 4, "hay": 12, "corn": 30, "wheat": 40, "alfalfa": 55,
+      "carrot": 45, "turnip": 35, "clover": 25, "pumpkin": 120, "sunflower": 60
+    },
+    "_basePricesNote": "milk..manure copied verbatim from game-design.md 16.5. Crop/feed prices added here for the harvest economy.",
+    "productCategory": {
+      "milk": "dairy", "quality_milk": "dairy", "cheese": "dairy", "butter": "dairy", "yogurt": "dairy", "goat_milk": "dairy",
+      "egg": "egg", "wool": "fiber", "fine_wool": "fiber", "truffle": "luxury", "manure": "fertilizer",
+      "corn": "crop", "wheat": "crop", "carrot": "crop", "turnip": "crop", "pumpkin": "crop",
+      "grass": "feed", "hay": "feed", "alfalfa": "feed", "clover": "feed", "sunflower": "decor"
+    },
+    "seasonalDemand": {
+      "dairy":      { "spring": 1.05, "summer": 1.15, "autumn": 1.00, "winter": 0.95 },
+      "egg":        { "spring": 1.10, "summer": 1.00, "autumn": 1.00, "winter": 1.05 },
+      "fiber":      { "spring": 0.90, "summer": 0.85, "autumn": 1.10, "winter": 1.35 },
+      "luxury":     { "spring": 1.00, "summer": 1.00, "autumn": 1.15, "winter": 1.25 },
+      "crop":       { "spring": 1.00, "summer": 1.05, "autumn": 1.20, "winter": 1.30 },
+      "feed":       { "spring": 0.90, "summer": 1.00, "autumn": 1.00, "winter": 1.40 },
+      "fertilizer": { "spring": 1.20, "summer": 1.00, "autumn": 1.00, "winter": 0.80 },
+      "decor":      { "spring": 1.20, "summer": 1.10, "autumn": 1.00, "winter": 1.00 }
+    },
+    "weatherDemand": {
+      "_note": "Small same-day nudges; keep subtle so weather is flavor, not a rug-pull.",
+      "dairy":  { "sunny": 1.02, "cloudy": 1.00, "rainy": 0.98, "snowy": 1.00 },
+      "fiber":  { "sunny": 0.98, "cloudy": 1.00, "rainy": 1.02, "snowy": 1.06 },
+      "feed":   { "sunny": 1.00, "cloudy": 1.00, "rainy": 1.02, "snowy": 1.08 }
+    },
+    "supplyGlut": {
+      "thresholdUnits": 50,
+      "dropPerUnitOver": 0.004,
+      "maxDropPct": 0.35,
+      "recoverPerDay": 0.06,
+      "note": "Selling a huge batch of one good in a day temporarily depresses only that good's price; recovers over days. Teaches diversification without ever making a good worthless."
+    },
+    "trendModel": {
+      "startIndex": 1.0,
+      "description": "Per-good priceIndex is a clamped, mean-reverting random walk. All randomness is described as multiplier RANGES; the programmer draws them with Game.util.rng, not any specific API.",
+      "stepFormula": "indexNext = clamp( index + uniform(-baseVolatility, +baseVolatility) + uniform(-moodJitter, +moodJitter) + (1.0 - index)*meanReversion , priceBand[0], priceBand[1] )",
+      "finalSellPriceFormula": "sellPrice = round( basePrice[good] * index[good] * seasonalDemand[category][season] * weatherDemand[category][weather] * (1 - supplyGlutPenalty[good]) * (1 - sellFeePct + marketStallBonus) )",
+      "finalBuyPriceFormula": "buyPrice = round( basePrice[good] * index[good] * seasonalDemand[category][season] * (1 + buyMarkupPct) )",
+      "marketStallBonus": "0 if no market_stall, else marketStallTierBonusPct[stallTier]; also waives the sell fee visually by netting into one number",
+      "clampNote": "index stays in [0.60,1.60] so a good never crashes to zero nor moons; typical daily swing is ~+-30%."
+    }
+  },
+
+  "netWorth": {
+    "_note": "Rank thresholds are checked against netWorth so players cannot cheese ranks by hoarding cash, nor by owning stuff while broke.",
+    "formula": "netWorth = cash + sum(animal.marketValue * animalValuePct) + sum(building.cost * buildingValuePct) + sum(product.qty * basePrice[product]) + sum(landPlotPaid * landValuePct)",
+    "animalValuePct": 0.70,
+    "buildingValuePct": 0.60,
+    "landValuePct": 0.50,
+    "productValuePct": 1.00,
+    "babyAnimalValuePct": 0.40
+  },
+
+  "breeding": {
+    "minHappinessToBreed": 65,
+    "minHealthToBreed": 55,
+    "minAgeDaysToBreed": 8,
+    "requiresSameSpecies": true,
+    "requiresTwoAdults": true,
+    "gestationDays": { "cow": 8, "sheep": 6, "goat": 6, "pig": 7, "chicken": 3, "duck": 3, "rabbit": 4, "alpaca": 9, "horse": 12, "default": 6 },
+    "cooldownDays": { "cow": 6, "chicken": 2, "rabbit": 3, "default": 5 },
+    "babyGrowthDays": { "cow": 6, "sheep": 5, "goat": 5, "pig": 5, "chicken": 3, "duck": 3, "rabbit": 3, "alpaca": 7, "horse": 10, "default": 5 },
+    "chanceOfTwins": { "cow": 0.05, "sheep": 0.12, "goat": 0.15, "rabbit": 0.35, "default": 0.08 },
+    "offspringInheritRules": {
+      "breed": "same species; if both parents same breed -> that breed. If different breeds -> 50/50 pick one parent's breed (no unhappy cross outcomes; cosmetic mixes only).",
+      "temperamentFormula": "clamp( (parentA.temperament + parentB.temperament)/2 + uniform(-8, +12), 10, 100 )",
+      "temperamentBiasNote": "The +12/-8 asymmetry gives a gentle upward drift so breeding your best animals slowly improves the herd (genetics-lite).",
+      "rareTraitChance": 0.03,
+      "rareTraits": ["sparkle_coat", "heterochromia", "golden"],
+      "rareTraitValueBonusPct": 0.25,
+      "rareTraitHappinessAura": 3,
+      "babyScale": 0.6
+    }
+  },
+
+  "crops": {
+    "baseGrowFormula": "progress += (1 / (growDays * cropGrowMult)) * waterEffect * seasonEffect * fertilizerEffect * weatherEffect ; harvest-ready when progress >= 1.0",
+    "cropGrowMultDefault": 1.0,
+    "cropGrowMultNote": "cropGrowMult is a TIME multiplier lowered by upgrades (cropGrow*0.8 => 20% faster). Default 1.0.",
+    "waterEffect": { "watered": 1.0, "dry": 0.45, "sprinklerAuto": 1.0 },
+    "rainWaters": true,
+    "seasonEffect": { "inSeason": 1.15, "neutral": 1.00, "offSeason": 0.50, "deadSeason": 0.0 },
+    "seasonEffectNote": "deadSeason (0.0) means a non-hardy crop makes no progress and begins to wither (see witherRules); hardy crops treat winter as offSeason instead of deadSeason.",
+    "fertilizerEffect": { "none": 1.0, "manure": 1.25 },
+    "weatherEffect": { "sunny": 1.05, "cloudy": 1.0, "rainy": 1.0, "snowy": 0.6 },
+    "witherRules": {
+      "dryDaysToWilt": 3,
+      "wiltRecoverable": true,
+      "dryDaysToWither": 5,
+      "witherProducesManure": 1,
+      "winterKillsNonHardy": true,
+      "overripeDaysToQualityLoss": 3,
+      "overripeSellMult": 0.70,
+      "note": "Withering is never punishing beyond losing that tile's crop; it drops a little manure as consolation and the tile is instantly replantable."
+    },
+    "hardyCrops": ["turnip", "wheat"],
+    "table": {
+      "grass":     { "seedCost": 8,  "growDays": 2, "yield": 3, "sellPrice": 4,   "season": ["spring", "summer", "autumn"], "regrow": true, "regrowDays": 2, "feedQuality": 0.4 },
+      "hay":       { "seedCost": 15, "growDays": 3, "yield": 3, "sellPrice": 12,  "season": ["summer", "autumn"], "feedQuality": 0.5 },
+      "corn":      { "seedCost": 30, "growDays": 5, "yield": 4, "sellPrice": 30,  "season": ["summer"], "feedQuality": 0.7 },
+      "wheat":     { "seedCost": 25, "growDays": 4, "yield": 4, "sellPrice": 40,  "season": ["spring", "autumn"], "feedQuality": 0.6, "hardy": true },
+      "alfalfa":   { "seedCost": 60, "growDays": 6, "yield": 3, "sellPrice": 55,  "season": ["spring", "summer"], "feedQuality": 1.0, "premiumFeed": true, "regrow": true, "regrowDays": 4 },
+      "carrot":    { "seedCost": 20, "growDays": 4, "yield": 4, "sellPrice": 45,  "season": ["spring", "autumn"], "treat": true },
+      "turnip":    { "seedCost": 12, "growDays": 3, "yield": 4, "sellPrice": 35,  "season": ["spring", "autumn", "winter"], "hardy": true },
+      "clover":    { "seedCost": 18, "growDays": 3, "yield": 3, "sellPrice": 25,  "season": ["spring"], "feedQuality": 0.6, "happinessBoost": true },
+      "pumpkin":   { "seedCost": 45, "growDays": 6, "yield": 2, "sellPrice": 120, "season": ["autumn"] },
+      "sunflower": { "seedCost": 25, "growDays": 5, "yield": 1, "sellPrice": 60,  "season": ["summer"], "decor": true, "happinessAura": true }
+    }
+  },
+
+  "weather": {
+    "oddsBySeason": {
+      "spring": { "sunny": 0.50, "cloudy": 0.30, "rainy": 0.20, "snowy": 0.00 },
+      "summer": { "sunny": 0.65, "cloudy": 0.20, "rainy": 0.15, "snowy": 0.00 },
+      "autumn": { "sunny": 0.45, "cloudy": 0.35, "rainy": 0.20, "snowy": 0.00 },
+      "winter": { "sunny": 0.35, "cloudy": 0.30, "rainy": 0.05, "snowy": 0.30 }
+    },
+    "effects": {
+      "sunny":  { "cropGrowthMult": 1.05, "sprinklerRainbow": true },
+      "cloudy": {},
+      "rainy":  { "autoWaterCrops": true, "cleanlinessDecayMult": 1.6, "happinessPenaltyUnsheltered": -6 },
+      "snowy":  { "cropGrowthMult": 0.6, "cleanlinessDecayMult": 1.3, "happinessPenaltyUnsheltered": -8, "feedConsumptionMult": 1.2 }
+    }
+  },
+
+  "auras": {
+    "_note": "Realizes the 看板犬/看板猫 market aura, mini_cow/rabbit happiness aura, pond/sunflower charm, and horse mobility flavor.",
+    "dog":       { "marketPriceBonusPct": 0.05, "visitorBonus": true, "scope": "ranch" },
+    "cat":       { "marketPriceBonusPct": 0.05, "visitorBonus": true, "scope": "ranch", "stacksWithDog": true },
+    "marketAuraCapPct": 0.12,
+    "mini_cow":  { "happinessAura": 6, "radiusTiles": 4 },
+    "rabbit":    { "happinessAura": 4, "radiusTiles": 3 },
+    "sunflower": { "happinessAura": 3, "radiusTiles": 2 },
+    "clover":    { "happinessAura": 2, "radiusTiles": 1 },
+    "pond":      { "happinessAura": 3, "radiusTiles": 3, "duckHappinessBonus": 10 },
+    "horse":     { "playerMoveSpeedMult": 1.4, "taskSpeedMult": 1.25 }
+  },
+
+  "capacities": {
+    "_note": "capacity+N upgrade target adds to the relevant building's cap. Animal houses cap head-count; storage caps stacks.",
+    "barn": 4,
+    "barn_big": 10,
+    "coop": 8,
+    "pond": 6,
+    "silo": 200,
+    "warehouse": 500,
+    "starterWarehouseless": 80,
+    "pasture": "usable crop tiles = building footprint area"
+  },
+
+  "costs": {
+    "rankTitles": {
+      "1": "見習い牧場主", "2": "かけだし牧場主", "3": "いちにんまえ牧場主",
+      "4": "ベテラン牧場主", "5": "名人牧場主", "6": "達人牧場主", "7": "しずくの牧場主"
+    },
+    "rankNetWorthThreshold": { "1": 500, "2": 5000, "3": 30000, "4": 150000, "5": 750000, "6": 3000000, "7": 15000000 },
+    "_rankNote": "Copied verbatim from game-design.md 7.1/16.7. A rank-up ALSO requires clearing that rank's goal set (defined in content.json); net worth alone is necessary but not sufficient.",
+    "expectedCashEnteringRank": { "1": 500, "2": 1200, "3": 6000, "4": 25000, "5": 120000, "6": 500000, "7": 2500000 },
+    "expectedCashNote": "Approx liquid cash a healthy player holds when they cross into each rank (the rest of net worth is animals/buildings/land). Used to sanity-check that the next rank's key purchases are affordable soon after arriving.",
+    "stageMoneyArcs": {
+      "S1": [500, 5000], "S2": [5000, 50000], "S3": [50000, 500000], "S4": [500000, 3000000], "S5": [3000000, 15000000]
+    },
+    "referencePrices": {
+      "animals": {
+        "chicken": 120, "duck": 180, "rabbit": 320, "goat": 460, "sheep": 500,
+        "holstein": 900, "dexter": 1700, "jersey": 1600, "brown_swiss": 1800,
+        "dog": 1500, "cat": 1500, "pig": 2200, "mini_cow": 2400, "belted_galloway": 2600,
+        "highland": 3200, "alpaca": 5200, "horse": 8000, "wagyu": 26000
+      },
+      "buildings": {
+        "barn": 0, "market_stall": 0, "pasture": 150, "coop": 320, "well": 600,
+        "sprinkler": 650, "pond": 800, "silo": 900, "feed_trough": 950,
+        "dairy": 1600, "warehouse": 2800, "windmill": 4500, "barn_big": 6500, "fence": 20
+      },
+      "buildingUpgradeTiers": {
+        "dairy": [1600, 4500, 12000],
+        "market_stall": [0, 2500, 7000],
+        "warehouse": [2800, 8000],
+        "well": [600, 2200]
+      }
+    },
+    "affordCheckpoints": [
+      {
+        "label": "★1 序盤 — Day ~3, 所持 ~800G",
+        "buys": { "coop": 320, "chicken x3": 360 },
+        "totalSpend": 680,
+        "leaves": 120,
+        "teaches": "spend -> daily income: 3 hens = ~45G/day eggs, paying back the coop in ~15 days while milk funds seeds."
+      },
+      {
+        "label": "★3 なかば — 所持 ~8,000G",
+        "buys": { "dairy": 1600, "well": 600, "silo": 900, "jersey": 1600, "feed_trough": 950 },
+        "totalSpend": 5650,
+        "leaves": 2350,
+        "teaches": "unlocks the milk->cheese pipeline (+60% margins), a premium-milk breed, water, and first automation, with a healthy buffer for feed/seeds."
+      },
+      {
+        "label": "★5 大台 — 所持 ~200,000G",
+        "buys": { "barn_big": 6500, "windmill": 4500, "sprinkler x6": 3900, "feed_trough x4": 3800, "alpaca x2": 10400, "wagyu": 26000 },
+        "totalSpend": 55100,
+        "leaves": 144900,
+        "teaches": "full automation + luxury tier (wagyu/alpaca) is comfortably affordable, leaving ~145k for region-2 land plots and more premium herd."
+      }
+    ],
+    "curveSanityNote": "Income per healthy day roughly scales: S1 ~120-300G, S2 ~500-1500G, S3 ~3k-10k, S4 ~25k-90k, S5 ~150k+. Each rank's headline unlocks cost ~10-30% of the cash you hold on arrival, so progress always feels within reach, never grindy or walled."
+  },
+
+  "landPlots": {
+    "starterPlots": 1,
+    "plotSizeTiles": [16, 12],
+    "costFormula": "plotCost(n) = round( base * growth^(n-2) )  where n is the plot index being purchased; plot 1 is the free starter, so the first purchasable plot (n=2) costs exactly base.",
+    "base": 1500,
+    "growth": 1.9,
+    "sampleCosts": { "plot2": 1500, "plot3": 2850, "plot4": 5415, "plot5": 10288, "plot6": 19548, "plot7": 37141, "plot8": 70569 },
+    "rankGate": { "plot2": 2, "plot3": 2, "plot4": 3, "plot5": 3, "plot6": 4, "plot7": 4, "region2": 5, "plot8": 5 },
+    "relocationRefundPct": 0.9,
+    "relocationGraceSeconds": 20,
+    "_forgivenessNote": "Buildings/animals sell back or relocate for near-full value (90%) within a grace window so experimentation is never punished (soft-failure pillar)."
+  },
+
+  "upgradesEffectSpec": {
+    "_purpose": "Defines the mini-language the programmer must interpret for content.upgrades[].effect (and reused by achievement/event rewards). content.json owns the upgrade cards; this owns their meaning.",
+    "format": "content.upgrades[].effect is an ARRAY of token strings. Each token is either 'TARGET OP VALUE' (no spaces) or a bare FLAG token. Multiple upgrades stack; same-target multipliers multiply together, additive tokens sum.",
+    "operators": {
+      "*": "multiply the target's running modifier by VALUE (e.g. milkYield*1.15)",
+      "+": "add VALUE to the target (fractions for percent-style targets; integers for counts). e.g. priceBonus+0.1, capacity+5",
+      "-": "subtract VALUE from the target. e.g. needsDecay-0.1",
+      "=": "set/override the target to VALUE (rare; use for hard caps)"
+    },
+    "numericTargets": {
+      "milkYield":   { "modifies": "production.milkYield.upgradeMult", "improveDirection": ">1", "default": 1.0 },
+      "eggYield":    { "modifies": "chicken/duck egg perDay", "improveDirection": ">1", "default": 1.0 },
+      "woolYield":   { "modifies": "sheep/alpaca perCycle", "improveDirection": ">1", "default": 1.0 },
+      "goatMilkYield": { "modifies": "goat perDay", "improveDirection": ">1", "default": 1.0 },
+      "truffleYield": { "modifies": "pig perCycle", "improveDirection": ">1", "default": 1.0 },
+      "allYield":    { "modifies": "every animal product yield", "improveDirection": ">1", "default": 1.0 },
+      "cropGrow":    { "modifies": "crops.cropGrowMult (TIME multiplier)", "improveDirection": "<1", "default": 1.0, "example": "cropGrow*0.8 = 20% faster growth" },
+      "cropYield":   { "modifies": "crop table yield", "improveDirection": ">1", "default": 1.0 },
+      "feedCost":    { "modifies": "feed.feedItems[].buyCost", "improveDirection": "<1", "default": 1.0 },
+      "feedUse":     { "modifies": "feed.consumptionPerDay", "improveDirection": "<1", "default": 1.0 },
+      "priceBonus":  { "modifies": "added to sell multiplier (like an extra market_stall bonus)", "improveDirection": "+", "default": 0.0, "example": "priceBonus+0.1 = +10% sell price" },
+      "cheeseSpeed": { "modifies": "processing dairy hours (TIME)", "improveDirection": "<1", "default": 1.0 },
+      "processSlots":{ "modifies": "dairy parallel slots", "improveDirection": "+", "default": 0 },
+      "capacity":    { "modifies": "the target building's capacity (context: which building the upgrade card names)", "improveDirection": "+", "default": 0, "example": "capacity+5" },
+      "needsDecay":  { "modifies": "global multiplier on hunger & cleanliness decay", "improveDirection": "<1", "default": 1.0, "example": "needsDecay*0.85 = needs drain 15% slower" },
+      "happinessGain": { "modifies": "multiplier on happiness recovery/eases", "improveDirection": ">1", "default": 1.0 },
+      "autoCollectRadius": { "modifies": "tiles auto-collected around player/buildings", "improveDirection": "+", "default": 0 },
+      "waterRadius": { "modifies": "well/sprinkler coverage tiles", "improveDirection": "+", "default": 0 },
+      "moveSpeed":   { "modifies": "player move speed", "improveDirection": ">1", "default": 1.0 }
+    },
+    "flags": {
+      "autoMilk": "cows auto-collect milk each morning (no manual tap needed)",
+      "autoFeed": "enables trough auto-feed globally even without a trough nearby (ranch-wide feeder research)",
+      "autoWater": "all crops auto-watered each morning (ranch-wide, like blanket sprinklers)",
+      "autoCollect": "eggs/wool/etc. auto-collected each morning",
+      "autoShear": "sheep/alpaca auto-sheared on cycle",
+      "bulkSell": "unlock one-tap sell-all in the market panel",
+      "nightWork": "production/processing continues through the night phase at normal rate",
+      "rainShelter": "animals count as sheltered from rain/snow happiness penalties ranch-wide"
+    },
+    "examples": [
+      "milkYield*1.15",
+      "cropGrow*0.8",
+      "feedCost*0.9",
+      "priceBonus+0.1",
+      "capacity+5",
+      "needsDecay*0.85",
+      "cheeseSpeed*0.8",
+      "autoWater",
+      "autoMilk",
+      "bulkSell"
+    ]
+  },
+
+  "achievementsSpec": {
+    "_purpose": "Defines the condition mini-language for content.achievements[].condition and the reward tokens (which reuse eventsSpec.effectTokens).",
+    "conditionFormat": "A string of one or more clauses joined by '&&' (all must hold) or '||' (any). Each clause is 'TOKEN OP VALUE'. No mixed &&/|| precedence — evaluate left to right, or keep clauses single-operator for safety.",
+    "operators": [">=", ">", "<=", "<", "==", "!="],
+    "tokens": {
+      "money": "current cash G",
+      "netWorth": "current net worth (see netWorth.formula)",
+      "day": "absolute day count since game start (1-based, never resets)",
+      "year": "current year (1-based)",
+      "season": "current season id; compare with == e.g. season==autumn",
+      "weather": "current weather id",
+      "ranchRank": "current star rank 1..7",
+      "cows": "count of species==cow owned",
+      "chickens": "count of chickens",
+      "sheep": "count of sheep",
+      "animals": "total animals owned",
+      "species": "count of DISTINCT species owned",
+      "breeds": "count of distinct cow breeds owned",
+      "babies": "count of baby (non-adult) animals",
+      "maxHappyAnimals": "count of animals at happiness >= thresholds.blissful",
+      "buildings.<id>": "count of a building, e.g. buildings.dairy>=1, buildings.sprinkler>=6",
+      "upgrades": "count of upgrades purchased",
+      "cropsHarvested": "lifetime crops harvested",
+      "totalMilk": "lifetime milk produced",
+      "totalCheese": "lifetime cheese made",
+      "totalEggs": "lifetime eggs collected",
+      "totalTruffle": "lifetime truffles found",
+      "totalPets": "lifetime pet interactions",
+      "totalSales": "lifetime G earned from sales",
+      "achievements": "count of achievements already unlocked"
+    },
+    "rewardFormat": "content.achievements[].reward is an ARRAY of effect tokens (same set as eventsSpec.effectTokens). Rewards are always positive.",
+    "examples": [
+      "cows>=5",
+      "netWorth>=50000",
+      "totalCheese>=100 && ranchRank>=3",
+      "maxHappyAnimals>=10",
+      "species>=8",
+      "buildings.dairy>=1",
+      "totalPets>=100"
+    ]
+  },
+
+  "eventsSpec": {
+    "_purpose": "Defines triggers and effect tokens for content.events[]. Effects are the shared reward mini-language used by upgrades' non-numeric grants and by achievement rewards.",
+    "triggerFormat": "content.events[].trigger uses the SAME condition mini-language as achievementsSpec (TOKEN OP VALUE joined by &&/||). It gates eligibility; scheduling fields then decide if/when it actually fires.",
+    "schedulingFields": {
+      "season": "restrict to a season id (or omit for any)",
+      "weatherAny": "array of weather ids that allow the event (e.g. ['rainy'])",
+      "dateExact": "fixed calendar slot, e.g. { season: 'autumn', day: 8 } for a festival",
+      "chancePerDay": "0..1 probability rolled each eligible morning",
+      "weightBase": "relative selection weight when several events are eligible the same day",
+      "cooldownDays": "minimum days between two firings of this event",
+      "onceOnly": "true = can fire at most once per save",
+      "onRankUp": "true = evaluate on rank-up instead of daily"
+    },
+    "effectFormat": "content.events[].effect (and each choices[].effect) is an ARRAY of effect tokens. All outcomes are positive or neutral (soft-failure: no event ever removes animals, bankrupts, or hard-locks).",
+    "effectTokens": {
+      "money+N": "grant N gold",
+      "money-N": "charge N gold (only as an opt-in choice cost; never forced below 0 -> clamped, triggers stipend if needed)",
+      "money*F": "scale cash by F (rare, celebratory)",
+      "priceAll*F": "scale ALL sell prices by F; pair with 'days:D' or defaults to 1 day",
+      "price:<good>*F": "scale one good's price (e.g. price:cheese*1.3) for 'days:D'",
+      "days:D": "modifier that sets the duration (days) of the preceding temporary buff token",
+      "spawnAnimal:<species|breed>": "gift one free animal (e.g. spawnAnimal:rabbit, spawnAnimal:jersey) — the stray-kitten/traveling-merchant delight",
+      "happinessAll+N": "add N happiness to every animal",
+      "happiness:<species>+N": "add N happiness to one species",
+      "healthAll+N": "add N health to every animal",
+      "give:<item>+N": "grant N of a product/feed/decor item (e.g. give:cheese+5)",
+      "seeds:<crop>+N": "grant N seeds (e.g. seeds:carrot+5)",
+      "unlock:<type>:<id>": "unlock content early (e.g. unlock:building:dairy, unlock:animal:alpaca, unlock:recipe:goat_cheese)",
+      "research+N": "grant N research points (for the upgrades/research board)",
+      "weather:<w>": "set tomorrow's weather (festival flavor, e.g. weather:sunny)",
+      "spawnDecor:<id>": "place/gift a decor object (e.g. spawnDecor:rainbow, spawnDecor:snowman)",
+      "buff:<target>*F:days": "temporary named buff, e.g. buff:cropGrow*0.8:3 (3 days of faster crops)"
+    },
+    "choiceFormat": "An event may present choices: [{ label, cost? (G or item), effect: [tokens] }]. Declining is always a free, guilt-free option ('またこんど♪').",
+    "examples": [
+      { "id": "spring_flower_fair", "trigger": "ranchRank>=2", "dateExact": { "season": "spring", "day": 6 }, "onceOnly": false, "effect": ["happinessAll+10", "priceAll*1.15", "days:2", "spawnDecor:flower_arch"] },
+      { "id": "rainbow_after_rain", "trigger": "day>=1", "weatherAny": ["rainy"], "chancePerDay": 0.4, "cooldownDays": 2, "effect": ["happinessAll+8", "spawnDecor:rainbow"] },
+      { "id": "stray_kitten", "trigger": "day>=3", "chancePerDay": 0.02, "onceOnly": true, "effect": ["spawnAnimal:cat"] },
+      { "id": "traveling_merchant", "trigger": "ranchRank>=3", "chancePerDay": 0.06, "cooldownDays": 5, "choices": [ { "label": "レア羊を むかえる", "cost": 4000, "effect": ["spawnAnimal:alpaca"] }, { "label": "たねを かう", "cost": 300, "effect": ["seeds:pumpkin+8"] }, { "label": "またこんど", "effect": [] } ] }
+    ]
+  },
+
+  "difficultyCurve": {
+    "philosophy": "Rewarding, gentle, and dead-end-proof. Every in-game day of basic care is net-positive; neglect only softens output; nothing is ever permanently lost. The player is always safe to relax and safe to experiment.",
+    "softFailure": {
+      "noDeath": true,
+      "noBankruptcy": true,
+      "zeroCashStipend": 150,
+      "stipendCooldownDays": 2,
+      "stipendMessage": "シズクの応援ボーナス♪ すこしだけ おすそわけ〜！",
+      "clampCashAtZero": true
+    },
+    "mentorLoan": {
+      "enabled": true,
+      "optional": true,
+      "maxPrincipalByRank": { "1": 1000, "2": 4000, "3": 20000, "4": 100000, "5": 500000, "6": 2000000, "7": 8000000 },
+      "interestPct": 0.0,
+      "repayFromSalesPct": 0.10,
+      "neverForcesRepayment": true,
+      "noCollateralSeized": true,
+      "note": "A gentle interest-free advance from Shizuku's mentor; auto-repays a small slice of sales. Never spirals, never seizes anything, can be ignored."
+    },
+    "antiStall": {
+      "alwaysProfitableFloor": ["turnip", "egg", "grass->hay"],
+      "floorNote": "Turnips and eggs are always sold above their input cost so a stuck player can always dig out with cheap, fast income.",
+      "belowCurveCatchUpPct": 0.10,
+      "belowCurveNote": "If net worth trails the stageMoneyArc for the current rank, goal rewards and market prices nudge up ~10% (invisible rubber-banding) to keep momentum.",
+      "goalRewardScalesWithRank": true
+    },
+    "pacingTargets": {
+      "S1_daysToRank2": [10, 20],
+      "S2_daysToRank3": [12, 24],
+      "S3_daysToRank4": [16, 30],
+      "note": "Ranges assume casual daily check-ins. Faster play compresses these; there is no timer pressure either way."
+    },
+    "guarantees": [
+      "No hard game-over and no single win screen; ★7 is 'arrival, not ending'.",
+      "Expired contracts/events are shrugged off, never penalized.",
+      "Sad/dirty/hungry animals fully recover with care and clearly signal their need.",
+      "Every good is always sellable at a floor price; no good ever crashes to zero (priceBand min 0.60).",
+      "Buildings/animals refund ~90% within a grace window so mistakes never sting."
+    ]
+  },
+
+  "_formulasQuickRef": {
+    "milkYield": "baseMilkPerDay[breed] * happinessMult * healthMult * seasonMult * feedMult * upgradeMult * ageMult",
+    "happinessMult": "clamp(0.40 + 0.008*happiness, 0.40, 1.20)",
+    "healthMult": "clamp(0.55 + 0.0045*health, 0.55, 1.00)",
+    "seasonMult_summer": "1 - 0.25*(1 - heatResist[breed])",
+    "seasonMult_winter": "1 - 0.30*(1 - coldResist[breed])",
+    "happinessTarget": "clamp(45 + 25*(hunger/100) + 15*(clean/100) + petBonus + min(companion,24) + shelter + weatherPenalty, 0, 100)",
+    "happinessUpdate": "happiness += (happinessTarget - happiness) * 0.5",
+    "qualityScore": "0.40*happiness + 0.25*health + 0.20*(feedQuality*100) + 0.15*temperament",
+    "premiumChance": "clamp((qualityScore-60)/40, 0, 1) * premiumAffinity[breed]",
+    "priceIndexStep": "clamp(index + U(-0.08,0.08) + U(-0.04,0.04) + (1-index)*0.15, 0.60, 1.60)",
+    "sellPrice": "round(basePrice * index * seasonalDemand[cat][season] * weatherDemand * (1-supplyGlut) * (1 - 0.05 + marketStallBonus))",
+    "cropProgress": "progress += (1/(growDays*cropGrowMult)) * waterEffect * seasonEffect * fertilizerEffect * weatherEffect",
+    "netWorth": "cash + sum(animalValue*0.70) + sum(buildingCost*0.60) + sum(product.qty*basePrice) + sum(landPaid*0.50)",
+    "plotCost": "round(1500 * 1.9^(n-2))  (n>=2; plot 1 is the free starter)",
+    "offspringTemperament": "clamp((tA+tB)/2 + U(-8,+12), 10, 100)"
+  }
+}

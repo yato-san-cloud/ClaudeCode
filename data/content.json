@@ -1,0 +1,1528 @@
+{
+  "cowBreeds": [
+    {
+      "id": "holstein",
+      "name": "ホルスタイン",
+      "emoji": "🐄",
+      "rarity": "common",
+      "buyPrice": 800,
+      "sellValue": 400,
+      "baseMilkPerDay": 18,
+      "milkQuality": 2,
+      "matureAgeDays": 12,
+      "lifespanDays": 240,
+      "feedPerDay": 6,
+      "coldResist": 0.5,
+      "heatResist": 0.4,
+      "cutenessBlurb": "白黒もようがトレードマーク。ミルクたっぷり、牧場のアイドル！",
+      "personality": "おっとり",
+      "unlockRank": 1
+    },
+    {
+      "id": "jersey",
+      "name": "ジャージー",
+      "emoji": "🐮",
+      "rarity": "uncommon",
+      "buyPrice": 1600,
+      "sellValue": 800,
+      "baseMilkPerDay": 12,
+      "milkQuality": 4,
+      "matureAgeDays": 14,
+      "lifespanDays": 260,
+      "feedPerDay": 5,
+      "coldResist": 0.4,
+      "heatResist": 0.5,
+      "cutenessBlurb": "うるうるおめめの小柄っ子。こくのある高級ミルクをくれるよ。",
+      "personality": "あまえんぼ",
+      "unlockRank": 1
+    },
+    {
+      "id": "brown_swiss",
+      "name": "ブラウンスイス",
+      "emoji": "🐄",
+      "rarity": "uncommon",
+      "buyPrice": 2400,
+      "sellValue": 1200,
+      "baseMilkPerDay": 15,
+      "milkQuality": 3,
+      "matureAgeDays": 15,
+      "lifespanDays": 280,
+      "feedPerDay": 6,
+      "coldResist": 0.6,
+      "heatResist": 0.5,
+      "cutenessBlurb": "グレーの毛なみがしぶかわ。まるくて大きなおめめでのんびり。",
+      "personality": "のんびり",
+      "unlockRank": 2
+    },
+    {
+      "id": "highland",
+      "name": "ハイランド牛",
+      "emoji": "🐂",
+      "rarity": "rare",
+      "buyPrice": 5000,
+      "sellValue": 2500,
+      "baseMilkPerDay": 8,
+      "milkQuality": 3,
+      "matureAgeDays": 18,
+      "lifespanDays": 340,
+      "feedPerDay": 5,
+      "coldResist": 0.95,
+      "heatResist": 0.2,
+      "cutenessBlurb": "もっふもふの前がみで目がかくれちゃう。寒さにめっぽう強いよ！",
+      "personality": "マイペース",
+      "unlockRank": 3
+    },
+    {
+      "id": "belted_galloway",
+      "name": "ベルギャロ",
+      "emoji": "🐄",
+      "rarity": "uncommon",
+      "buyPrice": 3200,
+      "sellValue": 1600,
+      "baseMilkPerDay": 10,
+      "milkQuality": 3,
+      "matureAgeDays": 16,
+      "lifespanDays": 300,
+      "feedPerDay": 5,
+      "coldResist": 0.8,
+      "heatResist": 0.35,
+      "cutenessBlurb": "おなかに白いベルト、まるでオレオ！元気にはねまわるよ。",
+      "personality": "元気いっぱい",
+      "unlockRank": 2
+    },
+    {
+      "id": "wagyu",
+      "name": "和牛",
+      "emoji": "🐄",
+      "rarity": "epic",
+      "buyPrice": 14000,
+      "sellValue": 8000,
+      "baseMilkPerDay": 6,
+      "milkQuality": 5,
+      "matureAgeDays": 22,
+      "lifespanDays": 380,
+      "feedPerDay": 8,
+      "coldResist": 0.4,
+      "heatResist": 0.6,
+      "cutenessBlurb": "つやつやの黒毛が高貴なかんじ。最高級のしずくをちょっぴりだけ。",
+      "personality": "高貴",
+      "unlockRank": 4
+    },
+    {
+      "id": "mini_cow",
+      "name": "ミニ牛",
+      "emoji": "🐮",
+      "rarity": "rare",
+      "buyPrice": 6500,
+      "sellValue": 3200,
+      "baseMilkPerDay": 4,
+      "milkQuality": 4,
+      "matureAgeDays": 10,
+      "lifespanDays": 400,
+      "feedPerDay": 3,
+      "coldResist": 0.5,
+      "heatResist": 0.5,
+      "cutenessBlurb": "手のひらサイズ…はうそだけど、とにかくちっちゃくてあまえんぼ。",
+      "personality": "あまえんぼ",
+      "unlockRank": 3
+    },
+    {
+      "id": "dexter",
+      "name": "デクスター",
+      "emoji": "🐄",
+      "rarity": "uncommon",
+      "buyPrice": 2800,
+      "sellValue": 1400,
+      "baseMilkPerDay": 9,
+      "milkQuality": 3,
+      "matureAgeDays": 14,
+      "lifespanDays": 300,
+      "feedPerDay": 4,
+      "coldResist": 0.7,
+      "heatResist": 0.5,
+      "cutenessBlurb": "小柄でしっかりもの。少ないごはんでけなげにがんばる働きもの。",
+      "personality": "しっかりもの",
+      "unlockRank": 2
+    }
+  ],
+  "animals": [
+    {
+      "id": "chicken",
+      "name": "ニワトリ",
+      "emoji": "🐔",
+      "kind": "poultry",
+      "buyPrice": 300,
+      "product": "egg",
+      "productPerDay": 1,
+      "feedPerDay": 1,
+      "buildingNeeded": "coop",
+      "cutenessBlurb": "コッコッとお散歩、毎日たまごをプレゼント。序盤のたよれる仲間。",
+      "unlockRank": 1
+    },
+    {
+      "id": "sheep",
+      "name": "ヒツジ",
+      "emoji": "🐑",
+      "kind": "livestock",
+      "buyPrice": 1200,
+      "product": "wool",
+      "productPerDay": 0.5,
+      "feedPerDay": 3,
+      "buildingNeeded": "pasture",
+      "cutenessBlurb": "まんまるふわふわ。刈っても刈ってもまた生えるもふもふの羊毛。",
+      "unlockRank": 2
+    },
+    {
+      "id": "goat",
+      "name": "ヤギ",
+      "emoji": "🐐",
+      "kind": "livestock",
+      "buyPrice": 900,
+      "product": "goat_milk",
+      "productPerDay": 3,
+      "feedPerDay": 2,
+      "buildingNeeded": "barn",
+      "cutenessBlurb": "やんちゃで好奇心おうせい。なんでも食べちゃういたずらっ子。",
+      "unlockRank": 2
+    },
+    {
+      "id": "pig",
+      "name": "ブタ",
+      "emoji": "🐖",
+      "kind": "livestock",
+      "buyPrice": 1500,
+      "product": "truffle",
+      "productPerDay": 0.2,
+      "feedPerDay": 4,
+      "buildingNeeded": "pasture",
+      "cutenessBlurb": "ぷにぷにのお鼻で高級トリュフをほりあてる名探偵さん。",
+      "unlockRank": 3
+    },
+    {
+      "id": "duck",
+      "name": "アヒル",
+      "emoji": "🦆",
+      "kind": "poultry",
+      "buyPrice": 500,
+      "product": "egg",
+      "productPerDay": 1,
+      "feedPerDay": 1,
+      "buildingNeeded": "pond",
+      "cutenessBlurb": "ぺたぺた歩いてすいすい泳ぐ。池のほとりのアイドル。",
+      "unlockRank": 2
+    },
+    {
+      "id": "alpaca",
+      "name": "アルパカ",
+      "emoji": "🦙",
+      "kind": "livestock",
+      "buyPrice": 4000,
+      "product": "fine_wool",
+      "productPerDay": 0.4,
+      "feedPerDay": 3,
+      "buildingNeeded": "pasture",
+      "cutenessBlurb": "もこもこ長い首でのんびりもぐもぐ。最高級のふわふわ毛を生産。",
+      "unlockRank": 3
+    },
+    {
+      "id": "rabbit",
+      "name": "ウサギ",
+      "emoji": "🐰",
+      "kind": "pet",
+      "buyPrice": 600,
+      "product": "manure",
+      "productPerDay": 1,
+      "feedPerDay": 1,
+      "buildingNeeded": "pasture",
+      "cutenessBlurb": "ぴょんぴょんはねる癒し担当。おとしものは畑の栄養にぴったり。",
+      "unlockRank": 2
+    },
+    {
+      "id": "dog",
+      "name": "イヌ",
+      "emoji": "🐕",
+      "kind": "utility",
+      "buyPrice": 2000,
+      "product": null,
+      "productPerDay": 0,
+      "feedPerDay": 2,
+      "buildingNeeded": "house",
+      "cutenessBlurb": "たよれる看板犬。動物たちをまとめて、みんなの幸福度をアップ。",
+      "unlockRank": 2
+    },
+    {
+      "id": "cat",
+      "name": "ネコ",
+      "emoji": "🐈",
+      "kind": "pet",
+      "buyPrice": 1500,
+      "product": null,
+      "productPerDay": 0,
+      "feedPerDay": 1,
+      "buildingNeeded": "house",
+      "cutenessBlurb": "気まぐれ看板猫。お客さんを呼びよせる福ねこ、直売所の人気者。",
+      "unlockRank": 2
+    },
+    {
+      "id": "horse",
+      "name": "ウマ",
+      "emoji": "🐴",
+      "kind": "utility",
+      "buyPrice": 5000,
+      "product": null,
+      "productPerDay": 0,
+      "feedPerDay": 4,
+      "buildingNeeded": "barn",
+      "cutenessBlurb": "つやつやたてがみの相棒。牧場の作業スピードをぐんと上げてくれる。",
+      "unlockRank": 3
+    }
+  ],
+  "crops": [
+    {
+      "id": "grass",
+      "name": "牧草",
+      "emoji": "🌱",
+      "seedPrice": 5,
+      "growDays": 2,
+      "feedValue": 2,
+      "sellValue": 1,
+      "season": ["spring", "summer", "autumn"],
+      "waterNeed": 1,
+      "isDecor": false,
+      "yieldAmount": 4,
+      "cutenessBlurb": "ふさふさみどりの基本のごはん。すぐ育つから序盤の味方。"
+    },
+    {
+      "id": "hay",
+      "name": "干し草",
+      "emoji": "🌾",
+      "seedPrice": 10,
+      "growDays": 3,
+      "feedValue": 3,
+      "sellValue": 2,
+      "season": ["spring", "summer", "autumn"],
+      "waterNeed": 1,
+      "isDecor": false,
+      "yieldAmount": 5,
+      "cutenessBlurb": "ほしてつくるふかふか飼料。冬のたくわえにもってこい。"
+    },
+    {
+      "id": "corn",
+      "name": "トウモロコシ",
+      "emoji": "🌽",
+      "seedPrice": 25,
+      "growDays": 5,
+      "feedValue": 5,
+      "sellValue": 12,
+      "season": ["summer", "autumn"],
+      "waterNeed": 2,
+      "isDecor": false,
+      "yieldAmount": 3,
+      "cutenessBlurb": "つぶつぶきいろがまぶしい夏の主役。飼料にも売り物にも大活躍。"
+    },
+    {
+      "id": "wheat",
+      "name": "小麦",
+      "emoji": "🌾",
+      "seedPrice": 20,
+      "growDays": 4,
+      "feedValue": 4,
+      "sellValue": 9,
+      "season": ["spring", "autumn"],
+      "waterNeed": 2,
+      "isDecor": false,
+      "yieldAmount": 4,
+      "cutenessBlurb": "風にそよぐこがね色。パンにも飼料にもなる万能っ子。"
+    },
+    {
+      "id": "alfalfa",
+      "name": "アルファルファ",
+      "emoji": "🌿",
+      "seedPrice": 60,
+      "growDays": 6,
+      "feedValue": 9,
+      "sellValue": 18,
+      "season": ["spring", "summer"],
+      "waterNeed": 2,
+      "isDecor": false,
+      "yieldAmount": 4,
+      "cutenessBlurb": "栄養まんてんの高級飼料。これを食べた牛はごきげんミルク。"
+    },
+    {
+      "id": "carrot",
+      "name": "ニンジン",
+      "emoji": "🥕",
+      "seedPrice": 18,
+      "growDays": 4,
+      "feedValue": 4,
+      "sellValue": 10,
+      "season": ["spring", "autumn", "winter"],
+      "waterNeed": 2,
+      "isDecor": false,
+      "yieldAmount": 3,
+      "cutenessBlurb": "おいしそうなオレンジ。ウサギさんもウマさんも大よろこび。"
+    },
+    {
+      "id": "turnip",
+      "name": "カブ",
+      "emoji": "🥬",
+      "seedPrice": 12,
+      "growDays": 3,
+      "feedValue": 3,
+      "sellValue": 7,
+      "season": ["autumn", "winter"],
+      "waterNeed": 1,
+      "isDecor": false,
+      "yieldAmount": 3,
+      "cutenessBlurb": "まんまる白いおしり。寒い季節にすくすく育つがんばりや。"
+    },
+    {
+      "id": "clover",
+      "name": "クローバー",
+      "emoji": "🍀",
+      "seedPrice": 15,
+      "growDays": 3,
+      "feedValue": 4,
+      "sellValue": 5,
+      "season": ["spring", "summer"],
+      "waterNeed": 1,
+      "isDecor": false,
+      "yieldAmount": 5,
+      "cutenessBlurb": "みつばのじゅうたん。まれに四つ葉がまじってラッキーなことも？"
+    },
+    {
+      "id": "pumpkin",
+      "name": "カボチャ",
+      "emoji": "🎃",
+      "seedPrice": 40,
+      "growDays": 7,
+      "feedValue": 3,
+      "sellValue": 30,
+      "season": ["autumn"],
+      "waterNeed": 2,
+      "isDecor": false,
+      "yieldAmount": 2,
+      "cutenessBlurb": "ころんと大きな秋の宝物。お祭りシーズンは高値まちがいなし。"
+    },
+    {
+      "id": "sunflower",
+      "name": "ヒマワリ",
+      "emoji": "🌻",
+      "seedPrice": 30,
+      "growDays": 5,
+      "feedValue": 0,
+      "sellValue": 20,
+      "season": ["summer"],
+      "waterNeed": 1,
+      "isDecor": true,
+      "yieldAmount": 2,
+      "cutenessBlurb": "おひさまに向かってにっこり。牧場をぱっと明るくする装飾花。"
+    }
+  ],
+  "products": [
+    {
+      "id": "milk",
+      "name": "ミルク",
+      "emoji": "🥛",
+      "basePrice": 12,
+      "category": "dairy",
+      "spoilDays": 3
+    },
+    {
+      "id": "quality_milk",
+      "name": "高級ミルク",
+      "emoji": "🥛",
+      "basePrice": 30,
+      "category": "dairy",
+      "spoilDays": 3
+    },
+    {
+      "id": "cheese",
+      "name": "チーズ",
+      "emoji": "🧀",
+      "basePrice": 60,
+      "category": "dairy",
+      "spoilDays": 20,
+      "craftedFrom": {"milk": 3}
+    },
+    {
+      "id": "butter",
+      "name": "バター",
+      "emoji": "🧈",
+      "basePrice": 45,
+      "category": "dairy",
+      "spoilDays": 15,
+      "craftedFrom": {"milk": 2}
+    },
+    {
+      "id": "yogurt",
+      "name": "ヨーグルト",
+      "emoji": "🥣",
+      "basePrice": 28,
+      "category": "dairy",
+      "spoilDays": 7,
+      "craftedFrom": {"milk": 2}
+    },
+    {
+      "id": "egg",
+      "name": "たまご",
+      "emoji": "🥚",
+      "basePrice": 8,
+      "category": "poultry",
+      "spoilDays": 10
+    },
+    {
+      "id": "wool",
+      "name": "羊毛",
+      "emoji": "🧶",
+      "basePrice": 35,
+      "category": "textile",
+      "spoilDays": 0
+    },
+    {
+      "id": "fine_wool",
+      "name": "高級羊毛",
+      "emoji": "🧶",
+      "basePrice": 90,
+      "category": "textile",
+      "spoilDays": 0
+    },
+    {
+      "id": "truffle",
+      "name": "トリュフ",
+      "emoji": "🍄",
+      "basePrice": 150,
+      "category": "gourmet",
+      "spoilDays": 5
+    },
+    {
+      "id": "goat_milk",
+      "name": "ヤギミルク",
+      "emoji": "🥛",
+      "basePrice": 18,
+      "category": "dairy",
+      "spoilDays": 3
+    },
+    {
+      "id": "manure",
+      "name": "堆肥",
+      "emoji": "💩",
+      "basePrice": 6,
+      "category": "fertilizer",
+      "spoilDays": 0
+    }
+  ],
+  "buildings": [
+    {
+      "id": "barn",
+      "name": "牛舎",
+      "emoji": "🛖",
+      "buildCost": 800,
+      "footprint": [3, 3],
+      "capacity": 4,
+      "function": "牛・ヤギ・ウマを飼育する基本のおうち",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "赤い屋根のあったか牛舎。動物たちのおやすみどころ。"
+    },
+    {
+      "id": "coop",
+      "name": "鶏小屋",
+      "emoji": "🐔",
+      "buildCost": 400,
+      "footprint": [2, 2],
+      "capacity": 6,
+      "function": "ニワトリ・アヒルを飼育、たまごを回収",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "コケコッコーでおはよう。たまごがころんと待っている小屋。"
+    },
+    {
+      "id": "pasture",
+      "name": "放牧地",
+      "emoji": "🌳",
+      "buildCost": 300,
+      "footprint": [3, 3],
+      "capacity": 6,
+      "function": "放牧して幸福度アップ、羊毛やトリュフを産出",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "青空の下でのびのび。みんなでかけっこできる草はら。"
+    },
+    {
+      "id": "silo",
+      "name": "サイロ",
+      "emoji": "🗼",
+      "buildCost": 600,
+      "footprint": [1, 2],
+      "capacity": 100,
+      "function": "飼料をためておく貯蔵タンク",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "とんがり屋根の飼料庫。冬にそなえてごはんをストック。"
+    },
+    {
+      "id": "well",
+      "name": "井戸",
+      "emoji": "🪣",
+      "buildCost": 350,
+      "footprint": [1, 1],
+      "capacity": 0,
+      "function": "水やり用の水をくみ上げる",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "つるべでぎいこぎいこ。つめたいお水は畑のいのち。"
+    },
+    {
+      "id": "dairy",
+      "name": "加工所",
+      "emoji": "🏭",
+      "buildCost": 2500,
+      "footprint": [2, 2],
+      "capacity": 0,
+      "function": "ミルクをチーズ・バター・ヨーグルトに加工",
+      "unlockRank": 2,
+      "upgradeOf": null,
+      "cutenessBlurb": "いいにおいの乳製品工房。ミルクがごちそうに大変身！"
+    },
+    {
+      "id": "market_stall",
+      "name": "直売所",
+      "emoji": "🏪",
+      "buildCost": 1200,
+      "footprint": [2, 2],
+      "capacity": 0,
+      "function": "商品を並べて販売、来客で収入アップ",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "手づくり看板のかわいいお店。お客さんとのふれあいスポット。"
+    },
+    {
+      "id": "warehouse",
+      "name": "倉庫",
+      "emoji": "📦",
+      "buildCost": 1500,
+      "footprint": [2, 3],
+      "capacity": 200,
+      "function": "商品の在庫をたくさん保管",
+      "unlockRank": 2,
+      "upgradeOf": null,
+      "cutenessBlurb": "きちんと積まれた木箱がずらり。売り時までとっておこう。"
+    },
+    {
+      "id": "house",
+      "name": "自宅",
+      "emoji": "🏡",
+      "buildCost": 1000,
+      "footprint": [2, 2],
+      "capacity": 0,
+      "function": "セーブと休息、ペットのおうち",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "煙突からゆらり。一日のおわりはここでほっとひといき。"
+    },
+    {
+      "id": "windmill",
+      "name": "風車",
+      "emoji": "🌬️",
+      "buildCost": 3000,
+      "footprint": [2, 2],
+      "capacity": 0,
+      "function": "牧草を干し草に加工、飼料生産をブースト",
+      "unlockRank": 3,
+      "upgradeOf": null,
+      "cutenessBlurb": "くるくるまわるランドマーク。牧場の景色を主役級に。"
+    },
+    {
+      "id": "sprinkler",
+      "name": "スプリンクラー",
+      "emoji": "💦",
+      "buildCost": 800,
+      "footprint": [1, 1],
+      "capacity": 0,
+      "function": "まわりの作物へ自動で水やり",
+      "unlockRank": 2,
+      "upgradeOf": null,
+      "cutenessBlurb": "しゃーっと虹色スプレー。水やりの手間をおまかせ。"
+    },
+    {
+      "id": "feed_trough",
+      "name": "自動給餌器",
+      "emoji": "🌾",
+      "buildCost": 700,
+      "footprint": [1, 1],
+      "capacity": 0,
+      "function": "まわりの動物へ自動でごはんを配る",
+      "unlockRank": 2,
+      "upgradeOf": null,
+      "cutenessBlurb": "時間になったらごはんコール。もぐもぐタイムを自動化。"
+    },
+    {
+      "id": "fence",
+      "name": "柵",
+      "emoji": "🪵",
+      "buildCost": 20,
+      "footprint": [1, 1],
+      "capacity": 0,
+      "function": "区画を仕切る、装飾兼機能ブロック",
+      "unlockRank": 1,
+      "upgradeOf": null,
+      "cutenessBlurb": "こつこつ並べる木の柵。牧場らしさがぐっと増すよ。"
+    },
+    {
+      "id": "pond",
+      "name": "池",
+      "emoji": "🏞️",
+      "buildCost": 900,
+      "footprint": [2, 2],
+      "capacity": 4,
+      "function": "アヒルの飼育、みんなの癒しスポット",
+      "unlockRank": 2,
+      "upgradeOf": null,
+      "cutenessBlurb": "きらきら水面にアヒルがすいすい。見てるだけで癒される。"
+    },
+    {
+      "id": "barn_big",
+      "name": "大型牛舎",
+      "emoji": "🏘️",
+      "buildCost": 4500,
+      "footprint": [4, 4],
+      "capacity": 10,
+      "function": "たくさんの牛を飼える大きな牛舎",
+      "unlockRank": 3,
+      "upgradeOf": "barn",
+      "cutenessBlurb": "牛舎がどどんとグレードアップ。大家族もこれで安心！"
+    }
+  ],
+  "upgrades": [
+    {
+      "id": "auto_milker",
+      "name": "自動搾乳機",
+      "emoji": "🥛",
+      "cost": 3500,
+      "effect": "milkYield*1.15",
+      "description": "しゅぽしゅぽ自動でしぼって、ミルクの量を15%アップ。",
+      "unlockRank": 2,
+      "requires": []
+    },
+    {
+      "id": "sprinkler_network",
+      "name": "スプリンクラー網",
+      "emoji": "💦",
+      "cost": 5000,
+      "effect": "cropGrow*0.9",
+      "description": "牧場中に水やりネットワーク。作物の成長が10%はやく。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "market_contract",
+      "name": "優良販売契約",
+      "emoji": "📈",
+      "cost": 4000,
+      "effect": "sellPrice*1.1",
+      "description": "町の商店と仲良し契約。すべての売値が10%アップ。",
+      "unlockRank": 2,
+      "requires": []
+    },
+    {
+      "id": "breeding_lab",
+      "name": "育種ラボ",
+      "emoji": "🧬",
+      "cost": 18000,
+      "effect": "breedSpeed*1.3,offspringQuality+1",
+      "description": "赤ちゃん誕生がはやくなり、生まれる子の品質もアップ。",
+      "unlockRank": 4,
+      "requires": []
+    },
+    {
+      "id": "cozy_bedding",
+      "name": "ふかふかベッド",
+      "emoji": "🛏️",
+      "cost": 2200,
+      "effect": "happiness*1.1",
+      "description": "もこもこ寝わらでぐっすり。みんなの幸福度が10%アップ。",
+      "unlockRank": 2,
+      "requires": []
+    },
+    {
+      "id": "winter_heater",
+      "name": "ヒーター",
+      "emoji": "🔥",
+      "cost": 6000,
+      "effect": "coldResist+0.3",
+      "description": "冬でもぬくぬく。寒さによるミルク減少をやわらげる。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "summer_cooler",
+      "name": "クーラー",
+      "emoji": "❄️",
+      "cost": 6000,
+      "effect": "heatResist+0.3",
+      "description": "夏でもひんやり快適。暑さによる生産ダウンをふせぐ。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "fast_fertilizer",
+      "name": "促成肥料",
+      "emoji": "🌱",
+      "cost": 3000,
+      "effect": "cropGrow*0.8",
+      "description": "堆肥ブレンドで作物の成長を20%スピードアップ。",
+      "unlockRank": 2,
+      "requires": []
+    },
+    {
+      "id": "silo_expansion",
+      "name": "サイロ拡張",
+      "emoji": "🗼",
+      "cost": 2800,
+      "effect": "feedStorage*2",
+      "description": "サイロを増築して飼料の保管量を2倍に。",
+      "unlockRank": 2,
+      "requires": []
+    },
+    {
+      "id": "warehouse_expansion",
+      "name": "倉庫拡張",
+      "emoji": "📦",
+      "cost": 5500,
+      "effect": "stockStorage*2",
+      "description": "倉庫を大きくして在庫の保管量を2倍に。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "tractor",
+      "name": "トラクター",
+      "emoji": "🚜",
+      "cost": 12000,
+      "effect": "farmSpeed*1.5",
+      "description": "耕す・植える・収穫するがぜんぶ50%スピードアップ。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "delivery_truck",
+      "name": "配送トラック",
+      "emoji": "🚚",
+      "cost": 16000,
+      "effect": "sellVolume*1.5",
+      "description": "一度に運べる量が1.5倍。まとめて売っておおもうけ。",
+      "unlockRank": 4,
+      "requires": []
+    },
+    {
+      "id": "petting_zoo_booth",
+      "name": "ふれあいチケット売場",
+      "emoji": "🎟️",
+      "cost": 9000,
+      "effect": "visitorIncome*1.4",
+      "description": "ふれあい牧場をオープン。来客からの収入が40%アップ。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "quality_feed_mix",
+      "name": "高級飼料ブレンド",
+      "emoji": "🌿",
+      "cost": 7000,
+      "effect": "milkQuality+1",
+      "description": "アルファルファ配合の特製ごはんでミルクの品質がアップ。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "auto_cleaner",
+      "name": "自動そうじロボ",
+      "emoji": "🤖",
+      "cost": 8000,
+      "effect": "cleanliness*1.5",
+      "description": "ころころお掃除ロボが牛舎をピカピカに自動キープ。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "rain_barrel",
+      "name": "雨水タンク",
+      "emoji": "🛢️",
+      "cost": 1800,
+      "effect": "waterCost*0.5",
+      "description": "雨の日に水をためて、水やりコストを半分に。",
+      "unlockRank": 2,
+      "requires": []
+    },
+    {
+      "id": "solar_panel",
+      "name": "ソーラーパネル",
+      "emoji": "☀️",
+      "cost": 14000,
+      "effect": "upkeep*0.8",
+      "description": "おひさまパワーで設備の維持費を20%カット。",
+      "unlockRank": 4,
+      "requires": []
+    },
+    {
+      "id": "cheese_press",
+      "name": "チーズプレス",
+      "emoji": "🧀",
+      "cost": 9500,
+      "effect": "dairyYield*1.25",
+      "description": "加工所に本格プレス機を導入、乳製品の生産量25%アップ。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "golden_bell",
+      "name": "黄金の牛鈴",
+      "emoji": "🔔",
+      "cost": 30000,
+      "effect": "allHappiness+0.1",
+      "description": "からんころん響く黄金のベル。牧場ぜんたいがしあわせに。",
+      "unlockRank": 5,
+      "requires": ["cozy_bedding"]
+    },
+    {
+      "id": "drone_herder",
+      "name": "ドローン牧童",
+      "emoji": "🛸",
+      "cost": 40000,
+      "effect": "autoHerd,happiness*1.1",
+      "description": "空飛ぶ牧童が動物を自動でお世話、幸福度もアップ。",
+      "unlockRank": 5,
+      "requires": []
+    },
+    {
+      "id": "fertilizer_spreader",
+      "name": "堆肥散布機",
+      "emoji": "🚜",
+      "cost": 6500,
+      "effect": "cropYield*1.2",
+      "description": "堆肥をむらなくまいて作物の収穫量を20%アップ。",
+      "unlockRank": 3,
+      "requires": ["fast_fertilizer"]
+    },
+    {
+      "id": "premium_market_contract",
+      "name": "プレミアム契約",
+      "emoji": "💎",
+      "cost": 22000,
+      "effect": "sellPrice*1.25",
+      "description": "一流ブランドと専属契約。売値がさらにぐんとアップ。",
+      "unlockRank": 5,
+      "requires": ["market_contract"]
+    },
+    {
+      "id": "incubator",
+      "name": "ふ化器",
+      "emoji": "🐣",
+      "cost": 5000,
+      "effect": "eggHatch,poultryBreed*1.3",
+      "description": "たまごをあたためてヒヨコ誕生。家きんが自分で増える。",
+      "unlockRank": 3,
+      "requires": []
+    },
+    {
+      "id": "windmill_gear",
+      "name": "風車ギア強化",
+      "emoji": "⚙️",
+      "cost": 11000,
+      "effect": "feedProduction*1.3",
+      "description": "風車のギアを強化して飼料の加工量を30%アップ。",
+      "unlockRank": 4,
+      "requires": []
+    },
+    {
+      "id": "night_lamps",
+      "name": "ナイトランプ",
+      "emoji": "🏮",
+      "cost": 2400,
+      "effect": "nightProduction*1.1,happiness*1.05",
+      "description": "やさしい灯りで夜も安心。夜間の生産と幸福度がアップ。",
+      "unlockRank": 2,
+      "requires": []
+    }
+  ],
+  "achievements": [
+    {
+      "id": "first_milk",
+      "name": "はじめてのしずく",
+      "emoji": "🥛",
+      "description": "はじめてミルクをしぼった記念すべき一日。",
+      "condition": "milkCollected>=1",
+      "rewardG": 100
+    },
+    {
+      "id": "first_10k",
+      "name": "はじめの一万",
+      "emoji": "💰",
+      "description": "累計かせぎが10,000Gに到達。牧場が回りはじめた！",
+      "condition": "totalEarned>=10000",
+      "rewardG": 500
+    },
+    {
+      "id": "herd_of_ten",
+      "name": "もぐもぐ牧場",
+      "emoji": "🐄",
+      "description": "牛が10頭に。にぎやかなもぐもぐタイム！",
+      "condition": "cows>=10",
+      "rewardG": 2000
+    },
+    {
+      "id": "full_barn",
+      "name": "ぎゅうぎゅう牛舎",
+      "emoji": "🛖",
+      "description": "牛が25頭に。牛舎がぎゅうぎゅうの大所帯。",
+      "condition": "cows>=25",
+      "rewardG": 5000
+    },
+    {
+      "id": "egg_master",
+      "name": "たまご名人",
+      "emoji": "🥚",
+      "description": "たまごを累計100個回収。コッコたちに感謝！",
+      "condition": "eggsCollected>=100",
+      "rewardG": 1000
+    },
+    {
+      "id": "cheese_artisan",
+      "name": "チーズ職人",
+      "emoji": "🧀",
+      "description": "チーズを累計50個生産。かおりただよう職人技。",
+      "condition": "cheeseMade>=50",
+      "rewardG": 3000
+    },
+    {
+      "id": "rich_rancher",
+      "name": "大金持ち",
+      "emoji": "💵",
+      "description": "所持金が100,000Gを突破。ゆとりの牧場経営。",
+      "condition": "money>=100000",
+      "rewardG": 8000
+    },
+    {
+      "id": "millionaire",
+      "name": "ミリオネア牧場",
+      "emoji": "🤑",
+      "description": "所持金が1,000,000Gに到達。牧場王への道！",
+      "condition": "money>=1000000",
+      "rewardG": 50000
+    },
+    {
+      "id": "all_cows",
+      "name": "牛コンプリート",
+      "emoji": "🏆",
+      "description": "8品種すべての牛をお迎え。牛好きのあかし。",
+      "condition": "cowBreedsOwned>=8",
+      "rewardG": 10000
+    },
+    {
+      "id": "zoo_keeper",
+      "name": "どうぶつ園長",
+      "emoji": "🦙",
+      "description": "10種類の動物をぜんぶそろえた。にぎやか牧場！",
+      "condition": "animalSpeciesOwned>=10",
+      "rewardG": 8000
+    },
+    {
+      "id": "green_thumb",
+      "name": "みどりのゆび",
+      "emoji": "🌱",
+      "description": "作物を累計200回収穫。畑仕事はおまかせ。",
+      "condition": "cropsHarvested>=200",
+      "rewardG": 2000
+    },
+    {
+      "id": "truffle_hunter",
+      "name": "トリュフハンター",
+      "emoji": "🍄",
+      "description": "トリュフを累計20個ゲット。ブタさんお手柄！",
+      "condition": "trufflesFound>=20",
+      "rewardG": 4000
+    },
+    {
+      "id": "wool_baron",
+      "name": "羊毛王",
+      "emoji": "🧶",
+      "description": "羊毛を累計100個収穫。もふもふの帝王。",
+      "condition": "woolCollected>=100",
+      "rewardG": 2500
+    },
+    {
+      "id": "decorator",
+      "name": "デコ名人",
+      "emoji": "🎀",
+      "description": "装飾を20個かざった。とびきりかわいい牧場に。",
+      "condition": "decorationsPlaced>=20",
+      "rewardG": 3000
+    },
+    {
+      "id": "star_five",
+      "name": "五つ星牧場",
+      "emoji": "⭐",
+      "description": "ランク★5に到達。一流牧場の仲間入り。",
+      "condition": "rank>=5",
+      "rewardG": 20000
+    },
+    {
+      "id": "star_seven",
+      "name": "伝説の牧場",
+      "emoji": "🌟",
+      "description": "ランク★7に到達。しずくの守り人となった。",
+      "condition": "rank>=7",
+      "rewardG": 100000
+    },
+    {
+      "id": "happy_ranch",
+      "name": "しあわせ牧場",
+      "emoji": "💖",
+      "description": "平均幸福度が95%以上に。みんなにっこにこ。",
+      "condition": "avgHappiness>=95",
+      "rewardG": 5000
+    },
+    {
+      "id": "breeder",
+      "name": "ブリーダー",
+      "emoji": "🍼",
+      "description": "赤ちゃんが累計10頭誕生。命をつなぐよろこび。",
+      "condition": "calvesBorn>=10",
+      "rewardG": 4000
+    },
+    {
+      "id": "early_bird",
+      "name": "はやおき牧場主",
+      "emoji": "🌅",
+      "description": "30日間プレイ。毎朝の日課がすっかり定着。",
+      "condition": "daysPlayed>=30",
+      "rewardG": 1500
+    },
+    {
+      "id": "festival_fan",
+      "name": "おまつり大好き",
+      "emoji": "🎪",
+      "description": "お祭りイベントに5回参加。牧場の名物あるじ。",
+      "condition": "festivalsAttended>=5",
+      "rewardG": 2000
+    },
+    {
+      "id": "automation_king",
+      "name": "じどうか大臣",
+      "emoji": "🤖",
+      "description": "アップグレードを15個導入。全自動ゆめ牧場。",
+      "condition": "upgradesOwned>=15",
+      "rewardG": 15000
+    },
+    {
+      "id": "pet_lover",
+      "name": "もふもふ愛",
+      "emoji": "🐰",
+      "description": "ペットを3ひきお迎え。癒しにかこまれる毎日。",
+      "condition": "petsOwned>=3",
+      "rewardG": 1500
+    }
+  ],
+  "events": [
+    {
+      "id": "rabbit_visit",
+      "name": "のらうさぎ",
+      "emoji": "🐰",
+      "kind": "good",
+      "weight": 10,
+      "minRank": 1,
+      "description": "野生のうさぎが遊びに来た！なでなでするとみんな幸福度アップ。",
+      "effect": "happiness+5"
+    },
+    {
+      "id": "cow_birth",
+      "name": "赤ちゃん誕生",
+      "emoji": "🍼",
+      "kind": "good",
+      "weight": 4,
+      "minRank": 2,
+      "description": "牛が元気な赤ちゃんを産んだ！小さなひづめにきゅん。",
+      "effect": "spawnCalf"
+    },
+    {
+      "id": "merchant_deal",
+      "name": "行商人の掘り出し物",
+      "emoji": "🛒",
+      "kind": "good",
+      "weight": 6,
+      "minRank": 2,
+      "description": "行商人が珍しい動物を大特価で売りにきた！今だけおやすく。",
+      "effect": "shopDiscount*0.7,duration1"
+    },
+    {
+      "id": "festival_prices",
+      "name": "収穫祭",
+      "emoji": "🎪",
+      "kind": "festival",
+      "weight": 3,
+      "minRank": 2,
+      "description": "村の収穫祭でミルク価格が高騰！売り時をのがすな。",
+      "effect": "sellPrice*1.5,duration3"
+    },
+    {
+      "id": "cold_snap",
+      "name": "寒波",
+      "emoji": "🥶",
+      "kind": "bad",
+      "weight": 5,
+      "minRank": 1,
+      "description": "急な寒波がやってきた…動物たちがぶるぶる寒がっている。",
+      "effect": "happiness-10,milkYield*0.8,duration2"
+    },
+    {
+      "id": "heat_wave",
+      "name": "熱波",
+      "emoji": "🥵",
+      "kind": "bad",
+      "weight": 5,
+      "minRank": 1,
+      "description": "きびしい猛暑日！みんなばて気味でミルクの出がいまいち。",
+      "effect": "milkYield*0.7,duration2"
+    },
+    {
+      "id": "four_leaf_clover",
+      "name": "四つ葉のクローバー",
+      "emoji": "🍀",
+      "kind": "good",
+      "weight": 4,
+      "minRank": 1,
+      "description": "四つ葉のクローバーを発見！なんだかいいことありそう。",
+      "effect": "money+500,luck+1,duration1"
+    },
+    {
+      "id": "sick_animal",
+      "name": "体調不良",
+      "emoji": "🤒",
+      "kind": "bad",
+      "weight": 4,
+      "minRank": 1,
+      "description": "動物が体調をくずしちゃった…やさしくお世話してあげよう。",
+      "effect": "health-20,needCare"
+    },
+    {
+      "id": "egg_jackpot",
+      "name": "たまごの当たり日",
+      "emoji": "🥚",
+      "kind": "good",
+      "weight": 5,
+      "minRank": 1,
+      "description": "ニワトリが絶好調！今日はたまごが大量に産まれたよ。",
+      "effect": "eggYield*2,duration1"
+    },
+    {
+      "id": "wandering_musician",
+      "name": "旅の楽師",
+      "emoji": "🎻",
+      "kind": "good",
+      "weight": 4,
+      "minRank": 2,
+      "description": "旅の楽師がやさしい音色を演奏。みんなうっとり聞きほれる。",
+      "effect": "happiness+8,duration2"
+    },
+    {
+      "id": "lost_puppy",
+      "name": "まいごの子犬",
+      "emoji": "🐕",
+      "kind": "good",
+      "weight": 2,
+      "minRank": 2,
+      "description": "くうんと鳴くまいごの子犬…お迎えしてあげられるかも。",
+      "effect": "gainPet_dog"
+    },
+    {
+      "id": "bumper_harvest",
+      "name": "大豊作",
+      "emoji": "🌾",
+      "kind": "good",
+      "weight": 4,
+      "minRank": 2,
+      "description": "作物がすくすく育って大豊作！収穫量がぐんとアップ。",
+      "effect": "cropYield*1.5,duration2"
+    },
+    {
+      "id": "cheese_boom",
+      "name": "チーズブーム",
+      "emoji": "🧀",
+      "kind": "festival",
+      "weight": 3,
+      "minRank": 3,
+      "description": "町でチーズブーム到来！乳製品が軒なみ高値になった。",
+      "effect": "dairyPrice*1.4,duration3"
+    },
+    {
+      "id": "crop_pest",
+      "name": "虫さん襲来",
+      "emoji": "🐛",
+      "kind": "bad",
+      "weight": 4,
+      "minRank": 2,
+      "description": "作物に虫がついちゃった！早めに対処しないと収穫が減るかも。",
+      "effect": "cropYield*0.6,duration1"
+    },
+    {
+      "id": "traveling_cat",
+      "name": "気まぐれ猫",
+      "emoji": "🐈",
+      "kind": "neutral",
+      "weight": 5,
+      "minRank": 1,
+      "description": "気まぐれな野良猫がひなたでお昼寝しにきた。ほっこり。",
+      "effect": "happiness+3"
+    },
+    {
+      "id": "golden_egg",
+      "name": "きんのたまご",
+      "emoji": "🥚",
+      "kind": "good",
+      "weight": 1,
+      "minRank": 3,
+      "description": "ニワトリがぴかぴか光る金のたまごを産んだ！大当たり！",
+      "effect": "money+2000"
+    },
+    {
+      "id": "rainbow",
+      "name": "虹",
+      "emoji": "🌈",
+      "kind": "festival",
+      "weight": 2,
+      "minRank": 1,
+      "description": "雨あがりに大きな虹がかかった！みんな元気100倍。",
+      "effect": "happiness+15,duration1"
+    }
+  ],
+  "npcs": [
+    {
+      "id": "grandma",
+      "name": "ハナおばあちゃん",
+      "emoji": "👵",
+      "role": "mentor",
+      "personality": "やさしくて物知り、いつもにこにこ",
+      "greeting": "おかえり。あせらずゆっくりやればええんじゃよ。"
+    },
+    {
+      "id": "market_buyer",
+      "name": "マルシェのミナ",
+      "emoji": "👩‍🌾",
+      "role": "buyer",
+      "personality": "明るくてノリがよく、商売じょうず",
+      "greeting": "やっほー！今日はどんないい商品があるのかな？"
+    },
+    {
+      "id": "vet",
+      "name": "モリ先生",
+      "emoji": "🧑‍⚕️",
+      "role": "veterinarian",
+      "personality": "おだやかで頼れる、動物思い",
+      "greeting": "動物たちの調子はどう？気になることはなんでも診るよ。"
+    },
+    {
+      "id": "merchant",
+      "name": "行商のクロベエ",
+      "emoji": "🧙",
+      "role": "traveling_merchant",
+      "personality": "あやしいけど気前がいい、掘り出し物じまん",
+      "greeting": "へへっ、今日はとっておきの掘り出し物があるよ、見てくかい？"
+    },
+    {
+      "id": "rival",
+      "name": "ライバルのリク",
+      "emoji": "🧑‍🌾",
+      "role": "rival",
+      "personality": "負けず嫌いだけど根はやさしい熱血",
+      "greeting": "ふふん、ボクの牧場には負けないんだからね！"
+    },
+    {
+      "id": "mail_carrier",
+      "name": "ポポ",
+      "emoji": "📮",
+      "role": "mail_carrier",
+      "personality": "元気でおてんば、村じゅうの人気者",
+      "greeting": "おはよー！お手紙とどけにきたよー！"
+    }
+  ],
+  "decorations": [
+    {
+      "id": "flower_bed",
+      "name": "花壇",
+      "emoji": "🌸",
+      "cost": 150,
+      "footprint": [1, 1],
+      "happinessBoost": 3,
+      "cutenessBlurb": "色とりどりのお花がぎゅっ。牧場が春いろに染まる。"
+    },
+    {
+      "id": "scarecrow",
+      "name": "かかし",
+      "emoji": "🧑‍🌾",
+      "cost": 100,
+      "footprint": [1, 1],
+      "happinessBoost": 1,
+      "cutenessBlurb": "とんがり帽子のみはり番。虫よけにもなる働きもの。"
+    },
+    {
+      "id": "signboard",
+      "name": "かんばん",
+      "emoji": "🪧",
+      "cost": 80,
+      "footprint": [1, 1],
+      "happinessBoost": 1,
+      "cutenessBlurb": "手書きのウェルカムボード。お客さんをおもてなし。"
+    },
+    {
+      "id": "lantern",
+      "name": "ランタン",
+      "emoji": "🏮",
+      "cost": 120,
+      "footprint": [1, 1],
+      "happinessBoost": 2,
+      "cutenessBlurb": "夜道をぽっと照らすあかり。あったかい光にほっこり。"
+    },
+    {
+      "id": "bench",
+      "name": "ベンチ",
+      "emoji": "🪑",
+      "cost": 200,
+      "footprint": [1, 1],
+      "happinessBoost": 2,
+      "cutenessBlurb": "ひとやすみにぴったりの木のベンチ。ねこがよく座る。"
+    },
+    {
+      "id": "fountain",
+      "name": "ふんすい",
+      "emoji": "⛲",
+      "cost": 1200,
+      "footprint": [2, 2],
+      "happinessBoost": 8,
+      "cutenessBlurb": "きらきら水しぶきがゆうが。牧場のごうか名所。"
+    },
+    {
+      "id": "topiary_cow",
+      "name": "牛のトピアリー",
+      "emoji": "🌳",
+      "cost": 800,
+      "footprint": [1, 1],
+      "happinessBoost": 5,
+      "cutenessBlurb": "牛のかたちに刈りこんだ植木。ほんものそっくりでかわいい。"
+    },
+    {
+      "id": "hay_bale",
+      "name": "干し草ロール",
+      "emoji": "🌾",
+      "cost": 60,
+      "footprint": [1, 1],
+      "happinessBoost": 1,
+      "cutenessBlurb": "ころんと丸い干し草。並べるだけで牧場らしさ満点。"
+    },
+    {
+      "id": "picket_sign",
+      "name": "ウェルカムサイン",
+      "emoji": "💌",
+      "cost": 90,
+      "footprint": [1, 1],
+      "happinessBoost": 2,
+      "cutenessBlurb": "ようこそ！のかわいい立て札。入口をぱっと華やかに。"
+    },
+    {
+      "id": "balloon",
+      "name": "バルーン",
+      "emoji": "🎈",
+      "cost": 140,
+      "footprint": [1, 1],
+      "happinessBoost": 3,
+      "cutenessBlurb": "ふわふわゆれる風船。お祭り気分を毎日おすそわけ。"
+    },
+    {
+      "id": "flower_arch",
+      "name": "花のアーチ",
+      "emoji": "🌺",
+      "cost": 500,
+      "footprint": [2, 1],
+      "happinessBoost": 6,
+      "cutenessBlurb": "くぐると笑顔になれる花のトンネル。記念撮影スポット。"
+    },
+    {
+      "id": "windbell",
+      "name": "風鈴",
+      "emoji": "🎐",
+      "cost": 110,
+      "footprint": [1, 1],
+      "happinessBoost": 2,
+      "cutenessBlurb": "ちりんちりんと涼しげな音。夏の牧場の風物詩。"
+    },
+    {
+      "id": "pond_lily",
+      "name": "すいれん",
+      "emoji": "🪷",
+      "cost": 180,
+      "footprint": [1, 1],
+      "happinessBoost": 3,
+      "cutenessBlurb": "水辺にうかぶ可憐な花。池がいっそう絵になるよ。"
+    },
+    {
+      "id": "star_lantern",
+      "name": "星あかり",
+      "emoji": "✨",
+      "cost": 350,
+      "footprint": [1, 1],
+      "happinessBoost": 4,
+      "cutenessBlurb": "夜になるとほしのようにきらめく飾り灯り。ロマンチック。"
+    }
+  ],
+  "ranks": [
+    {
+      "star": 1,
+      "name": "かけだし牧場主",
+      "requiredG": 0,
+      "rewardBlurb": "無料の牛が1頭とちいさな牧場からスタート！",
+      "unlocksBlurb": "牛舎・鶏小屋・放牧地・直売所・井戸・サイロが建てられる"
+    },
+    {
+      "star": 2,
+      "name": "みならい牧場主",
+      "requiredG": 5000,
+      "rewardBlurb": "加工所の設計図を入手、乳製品づくりが解禁！",
+      "unlocksBlurb": "加工所・倉庫・池・スプリンクラー・自動給餌器と各種動物"
+    },
+    {
+      "star": 3,
+      "name": "いちにんまえ牧場主",
+      "requiredG": 25000,
+      "rewardBlurb": "大型牛舎と風車が建設可能に、レア動物もお迎えできる！",
+      "unlocksBlurb": "大型牛舎・風車・ハイランド牛・ミニ牛・アルパカ・ブタ・ウマ"
+    },
+    {
+      "star": 4,
+      "name": "ベテラン牧場主",
+      "requiredG": 100000,
+      "rewardBlurb": "最高級・和牛の取引許可がおりた！",
+      "unlocksBlurb": "和牛・育種ラボ・配送トラック・ソーラーパネルなど上級設備"
+    },
+    {
+      "star": 5,
+      "name": "マイスター牧場主",
+      "requiredG": 350000,
+      "rewardBlurb": "黄金の牛鈴を授かり、牧場が名所として知れわたる！",
+      "unlocksBlurb": "黄金の牛鈴・ドローン牧童・プレミアム契約など最上位自動化"
+    },
+    {
+      "star": 6,
+      "name": "レジェンド牧場主",
+      "requiredG": 1000000,
+      "rewardBlurb": "伝説の設備がすべて解放、牧場は一大帝国に！",
+      "unlocksBlurb": "全設備の最終アップグレードとエンドゲーム経営要素"
+    },
+    {
+      "star": 7,
+      "name": "しずくの守り人",
+      "requiredG": 5000000,
+      "rewardBlurb": "牧場に妖精が住みつき、まきばのしずくの伝説となる。",
+      "unlocksBlurb": "すべて解放・特別エンドコンテンツと称号「しずくの守り人」"
+    }
+  ]
+}

@@ -24,6 +24,7 @@ const p = (...a) => path.join(ROOT, ...a);
 
 // Fixed module load order (dependencies first).
 const MODULE_ORDER = [
+  '00-data',  // normalizes Game.RAW (content+balance) into the frozen Game.DATA API
   'util',     // rng, math, easing, format, EventBus
   'state',    // central Game.state + newGame()
   'save',     // localStorage persistence + autosave
@@ -86,7 +87,7 @@ for (const name of MODULE_ORDER) {
 const scriptBlock =
 `"use strict";
 window.Game = window.Game || {};
-Game.DATA = ${dataJson};
+Game.RAW = ${dataJson};   /* raw content+balance JSON; 00-data.js normalizes -> Game.DATA */
 Game.BUILD = { modules: ${JSON.stringify(MODULE_ORDER)} };
 ${js}
 (function(){
