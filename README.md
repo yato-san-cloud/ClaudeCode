@@ -17,6 +17,10 @@ into a working program that prints it.
 - **Run & debug** — run to completion, single-step, or *animate* the execution
   while a live memory-tape visualiser shows each cell's value, its ASCII
   character, and the data pointer.
+- **Interactive Play mode** — press **Play ⌨** to run a program that reads input
+  *live*, one keystroke per turn. Ships with a playable **guess-the-number**
+  game (`buildGuessGame`) as proof that turn-based games really do work in these
+  languages.
 - **Three languages, one engine** — Ook!, Cow and Brainfuck. The UI re-tints to
   the language you're in (Ook! amber, Cow teal, Brainfuck periwinkle).
 - **Converter** — translate between all three. Ook! and Brainfuck are exact

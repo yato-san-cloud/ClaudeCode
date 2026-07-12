@@ -73,6 +73,36 @@ E.EXAMPLES.forEach(function (ex) {
 });
 
 // ---------------------------------------------------------------------------
+section('Interactive input (pause on read)');
+(function () {
+  var m = new E.Machine(E.parseBrainfuck(',.'), { interactive: true });
+  while (m.step()) {}                       // steps until it blocks on the read
+  ok(m.waiting === true && !m.halted, 'machine pauses waiting for input');
+  m.feedInput('A');                          // host supplies a keystroke
+  while (!m.halted && m.step()) {}
+  eq(m.output(), 'A', 'resumes and echoes the fed byte');
+})();
+
+// ---------------------------------------------------------------------------
+section('Guess-the-number game (generated)');
+function playGuess(secret, keys) { return E.run('brainfuck', E.buildGuessGame(secret), { input: keys }).output; }
+ok(/Too low!/.test(playGuess(7, '3')), 'guess below secret says Too low');
+ok(/Too high!/.test(playGuess(7, '9')), 'guess above secret says Too high');
+ok(/Correct! It was 7\./.test(playGuess(7, '7')), 'exact guess is Correct');
+(function () {
+  var o = playGuess(7, '397');               // low, then high, then win
+  ok(/Too low![\s\S]*Too high![\s\S]*Correct! It was 7\./.test(o), 'full session low→high→win in order');
+})();
+ok(/Bye!/.test(playGuess(4, '9')) && !/Correct/.test(playGuess(4, '9')), 'runs out of input → quits with Bye!');
+ok(E.run('brainfuck', E.buildGuessGame(7), { input: '7' }).error === null, 'winning game halts (no step-limit)');
+// every digit 1..9 gets exactly one verdict against secret 5
+[1,2,3,4,5,6,7,8,9].forEach(function (g) {
+  var o = playGuess(5, String(g));
+  var want = g === 5 ? 'Correct! It was 5.' : (g < 5 ? 'Too low!' : 'Too high!');
+  ok(o.indexOf(want) !== -1, 'digit ' + g + ' vs secret 5 → ' + want.replace('\n',''));
+});
+
+// ---------------------------------------------------------------------------
 section('Error handling');
 ok(E.run('brainfuck', '[').error !== null, 'unmatched [ is reported');
 ok(E.run('brainfuck', '+[]', { maxSteps: 1000 }).error !== null, 'infinite loop hits step limit');

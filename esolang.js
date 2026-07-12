@@ -185,6 +185,7 @@
     this.cellSize = options.cellSize || 256;
     this.maxSteps = options.maxSteps || 5000000;
     this.maxTape = options.maxTape || 100000;
+    this.interactive = !!options.interactive; // pause on a read when input runs out
     this.input = toBytes(options.input);
     this.reset();
   }
@@ -199,8 +200,23 @@
     this.maxPtr = 0;
     this.outBytes = [];
     this.halted = false;
+    this.waiting = false;      // interactive mode: blocked on input
     this.error = null;
     this.lastWrote = -1;       // pointer position of the most recent write (for the UI)
+  };
+
+  // In interactive mode a read blocks (rather than seeing EOF) when the input
+  // buffer is empty; the host feeds a keystroke and resumes stepping.
+  Machine.prototype.needsInput = function (op) {
+    if (this.inPtr < this.input.length) return false;
+    if (op === ',' || op === 'Q') return true;
+    if (op === 'M') return this.cell() === 0; // COW Moo only reads when cell is 0
+    return false;
+  };
+  Machine.prototype.feedInput = function (str) {
+    var b = toBytes(str);
+    for (var i = 0; i < b.length; i++) this.input.push(b[i]);
+    this.waiting = false;
   };
 
   Machine.prototype.cell = function () { return this.tape[this.ptr] || 0; };
@@ -274,8 +290,11 @@
   Machine.prototype.step = function () {
     if (this.halted) return false;
     if (this.pc >= this.ops.length) { this.halted = true; return false; }
+    var op = this.ops[this.pc];
+    if (this.interactive && this.needsInput(op)) { this.waiting = true; return false; }
+    this.waiting = false;
     if (this.steps >= this.maxSteps) throw new Error('Step limit reached (' + this.maxSteps + '). Possible infinite loop.');
-    this.exec(this.ops[this.pc], false);
+    this.exec(op, false);
     this.pc++;
     this.steps++;
     if (this.pc >= this.ops.length) this.halted = true;
@@ -389,6 +408,15 @@
       // MoO x5 seeds a counter; the loop prints the value then a newline and
       // decrements — showing OOM (print int), OOO (zero) and the char I/O.
       code: buildCowCounter()
+    },
+    {
+      name: 'Brainfuck · Guess the number (interactive)',
+      lang: 'brainfuck',
+      interactive: true,
+      note: 'Press Play ⌨, then type a digit 1–9 and hit a key each turn.',
+      // A real, playable game: read a digit, say too high / too low / correct,
+      // loop until solved. Proof that turn-based games work — see buildGuessGame.
+      code: buildGuessGame(7)
     }
   ];
 
@@ -405,6 +433,55 @@
       out.push('Moo', 'OOO', 'mOo');   // print '\n', zero cell1, back to cell0
     }
     return out.join(' ');
+  }
+
+  // Generate a playable "guess the number" game as Brainfuck. Rather than write
+  // fragile comparison code by hand, we assemble the opcodes with a tiny
+  // cell-addressed helper: dispatch on the typed digit with an equality test and
+  // print a per-digit verdict decided at build time. Reads block in interactive
+  // mode (one keypress per turn) and stop on EOF, so it also runs in batch.
+  //   cells: 0 playing · 1 input · 2 result · 3,4 temps · 5 print scratch
+  function buildGuessGame(secret) {
+    var code = '', p = 0;
+    var PLAY = 0, G = 1, RES = 2, T1 = 3, T2 = 4, MSG = 5;
+    function at(t) { while (p < t) { code += '>'; p++; } while (p > t) { code += '<'; p--; } }
+    function add(t, n) { at(t); code += (n >= 0 ? '+' : '-').repeat(Math.abs(n)); }
+    function zero(t) { at(t); code += '[-]'; }
+    function out(t) { at(t); code += '.'; }
+    function readc(t) { at(t); code += ','; }
+    function loopc(t, body) { at(t); code += '['; body(); at(t); code += ']'; }
+    function emitStr(s, cell) { for (var i = 0; i < s.length; i++) { zero(cell); add(cell, s.charCodeAt(i)); out(cell); } }
+    function copy(a, b, t) {                    // b = a, preserving a (t is scratch)
+      zero(b); zero(t);
+      loopc(a, function () { add(b, 1); add(t, 1); add(a, -1); });
+      loopc(t, function () { add(a, 1); add(t, -1); });
+    }
+    function eqConst(a, k) {                     // RES = (a == k) ? 1 : 0
+      copy(a, T1, T2); add(T1, -k);
+      zero(RES); add(RES, 1);
+      loopc(T1, function () { zero(RES); zero(T1); });
+    }
+    add(PLAY, 1);                                // playing = 1
+    loopc(PLAY, function () {
+      emitStr('Guess 1-9: ', MSG);
+      readc(G);
+      eqConst(G, 0);                             // EOF (0) → quit cleanly (batch mode)
+      loopc(RES, function () { zero(PLAY); zero(RES); });
+      for (var k = 1; k <= 9; k++) {
+        eqConst(G, 48 + k);                      // does the typed digit equal k?
+        (function (k) {
+          loopc(RES, function () {
+            var verdict = (k === secret) ? ('Correct! It was ' + secret + '.\n')
+                        : (k < secret ? 'Too low!\n' : 'Too high!\n');
+            emitStr(verdict, MSG);
+            if (k === secret) zero(PLAY);        // solved → stop looping
+            zero(RES);
+          });
+        })(k);
+      }
+    });
+    emitStr('Bye!\n', MSG);
+    return code;
   }
 
   // Fill in the generated examples.
@@ -428,6 +505,7 @@
     Machine: Machine,
     generate: generate,
     textToBrainfuck: textToBrainfuck,
+    buildGuessGame: buildGuessGame,
     LANGS: LANGS,
     EXAMPLES: EXAMPLES,
     COW_WORDS: COW_WORDS,

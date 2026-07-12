@@ -177,6 +177,10 @@
   .status .k { color: var(--text); }
   .status .err { color: var(--bad); font-weight: 600; width: 100%; }
   .status .ok { color: var(--good); }
+  .status .wait { color: var(--accent-ink); background: var(--accent); padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+  .out.live { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .play-hint { font-family: var(--mono); font-size: 11.5px; color: var(--accent); min-height: 15px; }
+  #play.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
   /* ---- memory tape --------------------------------------------------- */
   .tape { display: flex; gap: 6px; padding: 12px; overflow-x: auto; min-height: 74px; align-items: stretch; }
@@ -276,15 +280,17 @@
             <button class="btn btn-accent" id="run">Run ▶</button>
             <button class="btn" id="step">Step ▷</button>
             <button class="btn" id="animate">Animate</button>
+            <button class="btn" id="play" title="Interactive: run and type keys live">Play ⌨</button>
             <button class="btn" id="reset">Reset ↺</button>
             <span class="spacer"></span>
             <select id="examples" title="Load an example"><option value="">Examples…</option></select>
           </div>
+          <div class="play-hint" id="play-hint"></div>
         </div>
         <div class="col">
           <div>
             <label class="field" for="output">Output</label>
-            <pre class="out" id="output"></pre>
+            <pre class="out" id="output" tabindex="0"></pre>
           </div>
           <div class="status" id="status"></div>
           <div>
@@ -385,6 +391,7 @@
   var lang = 'ook';
   var vm = null;         // persistent machine for stepping
   var anim = null;       // animation timer
+  var playing = false;   // interactive Play session active
 
   // ---- rendering --------------------------------------------------------
   function printableAscii(v) {
@@ -422,28 +429,33 @@
       part('steps <span class="k">' + v.steps + '</span>');
       part('pointer <span class="k">' + v.ptr + '</span>');
       part('ops <span class="k">' + v.ops.length + '</span>');
-      part(v.halted ? '<span class="ok">● halted</span>' : '<span class="k">▷ ready to step</span>');
+      part(v.halted ? '<span class="ok">● halted</span>'
+        : v.waiting ? '<span class="wait">⌨ your move — press a key</span>'
+        : '<span class="k">▷ ready to step</span>');
     }
     if (extra) part(extra);
     if (v && v.error) { var e = document.createElement('span'); e.className = 'err'; e.textContent = '⚠ ' + v.error; st.appendChild(e); }
   }
   function renderVM() {
     if (!vm) return;
-    $('output').textContent = vm.output();
+    var o = vm.output();
+    var ff = o.lastIndexOf('\f');          // form-feed clears the "screen"
+    $('output').textContent = (ff >= 0 ? o.slice(ff + 1) : o) + (vm.waiting ? '▋' : '');
+    $('output').classList.toggle('live', !!vm.waiting);
     renderTape(vm.tape, vm.ptr, vm.maxPtr >= 240 ? '· showing first 240 cells' : '');
     renderOps(vm.ops, vm.halted ? -1 : vm.pc);
     renderStatus(vm);
   }
 
   // ---- machine lifecycle ------------------------------------------------
-  function buildVM() {
-    stopAnim();
+  function buildVM(interactive) {
+    stopAnim(); endPlay();
     try {
       var ops = E.parse(lang, $('code').value);
-      vm = new E.Machine(ops, { input: $('stdin').value });
+      vm = new E.Machine(ops, { input: $('stdin').value, interactive: !!interactive });
       return true;
     } catch (err) {
-      vm = null;
+      vm = null; endPlay();
       $('output').textContent = '';
       renderTape([0], 0, '');
       renderOps([], -1);
@@ -452,8 +464,8 @@
       return false;
     }
   }
-  function ensureVM() { if (!vm) return buildVM(); return true; }
-  function invalidate() { stopAnim(); vm = null; }
+  function ensureVM() { if (playing) invalidate(); if (!vm) return buildVM(); return true; }
+  function invalidate() { stopAnim(); endPlay(); vm = null; }
 
   function doRun() {
     if (!buildVM()) return;
@@ -478,6 +490,31 @@
       renderVM();
       if (vm.halted) stopAnim();
     }, 55);
+  }
+
+  // interactive Play: run until the program blocks on input, then wait for a key.
+  function pump() {
+    if (!vm) return;
+    try { var g = 0; while (!vm.halted && !vm.waiting && g++ < 60000000) vm.step(); }
+    catch (err) { vm.error = err.message; vm.halted = true; }
+    renderVM();
+    if (vm.halted || vm.error) endPlay();
+  }
+  function doPlay() {
+    if (playing) { endPlay(); renderVM(); return; }
+    if (!buildVM(true)) return;
+    playing = true;
+    $('play').textContent = 'Stop ⏹'; $('play').classList.add('on');
+    $('play-hint').textContent = '⌨ session live — click here or the output, then type. Enter/keys are sent to the program.';
+    try { $('output').focus(); } catch (e) {}
+    pump();
+  }
+  function endPlay() {
+    if (!playing) return;
+    playing = false;
+    $('play').textContent = 'Play ⌨'; $('play').classList.remove('on');
+    $('play-hint').textContent = '';
+    if (vm) { vm.waiting = false; }
   }
   function doReset() {
     invalidate();
@@ -519,6 +556,7 @@
       $('code').value = ex.code;
       $('stdin').value = ex.input || '';
       invalidate(); doReset();
+      if (ex.interactive) $('play-hint').textContent = '▶ ' + (ex.note || 'Press Play ⌨ to start.');
       sel.value = '';
     });
   }
@@ -571,7 +609,22 @@
   $('run').addEventListener('click', doRun);
   $('step').addEventListener('click', doStep);
   $('animate').addEventListener('click', doAnimate);
+  $('play').addEventListener('click', doPlay);
   $('reset').addEventListener('click', doReset);
+  // live keystrokes for an interactive session — never hijack real form fields
+  document.addEventListener('keydown', function (e) {
+    if (!playing || !vm || !vm.waiting) return;
+    if (e.target && e.target.matches && e.target.matches('textarea, input, select')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var ch;
+    if (e.key === 'Enter') ch = '\n';
+    else if (e.key === 'Backspace') ch = '\b';
+    else if (e.key.length === 1) ch = e.key;   // printable single character
+    else return;
+    e.preventDefault();
+    vm.feedInput(ch);
+    pump();
+  });
   $('cvt-go').addEventListener('click', doConvert);
   $('gen-go').addEventListener('click', doGenerate);
   $('cvt-send').addEventListener('click', function () {
