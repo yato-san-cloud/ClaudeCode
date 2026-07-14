@@ -51,6 +51,10 @@
   .st-retired{background:#e2e8f0; color:#334155; text-decoration:line-through}
   .st-over{background:#fee2e2; color:#b91c1c}
   .st-dirty{background:#e0e7ff; color:#3730a3}
+  .st-qa{background:#ccfbf1; color:#0f766e}
+  .st-qb{background:#dbeafe; color:#1e40af}
+  .st-qc{background:#fef3c7; color:#b45309}
+  .st-qd{background:#fee2e2; color:#b91c1c}
   .macts{display:flex; flex-direction:column; gap:2px}
   .linkbtn{border:none; background:none; color:var(--sub); text-decoration:underline; font-size:12px; cursor:pointer; font-family:inherit}
   .searchbox{width:100%; padding:11px 14px; border-radius:11px; border:1.5px solid var(--line); font-family:inherit; font-size:14px; margin-bottom:12px; background:var(--card); color:var(--ink)}
@@ -73,6 +77,25 @@
   details.mgmt{margin-top:14px; border-top:1px dashed var(--line); padding-top:10px}
   details.mgmt summary{cursor:pointer; font-size:13px; font-weight:700; color:var(--sub)}
   .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px}
+
+  /* ---- quality / approval / effect panel ---- */
+  .q-head{display:flex; align-items:baseline; gap:10px; margin:10px 0 6px; flex-wrap:wrap}
+  .q-score{font-size:22px; font-weight:800; color:var(--danger)}
+  .q-score.good{color:#166534}
+  .q-blockers{font-size:11px; color:var(--sub); flex:1; min-width:180px}
+  .q-checks{display:grid; gap:6px; margin:6px 0 12px}
+  .q-checks label{display:flex; align-items:flex-start; gap:8px; font-size:13px; font-weight:600; color:var(--ink); margin-bottom:0}
+  .q-checks input{width:18px; height:18px; accent-color:var(--brand); flex:none; margin-top:2px}
+  .q-actions{display:flex; gap:8px; margin-top:12px}
+  .q-actions button{flex:1; border:none; background:var(--brand); color:#fff; border-radius:9px; padding:10px 8px; font-weight:700; font-family:inherit; font-size:13px; cursor:pointer}
+  .q-actions button.ghost{background:var(--bg); color:var(--ink)}
+
+  /* ---- per-step education fields ---- */
+  details.edu{margin-top:10px; border-top:1px dashed var(--line); padding-top:8px}
+  details.edu summary{font-size:12px; font-weight:700; color:var(--sub); cursor:pointer}
+  details.edu input,details.edu textarea{width:100%; border:1.5px solid var(--line); border-radius:8px; padding:7px; font-family:inherit; font-size:13px; margin:6px 0 0; color:var(--ink); resize:vertical}
+  details.edu textarea{min-height:38px}
+  details.edu input:focus,details.edu textarea:focus{outline:none; border-color:var(--brand)}
 
   /* ---- steps ---- */
   #steps{display:flex; flex-direction:column; gap:14px}
@@ -206,6 +229,31 @@
         </div>
         <div style="margin-top:10px"><label for="m-note">改訂メモ（今回の変更点）</label><input id="m-note" placeholder="例：バルブ電動化に伴い手順3を変更"></div>
       </details>
+      <details class="mgmt" id="d-quality">
+        <summary>✅ 提出前チェック（品質スコア・承認・改善効果）</summary>
+        <div class="q-head"><span class="q-score" id="q-score">--</span><span class="q-blockers" id="q-blockers"></span></div>
+        <div class="q-checks">
+          <label><input type="checkbox" data-ap="photoSecurity"> 写真に顔・個人名・顧客名・秘匿情報が写っていない</label>
+          <label><input type="checkbox" data-ap="orderChecked"> 実作業の順序と手順の並びが一致している</label>
+          <label><input type="checkbox" data-ap="dangerChecked"> 危険・品質影響箇所が「⚠注意」になっている</label>
+          <label><input type="checkbox" data-ap="checkDefined"> 記録が必要な箇所が「☑点検」になっている</label>
+          <label><input type="checkbox" data-ap="reviewSet"> 次回見直し日を設定した</label>
+          <label><input type="checkbox" data-ap="changeMemo"> 改訂メモを書いた</label>
+          <label><input type="checkbox" data-ap="oldVersionHandled"> 旧版の退避先を確認した</label>
+        </div>
+        <div class="grid2">
+          <div><label for="ef-before">従来の時間（分/回）</label><input id="ef-before" type="number" min="0" inputmode="numeric"></div>
+          <div><label for="ef-after">ツール利用後（分/回）</label><input id="ef-after" type="number" min="0" inputmode="numeric"></div>
+          <div><label for="ef-count">月間回数</label><input id="ef-count" type="number" min="0" inputmode="numeric"></div>
+          <div><label>月間削減見込み</label><input id="ef-saved" readonly tabindex="-1"></div>
+        </div>
+        <div style="margin-top:10px"><label for="ef-memo">改善効果メモ</label><input id="ef-memo" placeholder="例：新人教育の説明時間を短縮、点検記録の標準化"></div>
+        <div class="q-actions">
+          <button type="button" id="btn-ledger-json">台帳JSON</button>
+          <button type="button" id="btn-ledger-csv">台帳CSV</button>
+          <button type="button" id="btn-effect-copy" class="ghost">📋 効果メモ</button>
+        </div>
+      </details>
     </div>
 
     <div id="steps"></div>
@@ -333,6 +381,7 @@ function save(){
   cur.updatedAt=Date.now();
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{ dbPut(cur).then(stampSaved); },300);
+  refreshQuality();
 }
 async function flushSave(){
   clearTimeout(saveTimer);
@@ -343,6 +392,107 @@ function stampSaved(){
   $("#savenote").textContent=`✓ 保存済み ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/* ================= quality / approval / effect ================= */
+const AP_KEYS=["photoSecurity","orderChecked","dangerChecked","checkDefined","reviewSet","changeMemo","oldVersionHandled"];
+function extOf(m){
+  if(!m.ext) m.ext={};
+  if(!m.ext.effect) m.ext.effect={};
+  if(!m.ext.approval) m.ext.approval={};
+  return m.ext;
+}
+function calcQuality(m){
+  const steps=m.steps||[], blockers=[];
+  let s=0;
+  const add=(cond,pt,msg)=>{ if(cond) s+=pt; else if(msg) blockers.push(msg); };
+  add((m.title||"").trim(),8,"タイトル未入力");
+  add((m.place||"").trim(),8,"現場・設備未入力");
+  add((m.author||"").trim(),7,"作成者未入力");
+  add((m.approver||"").trim(),7,"承認者未入力");
+  add((m.reviewDate||"").trim(),10,"次回見直し日未設定");
+  add((m.version||"").trim(),5,null);
+  add(steps.length>0,10,"手順なし");
+  const photo=steps.filter(x=>x.photo).length;
+  const warn=steps.filter(x=>x.type==="warn").length;
+  const check=steps.filter(x=>x.type==="check").length;
+  const descOk=steps.filter(x=>(x.desc||"").trim().length>=8).length;
+  add(steps.length&&photo/steps.length>=0.8,10,steps.length?"写真付き手順が8割未満":null);
+  add(steps.length&&descOk/steps.length>=0.8,10,steps.length?"説明が薄い手順あり":null);
+  add(warn>0,6,"⚠注意の手順が未設定");
+  add(check>0,6,null);
+  add((m.note||"").trim(),5,null);
+  add((m.tools||"").trim(),4,null);
+  const ap=extOf(m).approval;
+  s+=Math.round(4*AP_KEYS.filter(k=>ap[k]).length/AP_KEYS.length);
+  if(s>100)s=100;
+  const grade=s>=90?"A":s>=80?"B":s>=70?"C":"D";
+  return {score:s, grade, blockers, stats:{steps:steps.length, photo, warn, check}};
+}
+function savedHours(ef){
+  const b=parseFloat(ef.beforeMinutes)||0, a=parseFloat(ef.afterMinutes)||0, c=parseFloat(ef.monthlyCount)||0;
+  const h=(b-a)*c/60;
+  return (isFinite(h)&&h>0)?Math.round(h*10)/10:0;
+}
+function ledgerObject(m){
+  const q=calcQuality(m), ef=extOf(m).effect;
+  return {
+    manual_id:m.id||"", title:m.title||"", place:m.place||"", version:m.version||"1.0",
+    status:m.status||"draft", author:m.author||"", approver:m.approver||"",
+    reviewDate:m.reviewDate||"", updatedAt:fmtDate(m.updatedAt), exportedAt:m.exportedAt?fmtDate(m.exportedAt):"",
+    stepCount:q.stats.steps, photoStepCount:q.stats.photo, warnStepCount:q.stats.warn, checkStepCount:q.stats.check,
+    qualityScore:q.score, qualityGrade:q.grade, qualityBlockers:q.blockers.join(" / "),
+    beforeMinutes:ef.beforeMinutes||"", afterMinutes:ef.afterMinutes||"", monthlyCount:ef.monthlyCount||"",
+    monthlySavedHours:savedHours(ef), effectMemo:ef.memo||""
+  };
+}
+function ledgerCsv(m){
+  const o=ledgerObject(m), cols=Object.keys(o);
+  const cell=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  // 先頭のBOMはExcel/kintoneでの文字化け防止
+  return "\uFEFF"+cols.join(",")+"\n"+cols.map(k=>cell(o[k])).join(",")+"\n";
+}
+function exportLedger(kind){
+  if(!cur) return;
+  const safe=(cur.title||"manual").replace(/[\\/:*?"<>|]/g,"_").slice(0,40);
+  if(kind==="json") downloadFile(JSON.stringify(ledgerObject(cur),null,2), `${safe}_v${cur.version||"1.0"}_台帳.json`, "application/json");
+  else downloadFile(ledgerCsv(cur), `${safe}_v${cur.version||"1.0"}_台帳.csv`, "text/csv");
+  toast("⬇ 台帳データを書き出しました");
+}
+function copyEffectMemo(){
+  if(!cur) return;
+  const o=ledgerObject(cur);
+  const lines=["【現場マニュアル改善効果】"+o.title+"（v"+o.version+"）",
+    "現場・設備："+o.place,
+    "品質スコア："+o.qualityScore+"点（"+o.qualityGrade+"）",
+    "月間削減見込み："+o.monthlySavedHours+" h/月（"+(o.beforeMinutes||"?")+"分 → "+(o.afterMinutes||"?")+"分 × 月"+(o.monthlyCount||"?")+"回）",
+    "手順数："+o.stepCount+"（写真"+o.photoStepCount+"・注意"+o.warnStepCount+"・点検"+o.checkStepCount+"）"];
+  if(o.effectMemo) lines.push("補足："+o.effectMemo);
+  const txt=lines.join("\n");
+  const ok=()=>toast("📋 効果メモをコピーしました");
+  const fallback=()=>{
+    const ta=document.createElement("textarea"); ta.value=txt;
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); ok(); }catch(e){ alert(txt); }
+    ta.remove();
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok,fallback);
+  else fallback();
+}
+function refreshQuality(){
+  if(!cur||$("#v-edit").hidden) return;
+  const ex=extOf(cur), q=calcQuality(cur);
+  const sc=$("#q-score");
+  sc.textContent=q.score+" / 100（"+q.grade+"）";
+  sc.classList.toggle("good",q.score>=90);
+  $("#q-blockers").textContent=q.blockers.length?("あと少し："+q.blockers.join("・")):"提出品質OK。承認に回せます。";
+  document.querySelectorAll("#d-quality input[data-ap]").forEach(c=>{ c.checked=!!ex.approval[c.dataset.ap]; });
+  const setV=(id,v)=>{ const el=$("#"+id); if(el.value!==String(v)) el.value=v; };
+  setV("ef-before",ex.effect.beforeMinutes||"");
+  setV("ef-after",ex.effect.afterMinutes||"");
+  setV("ef-count",ex.effect.monthlyCount||"");
+  setV("ef-memo",ex.effect.memo||"");
+  $("#ef-saved").value=savedHours(ex.effect)+" h/月";
+}
+
 /* ================= home ================= */
 function statusChips(m){
   const map={draft:["下書き","st-draft"],wait:["承認待ち","st-wait"],active:["運用中","st-active"],retired:["廃止","st-retired"]};
@@ -350,6 +500,10 @@ function statusChips(m){
   const out=[{tx,cls}];
   if(m.status==="active" && isOverdue(m)) out.push({tx:"⚠ 要見直し",cls:"st-over"});
   if(m.exportedAt && (m.updatedAt||0)>m.exportedAt) out.push({tx:"✎ 未提出の変更",cls:"st-dirty"});
+  if((m.steps||[]).length){
+    const q=calcQuality(m);
+    out.push({tx:`品質${q.grade}・${q.score}点`, cls:"st-q"+q.grade.toLowerCase()});
+  }
   return out;
 }
 function updQuota(){
@@ -396,6 +550,7 @@ function renderHome(){
 function blankManual(){
   return { id:uid(), title:"", place:"", author:"", approver:"", version:"1.0",
     status:"draft", reviewDate:"", note:"", tools:"", steps:[],
+    ext:{effect:{},approval:{}},
     createdAt:Date.now(), updatedAt:Date.now(), exportedAt:0 };
 }
 function isEmptyManual(m){
@@ -447,6 +602,7 @@ function openEditor(m){
   $("#savenote").textContent="— 自動保存されます —";
   renderSteps();
   showView("v-edit");
+  refreshQuality();
 }
 async function goHome(){
   if(cur && isEmptyManual(cur)){
@@ -492,6 +648,13 @@ function renderSteps(){
         <input class="s-title" placeholder="手順のタイトル（例：電源スイッチを確認）" value="${esc(st.title)}">
         <div class="field-lbl">説明・注意点</div>
         <textarea placeholder="やること、注意点、判断基準などを書く">${esc(st.desc)}</textarea>
+        <details class="edu"${(st.edu&&(st.edu.time||st.edu.done||st.edu.mistake||st.edu.escalate))?" open":""}>
+          <summary>🎓 教育・引継ぎメモ（任意・新人/応援者向け）</summary>
+          <input data-edu="time" placeholder="目安時間（例：3分）" value="${esc(st.edu?st.edu.time:"")}">
+          <textarea data-edu="done" placeholder="完了条件（例：ランプが緑点灯した状態）">${esc(st.edu?st.edu.done:"")}</textarea>
+          <textarea data-edu="mistake" placeholder="よくあるミス・NG例">${esc(st.edu?st.edu.mistake:"")}</textarea>
+          <textarea data-edu="escalate" placeholder="詰まった時の報告基準（例：ここで止まったら職長へ連絡）">${esc(st.edu?st.edu.escalate:"")}</textarea>
+        </details>
       </div>`;
     const slot=el.querySelector(".photo-slot");
     slot.onclick=()=>{
@@ -514,6 +677,9 @@ function renderSteps(){
     };
     el.querySelector(".s-title").oninput=e=>{ st.title=e.target.value; save(); };
     el.querySelector("textarea").oninput=e=>{ st.desc=e.target.value; save(); };
+    el.querySelectorAll("[data-edu]").forEach(inp=>{
+      inp.oninput=e=>{ if(!st.edu) st.edu={}; st.edu[inp.dataset.edu]=e.target.value; save(); };
+    });
     el.querySelector(".up").onclick=()=>moveStep(i,-1);
     el.querySelector(".down").onclick=()=>moveStep(i,1);
     el.querySelector(".sdel").onclick=()=>{
@@ -750,6 +916,17 @@ footer{margin-top:32px;padding-top:14px;border-top:1px solid #e2e8f0;color:#94a3
 .fb-empty{list-style:none;color:#94a3b8}
 #lb{position:fixed;inset:0;background:rgba(0,0,0,.93);z-index:80;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
 #lb img{max-width:100%;max-height:100%}
+.edu-v{margin-top:10px;font-size:13px}
+.edu-chip{display:inline-block;background:#f1f5f9;color:#334155;font-weight:700;border-radius:999px;padding:3px 10px;font-size:12px}
+.edu-row{padding:7px 11px;border-radius:8px;margin-top:6px;line-height:1.6}
+.edu-row.ok{background:#f0fdf4;color:#166534}
+.edu-row.ng{background:#fffbeb;color:#92400e}
+.edu-row.esc{background:#eff6ff;color:#1e40af}
+.q-sec p{font-size:13.5px}
+.g-edu{padding:10px 12px;border-radius:10px;margin:12px 0 0;font-size:14.5px;font-weight:600;display:none}
+.g-edu.ok{background:rgba(45,212,191,.16);color:#99f6e4}
+.g-edu.ng{background:rgba(245,158,11,.2);color:#fcd34d}
+.g-edu.esc{background:rgba(96,165,250,.16);color:#bfdbfe}
 .ckbtn{border:none;background:#0f766e;color:#fff;font-weight:700;font-family:inherit;font-size:12px;padding:6px 12px;border-radius:999px;cursor:pointer}
 [hidden]{display:none!important}
 @media print{
@@ -867,6 +1044,14 @@ const VIEWER_JS = `
     var im=q('#g-img');
     if(st.photo){ im.src=st.photo; im.style.display='block' } else { im.style.display='none' }
     q('#g-warn').style.display = st.type==='warn' ? 'inline-flex' : 'none';
+    var ed=st.edu||{};
+    function setEdu(sel,label,val){
+      var n=q(sel); if(!n) return;
+      if(val){ n.textContent=label+val; n.style.display='block' } else { n.style.display='none' }
+    }
+    setEdu('#g-done','✅ 完了条件：',ed.done||'');
+    setEdu('#g-mist','⚠ よくあるミス：',ed.mistake||'');
+    setEdu('#g-esc','📞 詰まったら：',ed.escalate||'');
     var gc=q('#g-check');
     if(st.type==='check'){
       gc.style.display='flex';
@@ -958,6 +1143,14 @@ function buildDoc(m){
 
   const stepsHtml = steps.map((s,i)=>{
     const isW=s.type==="warn", isC=s.type==="check";
+    const e=s.edu||{};
+    const eduHtml=(e.time||e.done||e.mistake||e.escalate)
+      ? `<div class="edu-v">
+          ${e.time?`<span class="edu-chip">⏱ 目安 ${esc(e.time)}</span>`:""}
+          ${e.done?`<div class="edu-row ok">✅ 完了条件：${esc(e.done)}</div>`:""}
+          ${e.mistake?`<div class="edu-row ng">⚠ よくあるミス：${esc(e.mistake)}</div>`:""}
+          ${e.escalate?`<div class="edu-row esc">📞 詰まったら：${esc(e.escalate)}</div>`:""}
+        </div>` : "";
     return `<section class="s" id="s-${i}">
       <div class="s-h">
         <span class="s-n${isW?" warn":""}">${i+1}</span>
@@ -967,16 +1160,26 @@ function buildDoc(m){
       </div>
       ${s.photo?`<img data-p="${i}" alt="手順${i+1}の写真">`:""}
       ${s.desc?`<p>${esc(s.desc).replace(/\n/g,"<br>")}</p>`:""}
+      ${eduHtml}
     </section>`;
   }).join("");
 
   const fbOptions = `<option value="-1">全体について</option>`+
     steps.map((s,i)=>`<option value="${i}">手順${i+1}：${esc(s.title)||"（無題）"}</option>`).join("");
 
+  const q=calcQuality(m), ef=extOf(m).effect, sh=savedHours(ef);
+  const qualHtml=`<section class="s q-sec"><div class="s-h"><span class="s-n">★</span><h2>品質・改善効果</h2></div>
+    <p>品質スコア：<b>${q.score} / 100（${q.grade}）</b>${sh>0?`<br>月間削減見込み：<b>${sh} h/月</b>`:""}${ef.memo?`<br>改善効果メモ：${esc(ef.memo)}`:""}</p></section>`;
+
   const embed={ id:m.id, title:m.title, place:m.place, author:m.author, approver:m.approver,
     version:m.version, note:m.note, reviewDate:m.reviewDate, tools:m.tools, status:m.status,
     createdAt:m.createdAt,
-    steps:steps.map(s=>({ id:s.id, type:s.type||"step", title:s.title, desc:s.desc, photo:s.photo })) };
+    ext:{approval:extOf(m).approval, effect:extOf(m).effect},
+    steps:steps.map(s=>{
+      const e=s.edu||{};
+      return { id:s.id, type:s.type||"step", title:s.title, desc:s.desc, photo:s.photo,
+        edu:(e.time||e.done||e.mistake||e.escalate)?e:undefined };
+    }) };
   const json=JSON.stringify(embed).replace(/<\//g,"<\\/");
 
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
@@ -999,6 +1202,7 @@ function buildDoc(m){
   ${tocHtml}
   ${recordHtml}
   ${stepsHtml}
+  ${qualHtml}
   <footer>全 ${steps.length} 手順 ・ v${esc(m.version||"1.0")} ・ このファイルは「現場マニュアル作成ツール」に再取り込みして改訂できます</footer>
 </div>
 <div class="vtb no-print">
@@ -1014,6 +1218,9 @@ function buildDoc(m){
     <h2 id="g-title"></h2>
     <img id="g-img" alt="">
     <p id="g-desc"></p>
+    <p class="g-edu ok" id="g-done"></p>
+    <p class="g-edu ng" id="g-mist"></p>
+    <p class="g-edu esc" id="g-esc"></p>
     <label id="g-check"><input type="checkbox" id="g-ckbox"> 実施した</label>
   </div>
   <div class="g-nav"><button id="g-prev">◀ 前へ</button><button id="g-next">次へ ▶</button></div>
@@ -1056,10 +1263,14 @@ function normalizeManual(x){
     id:x.id||uid(), title:x.title||"", place:x.place||"", author:x.author||"",
     approver:x.approver||"", version:x.version||"1.0", status:x.status||"draft",
     reviewDate:x.reviewDate||"", note:x.note||"", tools:x.tools||"",
+    ext:(x.ext&&typeof x.ext==="object")
+      ? {effect:x.ext.effect||{}, approval:x.ext.approval||{}}
+      : {effect:{}, approval:{}},
     createdAt:x.createdAt||now, updatedAt:now, exportedAt:x.exportedAt||now,
     steps:(x.steps||[]).map(s=>({
       id:s.id||uid(), type:s.type||"step", title:s.title||"", desc:s.desc||"",
-      photo:s.photo||null, photoOrig:s.photoOrig||null, marks:s.marks||null
+      photo:s.photo||null, photoOrig:s.photoOrig||null, marks:s.marks||null,
+      edu:(s.edu&&typeof s.edu==="object")?s.edu:null
     }))
   };
 }
@@ -1109,6 +1320,17 @@ bindMeta("m-tools","tools"); bindMeta("m-version","version"); bindMeta("m-approv
 bindMeta("m-review","reviewDate"); bindMeta("m-note","note");
 $("#m-status").onchange=e=>{ if(cur){ cur.status=e.target.value; save(); } };
 $("#search").oninput=()=>renderHome();
+document.querySelectorAll("#d-quality input[data-ap]").forEach(c=>{
+  c.onchange=()=>{ if(!cur) return; extOf(cur).approval[c.dataset.ap]=c.checked; save(); };
+});
+function bindEffect(id,key){
+  $("#"+id).oninput=e=>{ if(!cur) return; extOf(cur).effect[key]=e.target.value; save(); };
+}
+bindEffect("ef-before","beforeMinutes"); bindEffect("ef-after","afterMinutes");
+bindEffect("ef-count","monthlyCount"); bindEffect("ef-memo","memo");
+$("#btn-ledger-json").onclick=()=>exportLedger("json");
+$("#btn-ledger-csv").onclick=()=>exportLedger("csv");
+$("#btn-effect-copy").onclick=copyEffectMemo;
 function handlePick(e){
   const file=e.target.files[0];
   if(!file||!pendingStepId||!cur) return;

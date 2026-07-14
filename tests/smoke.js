@@ -141,12 +141,39 @@ function check(name, ok, detail) {
   check("未提出の変更チップ", dirtyAfterExport === 0 && dirtyAfterEdit === 1,
     `afterExport=${dirtyAfterExport} afterEdit=${dirtyAfterEdit}`);
 
-  console.log("[3] 書き出しHTML(ビューア)");
+  console.log("[3] 品質スコア・承認チェック・台帳・教育メモ");
   await page.click(".mcard");
   await page.waitForSelector("#v-edit:not([hidden])");
+  await page.click("#d-quality summary");
+  const scoreTxt = await page.textContent("#q-score");
+  check("品質スコア表示", /\d+ \/ 100/.test(scoreTxt), scoreTxt);
+  const scoreBefore = parseInt(scoreTxt, 10);
+  await page.check('#d-quality input[data-ap="photoSecurity"]');
+  await page.waitForTimeout(100);
+  const scoreAfter = parseInt(await page.textContent("#q-score"), 10);
+  check("承認チェックでスコア加点", scoreAfter > scoreBefore, `${scoreBefore} -> ${scoreAfter}`);
+  await page.fill("#ef-before", "30");
+  await page.fill("#ef-after", "10");
+  await page.fill("#ef-count", "20");
+  await page.waitForTimeout(700);
+  const savedVal = await page.inputValue("#ef-saved");
+  check("月間削減見込みの自動計算", savedVal === "6.7 h/月", savedVal);
+  const csvHead = await page.evaluate(() => ledgerCsv(cur).slice(0, 200));
+  check("台帳CSV（BOM+品質列）", csvHead.charCodeAt(0) === 0xFEFF && csvHead.includes("qualityScore"), csvHead.slice(0, 60));
+  await page.click(".step details.edu summary");
+  await page.fill('.step [data-edu="done"]', "ランプが緑点灯した状態");
+  await page.waitForTimeout(700);
+
+  console.log("[4] 書き出しHTML(ビューア)");
   const html = await page.evaluate(() => buildDoc(cur));
+  check("書き出しに教育メモと品質を埋め込み", html.includes("完了条件") && html.includes("品質・改善効果"));
   const rt = await page.evaluate(h => { const a = parseImport(h); return a.length === 1 ? a[0].title : ""; }, html);
   check("再取り込み(ラウンドトリップ)", rt === "テスト点検マニュアル", "got=" + rt);
+  const rtExt = await page.evaluate(h => {
+    const a = parseImport(h);
+    return { edu: a[0].steps[0].edu ? a[0].steps[0].edu.done : "", ap: !!a[0].ext.approval.photoSecurity };
+  }, html);
+  check("再取り込みで教育メモ・承認チェック保持", rtExt.edu === "ランプが緑点灯した状態" && rtExt.ap, JSON.stringify(rtExt));
 
   const viewerPath = path.join(os.tmpdir(), "genba_viewer_test.html");
   fs.writeFileSync(viewerPath, html);
@@ -166,9 +193,12 @@ function check(name, ok, detail) {
     Object.keys(localStorage).some(k => k.indexOf("gm_ck_") === 0));
   check("チェック状態がlocalStorageに保存", ckSaved);
 
+  check("ビューアに品質セクション", await v.locator(".q-sec").count() === 1);
+  check("ビューアに完了条件表示", (await v.textContent(".edu-row.ok")).includes("ランプが緑点灯"));
   await v.click("#v-genba");
   const gTitle = await v.textContent("#g-title");
   check("現場モードで手順表示", gTitle === "電源スイッチ確認", gTitle);
+  check("現場モードに完了条件表示", await v.isVisible("#g-done"));
   await v.click("#g-next"); // 1手順のみ→完了で閉じる
   check("現場モード完了で閉じる", await v.isHidden("#genba"));
 
