@@ -77,3 +77,39 @@ window.DOJO_UNITS.push({
 
 ## 完了条件
 `node spec/validate.js src/units/unitXX.js` がエラーゼロで通ること。
+
+---
+
+# V5 追補(この節が旧記述より優先)
+
+## unitオブジェクトの追加フィールド
+```js
+{
+  id: "unit11",             // ファイル名と一致(unit01〜unit22)
+  no: 1,                    // グローバル表示順 1〜22(ファイル名の番号とは独立)
+  track: "overview",        // "overview"|"basic"|"advanced"|"tips"|"practice-basic"|"practice-adv"
+  final: true,              // 卒業試験ユニットのみ(unit10)。それ以外は書かない
+  intro: true,              // 概念導入ユニットのみ(type必須の免除)。通常は書かない
+  ...従来どおり icon/name/color/desc/lessons
+}
+```
+
+## typeミックス規則の変更
+- fill: 全レッスンで1問以上(変更なし)
+- type: track が basic / advanced / practice-basic / practice-adv かつ no>=2 のユニットは各レッスン1問以上。
+  overview / tips トラックは任意(入れられるなら歓迎)。
+- 卒業試験規則は final:true のユニットの最終レッスンに適用(6問・type2問以上)。
+
+## 関数辞典データ(src/dictionary.js)
+```js
+window.DOJO_DICT = window.DOJO_DICT || [];
+window.DOJO_DICT.push(
+  { name: "CALCULATE", lang: "dax", cat: "フィルター",
+    syntax: "CALCULATE(式, フィルター1, フィルター2, ...)",
+    desc: "フィルターコンテキストを変更して式を評価する。DAXで最も重要な関数。",
+    ex: "CALCULATE([売上合計], 商品[カテゴリ] = \"飲料\")" },
+  ...
+);
+```
+- lang: "dax" | "m"。cat: 短い分類名(集計/フィルター/時間/テキスト/テーブル/リスト等)。
+- desc は1〜2文、ex は1行のコード例。name の重複禁止。

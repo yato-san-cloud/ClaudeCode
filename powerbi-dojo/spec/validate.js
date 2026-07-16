@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // usage: node spec/validate.js src/units/unit01.js [more files...]
-// ユニットファイルが SCHEMA.md の規則に従うか機械チェックする。
+// ユニットファイルが SCHEMA.md(v5) の規則に従うか機械チェックする。
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+
+const TRACKS = ["overview", "basic", "advanced", "tips", "practice-basic", "practice-adv"];
+const TYPE_REQUIRED_TRACKS = ["basic", "advanced", "practice-basic", "practice-adv"];
 
 let totalErrs = 0;
 
@@ -28,13 +31,16 @@ function validateFile(file) {
   const u = units[0] || {};
 
   if (u.id !== base) errs.push(`id "${u.id}" がファイル名 "${base}" と不一致`);
-  if (typeof u.no !== "number" || u.no < 1 || u.no > 10) errs.push("no は1〜10の数値");
+  if (typeof u.no !== "number" || u.no < 1 || u.no > 30) errs.push("no は1〜30の数値");
+  if (!TRACKS.includes(u.track)) errs.push(`track は ${TRACKS.join("|")} のいずれか(現在: ${u.track})`);
   if (!u.icon) errs.push("icon がない");
   if (!u.name) errs.push("name がない");
   if (!/^#[0-9a-fA-F]{6}$/.test(u.color || "")) errs.push("color は #rrggbb 形式");
   if (!u.desc) errs.push("desc がない");
   if (!Array.isArray(u.lessons) || u.lessons.length < 4 || u.lessons.length > 6)
     errs.push(`lessons は4〜6件(現在${(u.lessons || []).length}件)`);
+
+  const typeRequired = TYPE_REQUIRED_TRACKS.includes(u.track) && u.no >= 2 && u.intro !== true;
 
   (u.lessons || []).forEach((l, li) => {
     const at = `lesson[${li}] "${(l.title || "").slice(0, 20)}"`;
@@ -87,9 +93,9 @@ function validateFile(file) {
       }
     });
     if (fills < 1) errs.push(`${at}: fill が1問以上必要`);
-    if ((u.no || 0) >= 2 && types < 1) errs.push(`${at}: ユニット2以降は type が1問以上必要`);
+    if (typeRequired && types < 1) errs.push(`${at}: このトラック(${u.track})のユニットは type が1問以上必要`);
   });
-  if (u.no === 10 && u.lessons && u.lessons.length) {
+  if (u.final === true && u.lessons && u.lessons.length) {
     const last = u.lessons[u.lessons.length - 1];
     const t = (last.exercises || []).filter(x => x.type === "type").length;
     if (t < 2) errs.push("卒業試験(最終レッスン)は type 2問以上");
@@ -102,7 +108,7 @@ function validateFile(file) {
     totalErrs += errs.length;
   } else {
     const nq = u.lessons.reduce((n, l) => n + l.exercises.length, 0);
-    console.log(`[${base}] OK: ${u.lessons.length} lessons, ${nq} exercises`);
+    console.log(`[${base}] OK: track=${u.track} no=${u.no} ${u.lessons.length} lessons, ${nq} exercises`);
   }
 }
 

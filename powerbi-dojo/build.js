@@ -8,6 +8,9 @@ const read = f => fs.readFileSync(path.join(R, f), "utf8");
 const unitFiles = fs.readdirSync(path.join(R, "src/units"))
   .filter(f => /^unit\d{2}\.js$/.test(f)).sort();
 
+const dictPath = path.join(R, "src/dictionary.js");
+const dictJs = fs.existsSync(dictPath) ? fs.readFileSync(dictPath, "utf8") : "";
+
 const html = `<title>Power BI 道場 〜物流データアナリスト養成〜</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
@@ -16,6 +19,7 @@ ${read("src/style.css")}
 ${read("src/body.html")}
 <script>
 ${read("src/editor.js")}
+${dictJs}
 ${unitFiles.map(u => read("src/units/" + u)).join("\n")}
 ${read("src/app.js")}
 </script>

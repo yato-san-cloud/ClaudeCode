@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit01",
-  no: 1,
+  no: 13, track: "practice-basic", intro: true,
   icon: "🚚",
   name: "物流データアナリスト事始め",
   color: "#e8641b",

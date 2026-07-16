@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit04",
-  no: 4,
+  no: 16, track: "practice-basic",
   icon: "📏",
   name: "DAX基礎 × KPIメジャー第一歩",
   color: "#2f8f46",

@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit07",
-  no: 7,
+  no: 19, track: "practice-adv",
   icon: "📈",
   name: "タイムインテリジェンス × 物量トレンド",
   color: "#5561d6",

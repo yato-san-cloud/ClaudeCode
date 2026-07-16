@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit08",
-  no: 8,
+  no: 20, track: "practice-adv",
   icon: "📦",
   name: "在庫分析 × 半加法メジャー",
   color: "#8a4fd3",

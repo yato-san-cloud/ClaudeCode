@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit03",
-  no: 3,
+  no: 15, track: "practice-basic",
   icon: "🏭",
   name: "M応用 × 拠点データ統合",
   color: "#a16a3c",

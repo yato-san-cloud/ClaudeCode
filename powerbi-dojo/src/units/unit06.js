@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit06",
-  no: 6,
+  no: 18, track: "practice-adv",
   icon: "⏰",
   name: "CALCULATE道場 × 納期遵守率",
   color: "#2f6fd0",

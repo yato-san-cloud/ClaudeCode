@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit02",
-  no: 2,
+  no: 14, track: "practice-basic",
   icon: "🧹",
   name: "M基礎 × 出荷CSVクレンジング",
   color: "#d99a06",

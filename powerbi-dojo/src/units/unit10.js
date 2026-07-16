@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit10",
-  no: 10,
+  no: 22, track: "practice-adv", final: true,
   icon: "🎓",
   name: "総合演習 × 経営ダッシュボード",
   color: "#8c6d1f",

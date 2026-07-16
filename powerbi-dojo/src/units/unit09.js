@@ -1,7 +1,7 @@
 window.DOJO_UNITS = window.DOJO_UNITS || [];
 window.DOJO_UNITS.push({
   id: "unit09",
-  no: 9,
+  no: 21, track: "practice-adv",
   icon: "🏆",
   name: "上級 × ABC分析とランキング",
   color: "#c23a8c",
