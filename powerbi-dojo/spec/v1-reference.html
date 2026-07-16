@@ -1,0 +1,1332 @@
+<title>Power BI 道場 〜M & DAX 毎日修行〜</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --card: #ffffff;
+    --ink: #2b2a26;
+    --sub: #6d6a60;
+    --line: #e4e0d6;
+    --accent: #b8860b;
+    --accent-soft: #f7edd2;
+    --gold: #f2c811;
+    --green: #2e7d32;
+    --green-soft: #e3f1e4;
+    --red: #b3402e;
+    --red-soft: #f9e6e2;
+    --code-bg: #2d2b25;
+    --code-ink: #f0ead6;
+    --shadow: 0 1px 3px rgba(40,35,20,.08), 0 4px 14px rgba(40,35,20,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #191813; --card: #232119; --ink: #eee9dc; --sub: #a49f8e;
+      --line: #37342a; --accent: #e0b34a; --accent-soft: #322b18;
+      --green: #7cc47f; --green-soft: #1e2c1f; --red: #e08a77; --red-soft: #33201b;
+      --code-bg: #12110d; --code-ink: #e8e2cf;
+      --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #191813; --card: #232119; --ink: #eee9dc; --sub: #a49f8e;
+    --line: #37342a; --accent: #e0b34a; --accent-soft: #322b18;
+    --green: #7cc47f; --green-soft: #1e2c1f; --red: #e08a77; --red-soft: #33201b;
+    --code-bg: #12110d; --code-ink: #e8e2cf;
+    --shadow: 0 1px 3px rgba(0,0,0,.4);
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f4ef; --card: #ffffff; --ink: #2b2a26; --sub: #6d6a60;
+    --line: #e4e0d6; --accent: #b8860b; --accent-soft: #f7edd2;
+    --green: #2e7d32; --green-soft: #e3f1e4; --red: #b3402e; --red-soft: #f9e6e2;
+    --code-bg: #2d2b25; --code-ink: #f0ead6;
+    --shadow: 0 1px 3px rgba(40,35,20,.08), 0 4px 14px rgba(40,35,20,.06);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+    line-height: 1.65; font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app { max-width: 760px; margin: 0 auto; padding: 18px 16px 64px; }
+  header.top {
+    display: flex; align-items: baseline; gap: 10px; margin: 6px 0 18px; cursor: pointer;
+  }
+  header.top h1 { font-size: 21px; margin: 0; letter-spacing: .02em; }
+  header.top .sub { color: var(--sub); font-size: 12.5px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 14px; box-shadow: var(--shadow);
+  }
+  .statrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 8px; text-align: center; box-shadow: var(--shadow);
+  }
+  .stat .v { font-size: 19px; font-weight: 700; }
+  .stat .l { font-size: 11px; color: var(--sub); margin-top: 1px; }
+  .belt { font-size: 15px; font-weight: 700; }
+  h2.sec { font-size: 14px; color: var(--sub); margin: 22px 4px 10px; font-weight: 600; letter-spacing: .05em; }
+  .bigbtn {
+    display: flex; align-items: center; gap: 14px; width: 100%;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 15px 18px; margin-bottom: 10px; cursor: pointer; text-align: left;
+    font: inherit; color: inherit; box-shadow: var(--shadow); transition: transform .08s;
+  }
+  .bigbtn:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .bigbtn .ico { font-size: 26px; }
+  .bigbtn .t { font-weight: 700; font-size: 15.5px; }
+  .bigbtn .d { color: var(--sub); font-size: 12.5px; margin-top: 1px; }
+  .bigbtn .right { margin-left: auto; color: var(--sub); font-size: 13px; white-space: nowrap; }
+  .bigbtn.done-today { border-color: var(--green); }
+  .bar { height: 7px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), var(--accent)); border-radius: 4px; transition: width .4s; }
+  .crumb { color: var(--sub); font-size: 13px; margin-bottom: 12px; cursor: pointer; user-select: none; }
+  .crumb:hover { color: var(--accent); }
+  .lessonrow {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 16px; margin-bottom: 8px; cursor: pointer; text-align: left;
+    font: inherit; color: inherit;
+  }
+  .lessonrow:hover { border-color: var(--accent); }
+  .lessonrow .no {
+    width: 30px; height: 30px; border-radius: 50%; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 14px;
+  }
+  .lessonrow.cleared .no { background: var(--green-soft); color: var(--green); }
+  .lessonrow .lt { font-weight: 600; font-size: 14.5px; }
+  .lessonrow .ls { color: var(--sub); font-size: 12px; }
+  .doc p { margin: 10px 0; }
+  .doc pre, .qcode {
+    background: var(--code-bg); color: var(--code-ink); border-radius: 10px;
+    padding: 12px 14px; font-size: 13px; line-height: 1.55; overflow-x: auto;
+    font-family: "SF Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+    margin: 10px 0;
+  }
+  .doc code, .qtext code {
+    background: var(--accent-soft); color: var(--accent); border-radius: 5px;
+    padding: 1px 6px; font-size: .92em;
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  .doc .tip {
+    background: var(--accent-soft); border-radius: 10px; padding: 10px 14px;
+    font-size: 13.5px; margin: 12px 0 4px;
+  }
+  .btn {
+    display: inline-block; background: var(--accent); color: #fff; border: none;
+    border-radius: 10px; padding: 11px 22px; font: inherit; font-weight: 700;
+    font-size: 14.5px; cursor: pointer; margin-top: 14px;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+  .qhead { display: flex; justify-content: space-between; align-items: center; color: var(--sub); font-size: 13px; margin-bottom: 10px; }
+  .qtext { font-size: 16px; font-weight: 700; margin: 4px 0 14px; }
+  .choice {
+    display: block; width: 100%; text-align: left; font: inherit; color: inherit;
+    background: var(--card); border: 1.5px solid var(--line); border-radius: 11px;
+    padding: 11px 15px; margin-bottom: 9px; cursor: pointer; font-size: 14.5px;
+  }
+  .choice:hover:not(:disabled) { border-color: var(--accent); }
+  .choice:disabled { cursor: default; }
+  .choice.correct { border-color: var(--green); background: var(--green-soft); font-weight: 700; }
+  .choice.wrong { border-color: var(--red); background: var(--red-soft); }
+  .choice.dim { opacity: .55; }
+  .explain {
+    border-left: 3px solid var(--accent); padding: 8px 14px; margin: 14px 0 4px;
+    font-size: 14px; color: var(--ink); background: var(--accent-soft); border-radius: 0 10px 10px 0;
+  }
+  .explain b { color: var(--accent); }
+  .resultbox { text-align: center; padding: 28px 16px; }
+  .resultbox .big { font-size: 44px; }
+  .resultbox h3 { font-size: 20px; margin: 10px 0 4px; }
+  .resultbox .xp { color: var(--accent); font-weight: 700; font-size: 16px; }
+  .resultbox .msg { color: var(--sub); font-size: 14px; margin-top: 6px; }
+  .footer-note { text-align: center; color: var(--sub); font-size: 12px; margin-top: 28px; }
+  @media (max-width: 480px) {
+    .statrow { grid-template-columns: repeat(2, 1fr); }
+    #app { padding: 12px 10px 48px; }
+  }
+</style>
+
+<div id="app"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   コースデータ
+   ============================================================ */
+const COURSES = [];
+
+COURSES.push({
+  id: "m-basic", icon: "🔰", name: "M言語 基礎",
+  desc: "Power Queryの裏側で動く言語のキホン",
+  lessons: [
+    {
+      title: "Power QueryとM言語の世界",
+      doc: `
+<p>Power Queryエディターで行う操作(列の削除、フィルター、型変更…)は、すべて裏側で <b>M言語</b> のコードとして記録されています。「適用したステップ」の1つ1つがM式です。</p>
+<p>Mクエリの基本構造は <code>let ... in</code>。<code>let</code> にステップを並べ、<code>in</code> で最終結果を返します。</p>
+<pre>let
+    ソース = Excel.Workbook(File.Contents("C:\\売上.xlsx")),
+    絞り込み = Table.SelectRows(ソース, each [売上] > 0)
+in
+    絞り込み</pre>
+<p>M言語は<b>大文字と小文字を区別</b>します。<code>Text.Upper</code> は動きますが <code>text.upper</code> はエラーです。</p>
+<p class="tip">💡 実務メモ: リボンの「表示」→「詳細エディター」で、クエリ全体のMコードをいつでも確認・編集できます。まずは自動生成されたコードを読むことから始めましょう。</p>`,
+      quiz: [
+        { q: "Power Queryの各ステップの裏側で自動生成されている言語は?",
+          c: ["DAX", "M言語", "VBA", "SQL"], a: 1,
+          e: "「適用したステップ」はすべてM式です。DAXはモデル側(メジャー・計算列)の言語で、まったく別物です。" },
+        { q: "Mクエリの基本構造として正しいのは?",
+          c: ["let ~ in", "SELECT ~ FROM", "BEGIN ~ END", "function ~ return"], a: 0,
+          e: "letブロックにステップ(変数)を定義し、inで最終的に返す値を指定します。" },
+        { q: "M言語の仕様として正しいのは?",
+          c: ["大文字小文字を区別しない", "大文字小文字を区別する", "DAXと同じ言語である", "Excelでは使えない"], a: 1,
+          e: "Mは大文字小文字を区別します。<code>text.upper</code> と書くと「認識されませんでした」エラーになります。" },
+        { q: "クエリ全体のMコードを確認・編集できる場所は?",
+          c: ["数式バーのみ", "詳細エディター", "DAXエディター", "モデルビュー"], a: 1,
+          e: "詳細エディターでlet~in全体を編集できます。数式バーは選択中の1ステップだけを表示します。" },
+      ]
+    },
+    {
+      title: "データ型とリテラル",
+      doc: `
+<p>Mには豊富なデータ型があります。特に重要なのが3つの「構造型」です。</p>
+<pre>{1, 2, 3}                  // リスト(list)  ← 波かっこ!
+[名前 = "佐藤", 年齢 = 30]   // レコード(record) ← 角かっこ!
+#table(...)                // テーブル(table)</pre>
+<p><b>Excelや他言語と逆</b>なので要注意: Mでは <code>{ }</code> がリスト、<code>[ ]</code> がレコードです。</p>
+<p>日付などは <code>#date(2026, 7, 16)</code>、<code>#datetime(...)</code> のように「#」付きで書きます。レコードのフィールドは <code>rec[名前]</code> でアクセスします。</p>
+<p class="tip">💡 実務メモ: <code>null</code> は「値が存在しない」、<code>""</code> は「空のテキスト」。フィルターや結合で挙動が変わるので、区別を常に意識しましょう。</p>`,
+      quiz: [
+        { q: "Mでリスト(list)を作るリテラルは?",
+          c: ["{1, 2, 3}", "[1, 2, 3]", "(1, 2, 3)", "LIST(1, 2, 3)"], a: 0,
+          e: "Mでは波かっこ { } がリスト。[ ] はレコードです。多くの言語と逆なので最初に体で覚えましょう。" },
+        { q: "#date(2026, 7, 16) が作るものは?",
+          c: ["テキスト \"2026/7/16\"", "date型の値", "datetime型の値", "数値 20260716"], a: 1,
+          e: "#date(年, 月, 日) はdate型の値を作ります。時刻も含むなら #datetime(y,m,d,h,m,s) を使います。" },
+        { q: "レコード rec = [名前=\"佐藤\", 年齢=30] の「名前」を取り出す書き方は?",
+          code: "rec = [名前 = \"佐藤\", 年齢 = 30]",
+          c: ["rec[名前]", "rec.名前", "rec->名前", "rec(\"名前\")"], a: 0,
+          e: "レコードのフィールドアクセスは 角かっこ rec[名前]。テーブルの行内で [列名] と書くのも同じ仕組みです。" },
+        { q: "null と \"\"(空文字)の違いとして正しいのは?",
+          c: ["完全に同じ意味", "nullは「値が無い」、\"\"は「空のテキスト」", "nullはエラーを表す", "\"\"は使えない"], a: 1,
+          e: "nullは値の不在。null > 1 のような比較はnullを返し、フィルターの挙動にも影響します。" },
+      ]
+    },
+    {
+      title: "よく使うテキスト関数",
+      doc: `
+<p>データクレンジングの主役、テキスト関数。まずはこのあたりから。</p>
+<pre>Text.Trim("  abc  ")          // "abc"(前後の空白除去)
+Text.Upper("power bi")        // "POWER BI"
+Text.Start("PowerBI", 5)      // "Power"(先頭5文字)
+Text.Combine({"A","B","C"}, "-")  // "A-B-C"
+"売上: " & Text.From(123)     // 連結は & 演算子</pre>
+<p>Mは型に厳格です。数値とテキストをそのまま <code>&</code> で連結するとエラーになるため、<code>Text.From(123)</code> のように変換が必要です。</p>
+<p class="tip">💡 実務メモ: 全角/半角スペース混在のデータには <code>Text.Trim</code> + <code>Text.Clean</code>(印刷不能文字除去)のコンボが効きます。Excel出身データの定番クレンジングです。</p>`,
+      quiz: [
+        { q: "\"  abc  \" の前後の空白を取り除く関数は?",
+          c: ["Text.Clean", "Text.Trim", "Text.Remove", "Text.Strip"], a: 1,
+          e: "Text.Trimが前後の空白除去。Text.Cleanは改行などの印刷不能文字を除去します。両方使うことも多いです。" },
+        { q: "Mでテキストを連結する演算子は?",
+          c: ["+", "&", "||", "CONCAT"], a: 1,
+          e: "\"A\" & \"B\" → \"AB\"。+ は数値専用なのでテキストに使うとエラーです。" },
+        { q: "Text.Start(\"PowerBI\", 5) の結果は?",
+          c: ["\"Power\"", "\"werBI\"", "\"P\"", "エラー"], a: 0,
+          e: "Text.Startは先頭からn文字。末尾はText.End、途中はText.Middleです。" },
+        { q: "数値 123 を \"売上: \" と連結するには?",
+          c: ["\"売上: \" & 123", "\"売上: \" & Text.From(123)", "\"売上: \" + 123", "CONCATENATE(\"売上: \", 123)"], a: 1,
+          e: "Mは暗黙の型変換をしないため、Text.From(またはNumber.ToText)で明示的にテキスト化が必要です。" },
+      ]
+    },
+    {
+      title: "数値・日付の関数",
+      doc: `
+<p>日付操作はレポートの土台。よく使う関数を押さえましょう。</p>
+<pre>Date.Year(#date(2026,7,16))       // 2026
+Date.AddMonths(#date(2026,1,31), 1) // #date(2026,2,28) ← 自動調整!
+DateTime.LocalNow()                // 現在日時
+Date.From(DateTime.LocalNow())     // 今日の日付</pre>
+<p>意外な落とし穴が丸め処理。<code>Number.Round(2.5)</code> は <b>2</b> になります。Mの既定は「銀行家の丸め(偶数丸め)」だからです。</p>
+<pre>Number.Round(2.5)                              // 2
+Number.Round(2.5, 0, RoundingMode.AwayFromZero) // 3(四捨五入)</pre>
+<p class="tip">💡 実務メモ: Excelの ROUND と合わせたいときは必ず <code>RoundingMode.AwayFromZero</code> を指定。金額集計の「1円ズレ」の定番原因です。</p>`,
+      quiz: [
+        { q: "Number.Round(2.5) の結果は?",
+          c: ["2", "3", "2.5", "エラー"], a: 0,
+          e: "Mの既定は銀行家の丸め(最近接偶数へ)。四捨五入にしたいなら RoundingMode.AwayFromZero を指定します。Excelとズレる定番ポイント!" },
+        { q: "現在の日時を取得する関数は?",
+          c: ["Now()", "DateTime.LocalNow()", "Date.Today()", "GetDate()"], a: 1,
+          e: "DateTime.LocalNow()が現在日時。日付だけ欲しければ Date.From(DateTime.LocalNow()) とします。" },
+        { q: "Date.AddMonths(#date(2026,1,31), 1) の結果は?",
+          c: ["#date(2026, 2, 28)", "#date(2026, 3, 3)", "エラー", "#date(2026, 2, 31)"], a: 0,
+          e: "存在しない日付にならないよう月末に自動調整されます(2026年2月は28日まで)。" },
+        { q: "#date(2026,7,16) から「2026」を取り出す関数は?",
+          c: ["Date.Year", "Year.From", "Date.GetYear", "Text.Year"], a: 0,
+          e: "Date.Year / Date.Month / Date.Day のシリーズで各部分を取り出せます。" },
+      ]
+    },
+    {
+      title: "each と _ の正体",
+      doc: `
+<p>Mコードに頻出する <code>each</code>。実はこれ、<b>関数を短く書くための糖衣構文</b>です。</p>
+<pre>each [売上] > 100
+// ↑は↓とまったく同じ意味
+(_) => _[売上] > 100</pre>
+<p><code>each</code> は「引数を1つ(名前は <code>_</code>)受け取る関数」を作ります。<code>[売上]</code> は <code>_[売上]</code> の省略形。つまり <code>Table.SelectRows(t, each [売上] > 100)</code> は「各行 <code>_</code> を受け取り、その行の売上が100超なら true を返す関数」を渡しているのです。</p>
+<pre>List.Transform({1, 2, 3}, each _ * 2)   // {2, 4, 6}</pre>
+<p class="tip">💡 実務メモ: この仕組みが分かると、自動生成コードの改造が一気に怖くなくなります。「eachの中は1行(1要素)ずつ処理される関数」と覚えましょう。</p>`,
+      quiz: [
+        { q: "each [売上] > 100 と完全に等価な書き方は?",
+          c: ["(_) => _[売上] > 100", "(x, y) => x > y", "function([売上] > 100)", "lambda 売上 > 100"], a: 0,
+          e: "eachは「_という名前の引数を1つ取る関数」の糖衣構文。[売上]は _[売上] の省略形です。" },
+        { q: "Table.SelectRows(t, each ...) の第2引数の役割は?",
+          c: ["列名のリスト", "各行を受け取ってtrue/falseを返す関数", "抽出する行番号", "SQLのWHERE句文字列"], a: 1,
+          e: "各行(レコード)が順に渡され、trueを返した行だけが残ります。フィルターの正体は関数なのです。" },
+        { q: "List.Transform({1,2,3}, each _ * 2) の結果は?",
+          c: ["{2, 4, 6}", "{1, 2, 3, 1, 2, 3}", "6", "{3, 6}"], a: 0,
+          e: "List.Transformは各要素に関数を適用します。_ に 1, 2, 3 が順に入り、2倍されます。" },
+        { q: "each が存在する理由として正しいのは?",
+          c: ["高速化のため", "単なる糖衣構文(短く書くため)", "DAXとの互換のため", "エラー処理のため"], a: 1,
+          e: "機能は増えません。(_) => ... を短く書けるようにするだけの構文です。でも読みやすさは段違い。" },
+      ]
+    },
+    {
+      title: "リスト操作の基本",
+      doc: `
+<p>リスト関数はM上級への登竜門。連番・集計・重複除去が自在になります。</p>
+<pre>{1..5}                       // {1,2,3,4,5}(連番!)
+List.Sum({1, 2, 3})          // 6
+List.Distinct({1,1,2,3,3})   // {1,2,3}
+List.Max({10, 5, 8})         // 10
+List.Dates(#date(2026,1,1), 365, #duration(1,0,0,0))
+                             // 365日分の日付リスト</pre>
+<p><code>{1..5}</code> の範囲記法は超便利。<code>{"A".."Z"}</code> で文字の連続も作れます。</p>
+<p class="tip">💡 実務メモ: <code>List.Dates</code> はM言語製の日付テーブル作成の心臓部。連番リスト→テーブル変換→列追加、という流れは応用範囲が広いです。</p>`,
+      quiz: [
+        { q: "{1..5} の結果は?",
+          c: ["{1, 5}", "{1, 2, 3, 4, 5}", "エラー", "{15}"], a: 1,
+          e: "「..」は範囲記法。{1..5}で連番リストが作れます。日付テーブルや連番生成の第一歩。" },
+        { q: "List.Sum({1, 2, 3}) の結果は?",
+          c: ["{6}", "6", "{1,2,3,6}", "123"], a: 1,
+          e: "リスト集計関数はスカラー値(単一の値)を返します。List.Average, List.Max, List.Countも同様。" },
+        { q: "{1,1,2,3,3} から重複を除くには?",
+          c: ["List.Unique", "List.Distinct", "List.RemoveDuplicates", "List.Dedup"], a: 1,
+          e: "List.Distinctで{1,2,3}に。テーブル版はTable.Distinct(「重複の削除」の正体)です。" },
+        { q: "365日分の連続した日付リストを作る関数は?",
+          c: ["List.Dates", "Date.Range", "Calendar.Make", "List.Generate のみ"], a: 0,
+          e: "List.Dates(開始日, 件数, #duration(1,0,0,0))。M製日付テーブルの定番スタートです。" },
+      ]
+    },
+  ]
+});
+COURSES.push({
+  id: "m-adv", icon: "⚙️", name: "M言語 応用",
+  desc: "カスタム関数・フォールディング・高速化",
+  lessons: [
+    {
+      title: "カスタム関数を作る",
+      doc: `
+<p>Mでは関数も「値」。自分で定義して使い回せます。</p>
+<pre>// 空白クエリに書けば、名前付き関数クエリになる
+(税抜 as number) as number => Number.Round(税抜 * 1.1, 0, RoundingMode.AwayFromZero)
+
+// 複数引数・省略可能引数
+(x as number, optional y as number) => x + (y ?? 0)</pre>
+<p><code>optional</code> 引数は未指定だと <code>null</code> になります(<code>??</code> はnull合体演算子)。型注釈 <code>as number</code> は省略可能ですが、付けると引数入力UIが親切になります。</p>
+<p>作った関数はテーブルの全行に適用できます:</p>
+<pre>Table.AddColumn(売上, "税込", each fn税込([金額]))</pre>
+<p class="tip">💡 実務メモ: 「同じクレンジング処理を複数クエリでコピペ」し始めたら関数化のサイン。関数クエリ1つに集約すれば修正も1か所で済みます。</p>`,
+      quiz: [
+        { q: "2つの数値を受け取り合計を返す関数の定義は?",
+          c: ["(x, y) => x + y", "function(x, y) { return x + y }", "def f(x, y): x + y", "=LAMBDA(x, y, x+y)"], a: 0,
+          e: "Mの関数リテラルは (引数) => 式。空白クエリに書けば名前付き関数として保存できます。" },
+        { q: "optional 引数を指定しなかった場合、その値は?",
+          c: ["0", "null", "\"\"", "エラーになる"], a: 1,
+          e: "optionalな引数は未指定時にnull。y ?? 0 のようにnull合体演算子で既定値を与えるのが定石です。" },
+        { q: "自作関数 fn を「金額」列の全行に適用して新列を作るには?",
+          code: "Table.AddColumn(売上, \"税込\", ???)",
+          c: ["fn([金額])", "each fn([金額])", "fn(金額)", "apply fn to 金額"], a: 1,
+          e: "第3引数は「各行を受け取る関数」。each fn([金額]) で行ごとに _[金額] が渡されます。" },
+        { q: "関数を独立したクエリとして保存すると得られるものは?",
+          c: ["自動的に高速化される", "他のクエリから名前で呼び出せる+引数入力UI", "DAXから呼べる", "特に変化なし"], a: 1,
+          e: "関数クエリは「fx」アイコンで表示され、他クエリから再利用可能。「カスタム関数の呼び出し」ボタンでも列に適用できます。" },
+      ]
+    },
+    {
+      title: "テーブル変換関数を極める",
+      doc: `
+<p>UI操作の裏で動くTable系関数。名前と役割が結びつくと、コードの読解も改造も自由自在。</p>
+<pre>Table.SelectRows(t, each [売上] > 0)      // 行フィルター
+Table.SelectColumns(t, {"日付", "売上"})   // 列の選択
+Table.TransformColumnTypes(t, {{"売上", type number}})  // 型変更
+Table.Group(t, {"部署"}, {{"合計", each List.Sum([売上]), type number}})
+                                          // グループ化
+Table.NestedJoin(a, "ID", b, "ID", "b", JoinKind.LeftOuter)
+                                          // マージ(結合)</pre>
+<p><code>Table.Group</code> の第3引数のeachに渡ってくるのは「そのグループの部分テーブル」。だから <code>List.Sum([売上])</code> でグループ内合計が出せます。</p>
+<p class="tip">💡 実務メモ: マージのJoinKindはSQLと対応: LeftOuter=左外部、Inner=内部、FullOuter=完全外部、LeftAnti=左反(=存在しない行の検出に超便利)。</p>`,
+      quiz: [
+        { q: "条件に合う行だけ残す関数は?",
+          c: ["Table.FilterRows", "Table.SelectRows", "Table.Where", "Table.KeepRows"], a: 1,
+          e: "Table.SelectRows(t, each 条件)。UIの「フィルター」操作の正体です。" },
+        { q: "部署ごとに売上を合計するUI操作「グループ化」の正体は?",
+          c: ["Table.Group", "Table.Summarize", "Table.Aggregate", "List.Group"], a: 0,
+          e: "Table.Group(t, キー列, 集計定義)。集計のeachにはグループごとの部分テーブルが渡されます。" },
+        { q: "Table.TransformColumnTypes の役割は?",
+          c: ["列名の変更", "列のデータ型の変更", "列の並べ替え", "列の削除"], a: 1,
+          e: "「型の変更」の正体。ロケール指定版もあり、日付の解釈ミス対策に重要です。" },
+        { q: "SQLの LEFT JOIN に相当するマージは?",
+          c: ["JoinKind.Inner", "JoinKind.LeftOuter", "JoinKind.LeftAnti", "JoinKind.FullOuter"], a: 1,
+          e: "LeftOuter=左外部結合。ちなみにLeftAnti(左反)は「マスタに存在しない行の検出」に便利な隠れた名品です。" },
+      ]
+    },
+    {
+      title: "クエリフォールディング",
+      doc: `
+<p><b>クエリフォールディング</b>(Query Folding)は、Power Queryの変換ステップを<b>データソース側のネイティブクエリ(SQLなど)に翻訳して実行させる</b>仕組み。数百万行のフィルターをDB側でやるか、全行取得後に手元でやるかの違いなので、性能への影響は絶大です。</p>
+<p>確認方法: ステップを右クリック→「<b>ネイティブ クエリの表示</b>」が押せればフォールディングが効いています。</p>
+<p>フォールディングを<b>切ってしまう</b>典型操作:</p>
+<pre>・インデックス列の追加
+・Table.Buffer
+・カスタムM関数の適用
+・ソースがExcel/CSV(そもそも対象外)</pre>
+<p class="tip">💡 実務メモ: フィルター・列削除・結合など「畳める」ステップを前半に、畳めないステップを後半に置くのが鉄則。増分更新もフォールディングが前提です。</p>`,
+      quiz: [
+        { q: "クエリフォールディングとは?",
+          c: ["クエリを折りたたんで表示する機能", "変換ステップをソース側のネイティブクエリに翻訳して実行する仕組み", "クエリを圧縮保存する機能", "エラーを自動修復する機能"], a: 1,
+          e: "DB側でフィルターや結合を実行させるため、転送量と処理時間が劇的に減ります。大規模データの生命線。" },
+        { q: "フォールディングが効いているかの簡単な確認方法は?",
+          c: ["クエリが速いかどうかで判断", "ステップ右クリック→「ネイティブ クエリの表示」が有効か", "詳細エディターに印が付く", "確認する方法はない"], a: 1,
+          e: "グレーアウトしていたら、そのステップ以降はフォールディングが切れています。" },
+        { q: "次のうちフォールディングを切ってしまう操作は?",
+          c: ["行のフィルター", "列の削除", "インデックス列の追加", "グループ化"], a: 2,
+          e: "インデックス列はSQLに翻訳できないため、以降のステップは全てローカル処理になります。使うなら最後に。" },
+        { q: "フォールディングの恩恵が最も大きいシナリオは?",
+          c: ["小さなCSVの読み込み", "大規模なDBソース+増分更新", "手入力テーブル", "Webページの取得"], a: 1,
+          e: "DBソースでこそ効果を発揮。増分更新はフォールディング可能なフィルターが必須要件です。" },
+      ]
+    },
+    {
+      title: "エラー処理",
+      doc: `
+<p>「1行の変換エラーで更新全体が失敗」を防ぐのがエラー処理。主役は <code>try ... otherwise</code>。</p>
+<pre>try Number.From(x) otherwise 0   // 変換失敗なら0
+
+// otherwiseなしのtryは「レコード」を返す
+try Number.From("abc")
+// → [HasError = true, Error = [Reason = ..., Message = ...]]</pre>
+<p>otherwise無しの <code>try</code> は <code>HasError</code> と <code>Value</code>(または <code>Error</code>)を持つレコードを返すので、エラー内容で分岐もできます。</p>
+<p>UIからは「エラーの削除」(<code>Table.RemoveRowsWithErrors</code>)や「エラーの置換」も使えます。逆に <code>error "メッセージ"</code> で意図的にエラーを発生させることも可能。</p>
+<p class="tip">💡 実務メモ: 数値変換は try Number.From(x) otherwise null が安全牌。0ではなくnullにしておくと「変換失敗」と「本当の0」を後から区別できます。</p>`,
+      quiz: [
+        { q: "変換エラー時に既定値0を返す書き方は?",
+          c: ["try Number.From(x) otherwise 0", "if error then 0", "Number.From(x, 0)", "catch(Number.From(x), 0)"], a: 0,
+          e: "try 式 otherwise 代替値。Mのエラー処理の基本形です。" },
+        { q: "otherwise を付けない try 式がエラー時に返すものは?",
+          c: ["null", "HasErrorとErrorを持つレコード", "空のリスト", "falseのみ"], a: 1,
+          e: "[HasError=true, Error=[Reason, Message, Detail]] というレコード。エラー内容に応じた分岐が可能になります。" },
+        { q: "エラーを含む行をテーブルから除去する関数は?",
+          c: ["Table.SkipErrors", "Table.RemoveRowsWithErrors", "Table.Clean", "Table.DropErrors"], a: 1,
+          e: "UIの「エラーの削除」の正体。ただし黙って行が消えるので、件数チェックとセットで使うのが安全です。" },
+        { q: "error \"税率が不正です\" と書くと何が起きる?",
+          c: ["文字列が返る", "独自メッセージ付きのエラーが発生する", "警告ログが出るだけ", "構文エラー"], a: 1,
+          e: "意図的にエラーを発生させ、更新を止められます。「異常データが来たら気づきたい」時の防御壁に。" },
+      ]
+    },
+    {
+      title: "パラメータと動的なソース",
+      doc: `
+<p><b>パラメータ</b>の実体は「単一の値を返すクエリ」。ファイルパスや対象年度などを一元管理できます。</p>
+<pre>// パラメータ「基準フォルダ」を使う
+ソース = Folder.Files(基準フォルダ)</pre>
+<p>フォルダーから複数ファイルを結合すると、「サンプル ファイルの変換」という<b>関数</b>が自動生成されます。1ファイル分の変換を定義すれば、全ファイルに同じ変換が適用される仕組みです。</p>
+<p class="tip">💡 実務メモ: 接続先(サーバー名・フォルダパス)は必ずパラメータ化しておくと、開発環境⇔本番環境の切替やチームへの引き継ぎが一瞬で終わります。未来の自分への最高の贈り物。</p>`,
+      quiz: [
+        { q: "Power Queryのパラメータの実体は?",
+          c: ["単一の値を返すクエリ", "特殊なテーブル", "DAX変数", "環境変数"], a: 0,
+          e: "パラメータもクエリの一種。詳細エディターで見ると、メタデータ付きの単一値です。" },
+        { q: "フォルダー内の複数ファイル結合時に自動生成されるものは?",
+          c: ["マクロ", "サンプルファイル用の変換関数", "ピボットテーブル", "リレーションシップ"], a: 1,
+          e: "「サンプル ファイルの変換」関数が作られ、各ファイルに適用されます。ここを編集すれば全ファイルの変換を一括修正できます。" },
+        { q: "接続先をパラメータ化する最大のメリットは?",
+          c: ["クエリが高速になる", "開発/本番の切替や引き継ぎが容易になる", "ファイルサイズが減る", "エラーがなくなる"], a: 1,
+          e: "パラメータを1か所変えるだけで全クエリの接続先が切り替わります。保守性への投資です。" },
+        { q: "Excel.CurrentWorkbook() が読み取るものは?",
+          c: ["開いている全Excelファイル", "自ブック内のテーブルや名前付き範囲", "最後に保存したブック", "OneDrive上のブック"], a: 1,
+          e: "Excel内のPower Queryで「このブック自身」のテーブルを読む関数。Power BIでは使えない点にも注意。" },
+      ]
+    },
+    {
+      title: "パフォーマンス最適化",
+      doc: `
+<p>遅いクエリには必ず理由があります。代表的な処方箋:</p>
+<pre>1. 不要な列・行は「できるだけ早いステップ」で削除
+2. フォールディング可能なステップを前半に集める
+3. 参照されるクエリの結果を Table.Buffer で固定
+   (ただしフォールディングは切れる。使い所を選ぶ)
+4. マージ前に結合キーの型を揃え、重複を除去</pre>
+<p><code>Table.Buffer</code> はテーブルをメモリに読み込んで固定し、同じクエリが何度も再評価されるのを防ぎます。ただしソースへの委譲(フォールディング)は切れるため、「小さいテーブルを何度も参照する」場面に限定するのがコツです。</p>
+<p class="tip">💡 実務メモ: 中間クエリ(整形途中のクエリ)は右クリック→「読み込みを有効にする」をオフに。モデルに不要なテーブルが載らず、更新もモデルサイズも軽くなります。</p>`,
+      quiz: [
+        { q: "Table.Buffer の効果として正しいのは?",
+          c: ["常にクエリが速くなる", "テーブルをメモリに固定し再評価を防ぐ(ただしフォールディングは切れる)", "ディスクにキャッシュする", "列を圧縮する"], a: 1,
+          e: "万能薬ではなく、多重参照される小さめのテーブル向け。DBソースの前半ステップに置くと逆効果もあり得ます。" },
+        { q: "不要な列の削除はいつ行うべき?",
+          c: ["最後のステップ", "できるだけ早いステップ", "モデルに読み込んだ後", "削除しなくてよい"], a: 1,
+          e: "早く削るほど後続ステップの処理量が減ります。「choose columns first」は整形の基本姿勢。" },
+        { q: "クエリのマージを速くする準備として有効なのは?",
+          c: ["結合キーの型を揃え、可能ならソース側でフォールディングさせる", "列を全部残しておく", "マージを最初のステップにする(準備なしで)", "Table.Bufferを両方に必ず入れる"], a: 0,
+          e: "型不一致は暗黙変換で遅くなり、フォールディングも阻害します。キーを整えてからマージが鉄則。" },
+        { q: "モデルに不要な中間クエリの扱いは?",
+          c: ["削除するしかない", "「読み込みを有効にする」をオフにする", "非表示列にする", "別ファイルに移す"], a: 1,
+          e: "読み込みオフ(接続専用)にすれば、整形部品として残しつつモデルには載りません。クエリの整理整頓の基本。" },
+      ]
+    },
+  ]
+});
+COURSES.push({
+  id: "dax-basic", icon: "📊", name: "DAX 基礎",
+  desc: "メジャー・コンテキスト・CALCULATEの入口",
+  lessons: [
+    {
+      title: "メジャー vs 計算列",
+      doc: `
+<p>DAXの書き場所は主に2つ。<b>使い分けがDAX上達の第一歩</b>です。</p>
+<pre>【計算列】 データ更新時に行ごとに計算され、モデルに保存される
+  税込価格 = Sales[単価] * 1.1
+
+【メジャー】 ビジュアルに置かれた瞬間、その場のフィルターで計算される
+  売上合計 = SUM(Sales[金額])</pre>
+<p>計算列は<b>メモリを消費</b>し、値は更新まで固定。メジャーは<b>集計のたびに動的に計算</b>され、スライサーに反応します。</p>
+<p>迷ったら: 「スライサーや軸で値が変わってほしい」→メジャー。「行ごとの属性としてスライサー自体に使いたい」→計算列(またはPower Query列)。</p>
+<p class="tip">💡 実務メモ: 原則は<b>メジャー優先</b>。計算列でできることの多くはPower Query側の列追加でも可能で、その方が圧縮効率が良いことが多いです。</p>`,
+      quiz: [
+        { q: "スライサーの選択に応じて動的に値が変わるのは?",
+          c: ["計算列", "メジャー", "どちらも変わる", "どちらも変わらない"], a: 1,
+          e: "メジャーは評価のたびにその場のフィルターコンテキストで計算されます。計算列の値は更新時に固定済み。" },
+        { q: "計算列が評価されるタイミングは?",
+          c: ["ビジュアル描画のたび", "データ更新時(行ごとに1回)", "ファイルを開いたとき", "スライサー操作のたび"], a: 1,
+          e: "更新時に全行分が計算されモデルに保存されます。だからメモリを消費し、スライサーには反応しません。" },
+        { q: "計算列の主なコストは?",
+          c: ["CPUのみ", "メモリ(モデルサイズ)を消費する", "ネットワーク帯域", "コストはない"], a: 1,
+          e: "全行分の値が保存されるためモデルが肥大化します。特にカーディナリティが高い列は圧縮が効かず重くなります。" },
+        { q: "「売上を部署スライサーで切り替えて見たい」。作るべきは?",
+          c: ["計算列", "メジャー", "新しいテーブル", "パラメータ"], a: 1,
+          e: "集計値を動的に見たい=メジャーの出番。売上合計 = SUM(Sales[金額]) が第一歩です。" },
+      ]
+    },
+    {
+      title: "集計関数の基本",
+      doc: `
+<p>まず押さえる基本の集計関数:</p>
+<pre>売上合計 = SUM(Sales[金額])
+注文件数 = COUNTROWS(Sales)
+顧客数   = DISTINCTCOUNT(Sales[顧客ID])
+平均単価 = AVERAGE(Sales[単価])
+客単価   = DIVIDE([売上合計], [顧客数])</pre>
+<p><code>SUM</code> などの基本集計は<b>単一の列参照</b>しか受け取れません。<code>SUM(Sales[単価] * Sales[数量])</code> はエラー — これができるのが後で学ぶ <code>SUMX</code> です。</p>
+<p>割り算は <code>DIVIDE(分子, 分母)</code> が鉄板。分母が0やBLANKでもエラーにならずBLANKを返します。</p>
+<p class="tip">💡 実務メモ: メジャー名は「売上合計」「顧客数」のように業務用語で。ビジュアルにそのまま表示される名前なので、レポートの読み手目線で命名しましょう。</p>`,
+      quiz: [
+        { q: "一意な顧客数を数えるメジャーは?",
+          c: ["COUNT(Sales[顧客ID])", "DISTINCTCOUNT(Sales[顧客ID])", "COUNTROWS(Sales[顧客ID])", "SUM(Sales[顧客ID])"], a: 1,
+          e: "DISTINCTCOUNTが重複を除いた件数。COUNTは値の入っている行数なので重複を含みます。" },
+        { q: "COUNTROWS(Sales) が返すものは?",
+          c: ["Salesテーブルの列数", "(現在のフィルターでの)Salesテーブルの行数", "空白でない行数のみ", "常に全行数"], a: 1,
+          e: "フィルターコンテキスト適用後の行数。ビジュアルのセルごとに異なる値になります。" },
+        { q: "0除算エラーを避けて安全に割り算するには?",
+          c: ["IF(b=0, 0, a/b) しかない", "DIVIDE(a, b)", "a // b", "SAFEDIV(a, b)"], a: 1,
+          e: "DIVIDEは分母が0/BLANKのときBLANKを返します(第3引数で代替値も指定可)。a/bより速いケースもあります。" },
+        { q: "SUM が引数に取れるものは?",
+          c: ["任意の式", "単一の列参照のみ", "テーブル", "メジャーのみ"], a: 1,
+          e: "SUM(Sales[単価] * Sales[数量]) はエラー。行ごとの式を集計したいときはSUMXを使います。" },
+      ]
+    },
+    {
+      title: "2つのコンテキストを理解する",
+      doc: `
+<p>DAX最大の関門にして最重要概念。<b>「同じ式でもセルごとに結果が違う」理由</b>がここにあります。</p>
+<p><b>フィルターコンテキスト</b> — 「今、モデルがどう絞り込まれているか」。スライサー、ビジュアルの軸、行・列見出し、他ビジュアルのクロスフィルター…が作ります。マトリックスの各セルで <code>SUM(Sales[金額])</code> の値が違うのは、セルごとにフィルターコンテキストが違うから。</p>
+<p><b>行コンテキスト</b> — 「今、どの1行を処理しているか」。計算列の中と、イテレーター(SUMXなど)の中に存在します。</p>
+<p>重要な非対称性: <b>行コンテキストはフィルターしません</b>。計算列の中で <code>SUM(Sales[金額])</code> と書くと、全行で同じ「テーブル全体の合計」になります。</p>
+<p class="tip">💡 実務メモ: メジャーがおかしな値を返したら、まず「このセルのフィルターコンテキストは何か?」を言葉にしてみる。デバッグの9割はこれで進みます。</p>`,
+      quiz: [
+        { q: "計算列の中に自動的に存在するコンテキストは?",
+          c: ["フィルターコンテキスト", "行コンテキスト", "両方", "どちらもない"], a: 1,
+          e: "計算列は1行ずつ評価されるので行コンテキストがあります。フィルターコンテキストは空です。" },
+        { q: "スライサーやビジュアルの軸が作るのは?",
+          c: ["行コンテキスト", "フィルターコンテキスト", "クエリコンテキスト", "変数コンテキスト"], a: 1,
+          e: "レポート上の操作はすべてフィルターコンテキストとしてメジャーに届きます。" },
+        { q: "マトリックスの各セルで SUM(Sales[金額]) の値が違う理由は?",
+          c: ["乱数が入るから", "セルごとにフィルターコンテキストが異なるから", "行コンテキストが違うから", "キャッシュの都合"], a: 1,
+          e: "行見出し・列見出し・スライサーの組合せがセルごとに違うフィルターを作り、同じ式でも違う結果になります。" },
+        { q: "計算列の中で SUM(Sales[金額]) と書くと?",
+          c: ["その行の金額になる", "全行で同じ「テーブル全体の合計」になる", "エラーになる", "BLANKになる"], a: 1,
+          e: "行コンテキストはフィルターしないため、SUMは全体を集計します。「その行の値」が欲しければ Sales[金額] と書くだけでOK。" },
+      ]
+    },
+    {
+      title: "CALCULATE 入門",
+      doc: `
+<p>DAXで最も重要な関数、<b>CALCULATE</b>。役割はただ1つ:<b>フィルターコンテキストを変更して式を評価する</b>。</p>
+<pre>赤の売上 = CALCULATE([売上合計], '商品'[色] = "赤")
+全体売上 = CALCULATE([売上合計], ALL('商品'))</pre>
+<p>重要な仕様: <b>同じ列に対する既存フィルターは「上書き」される</b>。スライサーで「青」を選んでいても、上の「赤の売上」は赤の売上を返します。</p>
+<p>実は <code>'商品'[色] = "赤"</code> は糖衣構文で、内部的には:</p>
+<pre>CALCULATE([売上合計], FILTER(ALL('商品'[色]), '商品'[色] = "赤"))</pre>
+<p>「ALLしてから絞り直す」— だから上書きになるのです。上書きではなく「掛け合わせ」たいときは <code>KEEPFILTERS</code> を使います。</p>
+<p class="tip">💡 実務メモ: 「構成比」「前年比」「特定カテゴリ比較」— レポートの定番計算はほぼ全てCALCULATEの応用。この関数だけは徹底的に。</p>`,
+      quiz: [
+        { q: "CALCULATEの役割を一言で言うと?",
+          c: ["数値を高速に集計する", "フィルターコンテキストを変更して式を評価する", "テーブルを結合する", "行コンテキストを作る"], a: 1,
+          e: "「フィルターを書き換えてから計算」がCALCULATEの全て。DAXの中心概念です。" },
+        { q: "スライサーで「青」選択中に CALCULATE([売上], '商品'[色]=\"赤\") の結果は?",
+          c: ["青の売上", "赤の売上", "青と赤の合計", "BLANK"], a: 1,
+          e: "同じ列へのフィルターは上書きされるため、スライサーの「青」は無視され赤の売上になります。" },
+        { q: "既存のフィルターを保持したまま条件を「掛け合わせ」るには?",
+          c: ["KEEPFILTERS", "ALLSELECTED", "VALUES", "FILTER単体"], a: 0,
+          e: "CALCULATE([売上], KEEPFILTERS('商品'[色]=\"赤\")) なら、スライサーが青のときは交差が空になりBLANKを返します。" },
+        { q: "CALCULATE([売上], Sales[数量] > 3) の内部的な展開は?",
+          c: ["FILTER(Sales, Sales[数量] > 3)", "FILTER(ALL(Sales[数量]), Sales[数量] > 3)", "ALL(Sales)", "VALUES(Sales[数量])"], a: 1,
+          e: "ブールフィルターは「その列をALLしてから条件で絞る」FILTER式の糖衣構文。上書き挙動の理由がこれです。" },
+      ]
+    },
+    {
+      title: "イテレーター(X関数)",
+      doc: `
+<p><code>SUMX</code>, <code>AVERAGEX</code>, <code>MAXX</code>… 名前が<b>X</b>で終わる関数は<b>イテレーター</b>。テーブルを1行ずつ回り(=行コンテキストを作り)、行ごとの式を評価してから集計します。</p>
+<pre>売上合計 = SUMX(Sales, Sales[単価] * Sales[数量])
+// Salesを1行ずつ: 単価×数量 → 最後に全部足す</pre>
+<p>第1引数は「回るテーブル」、第2引数は「行ごとに評価する式」。SUMでは書けなかった行単位の掛け算がこれで可能になります。</p>
+<p>テーブル関数と組み合わせると表現力が跳ね上がります:</p>
+<pre>月平均売上 = AVERAGEX(VALUES('Date'[年月]), [売上合計])
+// 年月の一覧を1行ずつ → 各月の売上合計 → その平均</pre>
+<p class="tip">💡 実務メモ: 「合計行の値がおかしい」問題の多くは、行ごとに計算してから集計すべきところを先に集計しているのが原因。SUMXへの書き換えが定番の処方箋です。</p>`,
+      quiz: [
+        { q: "行ごとに「単価×数量」を計算して合計するメジャーは?",
+          c: ["SUM(Sales[単価] * Sales[数量])", "SUMX(Sales, Sales[単価] * Sales[数量])", "SUM(Sales[単価]) * SUM(Sales[数量])", "CALCULATE(単価 * 数量)"], a: 1,
+          e: "SUMは列しか受け取れません。行ごとの式を評価するのがSUMX。選択肢3は「合計同士の掛け算」で全く別の値になります。" },
+        { q: "Xで終わる関数(イテレーター)の共通点は?",
+          c: ["高速版の集計関数", "行コンテキストを作り、1行ずつ式を評価して集計する", "拡張(eXtended)ライセンス専用", "テキスト専用関数"], a: 1,
+          e: "第1引数のテーブルを1行ずつ回るのがX関数。行コンテキストを自分で作れるのがポイントです。" },
+        { q: "AVERAGEX(VALUES('Date'[年月]), [売上合計]) が計算するものは?",
+          c: ["日ごとの売上の平均", "月ごとの売上合計の平均", "年月の個数", "売上の移動平均"], a: 1,
+          e: "VALUESで年月の一意リストを作り、各月の[売上合計]を評価して平均。「粒度を変えた集計」の定番パターンです。" },
+        { q: "SUMXの第1引数に渡すものは?",
+          c: ["集計する列", "イテレート(反復)するテーブル", "フィルター条件", "メジャー"], a: 1,
+          e: "第1引数=回るテーブル、第2引数=行ごとの式。FILTER(...)などのテーブル式も渡せます。" },
+      ]
+    },
+    {
+      title: "RELATEDとリレーションシップ",
+      doc: `
+<p>スタースキーマでは、売上(ファクト)と商品マスタ(ディメンション)が<b>リレーションシップ</b>で結ばれます。DAXから関連テーブルの値を参照する関数:</p>
+<pre>// 多側(Sales)から1側(商品)の値を取る — 計算列などの行コンテキスト内で
+商品カテゴリ = RELATED('商品'[カテゴリ])
+
+// 1側(商品)から多側(Sales)の関連行テーブルを取る
+販売行数 = COUNTROWS(RELATEDTABLE(Sales))</pre>
+<p><code>RELATED</code> が動く条件は2つ: <b>行コンテキストがある</b>こと、そして<b>リレーションが存在する</b>こと。</p>
+<p>非アクティブ(点線)のリレーションを使いたいときは <code>USERELATIONSHIP</code>:</p>
+<pre>出荷日売上 = CALCULATE([売上合計], USERELATIONSHIP(Sales[出荷日], 'Date'[Date]))</pre>
+<p class="tip">💡 実務メモ: 注文日と出荷日など日付列が複数あるテーブルは「アクティブ1本+非アクティブ+USERELATIONSHIP」が定石。日付テーブルを複製するより保守が楽です。</p>`,
+      quiz: [
+        { q: "多側(Sales)の行から1側(商品マスタ)の値を取る関数は?",
+          c: ["RELATED", "RELATEDTABLE", "LOOKUPVALUE のみ", "VLOOKUP"], a: 0,
+          e: "RELATEDはリレーションを1側方向へ辿ります。計算列やイテレーター内(行コンテキスト)で使います。" },
+        { q: "1側(商品)から、関連するSalesの行「テーブル」を取得するのは?",
+          c: ["RELATED", "RELATEDTABLE", "ALLRELATED", "CROSSJOIN"], a: 1,
+          e: "RELATEDTABLEは関連する多側の行の集合を返します。COUNTROWSと組み合わせて「商品ごとの販売行数」などに。" },
+        { q: "RELATEDが機能するために必要なものは?",
+          c: ["フィルターコンテキストのみ", "行コンテキスト+リレーションシップ", "メジャーの中であること", "双方向フィルター"], a: 1,
+          e: "「今どの行か」が決まらないと辿れないので行コンテキストが必須。リレーションが無い場合はLOOKUPVALUEという手もあります。" },
+        { q: "非アクティブなリレーションを一時的に使うには?",
+          c: ["USERELATIONSHIP(CALCULATE内で)", "ACTIVATE関数", "モデルを変更するしかない", "RELATEDの第2引数"], a: 0,
+          e: "CALCULATE([売上], USERELATIONSHIP(Sales[出荷日], 'Date'[Date]))。注文日/出荷日の切替の定番です。" },
+      ]
+    },
+  ]
+});
+COURSES.push({
+  id: "dax-adv", icon: "🧠", name: "DAX 応用",
+  desc: "コンテキスト遷移・ALL系・タイムインテリジェンス",
+  lessons: [
+    {
+      title: "コンテキスト遷移",
+      doc: `
+<p>DAX中級の壁、<b>コンテキスト遷移</b>(Context Transition)。ルールは1つ:</p>
+<p style="text-align:center"><b>行コンテキストの中でCALCULATEが実行されると、<br>「今の行」がフィルターコンテキストに変換される</b></p>
+<pre>店舗別売上 = SUMX('店舗', [売上合計])
+// [売上合計]はメジャー = 暗黙にCALCULATEで包まれている
+// → 各行でコンテキスト遷移が起き、「その店舗の」売上合計になる</pre>
+<p>ここで超重要な事実: <b>メジャー参照は常に暗黙のCALCULATEで包まれます</b>。<code>[売上合計]</code> と書いた瞬間、実は <code>CALCULATE(SUM(Sales[金額]))</code> なのです。計算列にメジャーを置くと行ごとに違う値になるのはこのためです。</p>
+<p>落とし穴: 遷移は「行の全列の値」でフィルターするため、<b>テーブルに完全重複行があると二重計上</b>が起き、また大きなテーブルのイテレートでは性能問題になります。</p>
+<p class="tip">💡 実務メモ: SUMX('店舗', [売上合計]) と SUMX('店舗', SUM(Sales[金額])) の結果の違いを一度手を動かして確認すると、一生モノの理解になります(後者は遷移が起きず全店舗合計×店舗数に!)。</p>`,
+      quiz: [
+        { q: "行コンテキスト内でCALCULATEを実行すると何が起きる?",
+          c: ["エラーになる", "現在の行がフィルターコンテキストに変換される", "行コンテキストが消えるだけ", "何も起きない"], a: 1,
+          e: "これがコンテキスト遷移。「今の行の値」でモデル全体がフィルターされた状態で式が評価されます。" },
+        { q: "計算列に [売上合計] メジャーを置くと行ごとに違う値になる理由は?",
+          c: ["乱数だから", "メジャーは暗黙にCALCULATEで包まれ、コンテキスト遷移が起きるから", "計算列は特別扱いされるから", "リレーションのおかげ"], a: 1,
+          e: "メジャー参照=隠れたCALCULATE。行コンテキスト(計算列)×CALCULATE=遷移、という等式で覚えましょう。" },
+        { q: "SUMX('店舗', SUM(Sales[金額]))(メジャーでなく生のSUM)の結果は?",
+          c: ["店舗ごとの売上の合計(正しい値)", "全体売上×店舗数(遷移が起きない)", "BLANK", "エラー"], a: 1,
+          e: "CALCULATEが無いので遷移せず、各行で「フィルターされていない全体合計」が評価されます。メジャー参照との決定的な違い!" },
+        { q: "コンテキスト遷移の実務上の落とし穴は?",
+          c: ["特にない", "重複行があると誤集計/大テーブルのイテレートで低速化", "メモリリーク", "リレーションが壊れる"], a: 1,
+          e: "遷移は行の全列でフィルターするため、完全重複行は一緒に拾われます。主キーの無いテーブルでは特に注意。" },
+      ]
+    },
+    {
+      title: "ALL系関数の使い分け",
+      doc: `
+<p>「構成比」「全体比較」に必須のフィルター解除ファミリー。</p>
+<pre>ALL('商品')          // 商品テーブルの全フィルターを解除
+ALL('商品'[色])       // 色列のフィルターだけ解除
+ALLEXCEPT('商品', '商品'[カテゴリ])  // カテゴリ以外を解除
+ALLSELECTED('商品')   // ビジュアル内の行・列は解除、
+                     // スライサー等の外部フィルターは残す
+REMOVEFILTERS(...)    // ALLと同じ解除効果(意図が明確な新しい書き方)</pre>
+<p>定番の構成比パターン:</p>
+<pre>構成比 = DIVIDE([売上合計], CALCULATE([売上合計], ALL('商品')))
+選択内構成比 = DIVIDE([売上合計], CALCULATE([売上合計], ALLSELECTED('商品')))</pre>
+<p>「全体に対する比率」ならALL、「スライサーで選んだ範囲内での比率」ならALLSELECTED。この使い分けが分かればALL系は卒業です。</p>
+<p class="tip">💡 実務メモ: CALCULATEのフィルター引数としての解除には、意図が読み取りやすい <code>REMOVEFILTERS</code> を使うのがモダンな書き方。ALLはテーブル関数としての顔も持つため紛らわしいのです。</p>`,
+      quiz: [
+        { q: "「全体売上に対する構成比」の分母に使うのは?",
+          c: ["CALCULATE([売上], ALL('商品'))", "CALCULATE([売上], ALLSELECTED('商品'))", "SUM(Sales[金額])そのまま", "[売上] * 100"], a: 0,
+          e: "ALLで商品のフィルターを完全解除した売上=全体売上。これを分母にすれば構成比です。" },
+        { q: "ALLSELECTEDの特徴は?",
+          c: ["ALLと完全に同じ", "ビジュアル内のフィルターは解除するが、スライサー等の外部フィルターは残す", "何も解除しない", "行コンテキストを解除する"], a: 1,
+          e: "「ユーザーが選んだ範囲を全体として扱う」構成比に最適。ALLとの違いはスライサーを残すかどうかです。" },
+        { q: "「カテゴリのフィルターだけ残して他を全部解除」は?",
+          c: ["ALL('商品'[カテゴリ])", "ALLEXCEPT('商品', '商品'[カテゴリ])", "KEEPFILTERS('商品'[カテゴリ])", "VALUES('商品'[カテゴリ])"], a: 1,
+          e: "ALLEXCEPT(テーブル, 残す列...)。「カテゴリ内順位」「カテゴリ内構成比」で活躍します。" },
+        { q: "REMOVEFILTERSが導入された理由は?",
+          c: ["ALLより高速だから", "「フィルター解除」の意図を明確にするため(ALLはテーブル関数と紛らわしい)", "ALLが廃止されたから", "双方向フィルター専用だから"], a: 1,
+          e: "機能はCALCULATE内のALLと同等。「テーブルを返すALL」と「解除のALL」の二面性による誤読を防ぐための命名です。" },
+      ]
+    },
+    {
+      title: "タイムインテリジェンス",
+      doc: `
+<p>前年比・累計・移動平均— 時間軸の比較計算を一手に担う関数群。</p>
+<pre>売上YTD  = TOTALYTD([売上合計], 'Date'[Date])
+前年売上 = CALCULATE([売上合計], SAMEPERIODLASTYEAR('Date'[Date]))
+前月売上 = CALCULATE([売上合計], DATEADD('Date'[Date], -1, MONTH))
+前年比   = DIVIDE([売上合計] - [前年売上], [前年売上])</pre>
+<p><b>動作の大前提</b>(ここで9割の人がつまずく):</p>
+<pre>1. 連続した日付を持つ「日付テーブル」が存在する
+2. 「日付テーブルとしてマーク」されている
+3. ファクトとリレーションで接続され、
+   ビジュアルの軸に日付テーブルの列を使っている</pre>
+<p><code>DATEADD</code> は「現在のフィルター期間を丸ごとシフト」する関数。月でも四半期でも粒度を問わず動くので、SAMEPERIODLASTYEARより汎用的です(実はSAMEPERIODLASTYEARはDATEADDの-1 YEAR版の別名)。</p>
+<p class="tip">💡 実務メモ: 前年比がBLANKだらけ・変な値になったら、まず「軸にファクト側の日付列を使っていないか」「マーク済みか」を疑う。タイムインテリジェンス不調の2大原因です。</p>`,
+      quiz: [
+        { q: "年初来累計(YTD)を最も簡潔に書くと?",
+          c: ["TOTALYTD([売上合計], 'Date'[Date])", "SUM(Sales[金額]) * 12", "CALCULATE([売上], ALL('Date'))", "RUNNINGTOTAL([売上])"], a: 0,
+          e: "TOTALYTD(式, 日付列)。会計年度末を第3引数で指定すれば会計年度YTDにもなります。" },
+        { q: "前年同期の売上を求める式は?",
+          c: ["CALCULATE([売上], SAMEPERIODLASTYEAR('Date'[Date]))", "[売上] - 365", "CALCULATE([売上], LASTYEAR)", "OFFSET([売上], -1)"], a: 0,
+          e: "SAMEPERIODLASTYEARは現在の期間を1年前にシフトしたテーブルを返し、CALCULATEのフィルターとして使います。" },
+        { q: "タイムインテリジェンスが正しく動く前提は?",
+          c: ["特に前提なし", "連続した日付テーブル+「日付テーブルとしてマーク」+日付テーブルの列を軸に使用", "ファクトに日付列があればよい", "Premiumライセンス"], a: 1,
+          e: "歯抜けの日付や、ファクト側の日付列を軸に使うのが典型的な不調原因。日付テーブルは全ての土台です。" },
+        { q: "DATEADD('Date'[Date], -1, MONTH) がすることは?",
+          c: ["1日引く", "現在のフィルター期間を1か月前にシフトした日付テーブルを返す", "月末日を返す", "1か月分を合計する"], a: 1,
+          e: "「期間まるごとシフト」がDATEADD。表示中が3月なら2月の期間を返します。粒度を問わず動く万能シフト関数。" },
+      ]
+    },
+    {
+      title: "変数(VAR / RETURN)",
+      doc: `
+<p>複雑なメジャーの可読性と性能を一気に改善する<b>変数</b>。</p>
+<pre>前年比 =
+VAR CurrentSales = [売上合計]
+VAR PYSales = CALCULATE([売上合計], SAMEPERIODLASTYEAR('Date'[Date]))
+RETURN
+    DIVIDE(CurrentSales - PYSales, PYSales)</pre>
+<p>メリット: ①同じ式の再計算を防ぐ ②名前が付いて読みやすい ③部分ごとにRETURNして<b>デバッグ</b>できる。</p>
+<p><b>最重要仕様</b>: 変数は「定義された時点のコンテキストで<b>1回だけ</b>評価され、以後は定数」。</p>
+<pre>罠の例 =
+VAR S = [売上合計]              // ← この時点の値で確定!
+RETURN CALCULATE(S, ALL('商品'))  // ALLは S に影響しない!</pre>
+<p>「変数=値のスナップショット」。CALCULATEでコンテキストを変えてから評価したい式は、変数に入れず式のまま渡します。</p>
+<p class="tip">💡 実務メモ: 長いメジャーを書くときは RETURN の直後を一時的に途中の変数名に差し替えて値を確認するのが、Power BIネイティブで一番手軽なデバッグ術です。</p>`,
+      quiz: [
+        { q: "VARで定義した変数が評価されるのは?",
+          c: ["RETURNで使われるたびに毎回", "定義された時点のコンテキストで1回だけ", "レポート表示時に1回だけ", "評価されない"], a: 1,
+          e: "一度評価されたら以後は定数扱い。これが可読性・性能・そして「ALLが効かない罠」の全ての源です。" },
+        { q: "VAR S = [売上] のあと CALCULATE(S, ALL('商品')) と書くと?",
+          c: ["全商品の売上になる", "Sは評価済みの定数なのでALLの影響を受けない", "エラーになる", "BLANKになる"], a: 1,
+          e: "変数はスナップショット。フィルターを変えて評価したいならCALCULATE([売上], ALL('商品'))と式を直接渡します。超頻出の罠!" },
+        { q: "変数を使うメリットとして正しいのは?",
+          c: ["メモリが節約される", "同じ式の再計算を防ぎ、可読性とデバッグ性が上がる", "自動的に並列計算される", "計算列が不要になる"], a: 1,
+          e: "同じサブ式を2回書くと2回計算されることがありますが、変数なら1回。RETURN差し替えデバッグも便利です。" },
+        { q: "RETURNの後に書けるのは?",
+          c: ["複数の式", "単一の式", "変数定義のみ", "コメントのみ"], a: 1,
+          e: "RETURN以降は式1つ。複数の中間結果が要る場合はVARを重ねて、最後に1つの式を返します。" },
+      ]
+    },
+    {
+      title: "ランキングと上位N",
+      doc: `
+<p>「売上トップ10」「カテゴリ内順位」— ランキングの主役は <code>RANKX</code>。</p>
+<pre>売上順位 = RANKX(ALL('商品'[商品名]), [売上合計])</pre>
+<p><b>なぜALLが必要?</b> ビジュアルの各行では商品が1つに絞られています。そのままだと「1件中1位」で全行1位に。ALLでフィルターを外した全商品リストの中で、各商品の売上を比較するのです(ここでもコンテキスト遷移が働いています)。</p>
+<p>上位N件の集計は <code>TOPN</code>:</p>
+<pre>上位5商品売上 = CALCULATE([売上合計], TOPN(5, ALL('商品'), [売上合計]))</pre>
+<p>RANKXの引数: <code>RANKX(テーブル, 式, [値], [順序], [ties])</code>。第5引数でDENSE(同率の次を詰める)/SKIP(飛ばす)を選べます。</p>
+<p class="tip">💡 実務メモ: 「上位10商品+その他」の表現は、TOPNで上位を出し、全体からの差分を「その他」として計算するのが定番。経営レポートで一度は頼まれるやつです。</p>`,
+      quiz: [
+        { q: "商品ごとの売上順位メジャーの正しい形は?",
+          c: ["RANKX('商品', [売上合計])", "RANKX(ALL('商品'[商品名]), [売上合計])", "RANK([売上合計])", "ORDER BY [売上合計]"], a: 1,
+          e: "ALLなしだと各セルで商品が1つに絞られており「1件中1位」に。全商品の中で比較するためにALLが必須です。" },
+        { q: "RANKXの中でALLが必要な本質的理由は?",
+          c: ["構文上の決まりだから", "各セルでは対象が1つにフィルター済みなので、比較対象の全体リストを復元するため", "高速化のため", "同率順位を防ぐため"], a: 1,
+          e: "順位=「全体の中での位置」。フィルターを解除して初めて比較の土俵ができます。" },
+        { q: "売上上位5商品だけの売上合計は?",
+          c: ["CALCULATE([売上], TOPN(5, ALL('商品'), [売上]))", "TOPN(5, [売上])", "RANKX(5, [売上])", "CALCULATE([売上], FIRST(5))"], a: 0,
+          e: "TOPNは上位N行のテーブルを返し、CALCULATEのフィルターとして機能します。ALLを忘れると正しく動きません。" },
+        { q: "RANKXで同率順位の扱い(1,2,2,の次を3にするか4にするか)を決めるのは?",
+          c: ["第2引数", "第5引数(DENSE / SKIP)", "設定できない", "モデルの設定"], a: 1,
+          e: "DENSEなら1,2,2,3、SKIP(既定)なら1,2,2,4。レポート要件に合わせて選びます。" },
+      ]
+    },
+    {
+      title: "高度なフィルター操作",
+      doc: `
+<p>最後の仕上げ、フィルター制御の上級関数たち。</p>
+<pre>// リレーションが無いテーブル間で仮想的にフィルターを伝える
+CALCULATE([売上], TREATAS(VALUES('予算'[部署]), '実績'[部署]))
+
+// リレーションのフィルター方向を式内で変更
+CALCULATE([顧客数], CROSSFILTER(Sales[顧客ID], '顧客'[ID], Both))
+
+// ビジュアルで1つに絞られた値を安全に取得
+選択商品 = SELECTEDVALUE('商品'[商品名], "(複数)")</pre>
+<p><code>TREATAS</code> は「このリストの値を、あの列へのフィルターとして扱え」という関数。予算vs実績のような<b>リレーションを張りにくいテーブルの突合</b>で真価を発揮します。</p>
+<p>FILTER関数の性能面の鉄則: <b>絞りたいのが1列なら、テーブル全体でなく列だけを回す</b>。</p>
+<pre>遅い: FILTER(Sales, Sales[数量] > 3)         // 全列を保持して全行イテレート
+速い: FILTER(ALL(Sales[数量]), Sales[数量] > 3) // 数量列の一意値だけ</pre>
+<p class="tip">💡 実務メモ: SELECTEDVALUEはタイトルの動的化(「〇〇の売上推移」)や、選択に応じた条件分岐の定番。第2引数の既定値を忘れずに。</p>`,
+      quiz: [
+        { q: "TREATASの用途は?",
+          c: ["データ型の変換", "リレーションの無いテーブル間で値のリストを仮想フィルターとして適用", "テキストの整形", "エラー処理"], a: 1,
+          e: "「予算テーブルの部署リストを実績テーブルの部署列へのフィルターとして扱う」— リレーションレスな突合の切り札です。" },
+        { q: "CROSSFILTERができることは?",
+          c: ["リレーションのフィルター方向を式の中で一時的に変更", "テーブルの結合", "重複の削除", "クロス集計表の作成"], a: 0,
+          e: "モデル設定を双方向にせず、必要なメジャーの中だけでBothにできます。常時双方向より安全な選択肢。" },
+        { q: "FILTER(Sales, ...) より FILTER(ALL(Sales[数量]), ...) が速い理由は?",
+          c: ["ALLは常に速いから", "テーブル全行・全列でなく、1列の一意値だけをイテレートするから", "キャッシュされるから", "実は速くない"], a: 1,
+          e: "条件が1列で済むなら列だけ回すのが鉄則。イテレート対象の行数・幅を最小にするのがDAX性能改善の基本です。" },
+        { q: "スライサーで1つだけ選ばれた商品名を取得する安全な関数は?",
+          c: ["VALUES('商品'[商品名])単体", "SELECTEDVALUE('商品'[商品名], \"(複数)\")", "FIRST('商品')", "MAX(必ず正しい)"], a: 1,
+          e: "SELECTEDVALUEは1値ならその値、複数/ゼロなら既定値を返します。VALUES単体は複数値でエラーになります。" },
+      ]
+    },
+  ]
+});
+COURSES.push({
+  id: "tips", icon: "🛠️", name: "実務TIPS",
+  desc: "現場で効くモデリング・性能・保守のワザ",
+  lessons: [
+    {
+      title: "スタースキーマのすすめ",
+      doc: `
+<p>Power BIモデリングの黄金律は<b>スタースキーマ</b>: 中央に<b>ファクトテーブル</b>(売上明細などのトランザクション)、周囲に<b>ディメンションテーブル</b>(商品・顧客・日付などのマスタ)を配置し、1対多のリレーションで結びます。</p>
+<pre>       [日付]     [商品]
+           \\       /
+           [売上ファクト]
+           /       \\
+       [顧客]     [店舗]</pre>
+<p>Excelでありがちな「全部入り1枚フラットテーブル」の問題: 同じマスタ情報が全行に繰り返されて<b>メモリ肥大</b>、フィルターの意図が曖昧になり<b>DAXが複雑化</b>、複数ファクト(売上と予算など)への拡張が困難。</p>
+<p>ファクトには数値と外部キー、ディメンションには属性(名前・カテゴリ・地域…)。スライサーに使うのは常にディメンション側の列です。</p>
+<p class="tip">💡 実務メモ: <b>双方向クロスフィルターは原則避ける</b>。曖昧なフィルター経路とパフォーマンス低下の温床です。必要な場面(多対多の橋渡し等)以外は単方向+CROSSFILTERでの一時変更を。</p>`,
+      quiz: [
+        { q: "スタースキーマの構成として正しいのは?",
+          c: ["中央にディメンション、周囲にファクト", "中央にファクト、周囲にディメンション", "全テーブルを相互接続", "テーブルは1枚に統合"], a: 1,
+          e: "トランザクション(ファクト)を中心に、マスタ(ディメンション)が星形に囲む形。Power BIエンジンはこの形に最適化されています。" },
+        { q: "「全部入り1枚テーブル」の問題点は?",
+          c: ["特に問題ない", "マスタ情報の繰り返しでメモリ肥大+DAXが複雑化", "更新が速くなりすぎる", "リレーションが多くなる"], a: 1,
+          e: "列志向圧縮でもカーディナリティ高の繰り返しは不利。前年比などの計算も日付ディメンションが無いと格段に難しくなります。" },
+        { q: "スライサーに使うべき列はどちら側?",
+          c: ["ファクト側", "ディメンション側", "どちらでも同じ", "計算列のみ"], a: 1,
+          e: "ディメンション→ファクトへフィルターが流れるのが正常な設計。ファクト側の属性列でスライスし始めたらモデル設計を見直すサインです。" },
+        { q: "双方向クロスフィルターの扱いとして推奨されるのは?",
+          c: ["常に双方向にする", "原則避け、必要時のみ(またはCROSSFILTERで一時的に)", "使うと必ずエラー", "Premium専用機能"], a: 1,
+          e: "経路の曖昧さ・意図しないフィルター伝播・性能低下のリスク。既定は単方向、が現場の鉄則です。" },
+      ]
+    },
+    {
+      title: "日付テーブルの作り方",
+      doc: `
+<p>あらゆる時系列分析の土台、<b>日付テーブル</b>。作り方は主に2通り。</p>
+<p><b>DAX派</b>(手軽):</p>
+<pre>DateTable =
+ADDCOLUMNS(
+    CALENDARAUTO(),
+    "年", YEAR([Date]),
+    "月", MONTH([Date]),
+    "年月", FORMAT([Date], "YYYY-MM")
+)</pre>
+<p><b>M言語派</b>(更新時に生成、複数モデルで再利用しやすい):</p>
+<pre>let
+    開始 = #date(2020, 1, 1),
+    日数 = Duration.Days(Date.From(DateTime.LocalNow()) - 開始) + 1,
+    日付 = List.Dates(開始, 日数, #duration(1,0,0,0)),
+    表 = Table.FromList(日付, Splitter.SplitByNothing(), {"Date"})
+in
+    表</pre>
+<p>作ったら必ず「<b>日付テーブルとしてマーク</b>」。そして設定の「<b>自動の日付/時刻</b>」は<b>オフ</b>に — 日付列ごとに隠しカレンダーが作られ、モデルが静かに肥大化します。</p>
+<p class="tip">💡 実務メモ: 「年月」列で並べ替えると文字列順になる問題は、数値の「年月キー」列(202607形式)を作り「列で並べ替え」を設定するのが定番解です。</p>`,
+      quiz: [
+        { q: "CALENDARAUTO() がすることは?",
+          c: ["営業日のみのカレンダー作成", "モデル内の日付範囲から自動で連続日付テーブルを生成", "祝日の取得", "タイムゾーン変換"], a: 1,
+          e: "モデル中の日付列をスキャンし、それを覆う1/1〜12/31の連続カレンダーを作ります。手軽な日付テーブルの出発点。" },
+        { q: "「日付テーブルとしてマーク」する効果は?",
+          c: ["見た目が変わるだけ", "タイムインテリジェンスが正しく動作する保証+自動日付/時刻の階層に頼らなくなる", "更新が速くなる", "リレーションが自動生成される"], a: 1,
+          e: "マークにより日付テーブルの要件(一意・連続)が検証され、タイムインテリジェンス関数の前提が整います。" },
+        { q: "「自動の日付/時刻」設定を推奨オフにする理由は?",
+          c: ["バグが多いから", "日付列ごとに隠しカレンダーテーブルが作られモデルが肥大化するから", "日本語非対応だから", "オフにできないから"], a: 1,
+          e: "列ごとの隠しテーブルは意外なサイズに。自前の日付テーブル1本に統一するのがプロの流儀です。" },
+        { q: "M言語で連続日付を生成する中心となる関数は?",
+          c: ["List.Dates", "Table.Calendar", "Date.Range", "Calendar.Generate"], a: 0,
+          e: "List.Dates(開始日, 件数, #duration(1,0,0,0))で日付リストを作り、Table.FromListでテーブル化する流れです。" },
+      ]
+    },
+    {
+      title: "パフォーマンスチューニング",
+      doc: `
+<p>「レポートが重い」と言われたら、勘ではなく<b>計測</b>から。</p>
+<pre>手順1: パフォーマンス アナライザー(Power BI Desktop標準)
+       → どのビジュアルの何が遅いか(DAXクエリ? 描画?)
+手順2: 遅いビジュアルのクエリをDAX Studioにコピー
+       → サーバータイミングでストレージエンジン/式エンジンを分析</pre>
+<p>定番の改善ポイント:</p>
+<pre>・計算列 → メジャーへ(モデルサイズ削減)
+・不要な列の削除。特に高カーディナリティ列
+  (ID、タイムスタンプ)は圧縮が効かない主犯
+・1ページのビジュアル数を絞る(1画面のクエリ数が減る)
+・双方向フィルターを見直す</pre>
+<p>Power BIのVertiPaqエンジンは<b>列指向・辞書圧縮</b>。「列の種類数(カーディナリティ)がサイズを決める」と覚えると、削るべき列が見えてきます。</p>
+<p class="tip">💡 実務メモ: DAX Studioの「View Metrics」(VertiPaq Analyzer)でテーブル・列ごとのメモリ消費が一覧できます。「このモデル、何が重いの?」への最速の答えです。</p>`,
+      quiz: [
+        { q: "遅いビジュアルを特定する最初の道具は?",
+          c: ["タスクマネージャー", "パフォーマンス アナライザー", "Excelのストップウォッチ", "イベントビューアー"], a: 1,
+          e: "表示タブから起動、操作を記録するだけでビジュアルごとのDAXクエリ時間・描画時間が見えます。推測より計測。" },
+        { q: "モデルサイズ削減の観点で「計算列よりメジャー」の理由は?",
+          c: ["メジャーの方が書きやすいから", "計算列は全行分の値を保存しメモリを消費するから", "計算列は廃止予定だから", "メジャーは圧縮されるから"], a: 1,
+          e: "メジャーは定義(式)だけ保存され、値は必要時に計算。保存コストがほぼゼロです。" },
+        { q: "圧縮が効きにくくモデルを重くする列の特徴は?",
+          c: ["カーディナリティ(一意値の数)が高い列", "日本語の列", "短い列名の列", "ディメンションの列"], a: 0,
+          e: "VertiPaqは辞書圧縮。一意値が多いID・タイムスタンプ・自由記述はサイズの主犯。不要なら削除、必要でも粒度を落とす工夫を。" },
+        { q: "DAX Studioでできることは?",
+          c: ["レポートのデザイン編集", "DAXクエリの実行計測・サーバータイミング分析・モデルメトリクス確認", "データソースの編集", "ゲートウェイの管理"], a: 1,
+          e: "無料の必携ツール。遅いメジャーの原因がストレージエンジンか式エンジンかを切り分けられます。" },
+      ]
+    },
+    {
+      title: "読みやすいDAXの書き方",
+      doc: `
+<p>DAXは「書けた」の先に「読める・直せる」があります。チームと未来の自分のための作法:</p>
+<pre>// 悪い例
+売上YoY% = ([売上]-CALCULATE([売上],SAMEPERIODLASTYEAR('Date'[Date])))/CALCULATE([売上],SAMEPERIODLASTYEAR('Date'[Date]))
+
+// 良い例
+売上YoY% =
+VAR PY = CALCULATE([売上合計], SAMEPERIODLASTYEAR('Date'[Date]))
+RETURN
+    DIVIDE([売上合計] - PY, PY)</pre>
+<p>お作法の定番:</p>
+<pre>・メジャー参照は [売上合計](表名を付けない)
+・列参照は 'Sales'[金額](必ず表名を付ける)
+  → 一目で列かメジャーか区別できる
+・割り算は DIVIDE(0除算でBLANK)
+・長い式は daxformatter.com で整形</pre>
+<p>メジャーが増えてきたら、専用の「メジャーテーブル」(空テーブル)や表示フォルダーで整理を。</p>
+<p class="tip">💡 実務メモ: 命名は「売上合計」「売上YoY%」「売上YTD」のように<b>ベース名+修飾子</b>で揃えると、フィールド一覧で家族がまとまって並び、探す時間が消えます。</p>`,
+      quiz: [
+        { q: "DIVIDE(a, b) を a/b より推奨する理由は?",
+          c: ["常に高速だから", "分母が0やBLANKでもエラーにならずBLANK(または既定値)を返すから", "桁数が増えるから", "国際化対応のため"], a: 1,
+          e: "合計行や欠損データで分母0は日常茶飯事。DIVIDEなら安全に流せます。第3引数で代替値も指定可能。" },
+        { q: "「メジャーは表名なし、列は表名あり」で書く理由は?",
+          c: ["文字数削減", "参照が列かメジャーかを一目で区別するため", "エラー回避のため必須", "アルファベット順に並ぶため"], a: 1,
+          e: "[売上合計]=メジャー、'Sales'[金額]=列、と読み分けられるのはこの慣例のおかげ。世界標準のスタイルです。" },
+        { q: "長く複雑なDAX式を整形する定番の方法は?",
+          c: ["手作業で頑張るしかない", "DAX Formatter(daxformatter.com)やエディターの整形機能", "整形すると動かなくなる", "SQLフォーマッタを使う"], a: 1,
+          e: "SQLBI製のDAX Formatterが業界標準。改行とインデントの流儀ごと身につくのでコードリーディング力も上がります。" },
+        { q: "増えたメジャーの整理方法として定番なのは?",
+          c: ["1つのメジャーに統合", "専用のメジャーテーブルや表示フォルダーで分類", "使わないものも残す", "レポートごとにコピー"], a: 1,
+          e: "空テーブルを作ってメジャーの置き場にし、表示フォルダーで「売上系」「利益系」などに分類するのが定番です。" },
+      ]
+    },
+    {
+      title: "Power Query 実務ワザ",
+      doc: `
+<p>地味だけど毎日効く、エディターの実務テクニック集。</p>
+<pre>① ステップ名を変える(右クリック→名前の変更)
+   「フィルターされた行1」→「テスト部署を除外」
+   ※「説明」欄にメモも書ける
+② クエリの「参照」vs「複製」
+   参照 = 元クエリの結果を入力にする(連動する)
+   複製 = 完全に独立したコピー
+③ 「例からの列」— 欲しい結果を2〜3個入力すると
+   Mコードを自動生成。複雑な文字列抽出の時短に絶大
+④ クエリのグループ化(フォルダー)で整理
+   「01_ソース」「02_変換」「03_出力」など</pre>
+<p>「参照」は共通の整形(ソース接続+基本クレンジング)を1つのベースクエリにまとめ、そこから用途別に分岐する設計に使います。修正がベース1か所で済むのが強み。</p>
+<p class="tip">💡 実務メモ: 引き継ぎ資料を書く前に、まずステップ名を日本語で意味の通る名前にリネームしましょう。それ自体が最高のドキュメントになります。</p>`,
+      quiz: [
+        { q: "適用したステップの名前は?",
+          c: ["変更できない", "右クリックで変更でき、後から読んで分かる名前にすべき", "英数字のみ使用可", "変更するとエラーになる"], a: 1,
+          e: "「フィルターされた行3」が並ぶクエリは未来の自分への呪い。意図が分かる名前+説明欄のメモが最高の引き継ぎ資料です。" },
+        { q: "クエリの「参照」と「複製」の違いは?",
+          c: ["同じもの", "参照は元クエリの結果を入力とする(連動)、複製は独立コピー", "参照は読み取り専用", "複製は自動更新されない"], a: 1,
+          e: "ベースクエリ+参照で分岐、が保守しやすい設計。元の修正が参照先に自動で波及します。" },
+        { q: "「例からの列」の機能は?",
+          c: ["サンプルデータの生成", "入力した結果例からMの変換コードを自動生成", "列のコピー", "AIによるデータ予測"], a: 1,
+          e: "「この列からこう取り出したい」を2〜3例入力するだけでText.BetweenDelimiters等の式を自動生成。まず試す価値ありです。" },
+        { q: "クエリが増えてきたときの整理方法は?",
+          c: ["名前を長くする", "グループ(フォルダー)を作って役割別に整理", "ファイルを分けるしかない", "整理する方法はない"], a: 1,
+          e: "「ソース」「パラメータ」「中間」「出力」などのグループ分けが定番。読み込みオフの中間クエリも一目で分かります。" },
+      ]
+    },
+    {
+      title: "トラブルシューティング事典",
+      doc: `
+<p>現場で遭遇率の高いトラブルと、最初に疑うべきポイント集。</p>
+<pre>【症状】合計行だけ値がおかしい
+【原因】行ごとに計算すべき式を集計後に計算している
+【処方】SUMXで「行ごとに計算→合計」に書き換え
+
+【症状】循環依存エラー
+【原因】計算列同士の相互参照や、CALCULATEを含む
+        計算列が同テーブルの列と依存し合う
+【処方】依存の連鎖を図に描く/計算列をPower Queryへ移す
+
+【症状】前年比・YTDがBLANKや変な値
+【原因】日付テーブル未マーク/ファクト側日付列を軸に使用
+【処方】日付テーブルの3条件(連続・マーク・軸に使用)を確認
+
+【症状】BLANKの比較で意図しない動き
+【原因】DAXでは BLANK() = 0 がTRUE!
+【処方】ISBLANKで明示的に判定する</pre>
+<p>Power Query側の型エラー「テキストを数値に変換できません」は、対象列に混じった文字(全角数字、単位、空白)が原因のことがほとんど。エラー値のフィルターで現物を確認するのが最短です。</p>
+<p class="tip">💡 実務メモ: トラブルの再現手順と原因をメモに残しておくと、チームの「事典」が育ちます。同じ穴に2度落ちないのが上級者への近道。</p>`,
+      quiz: [
+        { q: "マトリックスで「明細は正しいのに合計行だけおかしい」典型原因は?",
+          c: ["Power BIのバグ", "行ごとに計算すべき式を集計後に計算している(SUMXで解決)", "データが壊れている", "リレーションの向き"], a: 1,
+          e: "合計行では「単価合計×数量合計」のような誤った計算に。SUMX(明細, 単価*数量)で行ごとに計算してから足します。" },
+        { q: "DAXにおける BLANK() = 0 の評価結果は?",
+          c: ["FALSE", "TRUE", "エラー", "BLANK"], a: 1,
+          e: "衝撃の仕様ですがTRUEです。「0のときだけ」の条件がBLANKも拾ってしまう罠。ISBLANKで明示的に区別しましょう。" },
+        { q: "循環依存エラーの典型的な原因は?",
+          c: ["メジャーが多すぎる", "計算列同士の相互参照など依存関係のループ", "リレーションの数", "データ量"], a: 1,
+          e: "列Aが列Bを参照し、列BがAを参照…のループ。計算列にCALCULATEが絡むと気づきにくい形でも発生します。" },
+        { q: "「テキストを数値に変換できません」エラーへの最初の一手は?",
+          c: ["モデルを作り直す", "Power Query側でエラー行を表示し、混入した文字(全角数字・単位等)の現物を確認", "DAXで回避する", "列を削除する"], a: 1,
+          e: "「エラーの保持」で現物確認→原因に応じてText.Trim/置換/try変換を仕込む。現物を見るのが常に最短ルートです。" },
+      ]
+    },
+  ]
+});
+/*__COURSES_END__*/
+
+/* ============================================================
+   帯(レベル)システム
+   ============================================================ */
+const BELTS = [
+  { xp: 0,    name: "白帯",  icon: "🤍" },
+  { xp: 80,   name: "黄帯",  icon: "💛" },
+  { xp: 200,  name: "橙帯",  icon: "🧡" },
+  { xp: 360,  name: "緑帯",  icon: "💚" },
+  { xp: 560,  name: "青帯",  icon: "💙" },
+  { xp: 800,  name: "紫帯",  icon: "💜" },
+  { xp: 1100, name: "茶帯",  icon: "🤎" },
+  { xp: 1450, name: "赤帯",  icon: "❤️" },
+  { xp: 1850, name: "黒帯",  icon: "🖤" },
+  { xp: 2300, name: "師範",  icon: "🏆" },
+];
+
+/* ============================================================
+   状態管理(localStorage)
+   ============================================================ */
+const KEY = "pbdojo_v1";
+let S = load();
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { xp: 0, streak: 0, best: 0, lastDay: "", done: {}, best_score: {}, qs: {}, dailyDay: "", dailyScore: null };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function today() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function touchStreak() {
+  const t = today();
+  if (S.lastDay === t) return;
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const yest = y.getFullYear() + "-" + String(y.getMonth() + 1).padStart(2, "0") + "-" + String(y.getDate()).padStart(2, "0");
+  S.streak = (S.lastDay === yest) ? S.streak + 1 : 1;
+  S.best = Math.max(S.best, S.streak);
+  S.lastDay = t;
+}
+function addXP(n) { touchStreak(); S.xp += n; save(); }
+function belt() {
+  let b = BELTS[0], next = null;
+  for (let i = 0; i < BELTS.length; i++) {
+    if (S.xp >= BELTS[i].xp) b = BELTS[i];
+    else { next = BELTS[i]; break; }
+  }
+  return { cur: b, next: next };
+}
+
+/* 全問題にIDを振ってフラットにも持つ */
+const ALLQ = [];
+COURSES.forEach((c, ci) => c.lessons.forEach((l, li) => l.quiz.forEach((q, qi) => {
+  q.id = ci + "-" + li + "-" + qi;
+  q.course = c.name;
+  ALLQ.push(q);
+})));
+
+function qstat(id) { return S.qs[id] || { c: 0, w: 0 }; }
+function recordAnswer(id, ok) {
+  const s = S.qs[id] || { c: 0, w: 0 };
+  if (ok) s.c++; else s.w++;
+  S.qs[id] = s;
+}
+function weakQuestions() {
+  return ALLQ.filter(q => { const s = qstat(q.id); return s.w > 0 && s.w >= s.c; });
+}
+function totalProgress() {
+  const total = COURSES.reduce((n, c) => n + c.lessons.length, 0);
+  const done = Object.keys(S.done).length;
+  return Math.round(done / total * 100);
+}
+
+/* ============================================================
+   描画
+   ============================================================ */
+const app = document.getElementById("app");
+let session = null; // {mode, qs, idx, correct, courseIdx, lessonIdx, answered}
+
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+function header() {
+  return `<header class="top" onclick="go('home')">
+    <h1>🥋 Power BI 道場</h1><span class="sub">M &amp; DAX 毎日修行</span>
+  </header>`;
+}
+
+function viewHome() {
+  const b = belt();
+  const t = today();
+  const dailyDone = S.dailyDay === t;
+  const weak = weakQuestions();
+  const pct = totalProgress();
+  const nextTxt = b.next ? `次の${b.next.name}まで あと${b.next.xp - S.xp} XP` : "最高位です!";
+  let html = header();
+  html += `<div class="statrow">
+    <div class="stat"><div class="v">🔥 ${S.streak}</div><div class="l">連続日数(最高 ${S.best})</div></div>
+    <div class="stat"><div class="v">⭐ ${S.xp}</div><div class="l">XP</div></div>
+    <div class="stat"><div class="v belt">${b.cur.icon} ${b.cur.name}</div><div class="l">${nextTxt}</div></div>
+    <div class="stat"><div class="v">${pct}%</div><div class="l">全レッスン進捗</div></div>
+  </div>`;
+  html += `<button class="bigbtn ${dailyDone ? "done-today" : ""}" onclick="startDaily()">
+    <span class="ico">${dailyDone ? "✅" : "⚔️"}</span>
+    <span><div class="t">今日の腕試し(5問)</div>
+    <div class="d">${dailyDone ? `本日クリア済み! ${S.dailyScore}/5 正解。また明日🌅` : "全コースからランダム出題・XP2倍!"}</div></span>
+  </button>`;
+  if (weak.length > 0) {
+    html += `<button class="bigbtn" onclick="startReview()">
+      <span class="ico">📝</span>
+      <span><div class="t">弱点復習</div><div class="d">間違えた問題 ${weak.length} 問が復習待ち</div></span>
+    </button>`;
+  }
+  html += `<h2 class="sec">コース一覧</h2>`;
+  COURSES.forEach((c, ci) => {
+    const done = c.lessons.filter((_, li) => S.done[ci + "-" + li]).length;
+    const p = Math.round(done / c.lessons.length * 100);
+    html += `<button class="bigbtn" onclick="go('course', ${ci})">
+      <span class="ico">${c.icon}</span>
+      <span style="flex:1"><div class="t">${c.name}</div><div class="d">${c.desc}</div>
+      <div class="bar"><i style="width:${p}%"></i></div></span>
+      <span class="right">${done}/${c.lessons.length}</span>
+    </button>`;
+  });
+  html += `<div class="footer-note">毎日1レッスン+腕試しで、3週間で師範クラス。焦らずコツコツ🍵</div>`;
+  app.innerHTML = html;
+}
+
+function viewCourse(ci) {
+  const c = COURSES[ci];
+  let html = header();
+  html += `<div class="crumb" onclick="go('home')">← ホーム</div>`;
+  html += `<div class="card"><div style="font-size:22px">${c.icon} <b>${c.name}</b></div><div style="color:var(--sub);font-size:13.5px">${c.desc}</div></div>`;
+  c.lessons.forEach((l, li) => {
+    const key = ci + "-" + li;
+    const cleared = S.done[key];
+    const bs = S.best_score[key];
+    html += `<button class="lessonrow ${cleared ? "cleared" : ""}" onclick="go('lesson', ${ci}, ${li})">
+      <span class="no">${cleared ? "✓" : li + 1}</span>
+      <span><div class="lt">${l.title}</div>
+      <div class="ls">クイズ${l.quiz.length}問${bs !== undefined ? ` ・ ベスト ${bs}/${l.quiz.length}` : ""}</div></span>
+    </button>`;
+  });
+  app.innerHTML = html;
+}
+
+function viewLesson(ci, li) {
+  const c = COURSES[ci], l = c.lessons[li];
+  let html = header();
+  html += `<div class="crumb" onclick="go('course', ${ci})">← ${c.name}</div>`;
+  html += `<div class="card"><h3 style="margin:4px 0 2px">${c.icon} ${l.title}</h3><div class="doc">${l.doc}</div>
+  <button class="btn" onclick="startLessonQuiz(${ci}, ${li})">🎯 クイズに挑戦(${l.quiz.length}問)</button></div>`;
+  app.innerHTML = html;
+  window.scrollTo(0, 0);
+}
+
+/* ============================================================
+   クイズセッション
+   ============================================================ */
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function startLessonQuiz(ci, li) {
+  session = { mode: "lesson", qs: COURSES[ci].lessons[li].quiz.slice(), idx: 0, correct: 0, ci: ci, li: li, answered: false };
+  renderQuestion();
+}
+function startDaily() {
+  if (S.dailyDay === today()) { go("home"); return; }
+  const weak = shuffle(weakQuestions()).slice(0, 2);
+  const rest = shuffle(ALLQ.filter(q => !weak.includes(q))).slice(0, 5 - weak.length);
+  session = { mode: "daily", qs: shuffle(weak.concat(rest)), idx: 0, correct: 0, answered: false };
+  renderQuestion();
+}
+function startReview() {
+  const weak = shuffle(weakQuestions()).slice(0, 10);
+  if (weak.length === 0) { go("home"); return; }
+  session = { mode: "review", qs: weak, idx: 0, correct: 0, answered: false };
+  renderQuestion();
+}
+
+function modeLabel() {
+  return session.mode === "daily" ? "⚔️ 今日の腕試し" : session.mode === "review" ? "📝 弱点復習" : "🎯 " + COURSES[session.ci].lessons[session.li].title;
+}
+
+function renderQuestion() {
+  const q = session.qs[session.idx];
+  let html = header();
+  html += `<div class="crumb" onclick="confirmQuit()">← 中断してホームへ</div>`;
+  html += `<div class="card">
+    <div class="qhead"><span>${modeLabel()}</span><span>${session.idx + 1} / ${session.qs.length}</span></div>
+    <div class="bar" style="margin:0 0 14px"><i style="width:${session.idx / session.qs.length * 100}%"></i></div>
+    <div class="qtext">${q.q}</div>
+    ${q.code ? `<pre class="qcode">${esc(q.code)}</pre>` : ""}
+    <div id="choices">${q.c.map((c, i) => `<button class="choice" onclick="answer(${i})">${esc(c)}</button>`).join("")}</div>
+    <div id="feedback"></div>
+  </div>`;
+  app.innerHTML = html;
+  window.scrollTo(0, 0);
+}
+
+function confirmQuit() { if (confirm("クイズを中断しますか?(進捗は保存されません)")) go("home"); }
+
+function answer(i) {
+  if (session.answered) return;
+  session.answered = true;
+  const q = session.qs[session.idx];
+  const ok = i === q.a;
+  if (ok) session.correct++;
+  recordAnswer(q.id, ok);
+  save();
+  const btns = document.querySelectorAll(".choice");
+  btns.forEach((b, bi) => {
+    b.disabled = true;
+    if (bi === q.a) b.classList.add("correct");
+    else if (bi === i) b.classList.add("wrong");
+    else b.classList.add("dim");
+  });
+  const last = session.idx === session.qs.length - 1;
+  document.getElementById("feedback").innerHTML =
+    `<div class="explain"><b>${ok ? "⭕ 正解!" : "❌ 残念…"}</b> ${q.e}</div>
+     <button class="btn" onclick="next()">${last ? "結果を見る 🏁" : "次の問題 →"}</button>`;
+}
+
+function next() {
+  session.answered = false;
+  session.idx++;
+  if (session.idx < session.qs.length) renderQuestion();
+  else finishSession();
+}
+
+function finishSession() {
+  const n = session.qs.length, c = session.correct;
+  const perQ = session.mode === "daily" ? 20 : 10;
+  let xp = c * perQ;
+  let bonusTxt = "";
+  if (session.mode === "lesson") {
+    const key = session.ci + "-" + session.li;
+    if (!S.done[key]) { S.done[key] = true; xp += 20; bonusTxt = "(初クリアボーナス +20)"; }
+    S.best_score[key] = Math.max(S.best_score[key] || 0, c);
+  }
+  if (session.mode === "daily") {
+    S.dailyDay = today(); S.dailyScore = c;
+    if (c === n) { xp += 30; bonusTxt = "(全問正解ボーナス +30)"; }
+  }
+  const beforeBelt = belt().cur;
+  addXP(xp);
+  const afterBelt = belt().cur;
+  const rate = c / n;
+  const face = rate === 1 ? "🎉" : rate >= 0.8 ? "😄" : rate >= 0.5 ? "🙂" : "💪";
+  const msg = rate === 1 ? "完璧!今日も冴えてます。" :
+              rate >= 0.8 ? "素晴らしい!あと一歩で完璧。" :
+              rate >= 0.5 ? "いい調子。間違えた問題は「弱点復習」へ回りました。" :
+              "難しかった?解説を読み直せば必ず伸びます。復習で会いましょう。";
+  const beltUp = beforeBelt !== afterBelt ? `<div style="font-size:17px;margin-top:10px">🎊 昇段! <b>${afterBelt.icon} ${afterBelt.name}</b> になりました!</div>` : "";
+  let html = header();
+  html += `<div class="card resultbox">
+    <div class="big">${face}</div>
+    <h3>${c} / ${n} 問正解</h3>
+    <div class="xp">+${xp} XP ${bonusTxt}</div>
+    ${beltUp}
+    <div class="msg">${msg}</div>
+    <div class="msg">🔥 連続学習 ${S.streak} 日目</div>
+    <div style="margin-top:18px">
+      <button class="btn" onclick="go('home')">ホームへ</button>
+      ${session.mode === "lesson" ? `<button class="btn ghost" onclick="go('course', ${session.ci})">コースに戻る</button>` : ""}
+    </div>
+  </div>`;
+  app.innerHTML = html;
+  session = null;
+}
+
+/* ============================================================
+   ルーティング
+   ============================================================ */
+function go(view, a, b) {
+  if (view === "home") viewHome();
+  else if (view === "course") viewCourse(a);
+  else if (view === "lesson") viewLesson(a, b);
+}
+window.go = go; window.answer = answer; window.next = next;
+window.startLessonQuiz = startLessonQuiz; window.startDaily = startDaily;
+window.startReview = startReview; window.confirmQuit = confirmQuit;
+
+viewHome();
+</script>
