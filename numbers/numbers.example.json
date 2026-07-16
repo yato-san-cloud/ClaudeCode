@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "updated": "260716",
+  "_注記": "本ファイルは書き方の実例。値はすべて明示的なダミーであり、実案件の数字ではない。実運用は numbers/numbers.json(本リポジトリには置かない)に作成すること。",
+  "numbers": [
+    {
+      "key": "dummy_monthly_cost_jpy",
+      "label": "月次コスト(ダミー)",
+      "value": 1234567,
+      "unit": "円",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-08", "cell": "C12" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": "ダミー値。実データはxlsxを正本として参照すること"
+    },
+    {
+      "key": "dummy_label_count_per_month",
+      "label": "ラベル枚数/月(ダミー)",
+      "value": 294952,
+      "unit": "枚",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-07", "cell": "D45" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": "種まき用オリコン等の別系列は含まない(別キーで管理)"
+    },
+    {
+      "key": "dummy_u_ratio_after",
+      "label": "改定後稼働率U%(ダミー)",
+      "value": 92.5,
+      "unit": "%",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-07", "cell": "F10" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": "分母は稼働可能時間。dummy_u_ratio_beforeとセットで改定前後比較に使う"
+    },
+    {
+      "key": "dummy_u_ratio_before",
+      "label": "改定前稼働率U%(ダミー)",
+      "value": 88.0,
+      "unit": "%",
+      "source": { "file": "(サンプル)費用まとめ_Rev98.xlsx", "sheet": "様式-07", "cell": "F10" },
+      "rev": "Rev98",
+      "as_of": "260716",
+      "notes": "改定前(旧Rev)の値。ブリッジ表の起点"
+    },
+    {
+      "key": "dummy_cost_reduction_jpy",
+      "label": "経費削減額/月(ダミー、▲表記)",
+      "value": -45000,
+      "unit": "円",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-08", "cell": "C20" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": "文書側では▲45,000円のように▲負号で表記される想定。JSON側はvalueに-45000を格納する"
+    },
+    {
+      "key": "dummy_roi_years",
+      "label": "投資回収年数(ダミー)",
+      "value": 3.2,
+      "unit": "年",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-20", "cell": "B5" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": ""
+    },
+    {
+      "key": "dummy_headcount",
+      "label": "必要人員数(ダミー)",
+      "value": 12,
+      "unit": "名",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-07", "cell": "H8" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": ""
+    },
+    {
+      "key": "dummy_case_count_per_day",
+      "label": "ケース数/日(ダミー)",
+      "value": 3556,
+      "unit": "枚/日",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-07", "cell": "D50" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": "種まき用オリコンの別系列(出荷ラベルの294,952枚/月とは混同しないこと)"
+    },
+    {
+      "key": "dummy_contract_amount_jpy",
+      "label": "契約金額(ダミー)",
+      "value": 98765432,
+      "unit": "円",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-08", "cell": "C1" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": ""
+    },
+    {
+      "key": "dummy_unregistered_in_docs",
+      "label": "文書未登場テスト用(ダミー)",
+      "value": 777,
+      "unit": "件",
+      "source": { "file": "(サンプル)費用まとめ_Rev99.xlsx", "sheet": "様式-08", "cell": "C99" },
+      "rev": "Rev99",
+      "as_of": "260716",
+      "notes": "監査ツールの『JSONにあるが文書に未登場』検出のためのテスト専用キー"
+    }
+  ]
+}
