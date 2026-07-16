@@ -25,7 +25,7 @@ writeFileSync(configPath, JSON.stringify({
   patientName: '',
   menuTextCandidates: ['診察', '一般診察', '診察＋注射'],
   proceedButtonTexts: ['受付する', '予約する', '次へ', '確認', '確定'],
-  successTexts: ['受付番号', '受付が完了'],
+  successTexts: ['受付が完了'],
   closedTexts: ['受付時間外', '受付を停止'],
   retry: { intervalSeconds: 1, maxAttempts: 2 },
   headless: true,

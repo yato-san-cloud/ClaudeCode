@@ -19,9 +19,28 @@ const PORT = Number(process.env.GUI_PORT || 8787);
 
 let child = null; // 実行中のブラウザ予約プロセス
 const sseClients = new Set();
+const logHistory = []; // 後からページを開いても結果が見えるよう直近ログを保持
+const LOG_HISTORY_MAX = 500;
 
 function broadcast(line) {
+  if (line !== '__DONE__') {
+    logHistory.push(line);
+    if (logHistory.length > LOG_HISTORY_MAX) logHistory.shift();
+  }
   for (const res of sseClients) res.write(`data: ${line.replace(/\n/g, '\\n')}\n\n`);
+}
+
+/**
+ * POSTの防御: 外部サイトからの単純リクエスト(CSRF)を拒否する。
+ * - Content-Type は application/json のみ許可（text/plain の単純POSTを弾く）
+ * - Origin ヘッダがある場合は自分自身(127.0.0.1/localhost)のみ許可
+ */
+function postAllowed(req) {
+  const ct = req.headers['content-type'] || '';
+  if (!ct.includes('application/json')) return false;
+  const origin = req.headers.origin;
+  if (origin && !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) return false;
+  return true;
 }
 
 /** .env を読み取り（値だけ） */
@@ -55,12 +74,12 @@ function readBody(req) {
   });
 }
 
-function runBook(flags) {
+function runBook(flags, showBrowser) {
   if (child) { broadcast('⚠ すでに実行中です。'); return; }
   broadcast(`▶ 実行: node src/book.js ${flags.join(' ')}`);
   child = spawn('node', ['src/book.js', ...flags], {
     cwd: root,
-    env: { ...process.env, HEADLESS: process.env.GUI_HEADLESS || '' },
+    env: { ...process.env, HEADLESS: showBrowser ? '0' : '1' },
   });
   const pipe = (buf) => buf.toString().split('\n').filter(Boolean).forEach(broadcast);
   child.stdout.on('data', pipe);
@@ -97,6 +116,10 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  if (req.method === 'POST' && !postAllowed(req)) {
+    return json(res, 403, { error: 'forbidden' });
+  }
+
   if (url.pathname === '/api/save' && req.method === 'POST') {
     const b = await readBody(req);
     const env = readEnv();
@@ -108,7 +131,10 @@ const server = http.createServer(async (req, res) => {
     const cfg = loadConfig(CONFIG);
     cfg.patientName = b.patientName ?? cfg.patientName;
     cfg.patientCardNumber = b.patientCardNumber ?? cfg.patientCardNumber;
-    if (b.targetTimeJst) cfg.targetTimeJst = b.targetTimeJst;
+    // <input type=time> は "HH:MM" を返すことがあるので "HH:MM:SS" に正規化
+    if (b.targetTimeJst) {
+      cfg.targetTimeJst = /^\d{2}:\d{2}$/.test(b.targetTimeJst) ? `${b.targetTimeJst}:00` : b.targetTimeJst;
+    }
     if (b.departmentUrl) cfg.departmentUrl = b.departmentUrl;
     if (typeof b.menuTextCandidates === 'string') {
       cfg.menuTextCandidates = b.menuTextCandidates.split(',').map((s) => s.trim()).filter(Boolean);
@@ -121,8 +147,7 @@ const server = http.createServer(async (req, res) => {
     const b = await readBody(req);
     const mode = { preflight: ['--preflight'], dry: ['--dry-run'], now: ['--now'], book: [] }[b.mode];
     if (!mode) return json(res, 400, { error: 'unknown mode' });
-    process.env.GUI_HEADLESS = b.showBrowser ? '' : '1';
-    runBook(mode);
+    runBook(mode, !!b.showBrowser);
     return json(res, 200, { ok: true });
   }
 
@@ -138,6 +163,8 @@ const server = http.createServer(async (req, res) => {
       Connection: 'keep-alive',
     });
     res.write(': connected\n\n');
+    // 接続時に過去ログを再生（夜に本番開始→朝にページを開き直しても結果が見える）
+    for (const line of logHistory) res.write(`data: ${line.replace(/\n/g, '\\n')}\n\n`);
     sseClients.add(res);
     req.on('close', () => sseClients.delete(res));
     return;

@@ -27,7 +27,7 @@ import { chromium } from 'playwright';
 import {
   loadDotEnv, loadConfig, log, sleep, notify, saveShot, ensureDir,
   measureClockOffsetMs, nextJstTimeToEpochMs, launchOptions,
-  scoreLabelByKeywords, rankProceedLabel, looksLikeReceipt,
+  scoreLabelByKeywords, rankProceedLabel, detectOutcome,
 } from './lib.js';
 
 loadDotEnv();
@@ -138,12 +138,13 @@ async function selectPatientIfNeeded(page) {
   if (await clickByText(page, name)) log(`受診者「${name}」を選択。`);
 }
 
-/** 診察券番号の入力欄が出ていたら埋める（通常は不要。念のための保険） */
+/** 診察券番号の入力欄が出ていたら埋める（通常は不要。念のための保険）
+ *  患者名など別の欄に書き込まないよう、「診察券/カード番号」を明示する欄だけを対象にする */
 async function fillCardNumberIfAsked(page) {
   const card = config.patientCardNumber?.trim();
   if (!card) return;
   const input = page.locator(
-    'input[name*="card" i], input[name*="shindan" i], input[name*="patient" i], input[placeholder*="診察券"]'
+    'input[placeholder*="診察券"], input[name*="card_number" i], input[id*="card_number" i], input[aria-label*="診察券"]'
   ).first();
   if (await input.isVisible().catch(() => false)) {
     await input.fill(card).catch(() => {});
@@ -166,11 +167,18 @@ async function clickBestMenu(page) {
   return null;
 }
 
-/** 確認画面を、前進ボタンを自力で選びながら進める。受付番号が出たら成功 */
+/** 現在のページの状態を判定する */
+async function outcomeOf(page) {
+  return detectOutcome(await bodyText(page), config);
+}
+
+/** 確認画面を、前進ボタンを自力で選びながら進める。
+ *  終端状態（success/already）に達したらその outcome を、進めなくなったら null を返す */
 async function advanceWizard(page, attemptNo) {
   let lastFingerprint = '';
   for (let step = 0; step < 8; step++) {
-    if (looksLikeReceipt(await bodyText(page), config.successTexts)) return true;
+    const o = await outcomeOf(page);
+    if (o.status === 'success' || o.status === 'already') return o;
     await fillCardNumberIfAsked(page);
     const items = await collectActionables(page);
     const scored = items
@@ -191,7 +199,17 @@ async function advanceWizard(page, attemptNo) {
     }
     lastFingerprint = after;
   }
-  return looksLikeReceipt(await bodyText(page), config.successTexts);
+  const o = await outcomeOf(page);
+  return (o.status === 'success' || o.status === 'already') ? o : null;
+}
+
+/** outcome を人間向けの結果文字列にする */
+async function describeOutcome(page, outcome) {
+  const body = (await bodyText(page)).slice(0, 800);
+  const head = outcome.status === 'already'
+    ? `既に受付済みでした${outcome.number ? `（受付番号 ${outcome.number}）` : ''}`
+    : `受付番号 ${outcome.number ?? '(画面参照)'}`;
+  return `${head}\n---\n${body}`;
 }
 
 /** 1回分の予約試行。成功時は結果文字列、受付前/失敗時は null */
@@ -199,10 +217,15 @@ async function attemptBooking(page, attemptNo) {
   await page.goto(config.departmentUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(300);
 
-  const bt = await bodyText(page);
-  const closed = config.closedTexts.find((t) => bt.includes(t));
-  if (closed) {
-    log(`試行${attemptNo}: まだ受付前/受付停止（「${closed}」）。`);
+  // 入口の時点で終端状態なら即座に確定する（受付済みの再試行=二重予約を防ぐ）
+  const entry = await outcomeOf(page);
+  if (entry.status === 'already') {
+    log(`試行${attemptNo}: この受診者は既に受付済みです。`);
+    await saveShot(page, shots, `attempt${attemptNo}-already`);
+    return describeOutcome(page, entry);
+  }
+  if (entry.status === 'closed') {
+    log(`試行${attemptNo}: まだ受付前/受付停止の表示。`);
     return null;
   }
 
@@ -217,11 +240,10 @@ async function attemptBooking(page, attemptNo) {
   }
   await saveShot(page, shots, `attempt${attemptNo}-menu`);
 
-  if (await advanceWizard(page, attemptNo)) {
+  const outcome = await advanceWizard(page, attemptNo);
+  if (outcome) {
     await saveShot(page, shots, `attempt${attemptNo}-SUCCESS`);
-    const body = (await bodyText(page)).slice(0, 800);
-    const m = body.match(/(受付|整理)番号\s*[:：]?\s*\d+/);
-    return `${m ? m[0] : '受付完了'}\n---\n${body}`;
+    return describeOutcome(page, outcome);
   }
   log(`試行${attemptNo}: 完了画面に到達できず。`);
   await saveShot(page, shots, `attempt${attemptNo}-stuck`);
@@ -252,7 +274,8 @@ async function runOnce(browser) {
   const offset = await measureClockOffsetMs();
   const now = () => Date.now() + offset;
   log(`時刻同期: ローカル時計との差 ${offset}ms (NICT基準)`);
-  const targetMs = NOW ? now() : nextJstTimeToEpochMs(config.targetTimeJst);
+  // 目標時刻の算出にも補正済み時計を使う（時計計算の基準を1つに揃える）
+  const targetMs = NOW ? now() : nextJstTimeToEpochMs(config.targetTimeJst, now());
   if (NOW) {
     log('即時モード: 待たずに今すぐ予約を試行します。');
   } else {
@@ -319,9 +342,18 @@ try {
     log('常駐モード: 毎朝くり返し予約します（Ctrl+Cで停止）。');
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      await withNetworkGuard(() => runOnce(browser));
-      log('翌日の受付開始を待ちます...');
-      await sleep(60 * 1000); // 目標時刻を過ぎてから次サイクルへ（nextJstが翌日を返す）
+      try {
+        await withNetworkGuard(() => runOnce(browser));
+      } catch (e) {
+        // 1回の失敗で常駐を殺さない。通知して次のサイクルへ
+        log(`エラー: ${e.message}`);
+        await notify(`⚠ 予約処理でエラー: ${e.message}`.slice(0, 300));
+      }
+      // 次の目標時刻の30分前まで眠る（直近で失敗した場合も最低1分は空けて再試行）
+      const next = nextJstTimeToEpochMs(config.targetTimeJst);
+      const waitMs = Math.max(next - 30 * 60000 - Date.now(), 60 * 1000);
+      log(`次のサイクルまで ${Math.round(waitMs / 60000)} 分待機します。`);
+      await sleep(waitMs);
     }
   } else {
     const ok = await withNetworkGuard(() => runOnce(browser));

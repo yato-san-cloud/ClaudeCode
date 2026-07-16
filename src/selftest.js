@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   loadConfig, nextJstTimeToEpochMs,
-  scoreLabelByKeywords, rankProceedLabel, looksLikeReceipt,
+  scoreLabelByKeywords, rankProceedLabel, detectOutcome, extractReceiptNumber,
 } from './lib.js';
 
 let passed = 0;
@@ -59,13 +59,56 @@ check('前進ボタン: 受付するは正、戻る/キャンセルは負', () =
   assert.ok(rankProceedLabel('予約をキャンセル', proceed) < 0);
 });
 
-// --- 完了判定 ---
-check('完了判定: 受付番号・完了メッセージを検出', () => {
-  assert.ok(looksLikeReceipt('受付番号: 12 番でお待ちください'));
-  assert.ok(looksLikeReceipt('整理番号 3'));
-  assert.ok(looksLikeReceipt('受付が完了しました'));
-  assert.ok(!looksLikeReceipt('受付時間外です'));
-  assert.ok(!looksLikeReceipt('メニューを選択してください'));
+// --- 状態判定 (detectOutcome) ---
+const cfg = {
+  successTexts: ['受付が完了', '予約が完了'],
+  closedTexts: ['受付時間外', '受付を停止', '定員'],
+};
+
+check('状態判定: 完了メッセージ＋受付番号 → success', () => {
+  const o = detectOutcome('受付が完了しました\n受付番号: 12 番でお待ちください。', cfg);
+  assert.strictEqual(o.status, 'success');
+  assert.strictEqual(o.number, '12');
+});
+
+check('状態判定: 「現在の受付番号」は待ち状況表示なので success にしない', () => {
+  assert.strictEqual(detectOutcome('現在の受付番号: 15', cfg).status, 'none');
+  assert.strictEqual(detectOutcome('ただいまの呼び出し番号: 5番', cfg).status, 'none');
+  assert.strictEqual(detectOutcome('診察中: 受付番号 8 の方', cfg).status, 'none');
+});
+
+check('状態判定: 待ち状況の行が混ざっても自分の番号を正しく抽出', () => {
+  const text = 'ただいまの呼び出し 受付番号: 5\n受付が完了しました\n受付番号: 12 番でお待ちください。';
+  const o = detectOutcome(text, cfg);
+  assert.strictEqual(o.status, 'success');
+  assert.strictEqual(o.number, '12');
+  assert.strictEqual(extractReceiptNumber(text), '12');
+});
+
+check('状態判定: 受付済み → already（再試行しない=二重予約防止）', () => {
+  assert.strictEqual(detectOutcome('既に受付済みです。受付番号: 12', cfg).status, 'already');
+  assert.strictEqual(detectOutcome('本日はすでに予約されています', cfg).status, 'already');
+});
+
+check('状態判定: 受付時間外/停止 → closed', () => {
+  assert.strictEqual(detectOutcome('受付時間外です', cfg).status, 'closed');
+  assert.strictEqual(detectOutcome('定員に達したため受付を停止しました', cfg).status, 'closed');
+});
+
+check('状態判定: 通常のメニュー画面 → none', () => {
+  assert.strictEqual(detectOutcome('受付内容を選択してください', cfg).status, 'none');
+});
+
+// --- 時刻計算（基準時刻を明示して検算） ---
+check('目標時刻: 基準時刻を渡すと決定的に計算できる', () => {
+  // 2026-07-16 05:00 JST (= 2026-07-15T20:00Z) 基準 → 同日 06:00 JST
+  const base = Date.UTC(2026, 6, 15, 20, 0, 0);
+  assert.strictEqual(nextJstTimeToEpochMs('06:00:00', base), Date.UTC(2026, 6, 15, 21, 0, 0));
+  // 06:30 JST 基準 → 翌日 06:00 JST
+  const after = Date.UTC(2026, 6, 15, 21, 30, 0);
+  assert.strictEqual(nextJstTimeToEpochMs('06:00:00', after), Date.UTC(2026, 6, 16, 21, 0, 0));
+  // "HH:MM" 形式でも動く
+  assert.strictEqual(nextJstTimeToEpochMs('06:00', base), Date.UTC(2026, 6, 15, 21, 0, 0));
 });
 
 console.log(`\n${passed} tests passed.`);

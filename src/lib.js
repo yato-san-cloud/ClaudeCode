@@ -57,12 +57,48 @@ export function scoreLabelByKeywords(label, keywords) {
   return best;
 }
 
-/** 受付完了・整理番号発行を示すテキストか */
-export function looksLikeReceipt(text, successTexts = []) {
+/** 「現在の受付番号: 15」のような待ち状況表示を成功と誤認しないための語 */
+export const QUEUE_STATUS_WORDS = ['現在', 'ただいま', 'ただ今', '只今', '呼び出し', '診察中', 'お呼び'];
+
+/**
+ * 自分に発行された受付番号を抽出する。
+ * 行単位で判定し、待ち状況表示（現在の受付番号など）の行は除外する。
+ */
+export function extractReceiptNumber(text) {
+  for (const line of (text || '').split('\n')) {
+    const m = line.match(/(受付|整理|予約)番号\s*[:：は]?\s*(\d+)/);
+    if (!m) continue;
+    if (QUEUE_STATUS_WORDS.some((w) => line.includes(w))) continue;
+    return m[2];
+  }
+  return null;
+}
+
+/**
+ * ページ本文から予約フローの状態を判定する（純関数）。
+ * 戻り値: { status: 'success' | 'already' | 'closed' | 'none', number?: string }
+ *  - success: 受付が完了した（完了文言、または待ち状況でない受付番号＋お待ちください）
+ *  - already: この患者は既に受付済み（再試行すると二重予約になるので成功扱いで停止）
+ *  - closed:  受付時間外・受付停止・定員
+ *  - none:    どれでもない（先へ進む/リトライ）
+ */
+export function detectOutcome(text, config = {}) {
   const t = text || '';
-  if (/(受付|整理)番号\s*[:：]?\s*\d+/.test(t)) return true;
-  if (/(受付|予約)(が)?(完了|受け付け)/.test(t)) return true;
-  return successTexts.some((s) => t.includes(s));
+  if (/(既に|すでに)(受付|予約)|受付済み|予約済み/.test(t)) {
+    return { status: 'already', number: extractReceiptNumber(t) };
+  }
+  if ((config.successTexts || []).some((s) => t.includes(s))
+      || /(受付|予約)(が|を)?(完了|受け付けました)/.test(t)) {
+    return { status: 'success', number: extractReceiptNumber(t) };
+  }
+  const num = extractReceiptNumber(t);
+  if (num && /番でお待ち|お待ちください/.test(t)) {
+    return { status: 'success', number: num };
+  }
+  if ((config.closedTexts || []).some((s) => t.includes(s))) {
+    return { status: 'closed' };
+  }
+  return { status: 'none' };
 }
 
 /**
@@ -110,17 +146,19 @@ export async function measureClockOffsetMs() {
   }
 }
 
-/** "HH:MM:SS" (JST) を、直近の未来のエポックms に変換する */
-export function nextJstTimeToEpochMs(hhmmss) {
+/**
+ * "HH:MM:SS" (JST) を、直近の未来のエポックms に変換する。
+ * nowMs には補正済みの現在時刻を渡す（時計計算の基準を1つに揃えるため）。
+ */
+export function nextJstTimeToEpochMs(hhmmss, nowMs = Date.now()) {
   const [h, m, s] = hhmmss.split(':').map(Number);
-  const now = new Date();
   // 現在のJST日付を求める（マシンのTZに依存しないようUTC+9で計算）
-  const jstNow = new Date(now.getTime() + 9 * 3600 * 1000);
+  const jstNow = new Date(nowMs + 9 * 3600 * 1000);
   const target = Date.UTC(
     jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(),
-    h - 9, m, s ?? 0
+    h - 9, m ?? 0, s ?? 0
   );
-  return target <= now.getTime() ? target + 24 * 3600 * 1000 : target;
+  return target <= nowMs ? target + 24 * 3600 * 1000 : target;
 }
 
 export function sleep(ms) {
