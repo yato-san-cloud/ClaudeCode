@@ -32,8 +32,12 @@ writeFileSync(configPath, JSON.stringify({
   screenshotsDir: path.join(tmp, 'shots'),
 }, null, 2));
 
-const chromium = process.env.CHROMIUM_PATH
-  || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+// CHROMIUM_PATH は開発環境固有のパスを決め打ちしない。
+// 環境変数で指定されていればそれを使い、なければ Playwright 標準の
+// インストール済みブラウザを自動検出させる（未指定でよい）。
+const chromiumOverride = process.env.CHROMIUM_PATH
+  ? { CHROMIUM_PATH: process.env.CHROMIUM_PATH }
+  : {};
 
 const res = spawnSync('node', ['src/book.js', '--now'], {
   cwd: path.join(here, '..'),
@@ -41,7 +45,7 @@ const res = spawnSync('node', ['src/book.js', '--now'], {
   env: {
     ...process.env,
     CONFIG_FILE: configPath,
-    CHROMIUM_PATH: chromium,
+    ...chromiumOverride,
     HEADLESS: '1',
     MEDICALPASS_EMAIL: 'test@example.com',
     MEDICALPASS_PASSWORD: 'dummy',
