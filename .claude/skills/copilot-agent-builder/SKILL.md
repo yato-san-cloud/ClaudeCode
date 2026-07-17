@@ -1,19 +1,29 @@
 ---
 name: copilot-agent-builder
 description: >
-  Design and generate Microsoft 365 Copilot declarative agents (agent builder)
-  that use readable HTML documents on SharePoint as skill-like knowledge, as a
-  substitute for Claude-style SKILL.md. Use when the user wants to create,
-  update, or review a Copilot 365 agent, its instructions, or its HTML skill
-  documents. M365 Copilot エージェント（エージェントビルダー）と、その代替スキルとなる
-  可読性の高い HTML ナレッジ文書を設計・生成するときに使う。
+  Design and generate Microsoft 365 Copilot agents (Copilot Studio or agent
+  builder) that use skill-like knowledge documents (Markdown for Copilot
+  Studio, HTML on SharePoint for agent builder) as a substitute for
+  Claude-style SKILL.md, including effort/model selection design. Use when the
+  user wants to create, update, or review a Copilot agent, its instructions,
+  or its skill documents. M365 Copilot エージェント（Copilot Studio /
+  エージェントビルダー）と、その代替スキルとなるナレッジ文書を設計・生成するときに使う。
 ---
 
-# Copilot エージェント作成スキル（HTML スキル文書方式）
+# Copilot エージェント作成スキル（スキル文書方式）
 
-M365 Copilot のエージェントビルダーで動く「宣言型エージェント」を、
-**指示欄（instructions）＋ SharePoint 上の HTML スキル文書**の 2 層構成で設計・生成するスキル。
-Copilot Studio ライセンスや Cowork が使えない環境（M365 Copilot のみ）を前提とする。
+M365 Copilot 上で動くエージェントを、**指示欄（instructions）＋スキル文書ナレッジ**の
+2 層構成で設計・生成するスキル。配備先は 2 トラックあり、最初に必ずどちらかを確定する:
+
+- **Copilot Studio トラック（使えるなら既定）**: スキル文書は **Markdown**（.md を
+  直接アップロード、最大 500）。モデル選択・一般知識遮断が可能。
+  差分は `references/copilot-studio-track.md` に従う
+- **エージェントビルダートラック**: Studio が使えない場合。スキル文書は **HTML**
+  （SharePoint 経由のみ、下記の本文どおり）
+
+以下の本文はエージェントビルダートラックを基準に書かれている。Studio トラックでは
+「HTML」を「Markdown」に、配備手順を copilot-studio-track.md の差し替えで読み替える。
+構造規約・指示欄の書き方・エフォート設計は両トラック共通。
 
 ## 大原則（役割分担）
 
