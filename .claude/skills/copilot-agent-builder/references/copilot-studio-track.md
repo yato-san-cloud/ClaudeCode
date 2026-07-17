@@ -61,7 +61,11 @@ Studio ではプライマリモデルをドロップダウンで指定できる�
   ツール接続（Power Automate / コネクタ / MCP）、定期・イベントトリガーによる
   自律実行（クレジット課金）、エージェント間連携（A2A）
 
-## 配備ガイド生成時の差し替え（setup-guide-template.md の STEP 1〜3 を置換）
+## 配備の流れ（概要）
+
+配備ガイドは **`references/studio-setup-guide-template.md` を雛形としてそのまま使う**
+（setup-guide-template.md はエージェントビルダー専用。差し替えや混用はしない）。
+以下は流れの概要:
 
 1. **STEP 1（SharePoint 不要）**: `https://copilotstudio.microsoft.com` を開く →
    左メニュー「エージェント」→「新しいエージェント」→「構成に進む」（対話形式はスキップ可）

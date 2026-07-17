@@ -22,8 +22,14 @@ M365 Copilot 上で動くエージェントを、**指示欄（instructions）�
   （SharePoint 経由のみ、下記の本文どおり）
 
 以下の本文はエージェントビルダートラックを基準に書かれている。Studio トラックでは
-「HTML」を「Markdown」に、配備手順を copilot-studio-track.md の差し替えで読み替える。
-構造規約・指示欄の書き方・エフォート設計は両トラック共通。
+「HTML」を「Markdown」に読み替え、配備ガイドは `references/studio-setup-guide-template.md`
+を使う。構造規約・指示欄の書き方・エフォート設計は両トラック共通。
+
+**生成物は単発ファイルではなく「エージェントパッケージ」**: `agents/CPA-NNN-<slug>/`
+配下の 5 点セット（spec.md / instructions.md / skills/ / setup-guide.md / tests.md）と
+台帳 `agents/registry.md` への登録。管理番号・命名・SharePoint 保管の体系は
+`references/agent-package.md` が正典。**既存エージェントへの変更依頼**（「CPA-◯◯を
+直したい」等）は新規作成フローではなく `references/maintenance-mode.md` の保守モードで扱う。
 
 ## 大原則（役割分担）
 
@@ -63,7 +69,17 @@ Microsoft の公式ガイダンスに基づく、破ってはいけない分担:
   kintone マスター＋連携コネクタ同期 — から選んでもらう。選択に応じて生成物の形式と
   配備ガイドの STEP 1 を差し替える）
 
-### 2. スキル文書の分割設計とエフォート分類
+### 2. 管理番号の払い出しと仕様書（spec.md）の生成
+
+- `agents/registry.md` を読み、既存の最大番号 +1 で `CPA-NNN` を採番して
+  **行を追加する（状態=設計中）**。台帳にないエージェントは作らない
+- `agents/CPA-NNN-<slug>/` を作成し、`references/spec-template.md` から `spec.md` を
+  生成する。**背景（Why）はヒアリングで得た具体的な事実（困りごと・頻度・きっかけ）で
+  埋める**。ここが曖昧なら着手せずヒアリングに戻る
+- 以降の生成物（instructions.md / skills/ / setup-guide.md / tests.md）はすべて
+  このディレクトリに置く
+
+### 3. スキル文書の分割設計とエフォート分類
 
 - **1 業務 = 1 HTML ファイル**。Claude のスキルと同じ粒度で切る
 - ファイル名は `skill-<slug>.html`（例: `skill-weekly-report.html`）
@@ -75,7 +91,7 @@ Microsoft の公式ガイダンスに基づく、破ってはいけない分担:
   リアルタイムルーターが指示文とプロンプトを手がかりに応答用モデルか Thinking 系
   モデルかを選ぶため、文面設計でルーティングを誘導する
 
-### 3. HTML スキル文書の生成
+### 4. スキル文書の生成（Studio: skills/*.md ／ ビルダー: HTML）
 
 `references/html-skill-template.html` をベースに生成する。構造の規約:
 
@@ -90,7 +106,7 @@ Microsoft の公式ガイダンスに基づく、破ってはいけない分担:
 - スタイルは `<style>` 1 ブロックに閉じた自己完結 HTML（外部 CSS/JS/画像なし）。
   装飾は最小限——グラウンディングでは無視されるため、投資すべきは見出し構造と本文
 
-### 4. 指示欄（instructions）の生成
+### 5. 指示欄（instructions.md）の生成
 
 `references/instructions-template.md` をベースに、**8,000 字以内**で生成する。
 Markdown で記述し、以下を含める:
@@ -103,10 +119,12 @@ Markdown で記述し、以下を含める:
   （`references/effort-design.md` の「指示欄に入れる文」を使う）
 - 生成後に文字数を数え、超過時は Routing 以外から削る
 
-### 5. 配備ガイドの生成（必ず生成する成果物）
+### 6. 配備ガイド（setup-guide.md）の生成
 
 チェックリストではなく、**そのエージェント専用の配備ガイド**を 1 ファイル生成して渡す。
-`references/setup-guide-template.md` を雛形に、以下を満たすこと:
+雛形はトラックで固定: **Studio トラックは `references/studio-setup-guide-template.md`**、
+エージェントビルダートラックは `references/setup-guide-template.md`（差し替えや
+混用はしない）。以下を満たすこと:
 
 - 「どの画面で・どの欄に・何を貼るか」を **貼り付け内容込みの表**にする
   （欄名 → 貼る文字列そのもの、の対応。ユーザーが考える余地をゼロにする）
@@ -114,10 +132,27 @@ Markdown で記述し、以下を含める:
 - SharePoint アップロード先・権限確認・インデックス待ち（数分）・動作確認プロンプトまで
   1 本の流れにする
 
-### 6. テスト質問の生成
+### 7. テスト質問（tests.md）の生成
 
-各 HTML スキル文書につき、「正しくその文書が引かれるか」を確かめる質問を 2〜3 個生成して渡す。
-うち 1 個は文書名を含まない言い回しにする（ルーティングの検証）。
+各スキル文書につき「文書名を含む質問」「文書名を含まない言い回しの質問」を 1 問ずつ、
+さらにエージェント全体で「対象外の依頼」（Routing のどれにも該当しない依頼に、推測せず
+対応一覧を案内できるか）を 1 問生成し、期待挙動とセットで `tests.md` に保存する。
+
+### 8. 台帳更新と SharePoint 保管
+
+配備完了の報告を受けたら（または setup-guide の STEP を利用者が完走したら）:
+
+- `agents/registry.md` の該当行を更新する（状態=稼働中、SharePoint フォルダ URL を記入）
+- パッケージ一式を SharePoint の `copilot-agents` ライブラリへ複製保管する
+  （手順は setup-guide 内の保管 STEP に含まれる。規則は `references/agent-package.md`）
+
+## 保守モード（既存エージェントの変更）
+
+「CPA-◯◯を更新したい」「◯◯エージェントの挙動を直したい」等、**既存エージェントへの
+変更依頼**が来たら、新規作成フローではなく `references/maintenance-mode.md` に従う。
+影響マトリクスで変更種別→更新ファイル→Studio 再設定操作を確定し、版を上げ、
+**変更理由（Why）を spec.md の変更履歴に必ず記録**し、差分に絞った再設定手順書
+（re-setup-CPA-NNN-v{版}.md）を生成して渡す。
 
 ## 品質チェック（生成物を渡す前に自己検査）
 
@@ -128,3 +163,5 @@ Markdown で記述し、以下を含める:
 - [ ] 外部リソース（CDN・画像・スクリプト）への依存がないか
 - [ ] `deep` 業務に 3 点セット（Routing のエスカレーション文・検討プロトコル・推奨依頼文）が入っているか。逆に `light` 業務に入れていないか
 - [ ] 配備ガイドの `{ }` がすべて実際の値で埋まっているか（雛形のまま渡さない）
+- [ ] `spec.md` の背景（Why）が具体的な事実で書かれているか（一般論で埋めていないか）
+- [ ] `agents/registry.md` に行が追加され、名称・版・状態が `spec.md` のヘッダ表と一致しているか
