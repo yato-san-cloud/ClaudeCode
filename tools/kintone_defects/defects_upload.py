@@ -136,6 +136,7 @@ def to_record(s):
         "JAN": {"value": "" if s.get("JAN") == "なし" else s.get("JAN", "")},
         "品目名": {"value": "" if item == "(記載なし)" else item},
         "責任": {"value": s["責任"]},
+        "起票元": {"value": "現場連絡票"},
         "状態": {"value": "転記済み"},
     }
     if qty:
