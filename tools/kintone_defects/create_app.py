@@ -13,6 +13,11 @@
 """
 import argparse, base64, json, os, sys, urllib.request
 
+PROCESSES = ["入荷検収", "格納", "保管・棚移動", "ピック", "流通加工",
+             "検品", "T-sort入荷", "T-sort出荷", "不明"]
+EVENT_TYPES = ["数量過剰", "数量不足", "品目相違", "作業漏れ", "位置相違",
+               "表示・ラベル不良", "破損", "システム・データ不整合", "その他"]
+
 FIELDS = {
     "発生日":   {"type": "DATE", "code": "発生日", "label": "発生日", "required": True},
     "発生場所": {"type": "RADIO_BUTTON", "code": "発生場所", "label": "発生場所",
@@ -40,6 +45,16 @@ FIELDS = {
     "発見破損": {"type": "CHECK_BOX", "code": "発見破損", "label": "発見・破損",
                  "options": {"発見": {"label": "発見", "index": "0"},
                              "破損": {"label": "破損", "index": "1"}}},
+    "発生工程": {"type": "DROP_DOWN", "code": "発生工程", "label": "発生工程(どこで起きたか)",
+                 "options": {k: {"label": k, "index": str(i)} for i, k in enumerate(PROCESSES)}},
+    "発見工程": {"type": "DROP_DOWN", "code": "発見工程", "label": "発見工程(どこで見つけたか)",
+                 "options": {k: {"label": k, "index": str(i)} for i, k in enumerate(PROCESSES)}},
+    "事象タイプ": {"type": "CHECK_BOX", "code": "事象タイプ", "label": "事象タイプ(何が起きたか)",
+                 "options": {k: {"label": k, "index": str(i)} for i, k in enumerate(EVENT_TYPES)}},
+    "原因区分": {"type": "DROP_DOWN", "code": "原因区分", "label": "原因区分(検品者が記入)",
+                 "options": {k: {"label": k, "index": str(i)} for i, k in enumerate(
+                     ["作業ミス", "確認漏れ", "指示・手順書不備", "システム起因",
+                      "入荷時から(外部起因)", "調査中"])}},
     "詳細":     {"type": "MULTI_LINE_TEXT", "code": "詳細", "label": "詳細"},
     "伝票番号": {"type": "SINGLE_LINE_TEXT", "code": "伝票番号", "label": "伝票番号"},
     "注文番号": {"type": "SINGLE_LINE_TEXT", "code": "注文番号", "label": "注文番号"},
@@ -69,6 +84,10 @@ LAYOUT = [
                                {"type": "DROP_DOWN", "code": "作業名", "size": {"width": "200"}}]},
     {"type": "ROW", "fields": [{"type": "CHECK_BOX", "code": "事象"}]},
     {"type": "ROW", "fields": [{"type": "CHECK_BOX", "code": "発見破損"}]},
+    {"type": "ROW", "fields": [{"type": "DROP_DOWN", "code": "発生工程", "size": {"width": "180"}},
+                               {"type": "DROP_DOWN", "code": "発見工程", "size": {"width": "180"}},
+                               {"type": "DROP_DOWN", "code": "原因区分", "size": {"width": "180"}}]},
+    {"type": "ROW", "fields": [{"type": "CHECK_BOX", "code": "事象タイプ"}]},
     {"type": "ROW", "fields": [{"type": "MULTI_LINE_TEXT", "code": "詳細", "size": {"width": "500"}}]},
     {"type": "ROW", "fields": [{"type": "SINGLE_LINE_TEXT", "code": "伝票番号", "size": {"width": "160"}},
                                {"type": "SINGLE_LINE_TEXT", "code": "注文番号", "size": {"width": "160"}},

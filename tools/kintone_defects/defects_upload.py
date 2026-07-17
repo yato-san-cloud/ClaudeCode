@@ -31,6 +31,34 @@ ENUM = {
 LABELS = ["票No", "発生日", "発生場所", "区分", "場所", "作業者", "作業名", "事象",
           "発見・破損", "詳細", "伝票番号", "注文番号", "JAN", "品目名/数量", "責任"]
 
+# MECE化の変換表(docs/不具合分類_MECE化案.md §3)。現行の事象 → (発生工程, 事象タイプ)
+EVENT_MAP = {
+    "過剰入庫": ("入荷検収", "数量過剰"), "過少入庫": ("入荷検収", "数量不足"),
+    "入庫漏れ": ("入荷検収", "作業漏れ"), "格納漏れ": ("格納", "作業漏れ"),
+    "過剰ピック": ("ピック", "数量過剰"), "過少ピック": ("ピック", "数量不足"),
+    "誤ピック": ("ピック", "品目相違"), "棚移動ミス": ("保管・棚移動", "位置相違"),
+    "特典JAN貼りミス": ("流通加工", "表示・ラベル不良"),
+    "作業完了エラー": (None, "システム・データ不整合"),  # 発生工程=発見工程(作業名)を充てる
+    "破損": ("不明", "破損"),
+}
+# 現行様式の作業名 → 発見工程(記入者が実際に作業していた工程)
+FOUND_MAP = {"入荷検収": "入荷検収", "格納": "格納", "ピック": "ピック",
+             "検品": "検品", "T-sort入荷": "T-sort入荷", "T-sort出荷": "T-sort出荷"}
+
+
+def derive_axes(events, task_name):
+    """チェックされた事象と作業名から (発生工程, 事象タイプ[], 発見工程) を導出する。"""
+    found = FOUND_MAP.get(task_name, "不明")
+    types, procs = [], []
+    for ev in events:
+        proc, typ = EVENT_MAP.get(ev, ("不明", "その他"))
+        if proc is None:  # 作業完了エラー: 発生=発見工程
+            proc = found
+        types.append(typ)
+        procs.append(proc)
+    occur = next((p for p in procs if p != "不明"), "不明")
+    return occur, list(dict.fromkeys(types)), found
+
 
 def jan_ok(jan):
     if not re.fullmatch(r"\d{13}", jan):
@@ -87,7 +115,12 @@ def to_record(s):
     if "/" in item:
         item, qty = [x.strip() for x in item.rsplit("/", 1)]
     qty = re.sub(r"[^0-9.]", "", qty)
+    events = [x.strip() for x in s.get("事象", "").replace("、", ",").split(",") if x.strip()]
+    occur, types, found = derive_axes(events, s.get("作業名", ""))
     rec = {
+        "発生工程": {"value": occur},
+        "発見工程": {"value": found},
+        "事象タイプ": {"value": types},
         "発生日": {"value": s["発生日"]},
         "発生場所": {"value": s["発生場所"]},
         "区分": {"value": s["区分"]},

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>不具合連絡票 v2（印刷用・様式案）</title>
+<style>
+  @page { size: A5 landscape; margin: 8mm; }
+  body { font-family: "Yu Gothic", "MS Gothic", sans-serif; color: #000; margin: 10px;
+         font-size: 10.5px; }
+  .sheet { width: 196mm; border: 2px solid #000; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border: 1px solid #000; padding: 3px 5px; vertical-align: middle; }
+  th { background: #eee; font-weight: bold; width: 21mm; text-align: left; }
+  .title { text-align: center; font-size: 15px; font-weight: bold; letter-spacing: 8px;
+           border-bottom: 2px solid #000; padding: 4px; position: relative; }
+  .no { position: absolute; right: 6px; top: 3px; font-size: 10px; letter-spacing: 0;
+        border: 1.5px solid #000; padding: 2px 6px; }
+  .no b { font-size: 13px; }
+  .opts span { white-space: nowrap; margin-right: 10px; }
+  .sm { font-size: 8.5px; color: #333; }
+  .chk::before { content: "□ "; font-size: 12px; }
+  .tall { height: 15mm; }
+  .print-note { margin: 8px 0; font-size: 11px; color: #444; }
+  @media print { .print-note { display: none; } body { margin: 0; } }
+</style>
+</head>
+<body>
+<p class="print-note">様式案 v2 — 変更点: ①票No欄(kintone発行番号) ②発生工程/発見工程を分離 ③事象を工程非依存の9タイプに整理 ④区分(入荷/出荷)廃止・破損の二重枠解消。A5横で印刷。</p>
+<div class="sheet">
+  <div class="title">不 具 合 連 絡 票
+    <span class="no">票No(kintone発行番号)<br><b>No.__________</b></span>
+  </div>
+  <table>
+    <tr>
+      <th>発生日</th>
+      <td style="width:40mm">　　　　年　　　月　　　日</td>
+      <th>何処で</th>
+      <td class="opts"><span class="chk">ネオウイング</span><span class="chk">ネオロジ</span></td>
+      <th>場所<span class="sm">(○)</span></th>
+      <td class="opts"><span>T-sort</span> ・ <span>HT検収</span> ・ <span>9マルチ</span></td>
+    </tr>
+    <tr>
+      <th>記入者</th>
+      <td colspan="2">氏名:</td>
+      <th colspan="2" style="width:30mm">発見した工程<span class="sm">(○ 自分が作業していた工程)</span></th>
+      <td class="opts">入荷検収 ・ 格納 ・ 保管棚移動 ・ ピック ・ 流通加工 ・ 検品 ・ T-sort入荷 ・ T-sort出荷</td>
+    </tr>
+    <tr>
+      <th colspan="2">発生した工程<span class="sm"><br>(○ ミスが起きた工程。わからなければ「不明」)</span></th>
+      <td class="opts" colspan="4">入荷検収 ・ 格納 ・ 保管棚移動 ・ ピック ・ 流通加工 ・ 検品 ・ T-sort入荷 ・ T-sort出荷 ・ <b>不明</b></td>
+    </tr>
+    <tr>
+      <th>何が<span class="sm">(複数可)</span></th>
+      <td colspan="5" class="opts">
+        <span class="chk">数量過剰</span><span class="chk">数量不足</span><span class="chk">品目相違(違う物)</span><span class="chk">作業漏れ(未実施)</span><span class="chk">位置相違(置き場違い)</span><br>
+        <span class="chk">表示・ラベル不良</span><span class="chk">破損</span><span class="chk">システム・データ不整合</span><span class="chk">その他(詳細に記入)</span>
+      </td>
+    </tr>
+    <tr>
+      <th>詳細</th>
+      <td colspan="5" class="tall">伝票番号:　　　　　　　　　　経緯:</td>
+    </tr>
+    <tr>
+      <th>注文番号</th><td></td>
+      <th>ロケーション</th><td>　―　　―　　―　　―</td>
+      <th>数量</th><td style="width:22mm"></td>
+    </tr>
+    <tr>
+      <th>JANコード</th><td colspan="2"></td>
+      <th>品目名</th><td colspan="2"></td>
+    </tr>
+    <tr>
+      <th>責任<span class="sm">(○)</span></th>
+      <td colspan="2" class="opts">ロジスティード中部 ・ NW様</td>
+      <th>原因区分<span class="sm">(検品者)</span></th>
+      <td colspan="2" class="opts sm">作業ミス ・ 確認漏れ ・ 手順書不備 ・ システム ・ 入荷時から ・ 調査中</td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>
