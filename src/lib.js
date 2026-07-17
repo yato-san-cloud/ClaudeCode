@@ -165,20 +165,50 @@ export function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Webhook (Discord/Slack互換) に通知。URL未設定なら何もしない */
+/**
+ * 設定済みの通知先すべてに送信する。
+ *  - NOTIFY_WEBHOOK_URL: Discord/Slack互換のWebhook
+ *  - LINE_CHANNEL_ACCESS_TOKEN + LINE_USER_ID: LINE Messaging API のプッシュ通知
+ * 戻り値: [{ target, ok, detail }] （未設定の通知先は含まれない）
+ */
 export async function notify(message) {
+  const results = [];
+
   const url = process.env.NOTIFY_WEBHOOK_URL;
-  if (!url) return;
-  try {
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: message, text: message }),
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch (e) {
-    log('通知の送信に失敗:', e.message);
+  if (url) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: message, text: message }),
+        signal: AbortSignal.timeout(10000),
+      });
+      results.push({ target: 'Webhook', ok: r.ok, detail: r.ok ? '' : `HTTP ${r.status}` });
+    } catch (e) {
+      results.push({ target: 'Webhook', ok: false, detail: e.message });
+    }
   }
+
+  const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const lineTo = process.env.LINE_USER_ID;
+  if (lineToken && lineTo) {
+    try {
+      const r = await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken}` },
+        body: JSON.stringify({ to: lineTo, messages: [{ type: 'text', text: message.slice(0, 4900) }] }),
+        signal: AbortSignal.timeout(10000),
+      });
+      results.push({ target: 'LINE', ok: r.ok, detail: r.ok ? '' : `HTTP ${r.status} ${(await r.text().catch(() => '')).slice(0, 200)}` });
+    } catch (e) {
+      results.push({ target: 'LINE', ok: false, detail: e.message });
+    }
+  }
+
+  for (const r of results) {
+    if (!r.ok) log(`通知失敗(${r.target}): ${r.detail}`);
+  }
+  return results;
 }
 
 export async function saveShot(page, dir, name) {

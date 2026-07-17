@@ -107,6 +107,24 @@ npm run book -- --daily   # 常駐して毎朝くり返し予約（Ctrl+Cで停�
 50 5 * * * cd /path/to/this/repo && npm run book >> book.log 2>&1
 ```
 
+## LINE通知（任意・初回のみ約15分）
+
+予約の成否をLINEで受け取れます。旧「LINE Notify」は2025年3月に終了したため、
+公式の **Messaging API**（無料枠 月200通＝毎朝1通なら十分）を使います。
+
+1. [LINE Developers](https://developers.line.biz/ja/) にLINEアカウントでログイン
+2. プロバイダーを作成 →「Messaging API」のチャネルを作成（名前は「予約通知」など何でも）
+3. チャネルの「Messaging API設定」タブで**チャネルアクセストークン（長期）**を発行
+4. 「チャネル基本設定」タブの**あなたのユーザーID**（`U`で始まる文字列）を控える
+5. 「Messaging API設定」タブのQRコードを自分のLINEで読み取り、ボットを**友だち追加**
+6. GUIの「結果の通知」欄にトークンとユーザーIDを貼って保存 →「テスト送信」で確認
+
+CLI派は `.env` に `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` を書けば同じです。
+Discord/Slackを使っている人は Webhook URL の方が手軽です（どちらか片方でOK、両方でもOK）。
+
+> LINEから予約ツールを**操作**する（双方向bot）のは、自宅PCを外部公開する必要があり
+> 安全上おすすめしません。通知（片方向）のみ対応しています。
+
 ## 設定
 
 ### `config.json`
@@ -131,6 +149,7 @@ npm run book -- --daily   # 常駐して毎朝くり返し予約（Ctrl+Cで停�
 | --- | --- |
 | `MEDICALPASS_EMAIL` / `MEDICALPASS_PASSWORD` | ログイン情報（必須, `.env`） |
 | `NOTIFY_WEBHOOK_URL` | 結果通知の Discord/Slack Webhook |
+| `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_USER_ID` | 結果通知のLINE送信（Messaging API） |
 | `HEADLESS` | `1` でヘッドレス強制（サーバー実行時） |
 | `CHROMIUM_PATH` | ブラウザ実行ファイルを固定パスで指定したい場合 |
 | `CONFIG_FILE` | 使う設定ファイルを差し替え（子ども別・クリニック別に用意可） |

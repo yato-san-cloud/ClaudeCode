@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig } from './lib.js';
+import { loadConfig, notify } from './lib.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
@@ -107,6 +107,8 @@ const server = http.createServer(async (req, res) => {
       email: env.MEDICALPASS_EMAIL || '',
       hasPassword: !!env.MEDICALPASS_PASSWORD,
       notifyWebhook: env.NOTIFY_WEBHOOK_URL || '',
+      hasLineToken: !!env.LINE_CHANNEL_ACCESS_TOKEN,
+      lineUserId: env.LINE_USER_ID || '',
       patientName: cfg.patientName || '',
       patientCardNumber: cfg.patientCardNumber || '',
       targetTimeJst: cfg.targetTimeJst || '06:00:00',
@@ -126,6 +128,8 @@ const server = http.createServer(async (req, res) => {
     env.MEDICALPASS_EMAIL = b.email ?? env.MEDICALPASS_EMAIL ?? '';
     if (b.password) env.MEDICALPASS_PASSWORD = b.password; // 空なら既存を保持
     env.NOTIFY_WEBHOOK_URL = b.notifyWebhook ?? env.NOTIFY_WEBHOOK_URL ?? '';
+    if (b.lineToken) env.LINE_CHANNEL_ACCESS_TOKEN = b.lineToken; // 空なら既存を保持
+    env.LINE_USER_ID = b.lineUserId ?? env.LINE_USER_ID ?? '';
     writeEnv(env);
 
     const cfg = loadConfig(CONFIG);
@@ -149,6 +153,24 @@ const server = http.createServer(async (req, res) => {
     if (!mode) return json(res, 400, { error: 'unknown mode' });
     runBook(mode, !!b.showBrowser);
     return json(res, 200, { ok: true });
+  }
+
+  if (url.pathname === '/api/test-notify' && req.method === 'POST') {
+    // 保存済みの .env を読み直してから送信（GUIプロセスの環境変数を最新化）
+    Object.assign(process.env, readEnv());
+    const configured = [];
+    if (process.env.NOTIFY_WEBHOOK_URL) configured.push('Webhook');
+    if (process.env.LINE_CHANNEL_ACCESS_TOKEN && process.env.LINE_USER_ID) configured.push('LINE');
+    if (configured.length === 0) {
+      broadcast('⚠ 通知先が未設定です。LINEのトークン+ユーザーID、またはWebhook URLを保存してください。');
+      return json(res, 200, { ok: false });
+    }
+    broadcast(`▶ テスト通知を送信します (${configured.join(', ')})`);
+    const results = await notify('🔔 テスト通知: おおはしこどもクリニック予約ツールからの送信テストです');
+    for (const r of results) {
+      broadcast(r.ok ? `✅ ${r.target}: 送信成功（届いたか確認してください）` : `❌ ${r.target}: 失敗 (${r.detail})`);
+    }
+    return json(res, 200, { ok: results.every((r) => r.ok) });
   }
 
   if (url.pathname === '/api/stop' && req.method === 'POST') {

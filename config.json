@@ -1,29 +1,54 @@
 {
   "loginUrl": "https://medicalpass.jp/users/login",
   "departmentUrl": "https://medicalpass.jp/departments/2860",
-
   "targetTimeJst": "06:00:00",
   "preOpenLeadMinutes": 5,
-
   "//patientName": "アカウントに複数の家族を登録している場合、受診する子の氏名を入れる（1人なら空でよい）",
   "patientName": "",
-
   "//patientCardNumber": "通常は不要（診察券番号はアカウントに登録済み）。予約時に番号入力を求められる場合のみ設定",
   "patientCardNumber": "",
-
   "//menuTextCandidates": "当日一般受付で押すメニュー名の候補。上から順に探して最初に見つかったものを押す",
-  "menuTextCandidates": ["診察", "一般診察", "一般外来", "診察＋注射", "診察+注射"],
-
-  "proceedButtonTexts": ["受付する", "予約する", "この内容で受付", "この内容で予約", "受付を確定", "予約を確定", "確定する", "次へ", "確認"],
+  "menuTextCandidates": [
+    "診察",
+    "一般診察",
+    "一般外来",
+    "診察＋注射",
+    "診察+注射"
+  ],
+  "proceedButtonTexts": [
+    "受付する",
+    "予約する",
+    "この内容で受付",
+    "この内容で予約",
+    "受付を確定",
+    "予約を確定",
+    "確定する",
+    "次へ",
+    "確認"
+  ],
   "//successTexts": "完了を確定できる文言のみ入れる。「受付番号」単体は待ち状況表示（現在の受付番号など）と紛れるため入れない（番号はプログラム側が文脈付きで判定）",
-  "successTexts": ["受付が完了", "受付を受け付けました", "予約が完了", "受付完了", "予約を受け付けました"],
-  "closedTexts": ["受付時間外", "受付を開始していません", "受付を停止", "受付停止", "受付は終了", "本日の受付は終了", "定員", "受付を締め切", "受付しておりません"],
-
+  "successTexts": [
+    "受付が完了",
+    "受付を受け付けました",
+    "予約が完了",
+    "受付完了",
+    "予約を受け付けました"
+  ],
+  "closedTexts": [
+    "受付時間外",
+    "受付を開始していません",
+    "受付を停止",
+    "受付停止",
+    "受付は終了",
+    "本日の受付は終了",
+    "定員",
+    "受付を締め切",
+    "受付しておりません"
+  ],
   "retry": {
     "intervalSeconds": 3,
     "maxAttempts": 40
   },
-
   "headless": false,
   "screenshotsDir": "screenshots"
 }

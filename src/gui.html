@@ -78,11 +78,34 @@
     </div>
     <label>予約ページURL</label>
     <input id="departmentUrl" type="text" placeholder="https://medicalpass.jp/departments/2860">
-    <label>結果通知の Webhook <span class="hint">（Discord/Slack・任意）</span></label>
-    <input id="notifyWebhook" type="text" placeholder="https://discord.com/api/webhooks/...">
     <div class="btns" style="margin-top:16px">
       <button class="save" id="saveBtn">設定を保存</button>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>結果の通知（任意）</h2>
+    <label>LINE チャネルアクセストークン <span class="hint">（保存済みなら空のままでOK）</span> <span id="linebadge" class="badge off">未設定</span></label>
+    <input id="lineToken" type="password" placeholder="Messaging APIのチャネルアクセストークン（長期）">
+    <label>LINE ユーザーID <span class="hint">（Uで始まる文字列）</span></label>
+    <input id="lineUserId" type="text" placeholder="U1234abcd...">
+    <label>Webhook URL <span class="hint">（Discord/Slack派の人向け）</span></label>
+    <input id="notifyWebhook" type="text" placeholder="https://discord.com/api/webhooks/...">
+    <div class="btns" style="margin-top:16px">
+      <button class="save" id="saveNotifyBtn">設定を保存</button>
+      <button class="ghost" id="testNotifyBtn">テスト送信</button>
+    </div>
+    <details style="margin-top:12px">
+      <summary class="hint" style="cursor:pointer">LINE通知の準備手順（初回のみ・約15分）</summary>
+      <ol class="note" style="margin:8px 0 0; padding:10px 12px 10px 28px">
+        <li><a href="https://developers.line.biz/ja/" target="_blank">LINE Developers</a> にLINEアカウントでログイン</li>
+        <li>プロバイダーを作成 →「Messaging API」のチャネルを作成（名前は「予約通知」など何でもOK）</li>
+        <li>チャネルの「Messaging API設定」タブで<b>チャネルアクセストークン（長期）</b>を発行 → 上の欄に貼る</li>
+        <li>「チャネル基本設定」タブの<b>あなたのユーザーID</b>（Uで始まる）→ 上の欄に貼る</li>
+        <li>同じ「Messaging API設定」タブのQRコードを自分のLINEで読み取り、ボットを<b>友だち追加</b></li>
+        <li>「設定を保存」→「テスト送信」で届けば完了（無料枠は月200通・毎朝1通なら十分）</li>
+      </ol>
+    </details>
   </div>
 
   <div class="card">
@@ -125,9 +148,13 @@ async function load() {
   $('menuTextCandidates').value = s.menuTextCandidates;
   $('departmentUrl').value = s.departmentUrl;
   $('notifyWebhook').value = s.notifyWebhook;
+  $('lineUserId').value = s.lineUserId;
   const badge = $('pwbadge');
   badge.textContent = s.hasPassword ? '設定済み' : '未設定';
   badge.className = 'badge ' + (s.hasPassword ? 'on' : 'off');
+  const lb = $('linebadge');
+  lb.textContent = s.hasLineToken ? '設定済み' : '未設定';
+  lb.className = 'badge ' + (s.hasLineToken ? 'on' : 'off');
   setRunning(s.running);
 }
 
@@ -136,6 +163,8 @@ function payload() {
     email: $('email').value.trim(),
     password: $('password').value,
     notifyWebhook: $('notifyWebhook').value.trim(),
+    lineToken: $('lineToken').value.trim(),
+    lineUserId: $('lineUserId').value.trim(),
     patientName: $('patientName').value.trim(),
     patientCardNumber: $('patientCardNumber').value.trim(),
     targetTimeJst: $('targetTimeJst').value,
@@ -147,8 +176,14 @@ function payload() {
 async function save() {
   await fetch('/api/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload()) });
   $('password').value = '';
+  $('lineToken').value = '';
   addLog('✔ 設定を保存しました。');
   load();
+}
+
+async function testNotify() {
+  await save();
+  await fetch('/api/test-notify', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
 }
 
 function setRunning(on) {
@@ -164,7 +199,9 @@ async function run(mode) {
 }
 
 $('saveBtn').onclick = save;
-$('stopBtn').onclick = () => fetch('/api/stop', { method:'POST' });
+$('saveNotifyBtn').onclick = save;
+$('testNotifyBtn').onclick = testNotify;
+$('stopBtn').onclick = () => fetch('/api/stop', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
 document.querySelectorAll('button[data-mode]').forEach(b => b.onclick = () => run(b.dataset.mode));
 
 const es = new EventSource('/api/logs');
