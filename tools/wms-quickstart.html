@@ -1,0 +1,666 @@
+<title>WMS はじめてガイド — ONEsLOGI クラウドWMS 運用者ツール</title>
+<style>
+:root{
+  --ink:#232a33; --ink-2:#5a6472; --paper:#f6f5f1; --card:#ffffff;
+  --line:#e3e0d8; --accent:#e8630a; --accent-ink:#ffffff;
+  --ok:#2e7d5b; --warn:#a87b00; --err:#c43d3d; --info:#3a6ea5;
+  --chip:#eeece5; --code:#f0eee8;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --ink:#e8e6e0; --ink-2:#9aa3ad; --paper:#171b21; --card:#1f242c;
+    --line:#333a44; --accent:#ff7a1a; --accent-ink:#1a1408;
+    --ok:#5bbd93; --warn:#d9a821; --err:#e07070; --info:#7aa7d4;
+    --chip:#2a313b; --code:#262c35; }
+}
+:root[data-theme="dark"]{ --ink:#e8e6e0; --ink-2:#9aa3ad; --paper:#171b21; --card:#1f242c;
+  --line:#333a44; --accent:#ff7a1a; --accent-ink:#1a1408;
+  --ok:#5bbd93; --warn:#d9a821; --err:#e07070; --info:#7aa7d4;
+  --chip:#2a313b; --code:#262c35; }
+:root[data-theme="light"]{ --ink:#232a33; --ink-2:#5a6472; --paper:#f6f5f1; --card:#ffffff;
+  --line:#e3e0d8; --accent:#e8630a; --accent-ink:#ffffff;
+  --ok:#2e7d5b; --warn:#a87b00; --err:#c43d3d; --info:#3a6ea5;
+  --chip:#eeece5; --code:#f0eee8; }
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic UI",Meiryo,system-ui,sans-serif;
+  font-size:15px;line-height:1.75;}
+header{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:2px solid var(--accent);
+  padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+header h1{font-size:16px;margin:0;letter-spacing:.02em}
+header h1 small{color:var(--ink-2);font-weight:normal;font-size:12px;margin-left:8px}
+#q{flex:1;min-width:200px;max-width:420px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;
+  background:var(--card);color:var(--ink);font-size:14px}
+#q:focus{outline:2px solid var(--accent);outline-offset:1px}
+.layout{display:flex;min-height:100vh}
+nav{width:190px;flex-shrink:0;padding:16px 0 40px 8px;position:sticky;top:56px;align-self:flex-start;height:calc(100vh - 56px);overflow-y:auto}
+nav button{display:block;width:100%;text-align:left;background:none;border:none;border-left:3px solid transparent;
+  padding:9px 14px;font-size:14px;color:var(--ink-2);cursor:pointer;font-family:inherit}
+nav button.on{color:var(--ink);border-left-color:var(--accent);font-weight:600;background:var(--card)}
+nav button:hover{color:var(--ink)}
+nav .grp{font-size:11px;letter-spacing:.12em;color:var(--ink-2);padding:16px 14px 4px;text-transform:uppercase}
+main{flex:1;padding:20px 24px 80px;max-width:900px}
+@media (max-width:760px){
+  .layout{display:block}
+  nav{width:auto;height:auto;position:static;display:flex;overflow-x:auto;padding:6px;border-bottom:1px solid var(--line)}
+  nav .grp{display:none}
+  nav button{white-space:nowrap;width:auto;border-left:none;border-bottom:3px solid transparent}
+  nav button.on{border-bottom-color:var(--accent)}
+}
+section{display:none}
+section.show{display:block}
+h2{font-size:20px;margin:18px 0 6px;text-wrap:balance}
+h2 .eyebrow{display:block;font-size:11px;letter-spacing:.14em;color:var(--accent);font-weight:600}
+.lead{color:var(--ink-2);margin:0 0 18px;max-width:62ch}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:0 0 14px;overflow:hidden}
+.card>summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:15px;list-style:none;display:flex;gap:10px;align-items:baseline}
+.card>summary::-webkit-details-marker{display:none}
+.card>summary::before{content:"▸";color:var(--accent);flex-shrink:0;transition:transform .15s}
+.card[open]>summary::before{transform:rotate(90deg)}
+@media (prefers-reduced-motion: reduce){.card>summary::before{transition:none}}
+.card .body{padding:2px 16px 14px;border-top:1px solid var(--line)}
+ol.steps{margin:10px 0;padding-left:0;counter-reset:s;list-style:none}
+ol.steps li{counter-increment:s;position:relative;padding:4px 0 4px 38px;max-width:66ch}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:6px;width:24px;height:24px;border-radius:50%;
+  background:var(--chip);color:var(--ink);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  font-variant-numeric:tabular-nums}
+.scr{background:var(--code);border-radius:4px;padding:1px 6px;font-size:13.5px;white-space:nowrap}
+b.btn{font-weight:700}
+.note{border-left:4px solid var(--warn);background:var(--card);padding:8px 14px;margin:10px 0;border-radius:0 6px 6px 0;max-width:66ch}
+.note.err{border-left-color:var(--err)}
+.note.ok{border-left-color:var(--ok)}
+.note .t{font-size:12px;font-weight:700;letter-spacing:.06em}
+.note.err .t{color:var(--err)} .note .t{color:var(--warn)} .note.ok .t{color:var(--ok)}
+.tag{display:inline-block;background:var(--chip);border-radius:99px;padding:1px 10px;font-size:12px;color:var(--ink-2);margin-right:6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+.twrap{overflow-x:auto;margin:10px 0}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--chip);font-size:12.5px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:12px 0}
+.flow .st{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-size:13px;font-weight:600}
+.flow .st.hl{border-color:var(--accent);color:var(--accent)}
+.flow .ar{color:var(--ink-2)}
+.term{padding:8px 0;border-bottom:1px solid var(--line);max-width:70ch}
+.term dt{font-weight:700;font-size:14.5px}
+.term dd{margin:2px 0 0;color:var(--ink-2);font-size:14px}
+.hidden{display:none!important}
+.hitcount{color:var(--ink-2);font-size:13px;margin:6px 0}
+kbd{background:var(--code);border:1px solid var(--line);border-radius:4px;padding:0 6px;font-size:12.5px;font-family:inherit}
+footer{color:var(--ink-2);font-size:12px;padding:24px;border-top:1px solid var(--line)}
+a{color:var(--info)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<header>
+  <h1>WMS はじめてガイド<small>ONEsLOGI クラウドWMS｜初見の運用者向け</small></h1>
+  <input id="q" type="search" placeholder="困りごと・操作・用語をなんでも検索（例: 検品 再開 / 欠品 / 日次締）" aria-label="全体検索">
+</header>
+
+<div class="layout">
+<nav aria-label="目次">
+  <div class="grp">まずここ</div>
+  <button data-s="start" class="on">初日の心得</button>
+  <button data-s="flow">1日の流れ</button>
+  <div class="grp">業務別手順</div>
+  <button data-s="nyuka">入荷</button>
+  <button data-s="shukka">出荷</button>
+  <button data-s="zaiko">在庫・補充</button>
+  <button data-s="tana">棚卸</button>
+  <button data-s="nichiji">日次締</button>
+  <button data-s="ec">EC受注</button>
+  <button data-s="ht">HT / SD</button>
+  <div class="grp">こまったら</div>
+  <button data-s="sos">困ったとき</button>
+  <button data-s="status">ステータス早見</button>
+  <button data-s="yougo">用語辞書</button>
+  <button data-s="nifuda">荷札・印刷</button>
+</nav>
+
+<main>
+
+<!-- ================= 初日の心得 ================= -->
+<section id="start" class="show" data-title="初日の心得">
+<h2><span class="eyebrow">START HERE</span>初日に知っておく7つのこと</h2>
+<p class="lead">マニュアルを全部読む前に、これだけ押さえれば事故は防げます。</p>
+
+<details class="card" open><summary>① ボタンは1回だけ。二度押し禁止</summary><div class="body">
+<p>処理が終わるまで他の操作をしない。二度押しすると同じ処理が2回動く恐れがあります。<kbd>F5</kbd>（更新）を押すと入力内容が全部消えます。</p>
+</div></details>
+
+<details class="card" open><summary>② 出荷検品中にブラウザの「戻る」は絶対に押さない</summary><div class="body">
+<p>押してしまうとステータスが「検品中」のまま残り、再開できなくなります。復旧方法は<b>困ったとき → 「検品が再開できない」</b>を参照。</p>
+</div></details>
+
+<details class="card"><summary>③ 「戻る」「×」を押しても処理は止まらない</summary><div class="body">
+<p>登録処理が始まった後にブラウザを閉じても<b>処理は継続されます</b>（取消にはなりません）。取消・修正は必ず各画面の機能（取消ボタン・実績訂正など）で行います。</p>
+</div></details>
+
+<details class="card"><summary>④ 画面名とボタン名の読み方</summary><div class="body">
+<p>このガイドでは <span class="scr">『画面名』</span>＝画面、<b class="btn">【ボタン名】</b>＝ボタンです。メニューは「マスタ／入荷／出荷／在庫／棚卸／日次／運用／ヘルプ」の8つ。荷主・センタの切替はメニュー上部のセンタ名称を押して<b class="btn">【切替】</b>（ログインし直し不要）。</p>
+</div></details>
+
+<details class="card"><summary>⑤ メッセージの色 = 青は正常・赤はエラー・黄は警告</summary><div class="body">
+<p>入力エラーは項目単位に表示されます。チェックの種類は「必須・桁数・文字種・日付形式・マスタ未存在」。「マスタに存在しません」系はマスタ登録漏れか削除済みが原因です。</p>
+</div></details>
+
+<details class="card"><summary>⑥ 挙動は「パラメータマスタ」の設定で変わる</summary><div class="body">
+<p>同じWMSでもセンタ・荷主ごとに設定が違います。特に影響が大きいのは: 欠品時の挙動（取消/0引当）、ラベル・荷札・納品明細の自動出力、荷材選択のスキップ、入庫No.管理の有無（HTの画面フロー自体が変わる）。「あの倉庫と動きが違う」と思ったらまず設定を疑い、管理者に確認しましょう。</p>
+</div></details>
+
+<details class="card"><summary>⑦ 1日の最後は「日次締」。忘れると翌日警告が出る</summary><div class="body">
+<p>庫内業務が終わったら日次メニューの『日次締処理』。忘れてもデータは壊れませんが、翌日ログイン時に警告が出るので、締めてから業務を始めます。詳しくは<b>日次締</b>のページへ。</p>
+</div></details>
+</section>
+
+<!-- ================= 1日の流れ ================= -->
+<section id="flow" data-title="1日の流れ">
+<h2><span class="eyebrow">DAILY FLOW</span>倉庫の1日と画面の対応</h2>
+<p class="lead">どの作業がどの画面かをまず地図として覚えます。</p>
+
+<h3>入荷の流れ</h3>
+<div class="flow">
+<span class="st">入荷予定登録</span><span class="ar">→</span>
+<span class="st">入荷予定リスト発行</span><span class="ar">→</span>
+<span class="st">検品・格納</span><span class="ar">→</span>
+<span class="st hl">入荷実績入力＝在庫計上</span><span class="ar">→</span>
+<span class="st">入庫ラベル発行・貼付</span>
+</div>
+<p>予定の取込は『入荷予定一括取込』（Excel）か『入荷予定入力』（手入力）、EDI自動連携も可。実績を入れた瞬間に在庫が増えます。</p>
+
+<h3>出荷の流れ</h3>
+<div class="flow">
+<span class="st">出荷指示登録</span><span class="ar">→</span>
+<span class="st hl">出庫指示＝在庫引当</span><span class="ar">→</span>
+<span class="st">ピッキングリスト発行</span><span class="ar">→</span>
+<span class="st">ピッキング</span><span class="ar">→</span>
+<span class="st">出荷検品・梱包</span><span class="ar">→</span>
+<span class="st">送り状・積込</span><span class="ar">→</span>
+<span class="st hl">出荷確定＝在庫引落</span>
+</div>
+<p>在庫が動くのは「出庫指示（引当）」と「出荷確定（引落）」の2点。ここを覚えると在庫数の見方に迷いません。</p>
+
+<h3>締め</h3>
+<div class="flow">
+<span class="st">庫内業務終了</span><span class="ar">→</span>
+<span class="st hl">日次締処理</span><span class="ar">→</span>
+<span class="st">ログ一覧で結果確認</span>
+</div>
+</section>
+
+<!-- ================= 入荷 ================= -->
+<section id="nyuka" data-title="入荷">
+<h2><span class="eyebrow">RECEIVING</span>入荷</h2>
+<p class="lead">予定 → 検品・格納 → 実績入力（在庫計上）→ ラベル。</p>
+
+<details class="card"><summary>入荷予定を登録する（手入力 / Excel取込）</summary><div class="body">
+<ol class="steps">
+<li>手入力: 入荷メニュー → <span class="scr">『入荷予定入力』</span>。入荷予定日・仕入先CD・処理区分・在庫区分・商品CD・予定数を入力 → <b class="btn">【登録】</b>。</li>
+<li>Excel: <span class="scr">『入荷予定一括取込』</span> → <b class="btn">【ファイル取込】</b> → <b class="btn">【登録】</b>。フォーマットはヘルプメニューからダウンロード。</li>
+<li>登録結果は <span class="scr">『伝票別入荷一覧』</span>／<span class="scr">『商品別入荷一覧』</span>で確認。</li>
+</ol>
+<div class="note"><span class="t">注意</span> 明細0行では登録不可。逆に<b>修正時に明細を0行にして登録すると「予定の削除」になる</b>。修正は未入荷・エラー有のみ、伝票1件だけチェックして<b class="btn">【入荷予定修正】</b>。</div>
+</div></details>
+
+<details class="card"><summary>エラー有の入荷予定を直す</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『伝票別入荷一覧』</span>で対象をチェック → <b class="btn">【エラーチェック】</b>。エラー行はピンク背景＋メッセージ。</li>
+<li>「〇〇マスタに存在しません」→ 該当マスタを登録するか、削除済みなら未削除に戻す。または予定側を修正。</li>
+<li>直したらもう一度<b class="btn">【エラーチェック】</b>。ステータスが「未入荷」に戻れば作業再開OK。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>入荷実績を入力する（在庫計上）</summary><div class="body">
+<ol class="steps">
+<li>一覧で対象をチェック → <b class="btn">【入荷実績入力】</b> → <span class="scr">『入荷実績入力（予定あり）』</span>。</li>
+<li>実績を入力。<b>ロット管理品・期限日管理品は「ロット」「期限日」が必須</b>。</li>
+<li>複数のロット・期限日・ロケに分かれた場合は<b class="btn">【明細分割】</b>。</li>
+<li><b class="btn">【登録】</b>で在庫計上。設定によっては入庫ラベル／商品ラベルが自動で出ます。</li>
+</ol>
+<p>予定なし入荷は<span class="scr">『入荷実績入力（予定なし）』</span>（ロケーションCD必須）。</p>
+<div class="note"><span class="t">注意</span> 入荷の取消は<b class="btn">【入荷取消】</b>。ただし入庫後に在庫を移動・調整して入庫時より減っていると取消不可 → 先に在庫を入荷時の状態に戻す。</div>
+</div></details>
+
+<details class="card"><summary>分納・打切り（予定数に届かないとき）</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『入荷未完了一覧』</span>で対象をチェック。</li>
+<li>画面下部で「分納」（未入荷分を別予定として残す）か「打切り」（未入荷分を取消）を指定 → <b class="btn">【指示】</b> → <b class="btn">【登録】</b>。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>進捗・履歴を見る</summary><div class="body">
+<p><span class="scr">『入荷ステータス別進捗』</span>（円グラフ）、<span class="scr">『入荷履歴』</span>。ステータスは 未入荷 → 入荷中（一部計上）→ 入荷済。「エラー有」は進捗上は未入荷扱い。</p>
+</div></details>
+</section>
+
+<!-- ================= 出荷 ================= -->
+<section id="shukka" data-title="出荷">
+<h2><span class="eyebrow">SHIPPING</span>出荷</h2>
+<p class="lead">指示 → 出庫指示（引当）→ ピッキング → 検品 → 確定（引落）。</p>
+
+<details class="card"><summary>出荷指示を登録する</summary><div class="body">
+<ol class="steps">
+<li>手入力: <span class="scr">『出荷指示入力』</span>。納品先CD・納品予定日・作業日・出荷日・商品CD・出荷指示数 → <b class="btn">【登録】</b>。</li>
+<li>Excel: <span class="scr">『出荷指示一括取込』</span> → <b class="btn">【ファイル取込】</b> → <b class="btn">【登録】</b>（エラー項目は画面上で修正可）。</li>
+<li>確認・操作の起点は<span class="scr">『出庫指示一覧』</span>。修正は<span class="scr">『商品別出荷一覧』</span> → <b class="btn">【指示修正】</b>。</li>
+</ol>
+<div class="note"><span class="t">注意</span> 修正・キャンセルができるのは<b>未出荷（またはエラー有）のみ</b>。出庫指示済のものは先に<b class="btn">【出庫指示解除】</b>。出荷確定済は日付・配送コース変更も不可。</div>
+</div></details>
+
+<details class="card"><summary>出庫指示（在庫引当）をかける</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『出庫指示一覧』</span>でステータス「未出荷」で検索 → 対象をチェック（タイトル部で全選択可）。</li>
+<li><b class="btn">【出庫指示】</b> → ステータスが「出庫指示済」に。取り消すときは<b class="btn">【出庫指示解除】</b>で「未出荷」へ戻る。</li>
+<li>緊急補充のメッセージが出たら<span class="scr">『在庫移動一覧』</span>で補充ラベル発行 → 補充作業 → <b class="btn">【完了】</b>。</li>
+</ol>
+<div class="note"><span class="t">注意</span> 欠品時の動き（伝票ごと取消／引当可能数だけ引当／商品ごと0／納品先ごと0）は<b>パラメータマスタの設定次第</b>。欠品行は一覧に青文字で表示。再引当は「出庫指示解除 → 指示修正 or 在庫を直す → 再度出庫指示」。</div>
+</div></details>
+
+<details class="card"><summary>ピッキングリストを発行する</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『ピッキングリスト発行』</span>（または『出庫指示一覧』で1件チェック → <b class="btn">【ピッキングリスト】</b>）。</li>
+<li>発行区分（一次／二次／ケース／送り状・荷札）を指定 → <b class="btn">【検索】</b> → 帳票種別を選びチェック → <b class="btn">【発行】</b>。</li>
+</ol>
+<div class="twrap"><table>
+<tr><th>方式</th><th>使いどころ</th><th>出す帳票</th></tr>
+<tr><td>オーダー</td><td>納品先単位にそのままピック</td><td>オーダーピッキングリスト＋ケース分</td></tr>
+<tr><td>トータル＋摘み取り/種蒔き</td><td>総数で集品→納品先別に仕分</td><td>トータル＋摘み取り or 種蒔きリスト</td></tr>
+<tr><td>マルチ</td><td>複数オーダーを台車で同時ピック</td><td>マルチピッキングリスト＋摘み取り</td></tr>
+<tr><td>ケース</td><td>ケース引当分（ある場合は必須出力）</td><td>ケースピッキングリスト</td></tr>
+<tr><td>単行</td><td>1商品だけの伝票をまとめ処理</td><td>単行ピッキングリスト（他リストからはピック不可）</td></tr>
+</table></div>
+<p>最適ピック提案を使う設定なら<span class="scr">『ピッキング提案』</span> → <b class="btn">【検索】</b> → 行選択 → <b class="btn">【発行】</b>。</p>
+</div></details>
+
+<details class="card"><summary>出荷検品する（PC＋スキャナ）</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『出荷検品』</span>で担当者CDと箱CD／ピックリストNo.を入力 → <b class="btn">【検索】</b>。</li>
+<li>ソースCDまたは商品CDをスキャンしてカウント。青=検品済、ピンク=検品中、白=未検品。数量手入力は明細行ダブルクリック。</li>
+<li>箱が変わるときは<b class="btn">【箱登録】</b>で荷材を追加。全商品完了で『荷材選択』が自動表示 → <b class="btn">【登録】</b>で完了。</li>
+</ol>
+<div class="note err"><span class="t">厳禁</span> 検品中のブラウザ「戻る」。押したら<span class="scr">『出庫指示一覧』</span>で<b class="btn">【出荷検品解除】</b>（1件チェック）して最初から。荷材選択で<b class="btn">【閉じる】</b>を押すと検品完了にならない → <b class="btn">【箱登録】</b>で荷材登録し直す。</div>
+</div></details>
+
+<details class="card"><summary>送り状・納品明細・積込</summary><div class="body">
+<ol class="steps">
+<li>納品明細: <span class="scr">『納品明細発行』</span>。送り状データ: <span class="scr">『送り状データ出力』</span> → チェック → <b class="btn">【データ出力】</b>（CSV。種別は配送コースの設定に従う）。</li>
+<li>荷札をWMSから直接出す場合は『ピッキングリスト発行』の発行区分「送り状・荷札」（ヤマト/佐川/ゆうパック/汎用に対応）。</li>
+<li>積込: <span class="scr">『積込リスト発行』</span> → 積込検品。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>出荷確定（在庫引落）と解除</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『出荷確定一覧』</span> → 対象チェック → <b class="btn">【出荷確定】</b>（検品済のみ）。ここで在庫が引き落とされます。</li>
+<li>目視検品のみで確定したいとき: 出庫指示済の行に<b class="btn">【強制確定】</b>。</li>
+<li>解除: 表示を「全件表示」にして検索 → チェック → <b class="btn">【出荷確定解除】</b>。</li>
+</ol>
+<div class="note"><span class="t">注意</span> 出荷確定済になると以降の出荷業務（修正・変更）は一切不可。確定は最後の関門と心得る。</div>
+</div></details>
+</section>
+
+<!-- ================= 在庫 ================= -->
+<section id="zaiko" data-title="在庫・補充">
+<h2><span class="eyebrow">INVENTORY</span>在庫・補充</h2>
+<p class="lead">照会 → 調整・移動 → 補充。在庫は9つのキー（荷主・センタ・預託・在庫区分・商品・ロケ・入庫ラベルNo.・ロット・期限日）で分かれます。</p>
+
+<details class="card"><summary>在庫を調べる</summary><div class="body">
+<p><span class="scr">『トータル在庫問合せ』</span>=商品別・全センタ（定点切れ確認も）。<span class="scr">『在庫問合せ』</span>=ロケーション別。行を選ぶと<b class="btn">【在庫受払問合せ】【在庫調整】【在庫移動】</b>などへ。受払履歴で「誰がいつ何をしたか」を追えます（訂正・取消は赤処理＝マイナス計上で残る）。</p>
+</div></details>
+
+<details class="card"><summary>在庫調整（数を合わせる）</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『在庫問合せ』</span>で対象行 → <b class="btn">【在庫調整】</b>（新規在庫は『在庫調整（新規）』）。</li>
+<li>調整内容を入力 → <b class="btn">【登録】</b>。ロット・期限日管理品は必須。入庫No.管理ありなら入庫ラベルNo.を指定（未入力だと新規在庫の追加になる）。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>在庫移動（ロケ・在庫区分・預託の切替）</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『在庫問合せ』</span> → <b class="btn">【在庫移動】</b> → 移動先を入力 → <b class="btn">【登録】</b>。</li>
+<li>複数まとめて動かすなら<b class="btn">【在庫一括移動指示】</b> → <span class="scr">『在庫移動一覧』</span>で搬送ラベル発行 → 作業 → <b class="btn">【完了】</b>。</li>
+</ol>
+<div class="note"><span class="t">注意</span> 補充ロケの在庫を<b>全数</b>移動すると補充ロケ定義が消える（移動先がピックロケなら移動先が新しい補充ロケになる）。一部だけ動かすと入庫No.は分割されて新しい番号が付く。</div>
+</div></details>
+
+<details class="card"><summary>補充（定期・緊急）</summary><div class="body">
+<p><b>定期補充</b>: ロケーションマスタに補充点を設定 → 補充点を切ると<span class="scr">『補充指示一覧』</span>に出る → チェック → <b class="btn">【補充指示】</b> → 『在庫移動一覧』でラベル発行・完了。<b>緊急補充</b>: 出庫指示時にピックロケ在庫が足りないと自動発生 → メッセージが出たら『在庫移動一覧』で処理。</p>
+</div></details>
+
+<details class="card"><summary>セット組・セット解除</summary><div class="body">
+<p><span class="scr">『セット組指示』</span>／<span class="scr">『セット解除指示』</span>で指示 → 指示書発行 → 作業 → 完了。構成総数と指示数が合わないと登録できません。親商品は構成品になれない（逆も同じ）。</p>
+</div></details>
+</section>
+
+<!-- ================= 棚卸 ================= -->
+<section id="tana" data-title="棚卸">
+<h2><span class="eyebrow">STOCKTAKE</span>棚卸</h2>
+<p class="lead">データ作成 → リスト発行 → カウント入力 → 差異確認 → 在庫調整。</p>
+
+<details class="card" open><summary>棚卸の手順</summary><div class="body">
+<ol class="steps">
+<li><span class="scr">『棚卸データ作成』</span>。条件なし=一斉棚卸、ロケ・ゾーン・受払日指定=循環棚卸。</li>
+<li><span class="scr">『棚卸作業リスト発行』</span>（HT・SDで数える場合は不要）。</li>
+<li>カウント結果を<span class="scr">『棚卸入力』</span>へ（リスト外在庫は<b class="btn">【行追加】</b>）。HTなら「商品棚卸入力」。</li>
+<li><span class="scr">『棚卸差異リスト発行』</span>で差異確認 → 必要なら再棚卸。</li>
+<li>調整: 1件ずつなら『棚卸入力』→<b class="btn">【在庫調整】</b>、まとめてなら<span class="scr">『棚卸在庫一括更新』</span>→<b class="btn">【在庫一括更新】</b>。</li>
+</ol>
+<div class="note"><span class="t">鉄則</span> 棚卸は<b>入出荷作業が終わってから</b>。データ作成後に在庫が動くと差異の原因になります（動いた行は一括更新画面で赤背景）。引当済がある在庫は「引当可能数」だけが棚卸対象 — 現物と合わないときはピッキング済みでないか確認。一度調整した行は再入力できません（在庫調整フラグ=調整済）。</div>
+</div></details>
+</section>
+
+<!-- ================= 日次締 ================= -->
+<section id="nichiji" data-title="日次締">
+<h2><span class="eyebrow">DAY-END</span>日次締</h2>
+<details class="card" open><summary>日次締の実行と確認</summary><div class="body">
+<ol class="steps">
+<li>庫内業務がすべて終わったことを確認。</li>
+<li>日次メニュー → <span class="scr">『日次締処理』</span> → システム管理日付（翌稼働日）を確認 → 荷主をチェック → <b class="btn">【締切】</b>。</li>
+<li>結果は運用メニュー → <span class="scr">『ログ一覧』</span>で確認（ダブルクリックで明細）。</li>
+</ol>
+<div class="note"><span class="t">注意</span> 荷主ごとにバラバラに実行すると荷主間でシステム管理日付がずれます。稼働日は戻せますが<b>受払が発生した日には戻せない</b>。締め忘れは翌日ログイン時に警告が出るので、締めてから業務開始。日次締で保持期間を過ぎたデータは履歴移動・削除されます。</div>
+</div></details>
+</section>
+
+<!-- ================= EC ================= -->
+<section id="ec" data-title="EC受注">
+<h2><span class="eyebrow">E-COMMERCE</span>EC受注業務</h2>
+<p class="lead">取込 → 出庫指示 → 納品書・EC送り状 → 以降は通常の出荷と同じ。</p>
+
+<details class="card"><summary>EC受注データを取り込む</summary><div class="body">
+<ol class="steps">
+<li>EC受注メニュー → <span class="scr">『EC受注データ一括取込』</span> → 取込種別（楽天/Yahoo!/Amazon等）を選択 → <b class="btn">【取込】</b> → <b class="btn">【登録】</b>。</li>
+<li>登録と同時に出荷指示も自動作成されます。確認は<span class="scr">『EC受注データ一覧』</span>。</li>
+</ol>
+<div class="note"><span class="t">注意</span> Yahoo!は注文ファイル＋商品ファイルの2種必須。<b>同じ種類のファイルを連続で取り込むと最後の1つしか有効にならない</b>。</div>
+</div></details>
+
+<details class="card"><summary>修正・キャンセル・納品書の落とし穴</summary><div class="body">
+<ul>
+<li><b class="btn">【指示修正】</b>で直せるのは出荷指示だけ。<b>EC受注データ自体は変わらない</b> → 納品書は変更前の内容（欠品品も含む）で出ます。受注データを直すならキャンセル → 再取込。</li>
+<li><b class="btn">【受注キャンセル】</b>は未出荷のみ。受注と出荷指示は双方向連動で一緒に消えます（エラー削除も同様）。</li>
+<li>EC送り状データ出力は<b>出庫指示済以降のみ</b>表示。送り状種別は配送コースへの関連付けで決まります。</li>
+</ul>
+<div class="note err"><span class="t">重要</span> EC受注データは<b>出荷日から一定期間で自動削除</b>され、納品書・EC送り状が出せなくなります。取り置き等で日が空くときは『出庫指示一覧』で出荷日を実際の日に更新しておくこと。</div>
+</div></details>
+
+<details class="card"><summary>帳票アタッチ（照合）</summary><div class="body">
+<p>ピッキングリスト・納品書・EC送り状は<b>出庫作業No.単位</b>で照合。印字位置: ピッキングリスト=右上、納品書=右上、送り状（メール便）=お届け先電話番号欄、送り状（宅配）=ご依頼主氏名末尾の【】内。</p>
+</div></details>
+</section>
+
+<!-- ================= HT/SD ================= -->
+<section id="ht" data-title="HT/SD">
+<h2><span class="eyebrow">HANDY</span>HT（ハンディ）/ SD（スマートデバイス）</h2>
+<p class="lead">HTはキー操作、SDはタッチ操作。<b>入庫No.管理の有無で画面フローが変わる</b>点だけ先に押さえる。</p>
+
+<details class="card" open><summary>HTの共通キー</summary><div class="body">
+<div class="twrap"><table>
+<tr><th>キー</th><th>意味</th></tr>
+<tr><td><kbd>F3</kbd> / <kbd>ENT</kbd></td><td>確定・次へ</td></tr>
+<tr><td><kbd>F4</kbd></td><td>完了・切替・選択リスト表示・後回し</td></tr>
+<tr><td><kbd>F1</kbd></td><td>登録内容の一覧確認・補助機能</td></tr>
+<tr><td><kbd>F2</kbd></td><td>終了・戻る</td></tr>
+</table></div>
+<p>電池切れ・電源OFFで中断しても、再ログイン時に「再開画面」から<kbd>F3</kbd>で復帰できます（やり直し不要）。数量入力では【・・・】でケース／ボール別の入力補助が使えます。</p>
+</div></details>
+
+<details class="card"><summary>HT入荷（検品 → 格納）</summary><div class="body">
+<ol class="steps">
+<li>入荷管理メニュー → <b class="btn">【1:入荷検品】</b>。ラベル選択（入庫ラベル/汎用ラベル）→ 伝票No.と仮ロケをスキャン → ソースCDスキャン → 数量 → <kbd>F3</kbd>。ロット・期限日管理品は続けて入力。</li>
+<li>格納は<b class="btn">【2:入庫格納】</b>: 入庫ラベルNo.スキャン → 数量 → 格納ロケスキャン → <kbd>F3</kbd>。</li>
+<li>検品と格納を一気にやるなら<b class="btn">【4:入荷検品格納】</b>。予定数を超えると『検品数確認』画面が出ます。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>HTピッキング・出荷検品</summary><div class="body">
+<ol class="steps">
+<li>オーダーピッキング: 出庫作業No.入力 → 表示された商品をスキャン → 数量 → <kbd>F3</kbd>。<kbd>F4</kbd>で後回し。入庫No.管理ありは<kbd>F4</kbd>で入庫No.単位ピックに切替。</li>
+<li>出荷検品: 出庫作業No.入力 → スキャンでカウント → 箱が満杯なら<kbd>F4</kbd>で箱登録 → 完了は<kbd>F3</kbd>。<b>完了前に<kbd>F3</kbd>を押すとエラー</b>。</li>
+<li>積込検品: 配送コース指定時に別コースの荷物をスキャンするとエラー（指定なしでも実施可）。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>SDの操作と制約</summary><div class="body">
+<p>SDはブラウザベース。ピッキングは『ピッキング』で 0:バラ / 1:ケース を選ぶと対象が順次表示され<b class="btn">【登録】</b>で次へ。解除は対象行の<b class="btn">【ピッキング解除】</b> — <b>「ピッキング中」ステータスのものだけ解除可</b>。</p>
+<div class="note"><span class="t">注意</span> ボタン二度押し禁止・ブラウザ更新でメインメニューに戻り入力消失・登録開始後の戻る/閉じるでも処理は継続 — PCと同じ3原則がSDにも当てはまります。</div>
+</div></details>
+</section>
+
+<!-- ================= 困ったとき ================= -->
+<section id="sos" data-title="困ったとき">
+<h2><span class="eyebrow">TROUBLE</span>困ったとき（症状から引く）</h2>
+<p class="lead">上の検索ボックスに症状を入れても絞り込めます。</p>
+
+<details class="card sos"><summary>出荷検品が再開できない（「検品中」のまま）</summary><div class="body">
+<p><b>原因:</b> 検品中に<b class="btn">【出荷検品中断】</b>を押さずに画面を閉じた／ブラウザの戻るを押した。</p>
+<ol class="steps">
+<li><span class="scr">『出庫指示一覧』</span>で対象を1件チェック → <b class="btn">【出荷検品解除】</b>（または【出庫指示解除】）。</li>
+<li>検品解除なら再度『出荷検品』からやり直し。出庫指示解除まで戻した場合は再度<b class="btn">【出庫指示】</b> → 新しい出庫作業No.で検品。</li>
+</ol>
+</div></details>
+
+<details class="card sos"><summary>タイムアウトした / 放置後に操作したらダイアログが出た</summary><div class="body">
+<p><b class="btn">【OK】</b> → ログインし直すと中断前の画面に戻ります。ただし<b>画面は表示直後の状態に戻る</b>ので、入力途中の内容は消えています。</p>
+</div></details>
+
+<details class="card sos"><summary>「他のユーザに変更された可能性があります」（排他エラー）</summary><div class="body">
+<p><b>原因:</b> 自分が画面を見ている間に、他の人が同じデータを処理した。</p>
+<ol class="steps">
+<li><b class="btn">【検索】</b>し直して画面を最新化。</li>
+<li>内容を確認 — 他の人の処理で既に完了していることが多い。必要な場合のみ再実行。</li>
+</ol>
+<p>入荷実績入力で出た場合は「取引先マスタが削除された」パターンの可能性 → 『伝票別入荷一覧』でエラーチェック →「取引先マスタに存在しません」なら取引先マスタで該当仕入先を未削除に戻す → 再度エラーチェックで「未入荷」に戻れば再開OK。</p>
+</div></details>
+
+<details class="card sos"><summary>ログインできない / 全画面が使えない</summary><div class="body">
+<p>システム更新等で稼働停止中の可能性。3回程度試して駄目ならシステム管理者へ。ID・パスワード不明も管理者へ。</p>
+</div></details>
+
+<details class="card sos"><summary>ログイン時に日次締を促すメッセージが出る</summary><div class="body">
+<p>前日の日次締が未実行でシステム管理日付が過去日のまま。日次メニュー → <span class="scr">『日次締処理』</span>を実行してから業務開始。</p>
+</div></details>
+
+<details class="card sos"><summary>「不明なエラー」「致命的エラー」が出た</summary><div class="body">
+<p>システム内部エラー。操作では復旧できません。発生時刻・操作内容を控えて、サーバログの確認をシステム管理者へ依頼。</p>
+</div></details>
+
+<details class="card sos"><summary>欠品になった / 引当がおかしい</summary><div class="body">
+<ol class="steps">
+<li>欠品行は一覧で青文字。まず『在庫問合せ』で引当可能数を確認（引当済数に食われていないか）。</li>
+<li>在庫はあるのに引当されない場合: 出荷限界日切れ・期限日逆転防止・引当禁止ロケ・出荷停止フラグを疑う。期限日を指定した出荷指示ならチェック対象外にできる。</li>
+<li>復旧: <b class="btn">【出庫指示解除】</b> → 指示修正 or 在庫を直す（入荷実績・調整・移動）→ 再度<b class="btn">【出庫指示】</b>。未出荷のまま欠品表示だけ消すなら<b class="btn">【欠品解除】</b>。</li>
+</ol>
+</div></details>
+
+<details class="card sos"><summary>「出荷停止中、または引当不可の商品が含まれています」</summary><div class="body">
+<p>出庫指示の後に商品・取引先マスタで出荷停止が設定されたケース。検品・確定が止まります（一覧はインディアンレッド背景）。マスタの出荷停止を確認し、解除するか指示をキャンセル。</p>
+</div></details>
+
+<details class="card sos"><summary>マスタが削除できない / 削除したら画面がおかしくなった</summary><div class="body">
+<p>在庫がある取引先・商品・ロケーションは削除できません（エラーで保護）。ただし<b>入荷予定・出荷指示だけが残っている場合は削除できてしまい</b>、「該当データが存在しません」「名称が表示されない」等が発生。対処: マスタを未削除に戻す → エラーチェックで解消。</p>
+</div></details>
+
+<details class="card sos"><summary>納品書・EC送り状が出せない（EC）</summary><div class="body">
+<p>EC受注データが出荷日起算の保持期間を過ぎて自動削除された可能性。こうなると復元不可 — 以後は取り置き時に出荷日を更新する運用で防止。EC送り状は出庫指示済以降でないと一覧に出ない点も確認。</p>
+</div></details>
+
+<details class="card sos"><summary>荷札の印字がずれる・用紙送りがおかしい</summary><div class="body">
+<p>プリンタドライバの用紙サイズとセンサタイプの設定ミスが定番。<b>荷札・印刷</b>のページの一覧表どおりか確認（ゆうパック・ヤマト系は反射センサ「アイマーク」指定）。</p>
+</div></details>
+
+<details class="card sos"><summary>画面が崩れる・ボタンが隠れる</summary><div class="body">
+<p>推奨環境からのずれ（解像度1920×1080・拡大率100%・標準フォント）を確認。1ページ表示件数を変えたときは再検索が必要。Excel出力は一覧表示に関係なく検索条件の全件（上限あり）が出る仕様です。</p>
+</div></details>
+</section>
+
+<!-- ================= ステータス ================= -->
+<section id="status" data-title="ステータス早見">
+<h2><span class="eyebrow">STATUS</span>ステータス早見表 —「なぜこの操作ができない？」</h2>
+<p class="lead">操作にはステータスの前提条件があります。拒否されたらここを見る。</p>
+
+<h3>入荷</h3>
+<div class="flow">
+<span class="st">未入荷</span><span class="ar">→</span><span class="st">入荷中（一部計上）</span><span class="ar">→</span><span class="st">入荷済</span>
+</div>
+<div class="twrap"><table>
+<tr><th>やりたい操作</th><th>できる条件</th></tr>
+<tr><td>入荷予定の修正</td><td>未入荷 or エラー有 のみ</td></tr>
+<tr><td>入荷予定の削除</td><td>未入荷（実績が付く前）</td></tr>
+<tr><td>分納・打切り</td><td>入荷中（一部計上済み）のみ</td></tr>
+<tr><td>入荷取消</td><td>入庫時より在庫が減っていないこと</td></tr>
+</table></div>
+
+<h3>出荷</h3>
+<div class="flow">
+<span class="st">未出荷</span><span class="ar">→</span><span class="st">出庫指示済</span><span class="ar">→</span><span class="st">出荷検品済</span><span class="ar">→</span><span class="st hl">出荷確定済</span>
+</div>
+<div class="twrap"><table>
+<tr><th>やりたい操作</th><th>できる条件</th></tr>
+<tr><td>出荷指示の修正・キャンセル</td><td>未出荷（エラー有含む）のみ</td></tr>
+<tr><td>出庫指示</td><td>未出荷・エラーなし</td></tr>
+<tr><td>出庫指示解除</td><td>出庫指示済〜検品中</td></tr>
+<tr><td>出荷検品解除</td><td>検品中・検品済（1件チェック）</td></tr>
+<tr><td>作業日・出荷日・配送コース変更</td><td>出荷確定前のみ</td></tr>
+<tr><td>出荷確定</td><td>出荷検品済（未検品は【強制確定】）</td></tr>
+<tr><td>出荷確定解除</td><td>出荷確定済のみ（全件表示で検索）</td></tr>
+</table></div>
+
+<h3>棚卸</h3>
+<div class="twrap"><table>
+<tr><th>やりたい操作</th><th>できる条件</th></tr>
+<tr><td>棚卸入力・一括更新・在庫調整</td><td>在庫調整フラグが「未調整」の行のみ。調整済は再入力不可</td></tr>
+</table></div>
+</section>
+
+<!-- ================= 用語 ================= -->
+<section id="yougo" data-title="用語辞書">
+<h2><span class="eyebrow">GLOSSARY</span>用語辞書（よく使う順）</h2>
+<p class="lead">上の検索ボックスで絞り込めます。全268語の完全版は原本「用語辞書.xlsx」へ。</p>
+<div class="hitcount" id="thit"></div>
+<dl id="terms">
+<div class="term"><dt>入荷 / 入庫 / 出庫 / 出荷</dt><dd>入荷=荷受完了、入庫=所定場所へ格納、出庫=ピッキング、出荷=発送。WMSでは厳密に使い分ける。</dd></div>
+<div class="term"><dt>荷主</dt><dd>荷物の所有者、または業務を委託した事業者。1つのWMSで複数荷主を管理でき、ログイン後に切替可能。</dd></div>
+<div class="term"><dt>センタ / 倉庫 / ゾーン / ロケーション</dt><dd>センタ＞倉庫＞ゾーン＞ロケーションの階層。ロケーションは棚1つ1つに割り当てた番号。</dd></div>
+<div class="term"><dt>ピックロケ / バックロケ</dt><dd>ピックロケ=バラピッキング用の棚。バックロケ=補充用にケース単位で保管する棚。ケース引当はバックロケから、端数バラはピックロケから。</dd></div>
+<div class="term"><dt>入庫仮ロケ</dt><dd>正規ロケへ格納するまで一時的に在庫を計上するロケーション。</dd></div>
+<div class="term"><dt>引当可能数 / 引当済数</dt><dd>引当可能数=これから引当できる在庫。引当済数=引当済みでまだ出荷確定していない数（未出荷数）。</dd></div>
+<div class="term"><dt>出庫指示</dt><dd>在庫の引当とピッキング指示の作成。ここで在庫が「引当済」になる。</dd></div>
+<div class="term"><dt>出荷確定</dt><dd>出荷業務の最終処理。引当済数から出庫数が引き落とされる。以降の修正は不可。</dd></div>
+<div class="term"><dt>強制確定</dt><dd>目視検品などでWMS上の検品を通さずに出荷確定すること。確定一覧に「強制確定」と表示される。</dd></div>
+<div class="term"><dt>WMS入荷伝票No. / WMS出荷伝票No.</dt><dd>予定・指示の登録時にセンタ単位で採番される伝票番号（13桁）。</dd></div>
+<div class="term"><dt>出庫作業No.</dt><dd>出庫指示時に採番。同一出荷日・納品先・配送コースを名寄せした作業単位で、ピッキング・検品・梱包・荷札アタッチの単位になる。納品指定日・時間帯が違うと別番号。</dd></div>
+<div class="term"><dt>出庫指示バッチNo.</dt><dd>1回の出庫指示のまとまりに付く番号。</dd></div>
+<div class="term"><dt>入庫ラベルNo.（入庫No.）</dt><dd>在庫が作られた単位に付く管理番号。番号だけで商品・ロケ・ロット・期限日等を特定できる。先入先出や期限管理の要。</dd></div>
+<div class="term"><dt>入庫No.管理フラグ / マージ区分</dt><dd>入庫No.で在庫を分けて管理するかの設定。00=マージしない（厳密管理）、01=ピックロケのみ自動マージ、02=自動マージ（実質管理なし）。HTの画面フローもこれで変わる。</dd></div>
+<div class="term"><dt>汎用ラベル</dt><dd>作業前に事前発行しておくラベル。印字された入庫ラベルNo.を実績入力時に指定して使う。</dd></div>
+<div class="term"><dt>ロット管理 / 期限日管理</dt><dd>商品マスタのフラグ。管理品は在庫発生時（入荷実績・在庫調整）にロット／期限日の入力が必須になる。</dd></div>
+<div class="term"><dt>期限日逆転防止</dt><dd>前回出荷した期限日より古い在庫を引当てない仕組み。商品マスタ＋取引先マスタ両方で「管理する」のとき有効。</dd></div>
+<div class="term"><dt>出荷期限日数 / 出荷限界日</dt><dd>期限日までの残り日数がこの値を切った在庫は引当てない。出荷指示で期限日を指定すればチェック対象外。</dd></div>
+<div class="term"><dt>在庫区分</dt><dd>同じ商品を状態別（通常/不良品/検査中など）に分けて管理する区分。導入時に任意設定。</dd></div>
+<div class="term"><dt>預託</dt><dd>在庫はセンタで保管するが所有権が荷主先にある状態。出店者別管理などに使う。</dd></div>
+<div class="term"><dt>処理区分</dt><dd>在庫に対する処理の種別。01通常入荷/02返品入荷/11通常出荷/12返品出荷、21移動/23調整(-)/24調整(+)/25入庫格納/32定期補充/33緊急補充 など。</dd></div>
+<div class="term"><dt>赤処理 / 黒処理</dt><dd>受払履歴の訂正方式。訂正・取消は元の処理をマイナス計上（赤）し、新しい処理（黒）を立てる。</dd></div>
+<div class="term"><dt>オーダーピッキング</dt><dd>納品先（出庫作業No.）単位でピッキングする方式。</dd></div>
+<div class="term"><dt>トータルピッキング</dt><dd>複数オーダーの総数をまとめてピッキング（一次）し、その後仕分（二次）する方式。</dd></div>
+<div class="term"><dt>摘み取り / 種蒔き</dt><dd>二次ピッキングの2方式。摘み取り=仮置き場から納品先単位に取る。種蒔き=納品先別に配って仕分ける。</dd></div>
+<div class="term"><dt>マルチピッキング</dt><dd>複数オーダーを台車のバケットに同時ピッキングする方式。</dd></div>
+<div class="term"><dt>ケースピッキング</dt><dd>ケース引当分をケース単位でピッキング。ケース引当があるときはケースピッキングリストが必ず出る。</dd></div>
+<div class="term"><dt>単行ピッキング</dt><dd>1商品だけの伝票をまとめて処理する方式。対象は単行リストからしかピッキングできない。</dd></div>
+<div class="term"><dt>ピッキング提案</dt><dd>引当データから最適なピッキング方式を自動提案するサービス（要設定）。</dd></div>
+<div class="term"><dt>定期補充 / 緊急補充</dt><dd>定期=補充点を切ったピックロケへの計画補充。緊急=出庫指示時の在庫不足で自動発生する補充。</dd></div>
+<div class="term"><dt>補充点 / 最大格納数</dt><dd>ロケーションマスタの設定。補充点を切ると補充対象になり、最大格納数を超えては補充されない。</dd></div>
+<div class="term"><dt>定点</dt><dd>商品マスタの基準在庫量。全センタ合計で定点を切るとトータル在庫問合せに表示。</dd></div>
+<div class="term"><dt>配送コース</dt><dd>運送業者・方面・引取時間ごとの出庫作業グループ。取引先マスタ（1:1）か配送コースマスタ（1:n）で設定。</dd></div>
+<div class="term"><dt>ワンタイム</dt><dd>届先を出荷指示ごとに直接入力できる納品先設定（取引先マスタのワンタイムフラグ）。</dd></div>
+<div class="term"><dt>顧客出荷指示No.</dt><dd>顧客独自の伝票番号。ピッキングリストと伝票の照合に使う。</dd></div>
+<div class="term"><dt>アタッチ</dt><dd>ピッキングした商品と荷札・納品書・送り状を出庫作業No.で照合して組み合わせる作業。</dd></div>
+<div class="term"><dt>梱包計算</dt><dd>容積・重量から箱数を自動計算する機能（パラメータマスタで有無・詰め方を設定）。</dd></div>
+<div class="term"><dt>セット組 / セット解除</dt><dd>複数の構成品から親商品を作る／親商品を構成品に戻す在庫処理。</dd></div>
+<div class="term"><dt>循環棚卸 / 一斉棚卸</dt><dd>循環=ロケ・ゾーン・受払日で範囲を絞る棚卸。一斉=条件なしの全件棚卸。</dd></div>
+<div class="term"><dt>日次締処理</dt><dd>1日の最後の締め。在庫繰越（前日残設定）・保持期間超過データの削除・翌稼働日設定を行う。</dd></div>
+<div class="term"><dt>システム管理日付</dt><dd>WMS内の「今日」。日次締で進む。受払が発生した日には戻せない。</dd></div>
+<div class="term"><dt>3期制（10日/15日/20日/末日残）</dt><dd>保管料計算用に月内の区切り日時点の在庫数を自動保持する仕組み。</dd></div>
+<div class="term"><dt>パラメータマスタ</dt><dd>センタ・荷主単位のWMS動作設定。欠品時挙動・自動出力・引当順序・補充・梱包計算など、ほぼ全ての「挙動の違い」の源泉。</dd></div>
+<div class="term"><dt>引当ソートキー</dt><dd>引当順序のカスタマイズ設定（ロット/期限日/ゾーン/ロケ/入庫ラベルNo./入庫日等を1〜8位で指定）。未設定時は 取引先引当順序→期限日→ロケ引当順序→入庫ラベルNo.→ロット→ロケCD の順。</dd></div>
+<div class="term"><dt>EDI</dt><dd>WebAPIによるデータ自動連携。受信=マスタ・入荷予定・出荷指示、送信=入庫実績・出荷実績・在庫。</dd></div>
+<div class="term"><dt>HT / SD</dt><dd>HT=ハンディターミナル（キー操作）。SD=スマートデバイス（スマホ・タブレットのブラウザ操作）。</dd></div>
+<div class="term"><dt>ソースCD</dt><dd>CODE39/128/CODABAR/JAN/ITF等のバーコード値の総称。スキャン入力の基本。</dd></div>
+<div class="term"><dt>シリアルNo.</dt><dd>商品個々の管理番号。同一商品CD＋シリアルNo.の重複登録は不可。登録後の編集は削除→再取込。</dd></div>
+<div class="term"><dt>出荷停止フラグ</dt><dd>商品単位・納品先単位で出荷を止める設定。出庫指示後に設定すると検品・確定でエラーになる。</dd></div>
+<div class="term"><dt>引当禁止フラグ</dt><dd>ロケーション単位で引当を止める設定。他ロケに在庫がなければ欠品になる。</dd></div>
+</dl>
+</section>
+
+<!-- ================= 荷札 ================= -->
+<section id="nifuda" data-title="荷札・印刷">
+<h2><span class="eyebrow">LABELS</span>荷札・印刷設定</h2>
+<p class="lead">印字ずれ・用紙送り不良のほとんどは用紙サイズとセンサタイプの設定ミス。</p>
+
+<details class="card" open><summary>荷札用紙の設定値一覧（プリンタドライバ）</summary><div class="body">
+<div class="twrap"><table>
+<tr><th>荷札種類</th><th>幅</th><th>長さ</th><th>センサタイプ</th></tr>
+<tr><td>汎用荷札</td><td>115.0mm</td><td>80.0mm</td><td>透過センサ: ギャップ</td></tr>
+<tr><td>佐川荷札</td><td>112.0mm</td><td>228.0mm</td><td>透過センサ: ギャップ</td></tr>
+<tr><td>ゆうパケット荷札</td><td>115.0mm</td><td>80.0mm</td><td>透過センサ: ギャップ</td></tr>
+<tr><td>ゆうパック荷札</td><td>111.0mm</td><td>201.0mm</td><td>反射センサ: アイマーク</td></tr>
+<tr><td>ヤマト宅急便（コレクト）</td><td>112.0mm</td><td>228.0mm</td><td>反射センサ: アイマーク</td></tr>
+<tr><td>ヤマト宅急便（発払）</td><td>112.0mm</td><td>165.0mm</td><td>反射センサ: アイマーク</td></tr>
+</table></div>
+<ol class="steps">
+<li>『デバイスとプリンター』→ 対象プリンタを右クリック → <b class="btn">【印刷設定】</b>。</li>
+<li>「用紙」タブ → <b class="btn">【用紙登録】</b>で用紙名・幅・長さを登録 → 用紙名に設定。</li>
+<li>「動作モード」タブでセンサタイプを上表どおりに → <b class="btn">【OK】</b>。</li>
+</ol>
+</div></details>
+
+<details class="card"><summary>帳票発行の基本と再発行</summary><div class="body">
+<p>各発行画面で条件指定 → <b class="btn">【発行】</b> → <b class="btn">【プレビュー】</b>で別画面表示。再発行済みにはマークが付き、再発行は発行条件で「発行済」or「全件」を選択。ピッキングリストの発行状態を戻すには『ピッキングリスト発行』で発行状況「発行済」で検索 → <b class="btn">【発行解除】</b>。HTのプリンタはHTのシステム管理メニュー【1:プリンタ選択】で切替。</p>
+</div></details>
+</section>
+
+</main>
+</div>
+
+<footer>出典: Box「三生」フォルダの ONEsLOGI クラウドWMS 公式マニュアル（PC編・共通操作編・HT編・SD編・EC受注業務編・トラブルシューティング編・ヘルプ編・荷札用紙設定編）、ご利用の手引き、機能一覧 Ver4.6、業務フロー図、用語辞書、ステータス遷移表。細部は原本を優先してください。</footer>
+
+<script>
+(function(){
+  var navBtns = document.querySelectorAll('nav button');
+  var sections = document.querySelectorAll('main section');
+  function show(id){
+    sections.forEach(function(s){s.classList.toggle('show', s.id===id);});
+    navBtns.forEach(function(b){b.classList.toggle('on', b.dataset.s===id);});
+  }
+  navBtns.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.s); q.value=''; clearFilter();});});
+
+  var q = document.getElementById('q');
+  var thit = document.getElementById('thit');
+  function clearFilter(){
+    document.querySelectorAll('.card,.term').forEach(function(el){el.classList.remove('hidden');});
+    thit.textContent='';
+  }
+  q.addEventListener('input', function(){
+    var v = q.value.trim().toLowerCase();
+    if(!v){ clearFilter(); return; }
+    var words = v.split(/\s+/);
+    // search across all sections: show sections containing hits? simpler: filter within, and jump to best section
+    var bestSection=null, bestCount=0;
+    sections.forEach(function(s){
+      var count=0;
+      s.querySelectorAll('.card,.term').forEach(function(el){
+        var t = el.textContent.toLowerCase();
+        var hit = words.every(function(w){return t.indexOf(w)>=0;});
+        el.classList.toggle('hidden', !hit);
+        if(hit) count++;
+      });
+      if(count>bestCount){bestCount=count;bestSection=s.id;}
+    });
+    if(bestSection && !document.getElementById(bestSection).classList.contains('show')){
+      show(bestSection);
+    }
+    thit.textContent = bestCount ? '' : '';
+    // open matched cards
+    document.querySelectorAll('section.show .card:not(.hidden)').forEach(function(d){d.open=true;});
+  });
+})();
+</script>
