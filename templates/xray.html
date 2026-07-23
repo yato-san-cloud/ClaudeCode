@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}X線骨盤分析 - カイロ分析アプリ{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>レントゲン骨盤分析</h2>
+    <p>基準点を自動検出したのち、<strong>ドラッグまたは矢印キーで補正</strong>してください。計測値は即時に再計算されます。</p>
+</div>
+
+<div class="form-card">
+    <h3>1. 画像の読み込み</h3>
+    <div class="upload-zone" id="uploadZone">
+        <div class="icon">&#128444;</div>
+        <p id="uploadLabel">クリックまたはドラッグ&amp;ドロップでX線画像を選択</p>
+        <p style="font-size: 0.8rem; margin-top: 0.5rem;">対応形式: DICOM(.dcm) / JPG / PNG / BMP（最大64MB）</p>
+        <input type="file" id="fileInput" accept=".dcm,application/dicom,image/*" style="display: none;">
+    </div>
+    <div class="upload-actions">
+        <label class="btn btn-outline session-load">
+            保存したセッション(.json)を開く
+            <input type="file" id="loadSessionInput" accept="application/json" style="display:none;">
+        </label>
+    </div>
+</div>
+
+<div class="form-card">
+    <h3>2. 分析タイプ</h3>
+    <div class="analysis-options">
+        <div class="analysis-option selected primary-mode" data-type="pelvis_full">
+            <span class="mode-badge">標準</span>
+            <h4>骨盤総合（Gonstead式）</h4>
+            <p>大腿骨頭線・腸骨稜・坐骨結節の8基準点で寛骨長(PI/AS)まで。通常はこれ一つで足ります。</p>
+        </div>
+    </div>
+    <details class="mode-more">
+        <summary>簡易モード（必要時のみ）</summary>
+        <div class="analysis-options">
+            <div class="analysis-option" data-type="pelvis_tilt">
+                <h4>骨盤傾斜</h4>
+                <p>腸骨稜の左右差のみ</p>
+            </div>
+            <div class="analysis-option" data-type="leg_length">
+                <h4>脚長差</h4>
+                <p>大腿骨頭の高低差</p>
+            </div>
+            <div class="analysis-option" data-type="spine_alignment">
+                <h4>脊椎アライメント</h4>
+                <p>側弯・偏位の確認</p>
+            </div>
+        </div>
+    </details>
+    <div class="form-actions">
+        <button class="btn btn-lg" id="analyzeBtn" disabled>基準点を自動検出</button>
+    </div>
+</div>
+
+<div class="loading" id="loading">
+    <div class="spinner"></div>
+    <p>処理中...</p>
+</div>
+
+<div class="results-panel" id="workspace">
+    <div class="form-card">
+        <h3>3. 基準点の補正と計測</h3>
+
+        <div class="editor-toolbar">
+            <div class="tb-group">
+                <button class="tb-btn" id="zInBtn" title="拡大">＋</button>
+                <button class="tb-btn" id="zOutBtn" title="縮小">－</button>
+                <button class="tb-btn" id="fitBtn" title="全体表示">全体</button>
+            </div>
+            <div class="tb-group">
+                <button class="tb-btn" id="undoBtn" disabled title="元に戻す (Ctrl+Z)">元に戻す</button>
+                <button class="tb-btn" id="redetectBtn" title="自動検出をやり直す">再検出</button>
+            </div>
+            <label class="tb-check"><input type="checkbox" id="linesChk" checked> 分析線を表示</label>
+            <span class="tb-hint">ドラッグ=移動 / ホイール=ズーム / 矢印キー=1px微調整（Shiftで5px）</span>
+        </div>
+
+        <div class="result-grid editor-grid">
+            <div>
+                <div class="editor-wrap" id="editorWrap">
+                    <svg id="editor" xmlns="http://www.w3.org/2000/svg" tabindex="0"></svg>
+                </div>
+            </div>
+
+            <div class="side-panel">
+                <div class="side-card">
+                    <h4>計測結果</h4>
+                    <div id="measurementsList"></div>
+                    <div class="note-box">
+                        &#9888; 計測値は画像上の基準点に基づく参考値です。診断は医師の判断によります。
+                    </div>
+                </div>
+
+                <div class="side-card">
+                    <h4>基準点</h4>
+                    <div id="lmList" class="lm-list"></div>
+                </div>
+
+                <div class="side-card">
+                    <h4>画像調整</h4>
+                    <div class="slider-row">
+                        <label>コントラスト <span id="contrastVal">1.00</span></label>
+                        <input type="range" id="contrastRange" min="0.5" max="2.5" step="0.05" value="1">
+                    </div>
+                    <div class="slider-row">
+                        <label>明るさ <span id="brightnessVal">1.00</span></label>
+                        <input type="range" id="brightnessRange" min="0.5" max="2" step="0.05" value="1">
+                    </div>
+                    <div class="check-row">
+                        <label><input type="checkbox" id="invertChk"> 白黒反転（ネガ表示）</label>
+                        <button class="tb-btn" id="filterResetBtn">リセット</button>
+                    </div>
+                </div>
+
+                <div class="side-card">
+                    <h4>表示設定</h4>
+                    <label class="check-line">
+                        <input type="checkbox" id="apChk" checked>
+                        AP標準（画面左＝患者の右）
+                    </label>
+                    <p class="side-help">PA像や左右反転された画像ではチェックを外してください。</p>
+                </div>
+
+                <div class="side-card">
+                    <h4>スケール設定（mm換算）</h4>
+                    <div id="dicomBanner" class="dicom-banner" style="display:none;"></div>
+                    <div id="calibManualRow">
+                        <label class="check-line">
+                            <input type="checkbox" id="calibChk">
+                            手動キャリブレーションを使う
+                        </label>
+                        <div id="calibFields" style="display:none;">
+                            <p class="side-help">
+                                画像に写った既知の長さ（定規・キャリブレーションボール等）の両端に
+                                <span style="color:#b14fff; font-weight:600;">紫の2点</span>を合わせ、実寸を入力してください。
+                            </p>
+                            <div class="slider-row">
+                                <label>実寸 (mm)</label>
+                                <input type="number" id="calibMM" value="100" min="1" step="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-card">
+        <h3>4. レポート情報と出力</h3>
+        <div class="report-grid">
+            <div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>患者名</label>
+                        <input type="text" id="patientName" placeholder="例: 山田太郎">
+                    </div>
+                    <div class="form-group">
+                        <label>検査日</label>
+                        <input type="date" id="examDate">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>院名（レポートに記載）</label>
+                        <input type="text" id="clinicName" placeholder="例: ○○カイロプラクティック">
+                    </div>
+                    <div class="form-group">
+                        <label>施術者名</label>
+                        <input type="text" id="clinicPractitioner" placeholder="例: 佐藤健太">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>所見・メモ（レポートに記載）</label>
+                    <textarea id="patientMemo" rows="3" placeholder="例: 触診所見と一致して患者右側の腸骨稜高位を認める。"></textarea>
+                </div>
+            </div>
+            <div class="output-buttons">
+                <button class="btn" id="reportBtn">分析レポートPDFを保存</button>
+                <button class="btn btn-outline" id="exportBtn">注釈入り画像(PNG)を生成</button>
+                <button class="btn btn-outline" id="attachBtn">紹介状に添付する</button>
+                <button class="btn btn-outline" id="saveSessionBtn">セッションを保存(.json)</button>
+                <div id="exportResult" style="display:none;">
+                    <a id="downloadLink" class="btn" style="width:100%; text-align:center;" download>PNGをダウンロード</a>
+                    <img id="exportThumb" class="export-thumb" alt="出力プレビュー">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/xray_editor.js"></script>
+{% endblock %}

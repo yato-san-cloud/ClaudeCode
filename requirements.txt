@@ -1,0 +1,15 @@
+flask>=3.0
+opencv-python-headless>=4.8
+numpy>=1.24
+Pillow>=10.0
+reportlab>=4.0
+
+# DICOM(.dcm) 読み込み + 圧縮転送構文のデコード
+pydicom>=3.0
+pylibjpeg>=2.0
+pylibjpeg-libjpeg>=2.1
+pylibjpeg-openjpeg>=2.1
+
+# デスクトップアプリ起動用 (任意)
+# 未インストールでも desktop.py はブラウザフォールバックで動きます
+pywebview>=5.0; sys_platform != "linux"

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="hero">
+    <h2>カイロ骨盤分析 &amp; 紹介状アプリ</h2>
+    <p>Gonstead式のX線骨盤分析と、整形外科への紹介状自動生成をひとつに</p>
+</div>
+
+<div class="cards">
+    <div class="card">
+        <div class="icon">&#128300;</div>
+        <h3>レントゲン骨盤分析（Gonstead式）</h3>
+        <p>大腿骨頭・腸骨稜・坐骨結節の8基準点を自動検出。ドラッグ補正で寛骨長(PI/AS)・傾斜・偏位を計測し、mm換算・分析レポートPDFまで。DICOM対応。</p>
+        <a href="/xray" class="btn">X線を分析</a>
+    </div>
+    <div class="card">
+        <div class="icon">&#128196;</div>
+        <h3>紹介状の自動生成</h3>
+        <p>問診票やGoogle Formのデータから、整形外科向けの紹介状を所定フォーマットのPDFで自動生成。X線所見の添付にも対応します。</p>
+        <a href="/referral" class="btn">紹介状を作成</a>
+    </div>
+</div>
+
+<div class="workflow-diagram">
+    <h3>ワークフロー</h3>
+    <div class="workflow-steps">
+        <div class="workflow-step">
+            <div class="step-icon">&#128221;</div>
+            <div>Google Form<br>問診票入力</div>
+        </div>
+        <div class="workflow-arrow">&#10132;</div>
+        <div class="workflow-step">
+            <div class="step-icon">&#9881;</div>
+            <div>自動変換<br>データ整形</div>
+        </div>
+        <div class="workflow-arrow">&#10132;</div>
+        <div class="workflow-step">
+            <div class="step-icon">&#128196;</div>
+            <div>紹介状PDF<br>自動生成</div>
+        </div>
+        <div class="workflow-arrow">&#10132;</div>
+        <div class="workflow-step">
+            <div class="step-icon">&#127973;</div>
+            <div>整形外科<br>初診・X線</div>
+        </div>
+        <div class="workflow-arrow">&#10132;</div>
+        <div class="workflow-step">
+            <div class="step-icon">&#128300;</div>
+            <div>X線画像<br>骨盤分析</div>
+        </div>
+    </div>
+</div>
+
+<div class="form-card" style="margin-top: 2rem;">
+    <h3>Google Form連携 (Webhook API)</h3>
+    <p style="color: var(--text-light); font-size: 0.9rem; margin-bottom: 1rem;">
+        Google FormのApps Scriptから以下のエンドポイントにPOSTすると、紹介状PDFが自動生成されます。
+    </p>
+    <div style="background: #1a202c; color: #e2e8f0; padding: 1rem; border-radius: 8px; font-family: monospace; font-size: 0.85rem; overflow-x: auto;">
+        <span style="color: #68d391;">POST</span> /api/google-form-webhook<br><br>
+        <span style="color: #90cdf4;">Content-Type:</span> application/json<br><br>
+        {<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"お名前"</span>: <span style="color: #fc8181;">"山田太郎"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"フリガナ"</span>: <span style="color: #fc8181;">"ヤマダタロウ"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"生年月日"</span>: <span style="color: #fc8181;">"1985-03-15"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"性別"</span>: <span style="color: #fc8181;">"男性"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"主な症状"</span>: <span style="color: #fc8181;">"腰痛"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"症状の部位"</span>: <span style="color: #fc8181;">"腰部〜右臀部"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"症状の期間"</span>: <span style="color: #fc8181;">"3ヶ月"</span>,<br>
+        &nbsp;&nbsp;<span style="color: #fbd38d;">"痛みのレベル"</span>: <span style="color: #fc8181;">"7"</span>,<br>
+        &nbsp;&nbsp;...<br>
+        }
+    </div>
+</div>
+{% endblock %}

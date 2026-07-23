@@ -1,0 +1,808 @@
+:root {
+    --primary: #2c5f7c;
+    --primary-light: #3a7ca5;
+    --accent: #e8f4f8;
+    --bg: #f5f7fa;
+    --card-bg: #ffffff;
+    --text: #2d3748;
+    --text-light: #718096;
+    --border: #e2e8f0;
+    --success: #48bb78;
+    --warning: #ed8936;
+    --danger: #fc8181;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+}
+
+.navbar {
+    background: var(--primary);
+    padding: 1rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.navbar h1 {
+    color: white;
+    font-size: 1.3rem;
+    font-weight: 600;
+}
+
+.navbar a {
+    color: rgba(255,255,255,0.85);
+    text-decoration: none;
+    font-size: 0.95rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.navbar a:hover, .navbar a.active {
+    background: rgba(255,255,255,0.15);
+    color: white;
+}
+
+.install-prompt { margin-left: auto; }
+.btn-install {
+    background: rgba(255,255,255,0.95);
+    color: var(--primary);
+    border: none;
+    border-radius: 6px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn-install:hover { background: white; }
+
+.container {
+    max-width: 960px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+}
+
+.hero {
+    text-align: center;
+    padding: 3rem 1rem;
+}
+
+.hero h2 {
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+}
+
+.hero p {
+    color: var(--text-light);
+    font-size: 1.05rem;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border: 1px solid var(--border);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.card h3 {
+    color: var(--primary);
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+}
+
+.card p {
+    color: var(--text-light);
+    font-size: 0.95rem;
+    margin-bottom: 1.2rem;
+}
+
+.card .icon {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+}
+
+.btn {
+    display: inline-block;
+    padding: 0.6rem 1.5rem;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s;
+}
+
+.btn:hover {
+    background: var(--primary-light);
+}
+
+.btn-outline {
+    background: transparent;
+    color: var(--primary);
+    border: 2px solid var(--primary);
+}
+
+.btn-outline:hover {
+    background: var(--accent);
+}
+
+.btn-lg {
+    padding: 0.8rem 2rem;
+    font-size: 1.05rem;
+}
+
+.page-header {
+    margin-bottom: 2rem;
+}
+
+.page-header h2 {
+    font-size: 1.5rem;
+    color: var(--primary);
+}
+
+.page-header p {
+    color: var(--text-light);
+    margin-top: 0.3rem;
+}
+
+.form-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border: 1px solid var(--border);
+    margin-bottom: 1.5rem;
+}
+
+.form-card h3 {
+    font-size: 1.1rem;
+    color: var(--primary);
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--accent);
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 0.3rem;
+    color: var(--text);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 3px rgba(58, 124, 165, 0.1);
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.form-actions {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+/* X-ray page */
+.upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 3rem;
+    text-align: center;
+    background: var(--accent);
+    cursor: pointer;
+    transition: border-color 0.2s;
+    margin-bottom: 1.5rem;
+}
+
+.upload-zone:hover {
+    border-color: var(--primary-light);
+}
+
+.upload-zone.dragover {
+    border-color: var(--primary);
+    background: #d5eaf3;
+}
+
+.upload-zone .icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+}
+
+.upload-zone p {
+    color: var(--text-light);
+}
+
+.analysis-options {
+    display: flex;
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.analysis-option {
+    flex: 1;
+    min-width: 140px;
+    padding: 0.8rem 1rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+    background: var(--card-bg);
+}
+
+.analysis-option:hover {
+    border-color: var(--primary-light);
+}
+
+.analysis-option.selected {
+    border-color: var(--primary);
+    background: var(--accent);
+}
+
+.analysis-option h4 {
+    font-size: 0.9rem;
+    color: var(--primary);
+}
+
+.analysis-option p {
+    font-size: 0.8rem;
+    color: var(--text-light);
+}
+
+.results-panel {
+    display: none;
+    margin-top: 1.5rem;
+}
+
+.results-panel.active {
+    display: block;
+}
+
+.result-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+
+.result-image {
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.result-image img {
+    max-width: 100%;
+    height: auto;
+}
+
+.result-data {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+}
+
+.result-data h3 {
+    font-size: 1.1rem;
+    color: var(--primary);
+    margin-bottom: 1rem;
+}
+
+.measurement {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.measurement:last-child {
+    border-bottom: none;
+}
+
+.measurement .label {
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.measurement .value {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.note-box {
+    margin-top: 1rem;
+    padding: 0.8rem;
+    background: #fff8e1;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: #8b6914;
+    border-left: 3px solid var(--warning);
+}
+
+.loading {
+    display: none;
+    text-align: center;
+    padding: 2rem;
+}
+
+.loading.active {
+    display: block;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--border);
+    border-top: 4px solid var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1rem;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.preview-image {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    margin-top: 1rem;
+    display: none;
+}
+
+.workflow-diagram {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 2rem;
+    border: 1px solid var(--border);
+    margin-top: 2rem;
+}
+
+.workflow-diagram h3 {
+    text-align: center;
+    color: var(--primary);
+    margin-bottom: 1.5rem;
+}
+
+.workflow-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.workflow-step {
+    background: var(--accent);
+    padding: 0.8rem 1.2rem;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+}
+
+.workflow-step .step-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.3rem;
+}
+
+.workflow-arrow {
+    font-size: 1.2rem;
+    color: var(--primary);
+}
+
+/* Interactive X-ray editor */
+.editor-wrap {
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    line-height: 0;
+}
+
+#editor {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    outline: none;
+    cursor: grab;
+}
+
+#editor:focus {
+    box-shadow: inset 0 0 0 2px var(--primary-light);
+}
+
+#editor .handle, #editor .handle-hit {
+    cursor: crosshair;
+}
+
+#editor .handle:hover {
+    filter: brightness(1.25);
+}
+
+.editor-grid {
+    grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+    align-items: start;
+}
+
+.editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.8rem;
+}
+
+.tb-group {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.tb-btn {
+    padding: 0.35rem 0.8rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: var(--text);
+    transition: all 0.15s;
+}
+
+.tb-btn:hover:not(:disabled) {
+    border-color: var(--primary-light);
+    background: var(--accent);
+}
+
+.tb-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.tb-check {
+    font-size: 0.85rem;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.tb-hint {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    margin-left: auto;
+}
+
+.side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-height: 82vh;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.side-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+}
+
+.side-card h4 {
+    font-size: 0.95rem;
+    color: var(--primary);
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 2px solid var(--accent);
+}
+
+.side-help {
+    font-size: 0.78rem;
+    color: var(--text-light);
+    margin-top: 0.4rem;
+}
+
+.dicom-banner {
+    background: #eef7ef;
+    border: 1px solid #bfe3c4;
+    border-left: 4px solid var(--success);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    margin-bottom: 0.7rem;
+    font-size: 0.82rem;
+    color: #2f6b3a;
+    line-height: 1.5;
+}
+
+.dicom-banner b { color: #1f5b2c; }
+
+.slider-row {
+    margin-bottom: 0.6rem;
+}
+
+.slider-row label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin-bottom: 0.2rem;
+}
+
+.slider-row input[type="range"] {
+    width: 100%;
+}
+
+.slider-row input[type="number"] {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.check-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+}
+
+.check-line {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+
+.lm-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.lm-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.83rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.lm-item:hover {
+    background: var(--accent);
+}
+
+.lm-item.selected {
+    background: #fff6d6;
+    outline: 1px solid #e8c94a;
+}
+
+.lm-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.25);
+    flex-shrink: 0;
+}
+
+.lm-xy {
+    margin-left: auto;
+    color: var(--text-light);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.upload-actions {
+    margin-top: 0.8rem;
+    text-align: center;
+}
+
+.session-load {
+    cursor: pointer;
+    display: inline-block;
+}
+
+.report-grid {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.output-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.output-buttons .btn {
+    width: 100%;
+    text-align: center;
+}
+
+.export-thumb {
+    width: 100%;
+    border-radius: 8px;
+    margin-top: 0.6rem;
+    border: 1px solid var(--border);
+}
+
+.editor-hint {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 0.5rem;
+    text-align: center;
+}
+
+/* 所見サマリ (骨盤総合): 計測表の頭に一言 */
+.clinical-summary {
+    background: var(--accent);
+    border-left: 4px solid var(--primary);
+    border-radius: 6px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.8rem;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--primary);
+    line-height: 1.5;
+}
+
+/* 分析タイプ: 標準モードを主役に、簡易は折りたたみ */
+.primary-mode {
+    position: relative;
+    border-width: 2px;
+}
+
+.mode-badge {
+    position: absolute;
+    top: -10px;
+    left: 14px;
+    background: var(--primary);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.15rem 0.6rem;
+    border-radius: 10px;
+    letter-spacing: 0.05em;
+}
+
+.mode-more {
+    margin-top: 0.8rem;
+}
+
+.mode-more summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-light);
+    padding: 0.4rem 0;
+    user-select: none;
+}
+
+.mode-more summary:hover {
+    color: var(--primary);
+}
+
+.mode-more .analysis-options {
+    margin-top: 0.6rem;
+}
+
+.calib-box {
+    margin-top: 1rem;
+    padding: 0.9rem;
+    background: #f7f3ff;
+    border: 1px solid #e0d4ff;
+    border-radius: 8px;
+}
+
+.calib-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #6b3fa0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.calib-help {
+    font-size: 0.8rem;
+    color: var(--text-light);
+    margin-top: 0.5rem;
+}
+
+.calib-status {
+    font-size: 0.8rem;
+    color: #8b5fbf;
+    margin-top: 0.4rem;
+}
+
+.attachment-preview {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--accent);
+    border-radius: 8px;
+    text-align: center;
+}
+
+.attachment-preview img {
+    max-width: 100%;
+    max-height: 240px;
+    border-radius: 6px;
+}
+
+.app-footer {
+    margin: 2.5rem 0 1rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-light);
+}
+
+@media (max-width: 900px) {
+    .editor-grid { grid-template-columns: 1fr; }
+    .report-grid { grid-template-columns: 1fr; }
+    .side-panel { max-height: none; }
+}
+
+@media (max-width: 768px) {
+    .cards { grid-template-columns: 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+    .result-grid { grid-template-columns: 1fr; }
+    .navbar { flex-wrap: wrap; gap: 0.5rem; }
+    .tb-hint { display: none; }
+}
