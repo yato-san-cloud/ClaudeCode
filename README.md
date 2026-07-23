@@ -53,9 +53,11 @@ pyinstaller chiro_app.spec
 
 ```bash
 pip install -r requirements.txt
-python app.py          # ブラウザで http://localhost:5000
-python desktop.py      # ネイティブウィンドウ起動（pywebview、無ければブラウザに自動フォールバック）
-python tests/test_basic.py   # テスト
+python app.py                       # ブラウザで http://localhost:5000
+python desktop.py                   # ネイティブウィンドウ起動（pywebview、無ければブラウザに自動フォールバック）
+python tests/test_basic.py          # 単体テスト
+python tests/test_detection_quality.py  # 合成骨盤での検出品質(回帰ガード)
+python tests/test_real_images.py    # 実X線(CC/Radiopaedia)での検出サニティ ※ネット無しは自動スキップ
 ```
 
 `python app.py` で開いた場合は Chrome/Edge から PWA としてインストールも可能。
