@@ -142,6 +142,7 @@
       <button class="card" data-id="scurve"><canvas data-ico="scurve"></canvas><div><div class="t">S字カーブ</div><div class="d">幅3.5mの曲線路</div></div></button>
       <button class="card" data-id="crank"><canvas data-ico="crank"></canvas><div><div class="t">クランク</div><div class="d">直角に折れる狭路</div></div></button>
       <button class="card" data-id="railway"><canvas data-ico="railway"></canvas><div><div class="t">踏切</div><div class="d">一時停止と安全確認</div></div></button>
+      <button class="card" data-id="signal"><canvas data-ico="signal"></canvas><div><div class="t">信号交差点</div><div class="d">赤・黄の判断</div></div></button>
     </div>
     <p class="lead">※ コース寸法は仮の標準値。教習車＝マツダ アクセラ セダン想定。実寸で本人仕様に。</p>
     <button class="close" id="menuClose">閉じる</button>
@@ -253,6 +254,19 @@ function buildHill(){
     coach:'坂の停止線でいったん停止→サイドを引く→半クラの要領で発進（逆行させない）' };
 }
 
+/* 信号機：青→黄→赤を周期で回す。路上教習でも同じ部品を使う。 */
+const SIGNAL={ green:9.0, yellow:3.0, red:9.0 };
+function signalUpdate(dt){
+  if(!M||!M.signals) return;
+  for(const sg of M.signals){
+    sg.t=(sg.t||0)+dt;
+    const cyc=SIGNAL.green+SIGNAL.yellow+SIGNAL.red;
+    const p=(sg.t+(sg.phase||0))%cyc;
+    sg.state = p<SIGNAL.green ? 'green' : p<SIGNAL.green+SIGNAL.yellow ? 'yellow' : 'red';
+    sg.remain = p<SIGNAL.green ? SIGNAL.green-p
+              : p<SIGNAL.green+SIGNAL.yellow ? SIGNAL.green+SIGNAL.yellow-p : cyc-p;
+  }
+}
 /* 中心線を純追従で走らせて実際の走行軌跡を得る（理想経路＝解ける幾何の保証） */
 function truncForRunoff(center, runoff){
   let acc=0, i=center.length-1;
@@ -298,6 +312,22 @@ function buildSCurve(){
 /* ---- クランク：直角に折れる幅3.5mの狭路。角が正確な直角になるよう矩形で構成 ---- */
 /* 踏切：停止線でいったん完全停止し、窓を開けて左右を確認してから一気に渡る。
    踏切不停止は実際の検定でも即中止なので、そのまま再現する。 */
+/* 信号交差点：赤で停止線の手前に止まり、青で発進して交差点を渡る。
+   赤信号で交差点に進入したら実際の検定どおり即中止。 */
+function buildSignal(){
+  const HW=1.75, X0=-20, X1=60, IX=26, CROSS=4.0, STOP=IX-CROSS-1.2;
+  const goal=rect(IX+10,-HW,IX+22,HW);
+  const center=[]; for(let x=X0;x<=X1;x+=0.5) center.push({x,y:0});
+  const path=followCenterline(truncForRunoff(center,5),{x:X0+2,y:0,th:0},C.creep,2.6);
+  return { id:'signal', title:'信号交差点', lockLabel:'右', successKind:'signal', speedLimitMs:6.5,
+    turnRefX:STOP, appY:0,
+    rects:[rect(X0,-HW,X1,HW), rect(IX-CROSS,-14,IX+CROSS,14)],   // 本線＋交差する道路
+    corridors:[], obstacles:[], bay:goal, poles:[], parkedCars:[], curbY:null, curbs:[],
+    signals:[{x:IX-CROSS-2.2, y:-HW-0.8, t:0, phase:0, state:'green'}],
+    stopLineX:STOP, goalX:IX+10, interX0:IX-CROSS, interX1:IX+CROSS,
+    ideal:{path,end:path[path.length-1]}, start:{x:X0+2,y:0,th:0},
+    goalRect:goal, coach:'信号を早めに確認。黄で止まれるなら止まる。赤で交差点に入ったら即中止' };
+}
 function buildRailway(){
   const HW=1.75, X0=-16, X1=60, RAIL=24, STOP=RAIL-3.2;   // ゴール後の余走を十分に確保
   const goal=rect(RAIL+8,-HW,RAIL+20,HW);
@@ -329,7 +359,7 @@ function buildCrank(){
 }
 const _perpR=buildPerpR();
 const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill(),
-  scurve:buildSCurve(), crank:buildCrank(), railway:buildRailway() };
+  scurve:buildSCurve(), crank:buildCrank(), railway:buildRailway(), signal:buildSignal() };
 
 /* ==================== 状態・エンジン ==================== */
 let M=null, bounds=null;
@@ -341,6 +371,7 @@ let hbHoldT=0;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
 let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
+let sigEntered=false, sigYellowSeen=false, sigCouldStop=false;
 let railPhase=0, railStopTick=0, railWarned=false, railStalled=false;
 let hillPhase=0, hillStartX0=null, hillMinX=null, hillRolled=false, hillUsedHb=false, hillOver=false, hillHoldTick=0, hillHbWarned=false;
 let demoMode=false, demoPhase=0, demoT=0, demoTargetV=0, demoWheelTarget=0, demoChecksDone=false;
@@ -380,6 +411,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   handbrake=true; hbWarned=false; hbHoldT=0; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
   driveReset(); drive={rpm:DT.idle,load:0,slip:0,gearNum:1};
+  sigEntered=false; sigYellowSeen=false; sigCouldStop=false;
   railPhase=0; railStopTick=0; railWarned=false; railStalled=false;
   hillPhase=0; hillStartX0=null; hillMinX=null; hillRolled=false; hillUsedHb=false; hillOver=false; hillHoldTick=0; hillHbWarned=false;
   tutorMode=false; tutorWait=false; document.getElementById('tutorPop').classList.remove('show');
@@ -1381,6 +1413,7 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     // --- サウンド：現状の速度/操作から回転数と負荷を推定して駆動（ドライブトレイン実装後は実RPMに差し替え） ---
     SimAudio.update({rpm:drive.rpm,speed:Math.abs(car.v),load:drive.load,
       slip:Math.max(drive.slip,LAT.slip,LAT.scrub*0.7),gear,braking:brakeHeld});
+    signalUpdate(dt);
     if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
   }
@@ -1427,6 +1460,8 @@ function updateLogic(){
     setCoach('鼻先が縁石の上に出るのは正常。タイヤが越えなければ脱輪ではない','ok'); break; } }
   // --- 坂道発進：停止線での停止 → 逆行させずに発進 → 坂上のゴール ---
   if(M.successKind==='hill'){ hillLogic(); return; }
+  // --- 信号交差点：赤で停止、青で発進、赤進入は即中止 ---
+  if(M.successKind==='signal'){ signalLogic(); return; }
   // --- 踏切：停止線での一時停止 → 安全確認 → 渡り切ってゴール ---
   if(M.successKind==='railway'){ railwayLogic(); return; }
   // --- 通過型（S字・クランク）：脱輪せずゴール枠へ入り、停止→P→サイドで完了 ---
@@ -1447,6 +1482,30 @@ function updateLogic(){
 // 通過型コースのゴール判定：後車軸がゴール帯の中にあれば到達とみなす
 function inGoalZone(){ const gr=M.goalRect; if(!gr) return false;
   return inRect(gr,car.x,car.y) || carCorners(car).every(p=>inRect(gr,p.x,p.y)); }
+/* 信号の判定：赤・黄での進入可否と、交差点内での停止 */
+function signalLogic(){
+  const sg=M.signals[0], nose=Math.max(...carCorners(car).map(p=>p.x));
+  const enteringNow = nose>=M.interX0 && car.x<M.interX1;
+  if(!sigEntered && enteringNow){                    // 交差点へ進入した瞬間の信号で判定
+    sigEntered=true;
+    if(sg.state==='red'){ finish('fail','信号無視（赤で進入）'); return; }
+    if(sg.state==='yellow' && sigCouldStop){ deduct('黄信号で進入',10);
+      if(!examMode) setCoach('黄信号は「止まれ」が原則（−10点）','warn'); }
+  }
+  // 黄に変わった時点で、停止線まで余裕をもって止まれたかを記録しておく
+  if(sg.state==='yellow' && !sigYellowSeen){ sigYellowSeen=true;
+    const dist=M.stopLineX-nose, brakeDist=(car.v*car.v)/(2*4.0);   // 減速度4m/s^2 想定
+    sigCouldStop = dist>brakeDist+0.5; }
+  if(sg.state==='green') { sigYellowSeen=false; sigCouldStop=false; }
+  if(!examMode && !sigEntered && tick%30===0){
+    const d=M.stopLineX-nose;
+    if(sg.state==='red'&&d>0&&d<12) setCoach('赤信号。停止線の手前で止まる','warn');
+    else if(sg.state==='green'&&d>0&&d<14) setCoach('青。交差点の左右も確認して通過','ok'); }
+  // ゴール
+  if(sigEntered && car.x>M.interX1 && inGoalZone() && Math.abs(car.v)<0.05){
+    if(gear==='P'&&handbrake) finish('success');
+    else if(tick%40===0&&!examMode) setCoach('ゴール！停止 → P → サイドで完了','ok'); }
+}
 /* 踏切の判定：①停止線の手前で完全停止 ②左右の安全確認 ③渡り切る（不停止＝即中止） */
 function railwayLogic(){
   const nose=Math.max(...carCorners(car).map(p=>p.x));
@@ -1727,6 +1786,17 @@ function renderSceneInner(){
         const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1, nx=-dy/L*co.hw*sgn, ny=dx/L*co.hw*sgn;
         const X=wx(co.pts[i].x+nx), Y=wy(co.pts[i].y+ny); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); }
       ctx.stroke(); } }
+  if(M.signals) for(const sg of M.signals){       // 信号機（俯瞰では色つきの丸）
+    const X=wx(sg.x), Y=wy(sg.y);
+    ctx.fillStyle='rgba(0,0,0,.45)'; ctx.beginPath(); ctx.arc(X+2,Y+2,7,0,7); ctx.fill();
+    ctx.fillStyle= sg.state==='green'?'#3ad07a':sg.state==='yellow'?'#ffcf3f':'#ff5a4d';
+    ctx.beginPath(); ctx.arc(X,Y,7,0,7); ctx.fill();
+    ctx.strokeStyle='#0d1117'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#dfe6ef'; ctx.font='bold 10px system-ui'; ctx.textAlign='center';
+    ctx.fillText(Math.ceil(sg.remain||0)+'', X, Y-11); ctx.textAlign='left'; }
+  if(M.stopLineX!=null&&M.successKind==='signal'){
+    ctx.strokeStyle='#e8edf4'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(wx(M.stopLineX),wy(-1.75)); ctx.lineTo(wx(M.stopLineX),wy(1.75)); ctx.stroke(); }
   if(M.rails) for(const r of M.rails){          // 線路（枕木＋レール）
     ctx.strokeStyle='#6b6357'; ctx.lineWidth=1.5;
     for(let y=-3.2;y<=3.2;y+=0.6){ ctx.beginPath();
@@ -1977,10 +2047,29 @@ function mRails(proj,g){
       g.lineWidth=clamp(26/Math.min(a.depth,b.depth),2,14);
       g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); } }
 }
+function mSignals(proj,g){
+  if(!M.signals) return;
+  for(const sg of M.signals){
+    const base=proj(sg.x,sg.y,0), head=proj(sg.x,sg.y,3.6);
+    if(!base||!head||base.depth<0.6) continue;
+    g.strokeStyle='#5a6472'; g.lineWidth=clamp(26/base.depth,1.5,9);      // 支柱
+    g.beginPath(); g.moveTo(base.x,base.y); g.lineTo(head.x,head.y); g.stroke();
+    const r=clamp(30/head.depth,3,16);                                     // 灯器（横型3灯）
+    g.fillStyle='#1a1e24'; g.beginPath();
+    g.ellipse(head.x,head.y,r*3.2,r*1.25,0,0,7); g.fill();
+    g.strokeStyle='#0d1117'; g.lineWidth=1.5; g.stroke();
+    const cols=['#ff5a4d','#ffcf3f','#3ad07a'], on=sg.state==='red'?0:sg.state==='yellow'?1:2;
+    for(let i=0;i<3;i++){ const cx=head.x+(i-1)*r*2.0;
+      g.fillStyle = i===on ? cols[i] : 'rgba(40,46,54,.9)';
+      g.beginPath(); g.arc(cx,head.y,r*0.85,0,7); g.fill();
+      if(i===on){ g.globalAlpha=0.35; g.beginPath(); g.arc(cx,head.y,r*1.5,0,7); g.fill(); g.globalAlpha=1; } }
+  }
+}
 function mWorld(proj,g){
   for(const r of M.rects) mRect(proj,g,r,'rgba(200,215,235,.10)',1,0);
   mCorridorEdges(proj,g);
   mRails(proj,g);
+  mSignals(proj,g);
   mBayFill(proj,g);
   if(M.curbY!=null) mCurb(proj,g,M.curbY);
   for(const cb of (M.curbs||[])) mCurb(proj,g,cb.y);          // 反対側の縁石（3.5m道路の外縁）
@@ -2265,6 +2354,25 @@ function renderFront(){
   // 切り始めの目安ライン（地面の青ライン）が前方に見える
   if(showGuide&&!examMode&&(M.successKind==='perp'||M.successKind==='parallel')){ let prev=null; g.strokeStyle='rgba(77,163,255,.85)'; g.lineWidth=3;
     for(let y=bounds.minY;y<=bounds.maxY;y+=0.4){ const p=proj(M.turnRefX,y,0.02); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+  // 信号インジケータ：接近すると実際の灯器は視界の上に外れるため、隅に現在の表示を出す
+  if(M.signals&&M.signals.length){
+    const sg=M.signals[0], d=sg.x-car.x;
+    if(d>-6&&d<70){
+      const bw=Math.min(96,w*0.13), bh=Math.max(20,bw*0.30), bx=w-bw-8, by=6;
+      g.fillStyle='rgba(8,12,18,.78)'; g.beginPath();
+      g.moveTo(bx+4,by); g.lineTo(bx+bw-4,by); g.quadraticCurveTo(bx+bw,by,bx+bw,by+4);
+      g.lineTo(bx+bw,by+bh-4); g.quadraticCurveTo(bx+bw,by+bh,bx+bw-4,by+bh);
+      g.lineTo(bx+4,by+bh); g.quadraticCurveTo(bx,by+bh,bx,by+bh-4);
+      g.lineTo(bx,by+4); g.quadraticCurveTo(bx,by,bx+4,by); g.closePath(); g.fill();
+      const cols=['#ff5a4d','#ffcf3f','#3ad07a'], on=sg.state==='red'?0:sg.state==='yellow'?1:2;
+      const r=bh*0.30;
+      for(let i=0;i<3;i++){ const cx=bx+bw*(0.22+i*0.28), cy=by+bh*0.5;
+        g.fillStyle = i===on? cols[i] : 'rgba(52,58,66,.9)';
+        g.beginPath(); g.arc(cx,cy,r,0,7); g.fill(); }
+      g.fillStyle='#dfe6ef'; g.font='bold 10px system-ui'; g.textAlign='right';
+      g.fillText(Math.ceil(sg.remain||0)+'s', bx+bw-4, by+bh-3); g.textAlign='left';
+    }
+  }
   // 自車のボンネット（RHDで少し右寄りに見える）
   const cs2=carCorners(car), pl=proj(cs2[0].x,cs2[0].y,0.98), pr=proj(cs2[1].x,cs2[1].y,0.98);
   if(pl&&pr){ const topY=Math.min(pl.y,pr.y); const grd=g.createLinearGradient(0,topY,0,h);
