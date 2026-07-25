@@ -22,6 +22,10 @@
 
 * { box-sizing: border-box; }
 
+/* スマホの画面という 1 つの世界観に寄せているので、配色は明暗テーマで切り替えない。
+   埋め込み表示でも背景が白く抜けないよう html 側も塗っておく。 */
+html { background: #0b0d14; color-scheme: dark; }
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -4346,7 +4350,6 @@ const ROPE = {
     let clearT = 0;
     let calmT = 0;
     let acc = 0;
-    let tSim = 0;
     let shake = 0;
     let auto = []; // solve() が積む予約
     let autoT = 0;
@@ -4355,7 +4358,6 @@ const ROPE = {
     let px = 0;
     let py = 0;
     let heroMood = 'calm';
-    let stageIx = 0;
 
     // シーソーの板は毎ステップ座標が変わるので使い回す
     const seeBar = bar(0, 0, 0, 0, { style: 'seesaw', half: 6, mu: 2.4 });
@@ -4473,7 +4475,6 @@ const ROPE = {
       const nvt = vt * Math.max(0, 1 - b.mu * h);
       it.vx += (nvt - vt) * tx;
       it.vy += (nvt - vt) * ty;
-      it.touch = true;
       it.spin = it.vx / it.r;
       armBomb(it);
       if (b.frag && it.mass >= 2.5 && vn < -100) {
@@ -4601,7 +4602,6 @@ const ROPE = {
     };
 
     const step = (h) => {
-      tSim += h;
       stepSee(h);
       for (const r of world.ropes) {
         if (r.cut) continue;
@@ -4618,7 +4618,6 @@ const ROPE = {
         it.x += it.vx * h;
         it.y += it.vy * h;
         it.onSee = false;
-        it.touch = false;
         for (const b of bars) hitBar(it, b, h);
         it.rot += it.spin * h;
       }
@@ -4925,8 +4924,7 @@ const ROPE = {
       hint: STAGES[0].hint,
 
       start(i) {
-        stageIx = i % STAGES.length;
-        const st = STAGES[stageIx];
+        const st = STAGES[i % STAGES.length];
         const w = st.make();
         w.pits = w.pits ?? [];
         w.bars = [...w.bars, ...ground(w.pits)];
@@ -4939,7 +4937,7 @@ const ROPE = {
           const it = {
             kind: r.kind, r: kd.r, mass: kd.mass, x: r.x ?? 0, y: CEIL + r.len,
             vx: 0, vy: 0, rot: 0, spin: 0, alive: true, free: false, fuse: -1,
-            onSee: false, seeOff: 0, touch: false, seed: k % 9,
+            onSee: false, seeOff: 0, seed: k % 9,
           };
           r.item = it;
           w.items.push(it);
@@ -4951,7 +4949,6 @@ const ROPE = {
         clearT = 0;
         calmT = 0;
         acc = 0;
-        tSim = 0;
         shake = 0;
         auto = [];
         autoT = 0;
