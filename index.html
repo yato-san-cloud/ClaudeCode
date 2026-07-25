@@ -139,6 +139,8 @@
       <button class="card" data-id="perpL"><canvas data-ico="perpL"></canvas><div><div class="t">方向転換（左バック）</div><div class="d">左のポケットへ後退</div></div></button>
       <button class="card" data-id="parallel"><canvas data-ico="parallel"></canvas><div><div class="t">縦列駐車</div><div class="d">S字で切り返し</div></div></button>
       <button class="card" data-id="hill"><canvas data-ico="hill"></canvas><div><div class="t">坂道発進</div><div class="d">10%の坂で逆行させず発進</div></div></button>
+      <button class="card" data-id="scurve"><canvas data-ico="scurve"></canvas><div><div class="t">S字カーブ</div><div class="d">幅3.5mの曲線路</div></div></button>
+      <button class="card" data-id="crank"><canvas data-ico="crank"></canvas><div><div class="t">クランク</div><div class="d">直角に折れる狭路</div></div></button>
     </div>
     <p class="lead">※ コース寸法は仮の標準値。教習車＝マツダ アクセラ セダン想定。実寸で本人仕様に。</p>
     <button class="close" id="menuClose">閉じる</button>
@@ -249,8 +251,69 @@ function buildHill(){
     ideal:{path,end:{x:38,y:0,th:0}}, start:{x:X0+3,y:0,th:0},
     coach:'坂の停止線でいったん停止→サイドを引く→半クラの要領で発進（逆行させない）' };
 }
+
+/* 中心線を純追従で走らせて実際の走行軌跡を得る（理想経路＝解ける幾何の保証） */
+function truncForRunoff(center, runoff){
+  let acc=0, i=center.length-1;
+  for(; i>1; i--){ acc+=Math.hypot(center[i].x-center[i-1].x, center[i].y-center[i-1].y); if(acc>=runoff) break; }
+  return center.slice(0, Math.max(2,i+1));
+}
+function followCenterline(center, start, speed, look){
+  const s={x:start.x,y:start.y,th:start.th,steer:0,v:speed};
+  const out=[{x:s.x,y:s.y,th:s.th}]; let idx=0;
+  for(let n=0;n<20000;n++){
+    const LA=look||2.6;
+    while(idx<center.length-1 && Math.hypot(center[idx].x-s.x,center[idx].y-s.y)<LA) idx++;
+    const tgt=center[idx];
+    const dx=tgt.x-s.x, dy=tgt.y-s.y;
+    const lx= Math.cos(s.th)*dx + Math.sin(s.th)*dy;
+    const ly=-Math.sin(s.th)*dx + Math.cos(s.th)*dy;
+    const L2=lx*lx+ly*ly;
+    const curv = L2>1e-6 ? (2*ly/L2) : 0;
+    s.steer = clamp(Math.atan(curv*C.wheelbase), -MAXSTEER, MAXSTEER);
+    bicycle(s,0.02);
+    out.push({x:s.x,y:s.y,th:s.th});
+    if(idx>=center.length-1 && Math.hypot(tgt.x-s.x,tgt.y-s.y)<0.6) break;
+  }
+  return out;
+}
+/* ---- S字カーブ：半径8mの左右反転した円弧をつないだ幅3.5mの曲線路 --------------
+   中心線をコリドー（中心線＋半幅）で表すため、曲線の縁も自然に丸くなる。 */
+function buildSCurve(){
+  const HW=1.75, R=8;
+  const pts=[];
+  for(let i=0;i<=4;i++) pts.push({x:-6+i*1.5, y:0});                    // 進入直線
+  for(let a=-90;a<=0;a+=4){ const t=a*DEG; pts.push({x:R*Math.cos(t), y:R+R*Math.sin(t)}); }   // 左カーブ
+  for(let a=180;a>=90;a-=4){ const t=a*DEG; pts.push({x:2*R+R*Math.cos(t), y:R+R*Math.sin(t)}); } // 右カーブ
+  for(let i=1;i<=10;i++) pts.push({x:2*R, y:2*R+i*1.5});                // 退出直線（前輪の余走を確保）
+  const goal=rect(2*R-HW, 2*R+4.0, 2*R+HW, 2*R+8.0);
+  const path=followCenterline(truncForRunoff(pts,5),{x:-6,y:0,th:0},C.creep,2.8);
+  return { id:'scurve', title:'S字カーブ', lockLabel:'右', successKind:'course', speedLimitMs:2.6,
+    turnRefX:0, appY:0, rects:[goal], corridors:[{pts,hw:HW}], obstacles:[], bay:goal,
+    poles:[], parkedCars:[], curbY:null, curbs:[],
+    ideal:{path,end:path[path.length-1]}, start:{x:-6,y:0,th:0},
+    goalRect:goal, coach:'ふちに寄せすぎず、内側の後輪を意識してゆっくり通過' };
+}
+/* ---- クランク：直角に折れる幅3.5mの狭路。角が正確な直角になるよう矩形で構成 ---- */
+function buildCrank(){
+  const HW=1.75, R=5, X0=-14, XC=4, YC=9, X1=30;   // 角は中心線半径5mで丸める
+  const c=[];
+  for(let x=X0;x<=XC-R;x+=0.5) c.push({x,y:0});                                   // 進入（東行き）
+  for(let a=-90;a<=0;a+=5){ const t=a*DEG; c.push({x:XC-R+R*Math.cos(t), y:R+R*Math.sin(t)}); }   // 左へ
+  for(let y=R+0.5;y<=YC-R;y+=0.5) c.push({x:XC,y});                               // 縦（北行き）
+  for(let a=180;a>=90;a-=5){ const t=a*DEG; c.push({x:XC+R+R*Math.cos(t), y:YC-R+R*Math.sin(t)}); } // 右へ
+  for(let x=XC+R+0.5;x<=X1;x+=0.5) c.push({x,y:YC});                              // 退出（東行き）
+  const goal=rect(X1-8,YC-HW,X1-2,YC+HW);
+  const path=followCenterline(truncForRunoff(c,5),{x:X0,y:0,th:0},C.creep,2.6);
+  return { id:'crank', title:'クランク（狭路）', lockLabel:'左', successKind:'course', speedLimitMs:2.2,
+    turnRefX:XC, appY:0, rects:[], corridors:[{pts:c,hw:HW}], obstacles:[], bay:goal,
+    poles:[], parkedCars:[], curbY:null, curbs:[],
+    ideal:{path,end:path[path.length-1]}, start:{x:X0,y:0,th:0},
+    goalRect:goal, coach:'内輪差に注意。角は大きく回り、内側の後輪を落とさない' };
+}
 const _perpR=buildPerpR();
-const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill() };
+const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill(),
+  scurve:buildSCurve(), crank:buildCrank() };
 
 /* ==================== 状態・エンジン ==================== */
 let M=null, bounds=null;
@@ -274,8 +337,26 @@ function allChecked(){ return (tick-checks.room<900)&&(tick-checks.L<900)&&(tick
 
 function computeBounds(){ let a=[...M.rects,M.bay,...M.parkedCars], minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;
   for(const r of a){ minX=Math.min(minX,r.x0);maxX=Math.max(maxX,r.x1);minY=Math.min(minY,r.y0);maxY=Math.max(maxY,r.y1);}
+  if(M.corridors) for(const co of M.corridors) for(const p of co.pts){
+    minX=Math.min(minX,p.x-co.hw);maxX=Math.max(maxX,p.x+co.hw);
+    minY=Math.min(minY,p.y-co.hw);maxY=Math.max(maxY,p.y+co.hw);}
   bounds={minX:minX-0.6,maxX:maxX+0.6,minY:minY-0.6,maxY:maxY+0.6}; }
-function drivable(x,y){ let ok=false; for(const r of M.rects) if(inRect(r,x,y)){ok=true;break;} if(!ok)return false;
+// 点と線分の距離（コリドー判定用）
+function distToSeg(px,py,ax,ay,bx,by){
+  const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+  let t = L2>1e-9 ? ((px-ax)*dx+(py-ay)*dy)/L2 : 0; t=t<0?0:t>1?1:t;
+  return Math.hypot(px-(ax+dx*t), py-(ay+dy*t));
+}
+// 中心線からの距離が半幅以内ならコリドー内。S字のような曲線路を矩形の集合にせず表せる
+function inCorridor(co,x,y){
+  const p=co.pts;
+  for(let i=0;i<p.length-1;i++) if(distToSeg(x,y,p[i].x,p[i].y,p[i+1].x,p[i+1].y)<=co.hw) return true;
+  return false;
+}
+function drivable(x,y){ let ok=false;
+  for(const r of M.rects) if(inRect(r,x,y)){ok=true;break;}
+  if(!ok&&M.corridors) for(const co of M.corridors) if(inCorridor(co,x,y)){ok=true;break;}
+  if(!ok)return false;
   for(const o of M.obstacles) if(inRect(o,x,y))return false; return true; }
 function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=M.start.th;car.steer=0;car.v=0;
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
@@ -833,6 +914,13 @@ function updateLogic(){
     setCoach('鼻先が縁石の上に出るのは正常。タイヤが越えなければ脱輪ではない','ok'); break; } }
   // --- 坂道発進：停止線での停止 → 逆行させずに発進 → 坂上のゴール ---
   if(M.successKind==='hill'){ hillLogic(); return; }
+  // --- 通過型（S字・クランク）：脱輪せずゴール枠へ入り、停止→P→サイドで完了 ---
+  if(M.successKind==='course'){
+    const inGoal=carCorners(car).every(p=>inRect(M.goalRect,p.x,p.y));
+    if(inGoal&&Math.abs(car.v)<0.05){
+      if(gear==='P'&&handbrake) finish('success');
+      else if(tick%40===0&&!examMode) setCoach('ゴール！停止 → P → サイドで完了','ok'); }
+    return; }
   // 正着判定 → 完了手順（停止→P→サイド）で終了
   const posOK = M.successKind==='perp'
     ? (inRect(M.bay,cs[2].x,cs[2].y)&&inRect(M.bay,cs[3].x,cs[3].y)&&alignedV(car.th))
@@ -1043,11 +1131,23 @@ function renderSceneInner(){
   ctx.fillStyle='#16251c';
   ctx.fillRect(wx(bounds.minX),wy(bounds.maxY),(bounds.maxX-bounds.minX)*PPM,(bounds.maxY-bounds.minY)*PPM);
   // 路面（アスファルト＋質感）と外周白線
+  if(M.corridors) for(const co of M.corridors){          // コリドー路面（太い線として塗る）
+    ctx.strokeStyle='#242e42'; ctx.lineWidth=co.hw*2*PPM; ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath(); co.pts.forEach((p,i)=>i?ctx.lineTo(wx(p.x),wy(p.y)):ctx.moveTo(wx(p.x),wy(p.y))); ctx.stroke(); }
   for(const r of M.rects) fillR(r,'#242e42');
   if(asphPat){ ctx.save(); ctx.globalAlpha=.55; ctx.fillStyle=asphPat;
     for(const r of M.rects) ctx.fillRect(wx(r.x0),wy(r.y1),(r.x1-r.x0)*PPM,(r.y1-r.y0)*PPM); ctx.restore(); }
   for(const r of M.rects) strokeR(r,'rgba(230,238,248,.17)',2);
-  fillR(M.bay,'#1a2a44'); strokeR(M.bay,'#4b3f22',0); strokeR(M.bay,'#5a6f92',2);
+  const _isPass = M.successKind==='course'||M.successKind==='hill';
+  if(_isPass){                                   // フィニッシュ帯（市松模様）
+    fillR(M.bay,'rgba(60,150,90,.18)');
+    const bw=(M.bay.x1-M.bay.x0), bh=(M.bay.y1-M.bay.y0), n=Math.max(2,Math.round(bw/0.7));
+    for(let i=0;i<n;i++){ if(i%2) continue;
+      const x0=M.bay.x0+bw*i/n, x1=M.bay.x0+bw*(i+1)/n;
+      ctx.fillStyle='rgba(235,242,250,.30)';
+      ctx.fillRect(wx(x0),wy(M.bay.y1),(x1-x0)*PPM,bh*PPM); }
+    strokeR(M.bay,'rgba(120,220,150,.85)',2);
+  } else { fillR(M.bay,'#1a2a44'); strokeR(M.bay,'#4b3f22',0); strokeR(M.bay,'#5a6f92',2); }
   // 縁石ハッチング（走行可能域の外周を強調）
   if(M.curbY!=null){ ctx.strokeStyle='#6d7f9c'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(wx(bounds.minX),wy(M.curbY)); ctx.lineTo(wx(bounds.maxX),wy(M.curbY)); ctx.stroke();
     ctx.strokeStyle='rgba(140,150,170,.5)'; ctx.lineWidth=1; for(let x=bounds.minX;x<bounds.maxX;x+=0.4){ ctx.beginPath(); ctx.moveTo(wx(x),wy(M.curbY)); ctx.lineTo(wx(x-0.25),wy(M.curbY)-6); ctx.stroke(); } }
@@ -1060,8 +1160,9 @@ function renderSceneInner(){
   // お手本（検定モードでは非表示）
   if(showGuide&&!examMode){ ctx.strokeStyle='rgba(77,163,255,.5)'; ctx.lineWidth=3; ctx.setLineDash([8,7]); ctx.beginPath();
     M.ideal.path.forEach((p,i)=>{const X=wx(p.x),Y=wy(p.y);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);}); ctx.stroke(); ctx.setLineDash([]);
-    ctx.strokeStyle='rgba(77,163,255,.9)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(wx(M.turnRefX),wy(bounds.maxY)); ctx.lineTo(wx(M.turnRefX),wy(bounds.minY)); ctx.stroke();
-    ctx.fillStyle='rgba(77,163,255,.9)'; ctx.font='11px system-ui'; ctx.fillText('切り始めの目安', wx(M.turnRefX)+5, wy(bounds.maxY)+14); }
+    if(M.successKind==='perp'||M.successKind==='parallel'){
+      ctx.strokeStyle='rgba(77,163,255,.9)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(wx(M.turnRefX),wy(bounds.maxY)); ctx.lineTo(wx(M.turnRefX),wy(bounds.minY)); ctx.stroke();
+      ctx.fillStyle='rgba(77,163,255,.9)'; ctx.font='11px system-ui'; ctx.fillText('切り始めの目安', wx(M.turnRefX)+5, wy(bounds.maxY)+14); } }
   // 自分の軌跡（後車軸の通った跡＝癖が見える）
   if(trail.length>1){ ctx.strokeStyle='rgba(240,246,255,.45)'; ctx.lineWidth=2; ctx.beginPath();
     trail.forEach((p,i)=>{const X=wx(p.x),Y=wy(p.y);i?ctx.lineTo(X,Y):ctx.moveTo(X,Y);}); ctx.lineTo(wx(car.x),wy(car.y)); ctx.stroke(); }
@@ -1077,6 +1178,13 @@ function renderSceneInner(){
       ctx.fillStyle='#eef2f7'; ctx.beginPath(); ctx.arc(X,Y,5.5,0,7); ctx.fill();
       ctx.fillStyle='#ffcf3f'; ctx.beginPath(); ctx.arc(X,Y,3,0,7); ctx.fill();
       ctx.strokeStyle='#5a6472'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(X,Y,5.5,0,7); ctx.stroke(); } }
+  if(M.corridors) for(const co of M.corridors){          // コリドーの縁（脱輪ライン）
+    for(const sgn of [1,-1]){ ctx.strokeStyle='#8793a6'; ctx.lineWidth=2.5; ctx.beginPath();
+      for(let i=0;i<co.pts.length;i++){
+        const a=co.pts[Math.max(0,i-1)], b=co.pts[Math.min(co.pts.length-1,i+1)];
+        const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1, nx=-dy/L*co.hw*sgn, ny=dx/L*co.hw*sgn;
+        const X=wx(co.pts[i].x+nx), Y=wy(co.pts[i].y+ny); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); }
+      ctx.stroke(); } }
   if(showLines&&!examMode) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
@@ -1283,8 +1391,30 @@ function mCarBox(proj,g,r,ht){ const c=[[r.x0,r.y0],[r.x1,r.y0],[r.x1,r.y1],[r.x
   const bot=c.map(([x,y])=>proj(x,y,0)), top=c.map(([x,y])=>proj(x,y,ht)); if(bot.some(p=>!p)||top.some(p=>!p))return;
   g.fillStyle='rgba(66,76,100,.96)'; for(let i=0;i<4;i++){ const j=(i+1)%4; g.beginPath(); g.moveTo(bot[i].x,bot[i].y);g.lineTo(bot[j].x,bot[j].y);g.lineTo(top[j].x,top[j].y);g.lineTo(top[i].x,top[i].y);g.closePath(); g.fill(); }
   g.fillStyle='#68748e'; g.beginPath(); g.moveTo(top[0].x,top[0].y); for(let i=1;i<4;i++)g.lineTo(top[i].x,top[i].y); g.closePath(); g.fill(); g.strokeStyle='#8a96b0'; g.lineWidth=1; g.stroke(); }
+// コリドーの左右のふちを3D縁石として描く（前方視界・ミラー・振り返りで共通）
+function mCorridorEdges(proj,g){
+  if(!M.corridors) return;
+  for(const co of M.corridors) for(const sgn of [1,-1]){
+    const edge=[];
+    for(let i=0;i<co.pts.length;i++){
+      const a=co.pts[Math.max(0,i-1)], b=co.pts[Math.min(co.pts.length-1,i+1)];
+      const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1;
+      edge.push({x:co.pts[i].x-dy/L*co.hw*sgn, y:co.pts[i].y+dx/L*co.hw*sgn});
+    }
+    for(let i=0;i<edge.length-1;i++){
+      const a0=proj(edge[i].x,edge[i].y,0.13), a1=proj(edge[i+1].x,edge[i+1].y,0.13);
+      const b0=proj(edge[i].x,edge[i].y,0),    b1=proj(edge[i+1].x,edge[i+1].y,0);
+      if(!a0||!a1||!b0||!b1) continue;
+      if(Math.min(a0.depth,a1.depth)<0.5) continue;
+      g.fillStyle='#8a97ab'; g.beginPath();
+      g.moveTo(a0.x,a0.y); g.lineTo(a1.x,a1.y); g.lineTo(b1.x,b1.y); g.lineTo(b0.x,b0.y); g.closePath(); g.fill();
+      g.strokeStyle='#e8edf4'; g.lineWidth=2; g.beginPath(); g.moveTo(a0.x,a0.y); g.lineTo(a1.x,a1.y); g.stroke();
+    }
+  }
+}
 function mWorld(proj,g){
   for(const r of M.rects) mRect(proj,g,r,'rgba(200,215,235,.10)',1,0);
+  mCorridorEdges(proj,g);
   mBayFill(proj,g);
   if(M.curbY!=null) mCurb(proj,g,M.curbY);
   for(const cb of (M.curbs||[])) mCurb(proj,g,cb.y);          // 反対側の縁石（3.5m道路の外縁）
@@ -1567,7 +1697,7 @@ function renderFront(){
     if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
   mWorld(proj,g);
   // 切り始めの目安ライン（地面の青ライン）が前方に見える
-  if(showGuide&&!examMode){ let prev=null; g.strokeStyle='rgba(77,163,255,.85)'; g.lineWidth=3;
+  if(showGuide&&!examMode&&(M.successKind==='perp'||M.successKind==='parallel')){ let prev=null; g.strokeStyle='rgba(77,163,255,.85)'; g.lineWidth=3;
     for(let y=bounds.minY;y<=bounds.maxY;y+=0.4){ const p=proj(M.turnRefX,y,0.02); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
   // 自車のボンネット（RHDで少し右寄りに見える）
   const cs2=carCorners(car), pl=proj(cs2[0].x,cs2[0].y,0.98), pr=proj(cs2[1].x,cs2[1].y,0.98);
