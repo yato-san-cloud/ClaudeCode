@@ -144,6 +144,7 @@
       <button class="card" data-id="crank"><canvas data-ico="crank"></canvas><div><div class="t">クランク</div><div class="d">直角に折れる狭路</div></div></button>
       <button class="card" data-id="railway"><canvas data-ico="railway"></canvas><div><div class="t">踏切</div><div class="d">一時停止と安全確認</div></div></button>
       <button class="card" data-id="signal"><canvas data-ico="signal"></canvas><div><div class="t">信号交差点</div><div class="d">赤・黄の判断</div></div></button>
+      <button class="card" data-id="road"><canvas data-ico="road"></canvas><div><div class="t">路上教習</div><div class="d">一般道・交通あり</div></div></button>
     </div>
     <p class="lead">※ コース寸法は仮の標準値。教習車＝マツダ アクセラ セダン想定。実寸で本人仕様に。</p>
     <button class="close" id="menuClose">閉じる</button>
@@ -358,9 +359,1481 @@ function buildCrank(){
     ideal:{path,end:path[path.length-1]}, start:{x:X0,y:0,th:0},
     goalRect:goal, coach:'内輪差に注意。角は大きく回り、内側の後輪を落とさない' };
 }
+/* ============================================================================
+   路上教習（ROAD）— 公道モード
+   ・車線／経路グラフ（lane + link）で公道ネットワークを手続き生成
+   ・交通AI：IDM追従＋信号順守＋優先／一時停止の譲り合い＋交差点の競合予約
+   ・歩行者：横断歩道を歩行者信号／車の切れ目を見て横断＋歩道の通行人
+   ・信号機の状態機械（車両EW/NS＋歩行者、ノードごとに位相オフセット）
+   ・路上検定の採点：速度超過／合図／一時不停止／信号無視／巻き込み確認／
+     車間距離／キープレフト／歩行者妨害／接触／路外逸脱
+   ・スポーン／デスポーン管理（自車周辺だけ実体化）
+   ・描画：俯瞰（ctx/wx/wy/PPM）と3D（mkProj の proj）の両方
+
+   既存コードへの依存（すべて同一 <script> 内のグローバル）：
+     CONFIG,C,DEG,clamp,normAng,rect,inRect,car,tick,carCorners,carPerimeter,
+     wheelPositions,drivable,deduct,finish,setCoach,examMode,gear,handbrake,
+     result,checks,SimAudio,bindTap,ctx,wx,wy,PPM,W,H
+   ========================================================================== */
+const ROAD=(()=>{
+  "use strict";
+
+  /* ================================================================== */
+  /*  0. 定数                                                            */
+  /* ================================================================== */
+  const KMH=1/3.6;
+  const RW=7.0, LW=3.5, RH=RW/2, LH=LW/2;   // 道路全幅・車線幅・道路半幅・車線半幅
+  const JH=RH;                               // 交差点の半辺（＝道路半幅。角が自然に閉じる）
+  const JX=[0,70,150], JY=[0,60];            // 交差点の格子座標[m]
+  /* 交差点の前後 LEAD[m] は「リンク（交差点内経路）」の受け持ちにする。
+     車線中心どうしを交差点の中だけで繋ぐと 90°ターンの曲率半径が LH=1.75m になり、
+     ホイールベース2.70m・最大舵角36°（最小回転半径 約3.7m）の車では絶対に曲がれない。
+     LEAD=5.0 にすると 4分の1ベジエの最小半径は 0.707*(LH+LEAD)=約4.8m ＝ 舵角29°で回れる。 */
+  const LEAD=5.0;
+  const CUT=1.2;                             // 交差点の隅切り[m]
+  const LSTART=JH+LEAD;                      // ノード中心から車線端までの距離[m]
+
+  const CFG={
+    quality:1.0,                             // 0.6 で交通量とLODを落とす（低速端末用）
+    maxCars:10, maxPeds:9,
+    spawnMin:55, spawnMax:135, despawn:175,  // 自車からの距離[m]
+    idm:{a:1.55,b:2.2,T:1.5,s0:2.6,delta:4},
+    cycle:{g:15,y:3,ar:2},                   // 青／黄／全赤[s]
+    aiHz:30,
+    lodFar:34,                               // これより遠いAI車は簡易描画
+    // 3D の可視距離[m]：立体物／路面マーキング
+    range :{front:95,glance:70,rear:56,mirror:44},
+    mrange:{front:55,glance:45,rear:32,mirror:26}
+  };
+  /* 減点表。0 は「検定中止」を意味する */
+  const PTS={ speed:10, sigNone:10, sigLate:5, sigWrong:10, sigStuck:5, stopFar:5,
+              yellow:10, blind:10, yoseL:5, yoseR:5, slowIn:10, gap:10,
+              keepLeft:5, centerOver:20, pedSlow:10, route:5 };
+
+  /* ================================================================== */
+  /*  1. 幾何ユーティリティ                                              */
+  /* ================================================================== */
+  const V=(x,y)=>({x,y});
+  function unit(dx,dy){ const L=Math.hypot(dx,dy)||1; return {x:dx/L,y:dy/L}; }
+  function leftN(d){ return {x:-d.y,y:d.x}; }                 // 進行方向の左向き法線
+  function neg(d){ return {x:-d.x,y:-d.y}; }
+  function add(p,d,k){ return {x:p.x+d.x*k, y:p.y+d.y*k}; }
+  function mkWay(o){
+    const p=o.pts, cum=new Float64Array(p.length);
+    for(let i=1;i<p.length;i++) cum[i]=cum[i-1]+Math.hypot(p[i].x-p[i-1].x,p[i].y-p[i-1].y);
+    o.cum=cum; o.len=cum[p.length-1]||0.001;
+    // 外接ボックスの中心と半径。射影の粗い足切りに使う
+    // （中点を pts[len>>1] で代用すると2点ポリラインで終端になり誤判定するので必ずこれを使う）
+    let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9;
+    for(const q of p){ if(q.x<mnx)mnx=q.x; if(q.x>mxx)mxx=q.x;
+                       if(q.y<mny)mny=q.y; if(q.y>mxy)mxy=q.y; }
+    o.mid={x:(mnx+mxx)/2, y:(mny+mxy)/2};
+    o.rad=Math.hypot(mxx-mnx,mxy-mny)/2;
+    return o;
+  }
+  function wayIdx(Wy,s){ const c=Wy.cum; let lo=0,hi=c.length-1;
+    while(lo<hi-1){ const m=(lo+hi)>>1; if(c[m]<=s) lo=m; else hi=m; } return lo; }
+  function wayAt(Wy,s){ s=clamp(s,0,Wy.len); const i=wayIdx(Wy,s), a=Wy.pts[i], b=Wy.pts[i+1];
+    const seg=Math.max(1e-6,Wy.cum[i+1]-Wy.cum[i]), t=(s-Wy.cum[i])/seg;
+    return {x:a.x+(b.x-a.x)*t, y:a.y+(b.y-a.y)*t, th:Math.atan2(b.y-a.y,b.x-a.x)}; }
+  /* 点を way へ射影。lat>0＝進行方向に対して左側 */
+  function wayProject(Wy,px,py){
+    let bd=1e9,bs=0,bl=0,bt=0;
+    for(let i=0;i<Wy.pts.length-1;i++){
+      const a=Wy.pts[i],b=Wy.pts[i+1],dx=b.x-a.x,dy=b.y-a.y,L2=dx*dx+dy*dy;
+      let t=L2>1e-9?((px-a.x)*dx+(py-a.y)*dy)/L2:0; t=t<0?0:t>1?1:t;
+      const qx=a.x+dx*t, qy=a.y+dy*t, d=Math.hypot(px-qx,py-qy);
+      if(d<bd){ const th=Math.atan2(dy,dx);
+        bd=d; bs=Wy.cum[i]+Math.sqrt(L2)*t; bt=th;
+        bl=-(px-qx)*Math.sin(th)+(py-qy)*Math.cos(th); }
+    }
+    return {d:bd,s:bs,lat:bl,th:bt};
+  }
+  function bez3(p0,p1,p2,p3,n){ const out=[];
+    for(let i=0;i<=n;i++){ const t=i/n,u=1-t;
+      out.push({x:u*u*u*p0.x+3*u*u*t*p1.x+3*u*t*t*p2.x+t*t*t*p3.x,
+                y:u*u*u*p0.y+3*u*u*t*p1.y+3*u*t*t*p2.y+t*t*t*p3.y}); }
+    return out; }
+  function bez(p0,p1,p2,n){ const out=[];
+    for(let i=0;i<=n;i++){ const t=i/n,u=1-t;
+      out.push({x:u*u*p0.x+2*u*t*p1.x+t*t*p2.x, y:u*u*p0.y+2*u*t*p1.y+t*t*p2.y}); }
+    return out; }
+  function xLine(p1,d1,p2,d2){                                 // 2直線の交点（平行なら中点）
+    const den=d1.x*d2.y-d1.y*d2.x;
+    if(Math.abs(den)<1e-6) return {x:(p1.x+p2.x)/2,y:(p1.y+p2.y)/2};
+    const t=((p2.x-p1.x)*d2.y-(p2.y-p1.y)*d2.x)/den;
+    return {x:p1.x+d1.x*t, y:p1.y+d1.y*t};
+  }
+  function segInt(p,p2,q,q2){
+    const d1={x:p2.x-p.x,y:p2.y-p.y}, d2={x:q2.x-q.x,y:q2.y-q.y};
+    const den=d1.x*d2.y-d1.y*d2.x; if(Math.abs(den)<1e-9) return false;
+    const t=((q.x-p.x)*d2.y-(q.y-p.y)*d2.x)/den, u=((q.x-p.x)*d1.y-(q.y-p.y)*d1.x)/den;
+    return t>0.02&&t<0.98&&u>0.02&&u<0.98;
+  }
+  let _seed=20260725;
+  function rnd(){ _seed=(_seed*1664525+1013904223)|0; return ((_seed>>>8)&0xffffff)/0x1000000; }
+  function rint(n){ return Math.min(n-1, Math.floor(rnd()*n)); }
+
+  /* ================================================================== */
+  /*  2. ネットワーク生成                                                */
+  /* ================================================================== */
+  let net=null;
+  const DEGK={E:0,N:90,W:180,S:270};
+  const CORN=[V(JH,JH),V(-JH,JH),V(-JH,-JH),V(JH,-JH)];        // 45°,135°,225°,315°
+  function cornIdx(angDeg){ const a=((angDeg%360)+360)%360; return (Math.round((a-45)/90)%4+4)%4; }
+
+  function buildNet(){
+    const nodes=[], nAt={}, segs=[], lanes=[], links=[], crossings=[],
+          props=[], curbs=[], walks=[], fillets=[];
+
+    /* ---- ノード ---- */
+    for(let j=0;j<JY.length;j++)for(let i=0;i<JX.length;i++){
+      const n={id:'n'+i+j,i,j,x:JX[i],y:JY[j],arms:{},armList:[],
+               signal:false,offset:0,occ:[],inLanes:[],outLanes:[],links:[]};
+      nodes.push(n); nAt[n.id]=n;
+    }
+    function dirKey(d){ return Math.abs(d.x)>Math.abs(d.y)?(d.x>0?'E':'W'):(d.y>0?'N':'S'); }
+    function arm(node,key,sg,outLane,inLane){
+      let A=node.arms[key];
+      if(!A){ const d=key==='E'?V(1,0):key==='W'?V(-1,0):key==='N'?V(0,1):V(0,-1);
+        A={key,dir:d,seg:sg,out:null,in:null,stop:false,cross:null,node};
+        node.arms[key]=A; node.armList.push(A); }
+      if(outLane)A.out=outLane; if(inLane)A.in=inLane;
+    }
+    /* ---- 区間（すべて軸並行＝既存の inRect 高速パスがそのまま効く） ---- */
+    function mkSeg(a,b,limit){
+      const d=unit(b.x-a.x,b.y-a.y);
+      const sg={id:a.id+'_'+b.id, a, b, d, limit,
+        len:Math.hypot(b.x-a.x,b.y-a.y),
+        rect:rect(Math.min(a.x,b.x)-(d.x?0:RH), Math.min(a.y,b.y)-(d.y?0:RH),
+                  Math.max(a.x,b.x)+(d.x?0:RH), Math.max(a.y,b.y)+(d.y?0:RH))};
+      for(const s of [1,-1]){                    // 双方向（日本＝左側通行）
+        const from=s>0?a:b, to=s>0?b:a, dd=s>0?d:neg(d), nn=leftN(dd);
+        const p0=add(add(from,dd,LSTART),nn,LH), p1=add(add(to,dd,-LSTART),nn,LH);
+        const L=mkWay({id:'L'+sg.id+(s>0?'+':'-'), kind:'lane', pts:[p0,p1], seg:sg,
+                       from, to, dir:dd, limit, ev:[], next:[], actors:[]});
+        lanes.push(L); from.outLanes.push(L); to.inLanes.push(L);
+        arm(from, dirKey(dd), sg, L, null);      // 出発ノード：このアームの流出車線
+        arm(to,   dirKey(neg(dd)), sg, null, L); // 到着ノード：このアームの流入車線
+      }
+      segs.push(sg); return sg;
+    }
+    for(let j=0;j<JY.length;j++) for(let i=0;i<JX.length-1;i++)
+      mkSeg(nAt['n'+i+j], nAt['n'+(i+1)+j], 40);
+    for(let i=0;i<JX.length;i++)
+      mkSeg(nAt['n'+i+'0'], nAt['n'+i+'1'], i===1?30:40);      // 中央の縦道は30km/h
+
+    /* ---- 路上駐車＋その車線の膨らまし（障害物回避の練習） ----
+       車線ポリライン自体を膨らませるので、AI・お手本経路・自車の採点が
+       すべて同じ「回避ライン」を共有する。3.5m車線に幅1.78mの駐車車両が
+       いれば実際にセンターラインへはみ出すので、その区間だけ中央線の
+       減点を免除し、代わりに「合図」と「対向車の確認」を採点する。 */
+    function bowLane(L,s0,s1,off,trans){
+      const n=leftN(L.dir), a=L.pts[0];
+      const ms=[0,s0-trans,s0,s1,s1+trans,L.len]
+        .map(v=>clamp(v,0,L.len)).sort((p,q)=>p-q)
+        .filter((v,i,arr)=>i===0||v-arr[i-1]>0.05);
+      const pts=ms.map(t=>{
+        let k=0;
+        if(t>=s0&&t<=s1) k=off;
+        else if(t>s0-trans&&t<s0) k=off*(t-(s0-trans))/trans;
+        else if(t>s1&&t<s1+trans) k=off*(1-(t-s1)/trans);
+        return add(add(a,L.dir,t),n,k);
+      });
+      L.pts=pts; mkWay(L);
+      L.bow={s0:s0-trans, s1:s1+trans, off};
+    }
+    (function parkedAndBow(){
+      const sg=segs.find(x=>x.id==='n10_n20'); if(!sg) return;
+      const d=sg.d, n=leftN(d);
+      const D0=26, D1=32.2;                       // ノードからの距離[m]
+      for(const D of [D0,D1]){
+        const p=add(add(sg.a,d,D),n,LH+0.5);      // 左車線内・縁石寄り
+        props.push({kind:'parked', x:p.x, y:p.y, th:Math.atan2(d.y,d.x),
+                    len:4.5, wid:1.78, h:1.42, col:'#4a5468'});
+      }
+      const L=lanes.find(x=>x.id==='Ln10_n20+'); if(!L) return;
+      bowLane(L, (D0-LSTART)-4.5, (D1-LSTART)+4.5, -1.60, 7.0);
+    })();
+
+    /* ---- 交差点の制御 ---- */
+    nAt.n11.signal=true; nAt.n11.offset=0;                     // 信号交差点
+    if(nAt.n10.arms.N) nAt.n10.arms.N.stop=true;               // T字：縦道が非優先＝一時停止
+
+    /* ---- 横断歩道 ---- */
+    function addCross(node,key){
+      const A=node.arms[key]; if(!A) return null;
+      const d=A.dir, c=add(node,d,JH+2.6);
+      const cr={id:'X'+node.id+key, x:c.x,y:c.y, ax:d, tx:leftN(d), half:RH, depth:4.0,
+                node, arm:A, axis:(key==='E'||key==='W')?'EW':'NS', peds:[]};
+      A.cross=cr; crossings.push(cr); return cr;
+    }
+    for(const k of ['E','W','S','N']) addCross(nAt.n11,k);
+    addCross(nAt.n10,'N');
+    (function midCross(){                                       // 単路の横断歩道（信号なし）
+      const sg=segs.find(s=>s.id==='n00_n10'); if(!sg)return;
+      const c=add(sg.a,sg.d,35);
+      crossings.push({id:'Xmid', x:c.x,y:c.y, ax:sg.d, tx:leftN(sg.d), half:RH, depth:4.0,
+                      node:null, arm:null, axis:'EW', peds:[]});
+    })();
+
+    /* ---- リンク（交差点内の経路） ---- */
+    for(const n of nodes){
+      for(const A of n.armList){ if(!A.in) continue;
+        for(const B of n.armList){ if(!B.out || B===A) continue;
+          const inL=A.in, outL=B.out;
+          const p0=inL.pts[inL.pts.length-1], p2=outL.pts[0];
+          const c=xLine(p0,inL.dir,p2,neg(outL.dir));
+          const dth=normAng(Math.atan2(outL.dir.y,outL.dir.x)-Math.atan2(inL.dir.y,inL.dir.x));
+          const turn=Math.abs(dth)<0.35?'S':(dth>0?'L':'R');
+          const pts= turn==='S' ? [p0,p2] : bez(p0,c,p2,12);
+          const K=mkWay({id:'K'+inL.id+'>'+outL.id, kind:'link', pts, node:n, turn,
+                         inLane:inL, outLane:outL, limit:outL.limit, dth,
+                         dir:outL.dir, next:[outL], actors:[], conflicts:[],
+                         outArm:B, exitCross:null});
+          links.push(K); inL.next.push(K); n.links.push(K);
+        }
+      }
+    }
+    /* 曲がった先の横断歩道（左折・右折時に歩行者を妨害しないための参照） */
+    for(const K of links) K.exitCross = K.outArm ? K.outArm.cross : null;
+
+    /* リンク同士の交差（＝競合）をビルド時に一度だけ算出：毎フレームは O(#conflicts) */
+    for(const n of nodes){
+      for(let i=0;i<n.links.length;i++)for(let j=i+1;j<n.links.length;j++){
+        const A=n.links[i], B=n.links[j];
+        if(A.inLane===B.inLane) continue;
+        let hit=false;
+        for(let p=0;p<A.pts.length-1&&!hit;p++)
+          for(let q=0;q<B.pts.length-1&&!hit;q++)
+            if(segInt(A.pts[p],A.pts[p+1],B.pts[q],B.pts[q+1])) hit=true;
+        if(hit){ A.conflicts.push(B); B.conflicts.push(A); }
+      }
+    }
+
+    /* ---- 車線ごとのイベント（停止線・横断歩道）を距離順に ---- */
+    for(const L of lanes){
+      const node=L.to;
+      const d=L.dir;                                            // 流入車線のアームは進行方向の逆
+      const key=Math.abs(d.x)>Math.abs(d.y)?(d.x>0?'W':'E'):(d.y>0?'S':'N');
+      const A=node.arms[key], cross=A?A.cross:null;
+      // ノード中心から距離 D の点は s = len-(D-LSTART)。停止線は横断歩道の直前＝JH+5.2
+      const stopD=JH+5.2;
+      L.ev.push({type:'stop', s:Math.max(0.5,L.len-(stopD-LSTART)), node, arm:A,
+                 ctl: node.signal?'signal':(A&&A.stop?'stop':'none')});
+      if(cross) L.ev.push({type:'cross', s:Math.max(0.5,L.len-0.35), cross});
+      for(const cr of crossings){ if(cr.node) continue;         // 単路の横断歩道
+        const pr=wayProject(L,cr.x,cr.y);
+        if(pr.d<LW*0.9 && pr.s>2 && pr.s<L.len-2)
+          L.ev.push({type:'cross', s:pr.s-cr.depth/2-0.4, cross:cr});
+      }
+      L.ev.sort((a,b)=>a.s-b.s);
+    }
+
+    /* ---- 縁石ポリライン＋歩道（3D・俯瞰で共用） ---- */
+    for(const sg of segs){ const d=sg.d, n=leftN(d);
+      for(const s of [1,-1]){ const off=s*RH;
+        curbs.push({pts:[add(add(sg.a,d,JH),n,off), add(add(sg.b,d,-JH),n,off)]});
+        walks.push(mkWay({pts:[add(add(sg.a,d,JH+1),n,off+1.7),
+                               add(add(sg.b,d,-JH-1),n,off+1.7)]}));
+      }
+    }
+    /* 交差点まわりの縁石：アームの端点間を交差点正方形の角づたいに閉じる。
+       90°の角には「隅切り」を入れる。全長4.58m・最小回転半径3.7mの車は、
+       3.5m車線どうしの直角左折を尖った角のままでは内輪が必ず縁石に乗るため、
+       実際の狭い交差点と同じく角を落として通行可能面を広げる。 */
+    for(const n of nodes){
+      const arms=n.armList.slice().sort((a,b)=>
+        Math.atan2(a.dir.y,a.dir.x)-Math.atan2(b.dir.y,b.dir.x));
+      for(let i=0;i<arms.length;i++){
+        const A=arms[i], B=arms[(i+1)%arms.length];
+        const iA=cornIdx(DEGK[A.key]+45), iB=cornIdx(DEGK[B.key]-45);
+        if(iA===iB){                                   // 90°の角＝隅切り
+          const c=CORN[iA], sx=Math.sign(c.x), sy=Math.sign(c.y);
+          fillets.push(rect(n.x+sx*JH, n.y+sy*JH, n.x+sx*(JH+CUT), n.y+sy*(JH+CUT)));
+          curbs.push({pts:[{x:n.x+sx*(JH+CUT), y:n.y+sy*JH},
+                           {x:n.x+sx*JH,       y:n.y+sy*(JH+CUT)}]});
+          continue;
+        }
+        const pts=[]; let k=iA, guard=0;
+        pts.push({x:n.x+CORN[k].x, y:n.y+CORN[k].y});
+        while(k!==iB && guard++<5){ k=(k+1)%4; pts.push({x:n.x+CORN[k].x, y:n.y+CORN[k].y}); }
+        if(pts.length>1) curbs.push({pts});
+      }
+    }
+
+    /* ---- 建物（見通しの悪さ＋街並み） ---- */
+    for(const [x0,y0,x1,y1] of [[0,0,70,60],[70,0,150,60]]){
+      const bx0=x0+RH+4, by0=y0+RH+4, bx1=x1-RH-4, by1=y1-RH-4;
+      for(let k=0;k<4;k++){
+        const w=8+rnd()*10, l=9+rnd()*12;
+        const cx=bx0+w/2+rnd()*Math.max(1,(bx1-bx0)-w),
+              cy=by0+l/2+rnd()*Math.max(1,(by1-by0)-l);
+        props.push({kind:'building', x:cx, y:cy, w, l, h:4.5+rnd()*7,
+                    col:['#8d8578','#7e8a90','#93867c','#7c8478'][k%4]});
+      }
+    }
+    /* ---- 標識（進行方向の左側に立てる） ---- */
+    function sign(node,key,type,val){
+      const A=node&&node.arms[key]; if(!A) return;
+      const travel=neg(A.dir), nl=leftN(travel);
+      const p=add(add(node,A.dir,JH+7), nl, RH+0.9);
+      props.push({kind:'sign', x:p.x, y:p.y, th:Math.atan2(-travel.y,-travel.x),
+                  type, val, h:2.3});
+    }
+    sign(nAt.n10,'N','stop');            // 止まれ（中央縦道→n10 の流入）
+    sign(nAt.n11,'S','limit',30);        // 30km/h（中央縦道）
+    sign(nAt.n10,'W','limit',40);
+    for(const cr of crossings){ if(cr.node) continue;
+      const p=add(V(cr.x,cr.y), cr.tx, RH+0.9);
+      props.push({kind:'sign', x:p.x, y:p.y,
+                  th:Math.atan2(-cr.ax.y,-cr.ax.x), type:'cross', h:2.3}); }
+
+    /* ---- 信号機（各流入アームの対向側・進行方向左） ---- */
+    for(const n of nodes){ if(!n.signal) continue;
+      for(const A of n.armList){ if(!A.in) continue;
+        const travel=neg(A.dir), nl=leftN(travel);
+        const p=add(add(n,travel,JH+1.4), nl, RH+0.6);
+        props.push({kind:'signal', x:p.x, y:p.y, th:Math.atan2(-travel.y,-travel.x),
+                    node:n, group:(A.key==='E'||A.key==='W')?'EW':'NS', h:5.1});
+        if(A.cross){ const q=add(V(A.cross.x,A.cross.y), A.cross.tx, RH+1.0);
+          props.push({kind:'pedsig', x:q.x, y:q.y,
+                      th:Math.atan2(-A.cross.tx.y,-A.cross.tx.x),
+                      node:n, axis:A.cross.axis, h:2.6}); }
+      }
+    }
+
+    net={nodes,nAt,segs,lanes,links,crossings,props,curbs,walks,fillets,
+         ways:lanes.concat(links)};
+    return net;
+  }
+
+  /* ================================================================== */
+  /*  3. コース（Mモデル）生成                                           */
+  /* ================================================================== */
+  let ROUTE=null, model=null;
+
+  function buildCourse(){
+    const N=buildNet();
+    /* 検定ルート：直進 → 左折 → 左折 → 信号左折 → 一時停止して右折 → 路端停車 */
+    const seq=[
+      {node:'n10', turn:'S', say:'そのまま直進してください'},
+      {node:'n20', turn:'L', say:'次の交差点を左折'},
+      {node:'n21', turn:'L', say:'次の交差点を左折'},
+      {node:'n11', turn:'L', say:'信号を左折'},
+      {node:'n10', turn:'R', say:'「止まれ」で停止してから右折'},
+      {node:null,  turn:'END', say:'左に寄せて安全な場所に停車してください'}
+    ];
+    const startLane=N.lanes.find(l=>l.id==='Ln00_n10+')||N.lanes[0];
+    const ways=[startLane]; let cur=startLane, ok=true;
+    for(const st of seq){
+      if(st.turn==='END') break;
+      const K=cur.next.find(k=>k.turn===st.turn && k.node.id===st.node);
+      if(!K){ ok=false; break; }
+      st.link=K; st.nodeRef=K.node;
+      ways.push(K,K.outLane); cur=K.outLane;
+    }
+    ROUTE={seq,ways,ok,goalLane:cur};
+
+    /* 路端停車の目標枠：最終車線の終端手前26m、左端に寄せて */
+    const gs=Math.max(6,cur.len-26), gp=wayAt(cur,gs), gd=cur.dir, gn=leftN(gd);
+    const yose=LH-C.width/2-0.30;                 // 車体左側面が縁石から30cm
+    const gc=add(V(gp.x,gp.y), gn, yose);
+    const hw2=C.width/2+0.75, hl2=C.length/2+2.6;
+    const hx=Math.abs(gd.x)>0.5?hl2:hw2, hy=Math.abs(gd.x)>0.5?hw2:hl2;
+    const bay=rect(gc.x-hx, gc.y-hy, gc.x+hx, gc.y+hy);
+    ROUTE.bay=bay; ROUTE.goalS=gs;
+
+    /* 走行可能面：区間の矩形＋交差点の正方形（すべて軸並行） */
+    const rects=N.segs.map(s=>s.rect)
+      .concat(N.nodes.map(n=>rect(n.x-JH,n.y-JH,n.x+JH,n.y+JH)))
+      .concat(N.fillets);                       // 隅切り（角の通行可能面）
+
+    /* お手本＝ルートの中心線（既存の青い破線がそのままルート表示になる） */
+    const path=[];
+    for(const w of ROUTE.ways){ const n2=Math.max(2,Math.ceil(w.len/1.5));
+      for(let i=0;i<=n2;i++){ const p=wayAt(w,w.len*i/n2); path.push({x:p.x,y:p.y,th:p.th}); } }
+
+    const st0=wayAt(startLane,6);
+    model={
+      id:'road', title:'路上教習（一般道）', lockLabel:'左', successKind:'road',
+      turnRefX:null, appY:st0.y,
+      speedLimitMs:22,                      // ≒80km/h のガバナ。実際の制限は区間ごとに採点
+      rects, obstacles:[], bay, poles:[], parkedCars:[], curbY:null, curbs:[],
+      ramps:null, corridors:null, hideRectEdges:true,
+      ideal:{path, end:{x:gc.x,y:gc.y,th:Math.atan2(gd.y,gd.x)}},
+      start:{x:st0.x,y:st0.y,th:st0.th},
+      coach:'指示に従って走行。合図は30m手前、左折は巻き込み確認。最後は左に寄せて停車',
+      net:N, route:ROUTE
+    };
+    return model;
+  }
+
+  /* ================================================================== */
+  /*  4. 信号の状態機械                                                  */
+  /* ================================================================== */
+  let T=0;
+  function cycleLen(){ const c=CFG.cycle; return 2*(c.g+c.y+c.ar); }
+  function phaseOf(node){ const L=cycleLen(); return ((T+(node.offset||0))%L+L)%L; }
+  function sigVeh(node,group){                       // 'G'|'Y'|'R'
+    if(!node||!node.signal) return 'G';
+    const c=CFG.cycle, half=c.g+c.y+c.ar, L=cycleLen(), p=phaseOf(node);
+    const q = group==='EW' ? p : (p+half)%L;
+    return q<c.g?'G':q<c.g+c.y?'Y':'R';
+  }
+  function sigPed(node,axis){                        // 'G'|'F'|'R'|'X'(信号なし)
+    if(!node||!node.signal) return 'X';
+    const c=CFG.cycle, half=c.g+c.y+c.ar, L=cycleLen(), p=phaseOf(node);
+    const q = axis==='EW' ? (p+half)%L : p;          // またぐ車道が赤＝直交側が青の間
+    if(q<1.0) return 'R';
+    if(q<c.g-4.5) return 'G';
+    if(q<c.g-1.0) return 'F';
+    return 'R';
+  }
+
+  /* ================================================================== */
+  /*  5. アクター（AI車・歩行者）                                        */
+  /* ================================================================== */
+  const cars=[], peds=[];
+  let nextId=1;
+  const CARCOLS=['#2f4f7a','#7a3f3a','#5a6a4a','#6d6f78','#3f5f5a','#7b6a3f','#4a3f6a','#8a8f96'];
+
+  function newCar(way,s){
+    const p=wayAt(way,s);
+    const a={id:nextId++, kind:'car', way, s, v:way.limit*KMH*(0.72+rnd()*0.22),
+      v0:way.limit*KMH*(0.85+rnd()*0.22), x:p.x, y:p.y, th:p.th,
+      len:4.3+rnd()*0.7, wid:1.70+rnd()*0.12, col:CARCOLS[rint(CARCOLS.length)],
+      brake:0, ind:0, stopDone:false, stopT:0, alive:true};
+    pickNext(a); cars.push(a); return a;
+  }
+  function pickNext(a){
+    const nx=a.way.next;
+    if(!nx||!nx.length){ a.nextWay=null; return; }
+    if(a.way.kind==='link'){ a.nextWay=nx[0]; a.ind=0; return; }
+    let cand=nx.filter(k=>k.outLane.seg!==a.way.seg);            // Uターンは除外
+    if(!cand.length) cand=nx;
+    const straight=cand.filter(k=>k.turn==='S');
+    const pick=(straight.length&&rnd()<0.55)?straight[rint(straight.length)]:cand[rint(cand.length)];
+    a.nextWay=pick;
+    a.ind = pick.turn==='L'?-1:pick.turn==='R'?1:0;              // AIも合図を出す
+  }
+  function advanceCar(a){
+    const nw=a.nextWay;
+    if(!nw){ a.alive=false; return; }
+    if(a.way.kind==='link'&&a.way.node) releaseNode(a.way.node,a);
+    a.way=nw; a.stopDone=false; a.stopT=0;
+    if(a.way.kind==='link'&&a.way.node) reserveNode(a.way.node,a);
+    pickNext(a);
+  }
+  function reserveNode(n,a){ if(n.occ.indexOf(a)<0) n.occ.push(a); }
+  function releaseNode(n,a){ const i=n.occ.indexOf(a); if(i>=0) n.occ.splice(i,1); }
+
+  /* --- IDM --- */
+  function idm(v,v0,gap,dv){
+    const I=CFG.idm;
+    const ss=I.s0+Math.max(0, v*I.T + v*dv/(2*Math.sqrt(I.a*I.b)));
+    const free=1-Math.pow(Math.max(0,v)/Math.max(0.5,v0), I.delta);
+    const g=Math.max(0.35,gap);
+    return I.a*(free-(ss/g)*(ss/g));
+  }
+  /* 先行車：同一way→次way→その次way まで（自車の擬似アクターも含む） */
+  function leaderOf(a){
+    let best=null, bg=1e9;
+    const scan=(Wy,off,minS)=>{
+      const lst=Wy.actors;
+      for(let i=0;i<lst.length;i++){ const b=lst[i];
+        if(b===a || b.s<=minS) continue;
+        const gap=off+(b.s-minS)-(a.len/2+(b.len||4.4)/2);
+        if(gap<bg){ bg=gap; best=b; } }
+    };
+    scan(a.way,0,a.s);
+    // 合流：出口車線が同じ別リンクの車が自分より合流点に近ければ先行車として扱う。
+    // （交差点の「予約」で解くとデッドロックするので、追従だけで解決する）
+    if(a.way.kind==='link'&&a.way.node){
+      const myTo=a.way.len-a.s;
+      for(const K of a.way.node.links){
+        if(K===a.way||K.outLane!==a.way.outLane) continue;
+        for(const b of K.actors){
+          const bTo=K.len-b.s;
+          if(bTo>=myTo) continue;                       // 相手のほうが後ろ
+          const gap=(myTo-bTo)-(a.len/2+(b.len||4.4)/2);
+          if(gap<bg){ bg=gap; best=b; }
+        }
+      }
+    }
+    if(bg>60&&a.nextWay){
+      scan(a.nextWay, a.way.len-a.s, 0);
+      const n2=a.nextWay.next&&a.nextWay.next[0];
+      if(bg>60&&n2) scan(n2,(a.way.len-a.s)+a.nextWay.len,0);
+    }
+    return best?{a:best,gap:bg,v:best.v||0}:null;
+  }
+  /* 横断中の歩行者が車道上（＋わずかな余裕）にいるか。
+     待機中の歩行者や、渡り終えて歩道に上がった歩行者では止まらない。 */
+  function crossBusy(cr){
+    for(const p of cr.peds){ if(!p.alive||p.waiting) continue;
+      const rel=(p.x-cr.x)*cr.tx.x+(p.y-cr.y)*cr.tx.y;
+      if(Math.abs(rel)<cr.half+0.5) return true; }
+    return false;
+  }
+  function oncoming(K){                                   // 右折 vs 対向直進
+    for(const O of K.node.links){
+      if(O===K||O.turn!=='S') continue;
+      const dot=O.inLane.dir.x*K.inLane.dir.x+O.inLane.dir.y*K.inLane.dir.y;
+      if(dot>-0.7) continue;                              // 対向でない
+      for(const b of O.inLane.actors) if(O.inLane.len-b.s<28 && (b.v||0)>0.4) return true;
+      for(const b of O.actors) if(b.alive!==false) return true;
+    }
+    return false;
+  }
+  function crossTraffic(K){                               // 一時停止側から見た優先道路
+    const n=K.node;
+    const mine=Math.abs(K.inLane.dir.x)>Math.abs(K.inLane.dir.y)?'EW':'NS';
+    for(const L of n.inLanes){
+      if(L===K.inLane) continue;
+      const ax=Math.abs(L.dir.x)>Math.abs(L.dir.y)?'EW':'NS';
+      if(ax===mine) continue;
+      for(const b of L.actors) if(L.len-b.s<26 && (b.v||0)>0.5) return true;
+    }
+    for(const b of n.occ) if(b.alive) return true;
+    return false;
+  }
+  function junctionBlocked(K,a){
+    for(const b of K.node.occ){
+      if(b===a || !b.way || !b.way.conflicts) continue;
+      if(b.way.conflicts.indexOf(K)>=0) return true; }
+    return false;
+  }
+  /* 停止すべき距離（なければ null） */
+  function stopDist(a){
+    let out=null;
+    const push=d=>{ if(d!=null&&(out==null||d<out)) out=Math.max(0,d); };
+    const Wy=a.way;
+    if(Wy.kind==='link'){
+      // 交差点内：曲がった先の横断歩道に歩行者がいれば手前で待つ
+      if(Wy.exitCross&&crossBusy(Wy.exitCross)) push((Wy.len-(LEAD-0.6))-a.s);
+      return out;
+    }
+    for(const e of Wy.ev){
+      const d=e.s-a.s;
+      if(d<-1.5||d>55) continue;
+      if(e.type==='cross'){ if(crossBusy(e.cross)) push(d); continue; }
+      const K=a.nextWay;
+      if(e.ctl==='signal'){
+        const grp=(e.arm&&(e.arm.key==='E'||e.arm.key==='W'))?'EW':'NS';
+        const st=sigVeh(e.node,grp);
+        if(st==='R') push(d);
+        else if(st==='Y' && d>a.v*a.v/(2*3.0)+1.0) push(d);
+        else if(K&&K.turn==='R'&&oncoming(K)) push(d);
+        else if(K&&junctionBlocked(K,a)) push(d);
+        else if(K&&K.exitCross&&crossBusy(K.exitCross)) push(d);
+      } else if(e.ctl==='stop'){
+        if(!a.stopDone) push(d);
+        else if(K&&(crossTraffic(K)||junctionBlocked(K,a))) push(d);
+        else if(K&&K.exitCross&&crossBusy(K.exitCross)) push(d);
+      } else {
+        if(K&&junctionBlocked(K,a)) push(d);
+        if(K&&K.turn==='R'&&oncoming(K)) push(d);
+        if(K&&K.exitCross&&crossBusy(K.exitCross)) push(d);
+      }
+    }
+    return out;
+  }
+  function stepCar(a,dt){
+    let acc=idm(a.v,a.v0,1e6,0);
+    const L=leaderOf(a);
+    if(L) acc=Math.min(acc, idm(a.v,a.v0,L.gap,a.v-L.v));
+    const sd=stopDist(a);
+    if(sd!=null) acc=Math.min(acc, idm(a.v,a.v0,sd,a.v));
+    if(a.way.kind==='link'&&a.way.turn!=='S') acc=Math.min(acc,(4.6-a.v)*1.2);  // 交差点内は徐行
+    acc=clamp(acc,-5.0,2.2);
+    a.v=Math.max(0,a.v+acc*dt);
+    if(L&&L.gap<0.5) a.v=Math.min(a.v,0.25);   // 安全ネット：詰まりすぎたら這うだけ（凍結はさせない）
+    a.brake=acc<-0.7?1:0;
+    if(a.v<0.25){ a.stopT+=dt; if(a.stopT>0.45) a.stopDone=true; } else a.stopT=0;
+    a.s+=a.v*dt;
+    let guard=0;
+    while(a.s>a.way.len && guard++<4){ a.s-=a.way.len; advanceCar(a); if(!a.alive) return; }
+    const p=wayAt(a.way,a.s); a.x=p.x; a.y=p.y; a.th=p.th;
+  }
+
+  /* --- 歩行者 --- */
+  function newPedCross(cr,side){
+    const st=add(V(cr.x,cr.y), cr.tx, side*(cr.half+1.3));
+    const p={id:nextId++, kind:'ped', cross:cr, side, t:0, len:(cr.half+1.3)*2,
+             v:1.15+rnd()*0.45, x:st.x, y:st.y, waiting:true, wait:0,
+             col:['#c9553d','#3d6cc9','#37804f','#8a4f9c','#b0902f'][rint(5)], alive:true};
+    cr.peds.push(p); peds.push(p); return p;
+  }
+  function newPedWalk(Wy){
+    const s=rnd()*Wy.len, q=wayAt(Wy,s);
+    const p={id:nextId++, kind:'ped', walk:Wy, s, dir:rnd()<0.5?1:-1, v:1.0+rnd()*0.4,
+             x:q.x, y:q.y, waiting:false,
+             col:['#7a7f8a','#5c6470','#8a7a6a'][rint(3)], alive:true};
+    peds.push(p); return p;
+  }
+  function vehicleGap(cr){                       // 最も早く横断歩道へ到達する車までの秒数
+    let best=99;
+    const test=(x,y,th,v)=>{
+      const dx=x-cr.x, dy=y-cr.y;
+      const along=dx*cr.ax.x+dy*cr.ax.y, lat=dx*cr.tx.x+dy*cr.tx.y;
+      if(Math.abs(lat)>RH+1) return;
+      const app=-(Math.cos(th)*cr.ax.x+Math.sin(th)*cr.ax.y);   // 横断歩道へ近づく向きか
+      const d=app>0?along:-along;
+      if(d>0&&v>0.3) best=Math.min(best,d/v);
+    };
+    for(const a of cars) test(a.x,a.y,a.th,a.v);
+    test(car.x,car.y,car.th,Math.abs(car.v));
+    return best;
+  }
+  function stepPed(p,dt){
+    if(p.walk){
+      p.s+=p.v*p.dir*dt;
+      if(p.s<0||p.s>p.walk.len){ p.dir*=-1; p.s=clamp(p.s,0,p.walk.len); }
+      const q=wayAt(p.walk,p.s); p.x=q.x; p.y=q.y;
+      return;
+    }
+    const cr=p.cross;
+    if(p.waiting){
+      p.wait+=dt;
+      const go = (cr.node&&cr.node.signal) ? (sigPed(cr.node,cr.axis)==='G')
+                                           : (p.wait>1.2 && vehicleGap(cr)>3.2);
+      if(go) p.waiting=false;
+      return;
+    }
+    let v=p.v;
+    if(cr.node&&cr.node.signal&&sigPed(cr.node,cr.axis)==='F') v*=1.45;   // 点滅＝小走り
+    p.t+=v*dt;
+    const u=clamp(p.t/p.len,0,1);
+    const q=add(V(cr.x,cr.y), cr.tx, p.side*(cr.half+1.3)*(1-2*u));
+    p.x=q.x; p.y=q.y;
+    if(p.t>=p.len) p.alive=false;
+  }
+
+  /* ================================================================== */
+  /*  6. スポーン／デスポーン                                            */
+  /* ================================================================== */
+  function d2car(x,y){ return Math.hypot(x-car.x,y-car.y); }
+  const maxCars=()=>Math.round(CFG.maxCars*CFG.quality);
+  const maxPeds=()=>Math.round(CFG.maxPeds*CFG.quality);
+
+  function manage(){
+    for(let i=cars.length-1;i>=0;i--){ const a=cars[i];
+      if(!a.alive || d2car(a.x,a.y)>CFG.despawn){
+        if(a.way&&a.way.kind==='link'&&a.way.node) releaseNode(a.way.node,a);
+        a.alive=false; cars.splice(i,1); } }
+    for(let i=peds.length-1;i>=0;i--){ const p=peds[i];
+      if(!p.alive || d2car(p.x,p.y)>CFG.despawn*0.75){
+        if(p.cross){ const k=p.cross.peds.indexOf(p); if(k>=0) p.cross.peds.splice(k,1); }
+        p.alive=false; peds.splice(i,1); } }
+    let tries=0;
+    while(cars.length<maxCars() && tries++<14){
+      const L=net.lanes[rint(net.lanes.length)];
+      const s=rnd()*Math.max(1,L.len), p=wayAt(L,s), d=d2car(p.x,p.y);
+      if(d<CFG.spawnMin||d>CFG.spawnMax) continue;
+      let clear=true;
+      for(const b of L.actors) if(Math.abs(b.s-s)<16){ clear=false; break; }
+      if(!clear) continue;
+      const a=newCar(L,s); L.actors.push(a); L.actors.sort((x,y)=>x.s-y.s);
+    }
+    tries=0;
+    while(peds.length<maxPeds() && tries++<10){
+      if(rnd()<0.55){
+        const cr=net.crossings[rint(net.crossings.length)];
+        if(d2car(cr.x,cr.y)>CFG.spawnMax*0.8||cr.peds.length>=2) continue;
+        newPedCross(cr, rnd()<0.5?1:-1);
+      } else {
+        const Wy=net.walks[rint(net.walks.length)], q=wayAt(Wy,Wy.len/2);
+        if(d2car(q.x,q.y)>CFG.spawnMax*0.8) continue;
+        newPedWalk(Wy);
+      }
+    }
+  }
+
+  /* ================================================================== */
+  /*  7. 自車の状態把握＋ウインカー                                      */
+  /* ================================================================== */
+  const IND={side:0,t0:0,dist:0,th0:0,tick:0,warned:false};
+  const PS={ lane:null, way:null, s:0, lat:0, headErr:0, dist:0, limit:40,
+             instr:0, nextNode:null, nextTurn:null, nextDist:1e9,
+             onLane:false, wayKind:null, postLink:0, gapT:0, klT:0, spdT:0, centerT:0, offT:0, stopT:0, minStop:99,
+             stopOK:false, yellowAt:null, enteredNode:null, approachLat:null,
+             evalDone:{}, ego:null, done:false };
+  const faults=[];
+
+  function fault(name,pts){
+    if(PS.done||result) return;
+    if(pts<=0){ PS.done=true; finish('fail',name); return; }
+    deduct(name,pts); faults.push({name,pts,t:T});
+    if(!examMode) setCoach(name+`（−${pts}点）`,'bad');
+    if(SimAudio&&SimAudio.sfx&&SimAudio.sfx.chime) SimAudio.sfx.chime();
+  }
+  function fatal(reason){ if(PS.done||result) return; PS.done=true; finish('fail',reason); }
+
+  function projectPlayer(){
+    let bd=1e9,bw=null,bp=null;
+    for(const Wy of net.ways){
+      if(Math.hypot(Wy.mid.x-car.x,Wy.mid.y-car.y)>Wy.rad+16) continue;
+      const pr=wayProject(Wy,car.x,car.y);
+      if(pr.d<bd){ bd=pr.d; bw=Wy; bp=pr; }
+    }
+    // 交差点内は複数のリンクが出口車線で重なるため最近傍だけでは特定できない。
+    // 直前に走っていた車線から出ているリンクを優先して曖昧さを消す。
+    if(bw&&bw.kind==='link'&&PS.lane&&PS.lane.next.length){
+      let d2=1e9,w2=null,p2=null;
+      for(const K of PS.lane.next){ const pr=wayProject(K,car.x,car.y);
+        if(pr.d<d2){ d2=pr.d; w2=K; p2=pr; } }
+      if(w2&&d2<bd+3.0){ bd=d2; bw=w2; bp=p2; }
+    }
+    PS.dist=bd; PS.way=bw;
+    if(!bw){ PS.onLane=false; return; }
+    PS.s=bp.s; PS.lat=bp.lat; PS.headErr=normAng(car.th-bp.th); PS.limit=bw.limit||40;
+    const wasLink=(PS.wayKind==='link');
+    PS.wayKind=bw.kind;
+    PS.onLane=(bw.kind==='lane');
+    if(wasLink&&PS.onLane) PS.postLink=1.4;      // 交差点を出た直後は膨らむのが普通
+    // 車線に乗っている間だけ PS.s/PS.lat が車線基準になる。交差点内(link)では使わない
+    if(PS.onLane&&PS.lane!==bw){
+      PS.lane=bw; PS.stopOK=false; PS.stopT=0; PS.minStop=99;
+      PS.yellowAt=null; PS.approachLat=null;
+    }
+  }
+
+  function setInd(side){
+    if(IND.side===side){ IND.side=0; IND.dist=0; syncIndUI(); return; }
+    IND.side=side; IND.t0=T; IND.dist=0; IND.th0=car.th; IND.warned=false;
+    if(SimAudio&&SimAudio.sfx&&SimAudio.sfx.winker) SimAudio.sfx.winker();
+    syncIndUI();
+  }
+  function indUpdate(dt){
+    if(!IND.side){ syncIndUI(); return; }
+    IND.dist+=Math.abs(car.v)*dt;
+    IND.tick+=dt;
+    if(IND.tick>0.42){ IND.tick=0;
+      if(SimAudio&&SimAudio.sfx&&SimAudio.sfx.winker) SimAudio.sfx.winker(); }
+    // 旋回完了で自動キャンセル（実車どおり）
+    if(Math.abs(normAng(car.th-IND.th0))>70*DEG && Math.abs(car.steer)<6*DEG){
+      IND.side=0; IND.dist=0; }
+    else if(IND.dist>140 && !IND.warned){ IND.warned=true; fault('合図の出しっぱなし',PTS.sigStuck); }
+    syncIndUI();
+  }
+  let indElL=null, indElR=null, indRow=null;
+  function syncIndUI(){
+    if(!indElL) return;
+    const bl=Math.floor(T*2.4)%2===0;
+    indElL.style.background = IND.side<0 ? (bl?'#2fd46a':'#1c6a38') : '#1b2233';
+    indElR.style.background = IND.side>0 ? (bl?'#2fd46a':'#1c6a38') : '#1b2233';
+  }
+  function mountUI(){
+    if(indRow) return;
+    const host=document.getElementById('leftCluster'); if(!host) return;
+    indRow=document.createElement('div');
+    indRow.style.cssText='display:flex;gap:6px;margin-bottom:6px;';
+    const mk=t=>{ const b=document.createElement('button'); b.textContent=t;
+      b.style.cssText='flex:1;height:30px;border:0;border-radius:8px;background:#1b2233;'+
+                      'color:#e8eef8;font-weight:800;font-size:12.5px;'; return b; };
+    indElL=mk('⬅ 合図'); indElR=mk('合図 ➡');
+    indRow.appendChild(indElL); indRow.appendChild(indElR);
+    host.insertBefore(indRow,host.firstChild);
+    if(typeof bindTap==='function'){ bindTap(indElL,()=>setInd(-1)); bindTap(indElR,()=>setInd(1)); }
+    else { indElL.onclick=()=>setInd(-1); indElR.onclick=()=>setInd(1); }
+    indRow.style.display='none';
+  }
+  function showUI(on){ if(indRow) indRow.style.display=on?'flex':'none'; }
+
+  /* ================================================================== */
+  /*  8. ルート案内                                                      */
+  /* ================================================================== */
+  function announce(){
+    const st=ROUTE.seq[PS.instr]; if(!st) return;
+    setCoach('👨‍🏫 '+st.say,'');
+  }
+  function routeUpdate(){
+    const st=ROUTE.seq[PS.instr]; if(!st) return;
+    if(st.turn==='END'){
+      PS.nextNode=null; PS.nextTurn='END';
+      PS.nextDist=Math.hypot(car.x-model.ideal.end.x, car.y-model.ideal.end.y);
+      return;
+    }
+    const n=st.nodeRef; if(!n) return;
+    PS.nextNode=n; PS.nextTurn=st.turn;
+    PS.nextDist=Math.hypot(car.x-n.x, car.y-n.y);
+    if(PS.way&&PS.way.kind==='link'&&PS.way.node===n){
+      if(PS.way.turn!==st.turn && !PS.evalDone['wrong'+PS.instr]){
+        PS.evalDone['wrong'+PS.instr]=true; fault('指示と違う進路',PTS.route); }
+      PS.enteredNode=n;
+    }
+    if(PS.enteredNode===n && PS.way && PS.way.kind==='lane'){
+      PS.enteredNode=null; PS.instr++; announce();
+    }
+  }
+  /* 交差点30m手前での寄せ量を記録 */
+  function approachSample(){
+    if(!PS.onLane||!PS.lane) return;
+    const d=PS.lane.len-PS.s;
+    // 交差点の12m手前での横位置をラッチ＝「寄せてから曲がる」を判定する位置
+    if(d>16) PS.approachLat=null;
+    else if(d<12&&d>3&&PS.approachLat==null) PS.approachLat=PS.lat;
+  }
+
+  /* ================================================================== */
+  /*  9. 路上採点                                                        */
+  /* ================================================================== */
+  function nearestAhead(){
+    const c=Math.cos(car.th), s=Math.sin(car.th);
+    let best=null;
+    for(const a of cars){
+      const dx=a.x-car.x, dy=a.y-car.y, u=dx*c+dy*s, v=-dx*s+dy*c;
+      if(u<0.5||Math.abs(v)>1.6) continue;
+      const gap=u-(C.wheelbase+C.frontOverhang)-a.len/2;
+      if(!best||gap<best.gap) best={a,gap,v:a.v};
+    }
+    return best;
+  }
+  function oncomingNear(range){
+    const R=range||35, c=Math.cos(car.th), s=Math.sin(car.th);
+    for(const a of cars){ const u=(a.x-car.x)*c+(a.y-car.y)*s;
+      if(u>0&&u<R&&Math.cos(a.th-car.th)<-0.6) return true; }
+    return false;
+  }
+  /* 停止線・信号・横断歩道の通過判定 */
+  function laneEvents(dt){
+    const L=PS.lane;
+    for(const e of L.ev){
+      const d=e.s-PS.s, key=L.id+e.type+e.s.toFixed(1);
+      if(e.type!=='stop') continue;
+      if(e.ctl==='stop'){
+        if(d<12&&d>-0.4&&Math.abs(car.v)<0.25){
+          PS.stopT+=dt;
+          if(PS.stopT>0.4){ PS.stopOK=true; PS.minStop=Math.min(PS.minStop,Math.max(0,d)); }
+        }
+        if(d<=-0.4&&!PS.evalDone[key]){
+          PS.evalDone[key]=true;
+          if(!PS.stopOK){ fatal('一時不停止'); return; }
+          if(PS.minStop>3.0) fault('停止位置が停止線から遠い',PTS.stopFar);
+          PS.stopOK=false; PS.stopT=0; PS.minStop=99;
+        }
+      } else if(e.ctl==='signal'){
+        const grp=(e.arm&&(e.arm.key==='E'||e.arm.key==='W'))?'EW':'NS';
+        const st=sigVeh(e.node,grp);
+        if(st==='Y'&&PS.yellowAt==null) PS.yellowAt=d;
+        if(st==='G') PS.yellowAt=null;
+        if(d<=-0.4&&!PS.evalDone[key]){
+          PS.evalDone[key]=true;
+          if(st==='R'){ fatal('信号無視（赤）'); return; }
+          if(st==='Y'&&PS.yellowAt!=null&&PS.yellowAt>(car.v*car.v)/(2*3.0)+1.5)
+            fault('黄信号で進入',PTS.yellow);
+        }
+      }
+    }
+  }
+  /* 交差点進入時の総合評価（合図・徐行・巻き込み確認・寄せ） */
+  function evalJunction(K){
+    if(K.turn==='S') return;
+    const want=K.turn==='L'?-1:1;
+    if(IND.side!==want){
+      fault(IND.side===0?'進路変更の合図なし':'合図の方向を間違い',
+            IND.side===0?PTS.sigNone:PTS.sigWrong);
+    } else if(IND.dist<24) fault('合図が遅い（30m手前で出す）',PTS.sigLate);
+    if(Math.abs(car.v)*3.6>18) fault('交差点での徐行不足',PTS.slowIn);
+    const recent=t=>(tick-t)<300;                 // 直近およそ5秒（60fps）
+    if(K.turn==='L'){
+      if(!(recent(checks.L)&&recent(checks.back))) fault('左折時の巻き込み確認なし',PTS.blind);
+      if(PS.approachLat!=null&&PS.approachLat<0.30) fault('左折時の左寄せ不足',PTS.yoseL);
+    } else {
+      if(!recent(checks.R)) fault('右折時の後方確認なし',PTS.blind);
+      if(PS.approachLat!=null&&PS.approachLat>-0.30) fault('右折時の右寄せ不足',PTS.yoseR);
+    }
+  }
+  /* 自車の前方にある横断歩道（車線／交差点内の双方）。コーチ表示にも使える */
+  function crossAhead(){
+    const Wy=PS.way; if(!Wy) return null;
+    if(Wy.kind==='link'){
+      if(!Wy.exitCross) return null;
+      return {cross:Wy.exitCross, d:(Wy.len-(LEAD-0.6))-PS.s, busy:crossBusy(Wy.exitCross)};
+    }
+    let best=null;
+    for(const e of Wy.ev){ if(e.type!=='cross') continue;
+      const d=e.s-PS.s; if(d<-1.5||d>40) continue;
+      if(!best||d<best.d) best={cross:e.cross,d,busy:crossBusy(e.cross)}; }
+    return best;
+  }
+  function pedBlockCheck(){
+    // 交差点内（左右折の先）の横断歩道
+    if(PS.way&&PS.way.kind==='link'&&PS.way.exitCross){
+      const cr=PS.way.exitCross, d=(PS.way.len-(LEAD-0.6))-PS.s;
+      if(d<6&&Math.abs(car.v)>1.2){
+        for(const p of cr.peds){ if(!p.alive||p.waiting) continue;
+          const rel=(p.x-cr.x)*cr.tx.x+(p.y-cr.y)*cr.tx.y;
+          if(Math.abs(rel)<cr.half+0.8){ fatal('横断歩行者の妨害（曲がった先）'); return; } }
+      }
+      return;
+    }
+    if(!PS.onLane||!PS.lane) return;
+    for(const e of PS.lane.ev){
+      if(e.type!=='cross') continue;
+      const d=e.s-PS.s;
+      if(d<=-1.2||d>=3.5) continue;
+      const cr=e.cross;
+      if(Math.abs(car.v)>1.2){
+        for(const p of cr.peds){
+          if(!p.alive||p.waiting) continue;
+          const rel=(p.x-cr.x)*cr.tx.x+(p.y-cr.y)*cr.tx.y;
+          if(Math.abs(rel)<cr.half+0.8){ fatal('横断歩行者の妨害'); return; }
+        }
+      }
+      const k='pw'+cr.id;
+      if(!PS.evalDone[k]&&Math.abs(car.v)*3.6>16){
+        for(const p of cr.peds) if(p.waiting){ PS.evalDone[k]=true;
+          fault('横断歩道の手前で減速せず',PTS.pedSlow); break; }
+      }
+    }
+  }
+  function collisionCheck(){
+    const per=carPerimeter(car,0.45);
+    const hitBox=(ox,oy,oth,ol,ow)=>{
+      const c=Math.cos(oth), s=Math.sin(oth);
+      for(const p of per){ const dx=p.x-ox, dy=p.y-oy;
+        if(Math.abs(dx*c+dy*s)<ol/2 && Math.abs(-dx*s+dy*c)<ow/2) return true; }
+      return false;
+    };
+    for(const a of cars){ if(Math.hypot(a.x-car.x,a.y-car.y)>7) continue;
+      if(hitBox(a.x,a.y,a.th,a.len,a.wid)) return true; }
+    for(const o of net.props){ if(o.kind!=='parked') continue;
+      if(Math.hypot(o.x-car.x,o.y-car.y)>7) continue;
+      if(hitBox(o.x,o.y,o.th,o.len,o.wid)) return true; }
+    // 歩行者は「自車が動いているとき」だけ接触扱い。
+    // 停止中の車に歩行者が寄ってきただけで検定中止にはしない。
+    if(Math.abs(car.v)>0.30)
+      for(const p of peds){ if(Math.hypot(p.x-car.x,p.y-car.y)>4) continue;
+        for(const q of per) if(Math.hypot(q.x-p.x,q.y-p.y)<0.34) return true; }
+    return false;
+  }
+  function goalCheck(){
+    if(PS.instr<ROUTE.seq.length-1) return;
+    const b=model.bay;
+    if(!carCorners(car).every(p=>inRect(b,p.x,p.y))) return;
+    if(Math.abs(car.v)>0.05) return;
+    if(!PS.evalDone.goalHint){ PS.evalDone.goalHint=true;
+      if(!examMode) setCoach('停止 → シフトP → サイドブレーキで完了','ok'); }
+    if(gear==='P'&&handbrake){
+      if(IND.side!==-1&&!PS.evalDone.goalSig){ PS.evalDone.goalSig=true;
+        fault('停車の合図なし',PTS.sigNone); }
+      if(PS.lat<0.40) deduct('路端への寄せ不足',5);
+      PS.done=true; finish('success');
+    }
+  }
+  function scoreUpdate(dt){
+    if(PS.done||result) return;
+    const spd=Math.abs(car.v), kmh=spd*3.6, lim=PS.limit;
+
+    /* 速度超過 */
+    if(kmh>lim+4){
+      PS.spdT+=dt;
+      if(kmh>lim+20){ fatal('速度超過（+20km/h超）'); return; }
+      const k='spd'+Math.floor(T/12);
+      if(PS.spdT>1.2&&!PS.evalDone[k]){ PS.evalDone[k]=true;
+        fault(`速度超過（${lim}km/h区間）`,PTS.speed); }
+    } else PS.spdT=0;
+
+    /* 車間距離 */
+    if(PS.onLane&&spd>4){
+      const ld=nearestAhead();
+      if(ld&&ld.gap<Math.max(3.0,spd*0.9)){
+        PS.gapT+=dt;
+        const k='gap'+Math.floor(T/20);
+        if(PS.gapT>1.6&&!PS.evalDone[k]){ PS.evalDone[k]=true; fault('車間距離不足',PTS.gap); }
+      } else PS.gapT=0;
+    } else PS.gapT=0;
+
+    /* キープレフト／中央線はみ出し（lat>0＝左＝路肩側） */
+    if(PS.onLane&&spd>2){
+      const bow=PS.lane&&PS.lane.bow;
+      const inBow=!!(bow&&PS.s>bow.s0-2&&PS.s<bow.s1+2);
+      if(inBow&&!PS.evalDone['bow'+PS.lane.id]){
+        PS.evalDone['bow'+PS.lane.id]=true;
+        if(IND.side!==1) fault('障害物回避の合図なし',PTS.sigNone);
+        if(oncomingNear(14)) fault('対向車があるのに障害物を回避',PTS.gap);
+        else if(!examMode) setCoach('駐車車両を避けます。右合図→対向車を確認→ふくらむ','');
+      }
+      // 車体の右端が中央線を越えた量で判定（lat は車体中心。半車幅ぶんの余裕をみる）
+      const OVER=-(LH-C.width/2)-0.20;         // ≒-1.05：右端が中央線を20cm越えた
+      const FATAL_OVER=OVER-0.5;
+      if(!inBow&&PS.postLink<=0&&PS.lat<OVER){
+        PS.centerT+=dt;
+        const k='cen'+Math.floor(T/15);
+        if(PS.centerT>0.6&&!PS.evalDone[k]){ PS.evalDone[k]=true;
+          if(oncomingNear()&&PS.lat<FATAL_OVER){ fatal('対向車線へのはみ出し'); return; }
+          fault('中央線からのはみ出し',PTS.centerOver); }
+      } else PS.centerT=0;
+      // 右折のための進路変更中（右合図）は中央寄りが正しいので対象外
+      if(!inBow&&PS.postLink<=0&&IND.side!==1&&PS.lat<-0.45&&PS.lat>=OVER){
+        PS.klT+=dt;
+        const k='kl'+Math.floor(T/30);
+        if(PS.klT>4.0&&!PS.evalDone[k]){ PS.evalDone[k]=true; fault('キープレフト不良',PTS.keepLeft); }
+      } else PS.klT=0;
+    }
+
+    if(PS.onLane){ laneEvents(dt); if(PS.done||result) return; }
+
+    if(PS.way&&PS.way.kind==='link'){
+      const k='jx'+PS.way.id+PS.instr;
+      if(!PS.evalDone[k]){ PS.evalDone[k]=true; evalJunction(PS.way);
+        if(PS.done||result) return; }
+    }
+
+    pedBlockCheck();               if(PS.done||result) return;
+    if(collisionCheck()){ try{ contactFail=true; }catch(_){}
+      fatal('接触事故'); return; }
+
+    /* 路外逸脱（タイヤが車道の外へ） */
+    const wp=wheelPositions(car);
+    let off=false;
+    for(const k in wp) if(!drivable(wp[k].x,wp[k].y)){ off=true; break; }
+    if(off){ PS.offT+=dt; if(PS.offT>0.5){ fatal('路外逸脱（脱輪）'); return; } }
+    else PS.offT=0;
+
+    goalCheck();
+  }
+
+  /* ================================================================== */
+  /* 10. 毎フレーム更新                                                  */
+  /* ================================================================== */
+  let acc=0;
+  function stepWorld(dt){
+    T+=dt;
+    for(const Wy of net.ways) Wy.actors.length=0;
+    for(const a of cars) if(a.alive) a.way.actors.push(a);
+    // 自車も擬似アクターとして車線に載せる＝AIが自車に反応して詰まる／譲る
+    if(PS.way&&PS.dist<3.2){
+      PS.ego=PS.ego||{id:0,kind:'ego',len:C.length,wid:C.width,alive:true};
+      PS.ego.s=PS.s; PS.ego.v=Math.abs(car.v); PS.ego.x=car.x; PS.ego.y=car.y;
+      PS.ego.th=car.th; PS.ego.way=PS.way;
+      PS.way.actors.push(PS.ego);
+    }
+    for(const Wy of net.ways) Wy.actors.sort((p,q)=>p.s-q.s);
+    for(const a of cars) if(a.alive) stepCar(a,dt);
+    for(const p of peds) if(p.alive) stepPed(p,dt);
+  }
+  function update(dt){
+    if(!net||!model) return;
+    projectPlayer();
+    acc+=dt;
+    const h=1/CFG.aiHz;
+    let n=0;
+    while(acc>=h&&n++<4){ stepWorld(h); acc-=h; }
+    if(PS.postLink>0) PS.postLink-=dt;
+    manage();
+    indUpdate(dt);
+    approachSample();
+    routeUpdate();
+    scoreUpdate(dt);
+    if(Object.keys(PS.evalDone).length>500) PS.evalDone={};
+  }
+
+  /* ================================================================== */
+  /* 11. 俯瞰描画（既存の ctx / wx / wy / PPM を使う）                    */
+  /* ================================================================== */
+  function drawTop(){
+    if(!net||!model) return;
+    const g=ctx;
+    const vis=(x,y,r)=>{ const X=wx(x),Y=wy(y); return X>-r&&Y>-r&&X<W+r&&Y<H+r; };
+    /* 縁石 */
+    g.strokeStyle='#6d7f9c'; g.lineWidth=Math.max(1.5,0.16*PPM); g.lineJoin='round';
+    for(const cb of net.curbs){
+      if(!vis(cb.pts[0].x,cb.pts[0].y,120)&&!vis(cb.pts[cb.pts.length-1].x,cb.pts[cb.pts.length-1].y,120)) continue;
+      g.beginPath();
+      cb.pts.forEach((p,i)=>i?g.lineTo(wx(p.x),wy(p.y)):g.moveTo(wx(p.x),wy(p.y)));
+      g.stroke();
+    }
+    /* 中央線（黄・破線）と車道外側線（白） */
+    for(const sg of net.segs){
+      const d=sg.d, n=leftN(d), a=add(sg.a,d,JH), b=add(sg.b,d,-JH);
+      if(!vis(a.x,a.y,140)&&!vis(b.x,b.y,140)) continue;
+      g.strokeStyle='rgba(238,208,90,.85)'; g.lineWidth=Math.max(1.4,0.16*PPM);
+      g.setLineDash([3*PPM,3*PPM]);
+      g.beginPath(); g.moveTo(wx(a.x),wy(a.y)); g.lineTo(wx(b.x),wy(b.y)); g.stroke();
+      g.setLineDash([]);
+      g.strokeStyle='rgba(232,238,246,.55)'; g.lineWidth=Math.max(1,0.12*PPM);
+      for(const s of [1,-1]){ const p0=add(a,n,s*(RH-0.35)), p1=add(b,n,s*(RH-0.35));
+        g.beginPath(); g.moveTo(wx(p0.x),wy(p0.y)); g.lineTo(wx(p1.x),wy(p1.y)); g.stroke(); }
+    }
+    /* 停止線 */
+    g.strokeStyle='rgba(240,246,255,.9)'; g.lineWidth=Math.max(2,0.42*PPM);
+    for(const L of net.lanes){
+      const e=L.ev.find(x=>x.type==='stop'); if(!e||e.ctl==='none') continue;
+      const p=wayAt(L,e.s); if(!vis(p.x,p.y,40)) continue;
+      const n=leftN(L.dir), p0=add(p,n,-LH+0.1), p1=add(p,n,LH-0.1);
+      g.beginPath(); g.moveTo(wx(p0.x),wy(p0.y)); g.lineTo(wx(p1.x),wy(p1.y)); g.stroke();
+    }
+    /* 横断歩道 */
+    g.fillStyle='rgba(240,246,255,.85)';
+    for(const cr of net.crossings){
+      if(!vis(cr.x,cr.y,60)) continue;
+      const nS=Math.max(4,Math.floor(cr.half*2/0.9));
+      for(let i=0;i<nS;i++){
+        const t=-cr.half+(i+0.25)*(cr.half*2/nS);
+        const c0=add(add(V(cr.x,cr.y),cr.tx,t),cr.ax,-cr.depth/2),
+              c1=add(add(V(cr.x,cr.y),cr.tx,t+0.45),cr.ax,-cr.depth/2),
+              c2=add(c1,cr.ax,cr.depth), c3=add(c0,cr.ax,cr.depth);
+        g.beginPath(); g.moveTo(wx(c0.x),wy(c0.y)); g.lineTo(wx(c1.x),wy(c1.y));
+        g.lineTo(wx(c2.x),wy(c2.y)); g.lineTo(wx(c3.x),wy(c3.y)); g.closePath(); g.fill();
+      }
+    }
+    /* 建物・路上駐車 */
+    for(const o of net.props){
+      if(o.kind==='building'){
+        if(!vis(o.x,o.y,80)) continue;
+        g.globalAlpha=.55; g.fillStyle=o.col;
+        g.fillRect(wx(o.x-o.w/2),wy(o.y+o.l/2),o.w*PPM,o.l*PPM); g.globalAlpha=1;
+        g.strokeStyle='rgba(20,26,36,.6)'; g.lineWidth=1;
+        g.strokeRect(wx(o.x-o.w/2),wy(o.y+o.l/2),o.w*PPM,o.l*PPM);
+      } else if(o.kind==='parked'&&vis(o.x,o.y,30)){
+        drawTopCar(g,o.x,o.y,o.th,o.len,o.wid,'#3a445d',0,0);
+      }
+    }
+    /* 信号（俯瞰は色つきの点） */
+    for(const o of net.props){
+      if(o.kind!=='signal'||!vis(o.x,o.y,40)) continue;
+      const st=sigVeh(o.node,o.group);
+      g.fillStyle= st==='G'?'#2fd46a':st==='Y'?'#ffd23f':'#ff4d4d';
+      g.beginPath(); g.arc(wx(o.x),wy(o.y),Math.max(3,0.30*PPM),0,7); g.fill();
+      g.strokeStyle='#0b1524'; g.lineWidth=1.2; g.stroke();
+    }
+    /* 交通アクター */
+    for(const a of cars) if(vis(a.x,a.y,30))
+      drawTopCar(g,a.x,a.y,a.th,a.len,a.wid,a.col,a.brake,a.ind);
+    for(const p of peds){
+      if(!vis(p.x,p.y,20)) continue;
+      g.fillStyle=p.col; g.beginPath(); g.arc(wx(p.x),wy(p.y),Math.max(2,0.26*PPM),0,7); g.fill();
+      g.strokeStyle='rgba(10,14,22,.8)'; g.lineWidth=1; g.stroke();
+    }
+    /* 次の指示 */
+    if(PS.nextNode&&!examMode){
+      const n=PS.nextNode, X=wx(n.x), Y=wy(n.y), al=0.45+0.35*Math.abs(Math.sin(tick*0.10));
+      g.globalAlpha=al; g.strokeStyle='#4da3ff'; g.lineWidth=3;
+      g.beginPath(); g.arc(X,Y,Math.max(10,RH*PPM*0.9),0,7); g.stroke(); g.globalAlpha=1;
+      g.fillStyle='#4da3ff'; g.font='bold 12px system-ui'; g.textAlign='center';
+      g.fillText(PS.nextTurn==='L'?'← 左折':PS.nextTurn==='R'?'右折 →':'直進',X,Y-RH*PPM-6);
+      g.textAlign='left';
+    }
+  }
+  function drawTopCar(g,x,y,th,len,wid,col,brake,ind){
+    g.save(); g.translate(wx(x),wy(y)); g.rotate(-th);
+    const L=len*PPM, Wd=wid*PPM, e=Math.max(1.5,0.16*PPM);
+    g.fillStyle='rgba(0,0,0,.30)'; g.fillRect(-L/2+2,-Wd/2+2,L,Wd);
+    g.fillStyle=col; g.fillRect(-L/2,-Wd/2,L,Wd);
+    g.fillStyle='rgba(255,255,255,.12)'; g.fillRect(-L/2,-Wd/2,L,Wd*0.42);
+    g.fillStyle='#161d2a'; g.fillRect(-L*0.22,-Wd*0.40,L*0.42,Wd*0.80);
+    g.strokeStyle='rgba(10,16,26,.85)'; g.lineWidth=1; g.strokeRect(-L/2,-Wd/2,L,Wd);
+    if(brake){ g.fillStyle='#ff4d4d'; g.fillRect(-L/2,-Wd/2,e,Wd); }
+    if(ind&&Math.floor(T*2.4)%2===0){
+      g.fillStyle='#ffb020';
+      g.fillRect(L/2-e, ind<0?-Wd/2:Wd/2-e*1.3, e, e*1.3);
+    }
+    g.restore();
+  }
+
+  /* ================================================================== */
+  /* 12. 3D描画（mkProj が返す proj を受け取る）                          */
+  /* ================================================================== */
+  const _q=[];
+  function draw3D(proj,g,view){
+    if(!net||!model) return;
+    const v=view||'front';
+    const range=CFG.range[v]||CFG.range.front, mr=CFG.mrange[v]||CFG.mrange.front;
+    const simple=(v==='mirror'||v==='rear');
+    mark3D(proj,g,mr,simple);
+    _q.length=0;
+    for(const o of net.props){
+      const d=Math.hypot(o.x-car.x,o.y-car.y);
+      if(d>range) continue;
+      if(simple&&(o.kind==='sign'||o.kind==='pedsig')&&d>range*0.55) continue;
+      const p=proj(o.x,o.y,0); if(!p) continue;
+      _q.push({d:p.depth,o,t:o.kind});
+    }
+    for(const a of cars){
+      if(Math.hypot(a.x-car.x,a.y-car.y)>range) continue;
+      const p=proj(a.x,a.y,0); if(!p) continue; _q.push({d:p.depth,o:a,t:'car'});
+    }
+    for(const p0 of peds){
+      if(Math.hypot(p0.x-car.x,p0.y-car.y)>range*0.75) continue;
+      const p=proj(p0.x,p0.y,0); if(!p) continue; _q.push({d:p.depth,o:p0,t:'ped'});
+    }
+    _q.sort((a,b)=>b.d-a.d);
+    const cap=simple?14:32, start=Math.max(0,_q.length-cap);
+    for(let i=start;i<_q.length;i++){
+      const it=_q[i], o=it.o, far=it.d>CFG.lodFar||simple;
+      switch(it.t){
+        case 'building': box3(proj,g,o.x,o.y,o.w,o.l,o.h,o.col); break;
+        case 'parked':   car3(proj,g,o.x,o.y,o.th,o.len,o.wid,o.col,0,0,far); break;
+        case 'car':      car3(proj,g,o.x,o.y,o.th,o.len,o.wid,o.col,o.brake,o.ind,far); break;
+        case 'ped':      ped3(proj,g,o); break;
+        case 'signal':   signal3(proj,g,o); break;
+        case 'pedsig':   pedsig3(proj,g,o); break;
+        case 'sign':     sign3(proj,g,o); break;
+      }
+    }
+  }
+  /* 路面マーキング＋縁石（距離に応じた適応ステップで O(可視) に保つ） */
+  function mark3D(proj,g,range,simple){
+    for(const cb of net.curbs){
+      for(let k=0;k<cb.pts.length-1;k++){
+        const a=cb.pts[k], b=cb.pts[k+1], L=Math.hypot(b.x-a.x,b.y-a.y);
+        if(L<0.01) continue;
+        let t=0, guard=0;
+        while(t<L&&guard++<80){
+          const u0=t/L, px=a.x+(b.x-a.x)*u0, py=a.y+(b.y-a.y)*u0;
+          const dm=Math.hypot(px-car.x,py-car.y);
+          const step=clamp(dm*0.22,0.9,9), t1=Math.min(L,t+step);
+          if(dm<=range){
+            const u1=t1/L, qx=a.x+(b.x-a.x)*u1, qy=a.y+(b.y-a.y)*u1;
+            const c0=proj(px,py,0.14), c1=proj(qx,qy,0.14),
+                  g0=proj(px,py,0),    g1=proj(qx,qy,0);
+            if(c0&&c1&&g0&&g1&&Math.min(c0.depth,c1.depth)>0.6){
+              g.fillStyle='#8a97ab'; g.beginPath();
+              g.moveTo(c0.x,c0.y); g.lineTo(c1.x,c1.y); g.lineTo(g1.x,g1.y); g.lineTo(g0.x,g0.y);
+              g.closePath(); g.fill();
+              if(!simple){ g.strokeStyle='#e8edf4';
+                g.lineWidth=clamp(26/c0.depth,1,3);
+                g.beginPath(); g.moveTo(c0.x,c0.y); g.lineTo(c1.x,c1.y); g.stroke(); }
+            }
+          }
+          t=t1;
+        }
+      }
+    }
+    for(const sg of net.segs){
+      const d=sg.d, n=leftN(d), a=add(sg.a,d,JH), b=add(sg.b,d,-JH);
+      if(Math.min(Math.hypot(a.x-car.x,a.y-car.y),Math.hypot(b.x-car.x,b.y-car.y))>range+sg.len) continue;
+      stripe(proj,g,a,b,0.16,'rgba(238,208,90,.95)',3,3,range);          // 中央線
+      for(const s of [1,-1])
+        stripe(proj,g,add(a,n,s*(RH-0.35)),add(b,n,s*(RH-0.35)),0.13,'rgba(238,244,252,.85)',0,0,range);
+    }
+    for(const L of net.lanes){
+      const e=L.ev.find(x=>x.type==='stop'); if(!e||e.ctl==='none') continue;
+      const p=wayAt(L,e.s);
+      if(Math.hypot(p.x-car.x,p.y-car.y)>range) continue;
+      const n=leftN(L.dir);
+      quad(proj,g,add(add(p,n,-LH+0.1),L.dir,-0.22),add(add(p,n,LH-0.1),L.dir,-0.22),
+                  add(add(p,n,LH-0.1),L.dir, 0.22),add(add(p,n,-LH+0.1),L.dir, 0.22),
+           'rgba(242,247,255,.95)');
+    }
+    for(const cr of net.crossings){
+      if(Math.hypot(cr.x-car.x,cr.y-car.y)>range) continue;
+      const nS=Math.max(4,Math.floor(cr.half*2/0.9));
+      for(let i=0;i<nS;i++){
+        const t=-cr.half+(i+0.25)*(cr.half*2/nS);
+        const c0=add(add(V(cr.x,cr.y),cr.tx,t),cr.ax,-cr.depth/2),
+              c1=add(add(V(cr.x,cr.y),cr.tx,t+0.45),cr.ax,-cr.depth/2);
+        quad(proj,g,c0,c1,add(c1,cr.ax,cr.depth),add(c0,cr.ax,cr.depth),'rgba(242,247,255,.92)');
+      }
+    }
+  }
+  function stripe(proj,g,a,b,wd,col,dash,gap,range){
+    const L=Math.hypot(b.x-a.x,b.y-a.y);
+    if(L<0.01) return;
+    const d=unit(b.x-a.x,b.y-a.y), n=leftN(d), seg=dash>0?(dash+gap):L;
+    for(let s=0;s<L;s+=seg){
+      const e=Math.min(L,s+(dash>0?dash:L));
+      const p0=add(a,d,s), p1=add(a,d,e);
+      const dm=Math.min(Math.hypot(p0.x-car.x,p0.y-car.y),Math.hypot(p1.x-car.x,p1.y-car.y));
+      if(dm>range) continue;
+      quad(proj,g,add(p0,n,-wd),add(p1,n,-wd),add(p1,n,wd),add(p0,n,wd),col);
+    }
+  }
+  function quad(proj,g,a,b,c,d,col){
+    const z=0.012;
+    const p0=proj(a.x,a.y,z),p1=proj(b.x,b.y,z),p2=proj(c.x,c.y,z),p3=proj(d.x,d.y,z);
+    if(!p0||!p1||!p2||!p3) return;
+    g.fillStyle=col; g.beginPath(); g.moveTo(p0.x,p0.y);
+    g.lineTo(p1.x,p1.y); g.lineTo(p2.x,p2.y); g.lineTo(p3.x,p3.y); g.closePath(); g.fill();
+  }
+  function shade(col,k){
+    if(col[0]!=='#') return col;
+    const n=parseInt(col.slice(1),16);
+    return 'rgb('+(clamp(((n>>16)&255)*k,0,255)|0)+','+(clamp(((n>>8)&255)*k,0,255)|0)+','+
+           (clamp((n&255)*k,0,255)|0)+')';
+  }
+  /* 直方体（建物）：側面を奥から手前へ→最後に天面 */
+  function box3(proj,g,cx,cy,w,l,h,col){
+    const P=[V(cx-w/2,cy-l/2),V(cx+w/2,cy-l/2),V(cx+w/2,cy+l/2),V(cx-w/2,cy+l/2)];
+    const bot=P.map(p=>proj(p.x,p.y,0)), top=P.map(p=>proj(p.x,p.y,h));
+    if(bot.some(p=>!p)||top.some(p=>!p)) return;
+    const f=[]; for(let i=0;i<4;i++){ const j=(i+1)%4; f.push({d:(bot[i].depth+bot[j].depth)/2,i,j}); }
+    f.sort((a,b)=>b.d-a.d);
+    for(const q of f){
+      g.fillStyle=shade(col,(q.i%2)?0.80:0.92);
+      g.beginPath(); g.moveTo(bot[q.i].x,bot[q.i].y); g.lineTo(bot[q.j].x,bot[q.j].y);
+      g.lineTo(top[q.j].x,top[q.j].y); g.lineTo(top[q.i].x,top[q.i].y); g.closePath(); g.fill();
+    }
+    g.fillStyle=shade(col,1.12); g.beginPath(); g.moveTo(top[0].x,top[0].y);
+    for(let i=1;i<4;i++) g.lineTo(top[i].x,top[i].y); g.closePath(); g.fill();
+    g.strokeStyle='rgba(12,18,28,.5)'; g.lineWidth=1; g.stroke();
+  }
+  /* AI車：影＋車体＋キャビン＋灯火（遠距離は車体のみのLOD） */
+  function car3(proj,g,cx,cy,th,len,wid,col,brake,ind,far){
+    const c=Math.cos(th), s=Math.sin(th), hl=len/2, hw=wid/2;
+    const P=(lx,ly)=>({x:cx+lx*c-ly*s, y:cy+lx*s+ly*c});
+    const body=[P(hl,hw),P(hl,-hw),P(-hl,-hw),P(-hl,hw)];
+    const bot=body.map(p=>proj(p.x,p.y,0.16)), top=body.map(p=>proj(p.x,p.y,0.90));
+    if(bot.some(p=>!p)||top.some(p=>!p)) return;
+    const sh=body.map(p=>proj(p.x,p.y,0.004));
+    if(!sh.some(p=>!p)){
+      g.fillStyle='rgba(0,0,0,.30)'; g.beginPath(); g.moveTo(sh[0].x,sh[0].y);
+      for(let i=1;i<4;i++) g.lineTo(sh[i].x,sh[i].y); g.closePath(); g.fill(); }
+    const f=[]; for(let i=0;i<4;i++){ const j=(i+1)%4; f.push({d:(bot[i].depth+bot[j].depth)/2,i,j}); }
+    f.sort((a,b)=>b.d-a.d);
+    for(const q of f){
+      g.fillStyle=shade(col,q.i===0?1.05:q.i===2?0.72:0.86);
+      g.beginPath(); g.moveTo(bot[q.i].x,bot[q.i].y); g.lineTo(bot[q.j].x,bot[q.j].y);
+      g.lineTo(top[q.j].x,top[q.j].y); g.lineTo(top[q.i].x,top[q.i].y); g.closePath(); g.fill();
+    }
+    g.fillStyle=shade(col,1.14); g.beginPath(); g.moveTo(top[0].x,top[0].y);
+    for(let i=1;i<4;i++) g.lineTo(top[i].x,top[i].y); g.closePath(); g.fill();
+    if(far) return;
+    const cab=[P(hl*0.42,hw*0.86),P(hl*0.42,-hw*0.86),P(-hl*0.55,-hw*0.86),P(-hl*0.55,hw*0.86)];
+    const cb=cab.map(p=>proj(p.x,p.y,0.90)), ct=cab.map(p=>proj(p.x,p.y,1.42));
+    if(!cb.some(p=>!p)&&!ct.some(p=>!p)){
+      const cf=[]; for(let i=0;i<4;i++){ const j=(i+1)%4; cf.push({d:(cb[i].depth+cb[j].depth)/2,i,j}); }
+      cf.sort((a,b)=>b.d-a.d);
+      for(const q of cf){
+        g.fillStyle= q.i===0?'rgba(150,195,230,.55)':q.i===2?'rgba(20,28,42,.92)':'rgba(30,40,58,.90)';
+        g.beginPath(); g.moveTo(cb[q.i].x,cb[q.i].y); g.lineTo(cb[q.j].x,cb[q.j].y);
+        g.lineTo(ct[q.j].x,ct[q.j].y); g.lineTo(ct[q.i].x,ct[q.i].y); g.closePath(); g.fill();
+      }
+      g.fillStyle=shade(col,0.95); g.beginPath(); g.moveTo(ct[0].x,ct[0].y);
+      for(let i=1;i<4;i++) g.lineTo(ct[i].x,ct[i].y); g.closePath(); g.fill();
+    }
+    lamp(proj,g,P( hl+0.02, hw*0.72),0.55,'rgba(255,246,214,.95)',0.30);
+    lamp(proj,g,P( hl+0.02,-hw*0.72),0.55,'rgba(255,246,214,.95)',0.30);
+    lamp(proj,g,P(-hl-0.02, hw*0.74),0.62,brake?'#ff5a5a':'#8a2020',0.28);
+    lamp(proj,g,P(-hl-0.02,-hw*0.74),0.62,brake?'#ff5a5a':'#8a2020',0.28);
+    if(ind&&Math.floor(T*2.4)%2===0){
+      const ly=ind<0?hw*0.86:-hw*0.86;
+      lamp(proj,g,P( hl-0.05,ly),0.58,'#ffb020',0.26);
+      lamp(proj,g,P(-hl+0.05,ly),0.60,'#ffb020',0.26);
+    }
+  }
+  function lamp(proj,g,p,z,col,r){
+    const q=proj(p.x,p.y,z); if(!q) return;
+    g.fillStyle=col; g.beginPath(); g.arc(q.x,q.y,clamp(r*260/q.depth,0.8,14),0,7); g.fill();
+  }
+  function ped3(proj,g,p){
+    const b=proj(p.x,p.y,0), t=proj(p.x,p.y,1.68);
+    if(!b||!t||b.depth<0.7) return;
+    const w=clamp(0.46*260/b.depth,1.2,26);
+    g.fillStyle='rgba(0,0,0,.28)';
+    g.beginPath(); g.ellipse(b.x,b.y,w*0.6,w*0.22,0,0,7); g.fill();
+    const hy=t.y+(b.y-t.y)*0.28;
+    g.fillStyle=p.col; g.fillRect(t.x-w/2,hy,w,b.y-hy);
+    g.fillStyle='rgba(20,26,36,.85)';
+    g.fillRect(t.x-w*0.34,hy+(b.y-hy)*0.55,w*0.68,(b.y-hy)*0.45);
+    g.fillStyle='#d8b48c';
+    g.beginPath(); g.arc(t.x,t.y+(b.y-t.y)*0.14,w*0.36,0,7); g.fill();
+  }
+  /* 車両信号（横型3灯：左から 青・黄・赤） */
+  function signal3(proj,g,o){
+    const st=sigVeh(o.node,o.group);
+    const base=proj(o.x,o.y,0), pt=proj(o.x,o.y,o.h);
+    if(!base||!pt||base.depth<1.0) return;
+    g.strokeStyle='#4a5260'; g.lineWidth=clamp(70/base.depth,1.5,9);
+    g.beginPath(); g.moveTo(base.x,base.y); g.lineTo(pt.x,pt.y); g.stroke();
+    const d=V(Math.cos(o.th),Math.sin(o.th)), hc=add(V(o.x,o.y),leftN(d),1.5);
+    const hb=proj(hc.x,hc.y,o.h-0.10), ht=proj(hc.x,hc.y,o.h+0.45);
+    if(!hb||!ht) return;
+    const bw=clamp(210/hb.depth,4,64), bh=Math.max(3,Math.abs(ht.y-hb.y)+2);
+    g.fillStyle='#20262f'; g.fillRect(hb.x-bw/2,ht.y,bw,bh);
+    g.strokeStyle='#0d1118'; g.lineWidth=1; g.strokeRect(hb.x-bw/2,ht.y,bw,bh);
+    const r=bw/8, cy=ht.y+bh/2, cols=[['G','#2fd46a'],['Y','#ffd23f'],['R','#ff4d4d']];
+    for(let i=0;i<3;i++){
+      const cx=hb.x-bw/2+bw*(0.2+0.3*i), on=cols[i][0]===st;
+      g.fillStyle=on?cols[i][1]:'#2a3038';
+      g.beginPath(); g.arc(cx,cy,r,0,7); g.fill();
+      if(on){ g.globalAlpha=0.32; g.beginPath(); g.arc(cx,cy,r*2.0,0,7); g.fill(); g.globalAlpha=1; }
+    }
+  }
+  function pedsig3(proj,g,o){
+    const st=sigPed(o.node,o.axis);
+    const base=proj(o.x,o.y,0), t=proj(o.x,o.y,o.h);
+    if(!base||!t||base.depth<1.2) return;
+    g.strokeStyle='#4a5260'; g.lineWidth=clamp(40/base.depth,1.2,6);
+    g.beginPath(); g.moveTo(base.x,base.y); g.lineTo(t.x,t.y); g.stroke();
+    const w=clamp(70/base.depth,3,26), h=w*1.7;
+    g.fillStyle='#20262f'; g.fillRect(t.x-w/2,t.y-h,w,h);
+    const on=(st==='G')||(st==='F'&&Math.floor(T*2)%2===0);
+    g.fillStyle=on?'#2fd46a':'#2a3038';
+    g.beginPath(); g.arc(t.x,t.y-h*0.72,w*0.30,0,7); g.fill();
+    g.fillStyle=(st==='R')?'#ff4d4d':'#2a3038';
+    g.beginPath(); g.arc(t.x,t.y-h*0.28,w*0.30,0,7); g.fill();
+  }
+  function sign3(proj,g,o){
+    const base=proj(o.x,o.y,0), t=proj(o.x,o.y,o.h);
+    if(!base||!t||base.depth<1.0) return;
+    g.strokeStyle='#8d949f'; g.lineWidth=clamp(28/base.depth,1,5);
+    g.beginPath(); g.moveTo(base.x,base.y); g.lineTo(t.x,t.y); g.stroke();
+    const r=clamp(90/base.depth,4,34);
+    if(o.type==='stop'){
+      g.fillStyle='#d0322f'; g.beginPath();
+      g.moveTo(t.x,t.y+r*1.1); g.lineTo(t.x-r*1.05,t.y-r*0.7); g.lineTo(t.x+r*1.05,t.y-r*0.7);
+      g.closePath(); g.fill();
+      g.strokeStyle='#fff'; g.lineWidth=Math.max(1,r*0.10); g.stroke();
+      if(r>9){ g.fillStyle='#fff'; g.font='bold '+Math.round(r*0.60)+'px system-ui';
+        g.textAlign='center'; g.fillText('止まれ',t.x,t.y-r*0.02); g.textAlign='left'; }
+    } else if(o.type==='limit'){
+      g.fillStyle='#f7f9fc'; g.beginPath(); g.arc(t.x,t.y,r,0,7); g.fill();
+      g.strokeStyle='#d0322f'; g.lineWidth=Math.max(1.5,r*0.20);
+      g.beginPath(); g.arc(t.x,t.y,r*0.86,0,7); g.stroke();
+      if(r>7){ g.fillStyle='#12305e'; g.font='bold '+Math.round(r*0.92)+'px system-ui';
+        g.textAlign='center'; g.textBaseline='middle'; g.fillText(String(o.val),t.x,t.y);
+        g.textAlign='left'; g.textBaseline='alphabetic'; }
+    } else {
+      g.fillStyle='#1b4fa0'; g.beginPath();
+      g.moveTo(t.x,t.y-r); g.lineTo(t.x+r,t.y); g.lineTo(t.x,t.y+r); g.lineTo(t.x-r,t.y);
+      g.closePath(); g.fill();
+      g.fillStyle='#fff'; g.fillRect(t.x-r*0.10,t.y-r*0.45,r*0.20,r*0.90);
+    }
+  }
+
+  /* ================================================================== */
+  /* 13. ライフサイクル                                                  */
+  /* ================================================================== */
+  function reset(){
+    T=0; acc=0;
+    cars.length=0; peds.length=0; faults.length=0;
+    for(const n of net.nodes) n.occ.length=0;
+    for(const cr of net.crossings) cr.peds.length=0;
+    for(const Wy of net.ways) Wy.actors.length=0;
+    IND.side=0; IND.dist=0; IND.tick=0; IND.warned=false;
+    PS.lane=null; PS.way=null; PS.onLane=false; PS.wayKind=null; PS.postLink=0;
+    PS.instr=0; PS.done=false; PS.ego=null;
+    PS.gapT=PS.klT=PS.spdT=PS.centerT=PS.offT=PS.stopT=0;
+    PS.minStop=99; PS.stopOK=false; PS.yellowAt=null;
+    PS.enteredNode=null; PS.approachLat=null; PS.nextNode=null; PS.evalDone={};
+    mountUI(); showUI(true); syncIndUI();
+    projectPlayer();
+    // 走り出しの街を先に走らせておく（無人の街から始めない）
+    for(let i=0;i<90;i++){ manage(); stepWorld(1/30); }
+    T=0;
+    projectPlayer();
+    announce();
+  }
+  function unload(){ showUI(false); }
+
+  return {
+    buildCourse, reset, unload, update, drawTop, draw3D,
+    setIndicator:setInd, crossAhead,
+    get model(){return model;}, get net(){return net;}, get state(){return PS;},
+    get indicator(){return IND;}, get faults(){return faults;},
+    get cars(){return cars;}, get peds(){return peds;},
+    sigVeh, sigPed, CFG
+  };
+})();
+
 const _perpR=buildPerpR();
 const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill(),
   scurve:buildSCurve(), crank:buildCrank(), railway:buildRailway(), signal:buildSignal() };
+try{ MODELS.road=ROAD.buildCourse(); }catch(e){ console.error('road course build failed',e); }
 
 /* ==================== 状態・エンジン ==================== */
 let M=null, bounds=null;
@@ -421,6 +1894,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   if(typeof setRearGlance==='function') setRearGlance(false); else rearGlance=false;
   cuePoleRef=M.poles.length?M.poles.reduce((a,b)=>Math.abs(b.x-M.turnRefX)<Math.abs(a.x-M.turnRefX)?b:a):null;
   checks.room=checks.L=checks.R=checks.back=-1e9;
+  if(M.successKind==='road'){ try{ ROAD.reset(); }catch(e){} } else { try{ ROAD.unload(); }catch(e){} }
   CAM.cx=car.x; CAM.cy=car.y;
   updateHbUI(); document.getElementById('resultPanel').classList.remove('show');
   document.getElementById('title').textContent=M.title;
@@ -1416,6 +2890,7 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     SimAudio.update({rpm:drive.rpm,speed:Math.abs(car.v),load:drive.load,
       slip:Math.max(drive.slip,LAT.slip,LAT.scrub*0.7),gear,braking:brakeHeld});
     signalUpdate(dt);
+    if(M.successKind==='road'&&!result){ try{ ROAD.update(dt); }catch(e){} }
     if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
   }
@@ -1462,6 +2937,8 @@ function updateLogic(){
     setCoach('鼻先が縁石の上に出るのは正常。タイヤが越えなければ脱輪ではない','ok'); break; } }
   // --- 坂道発進：停止線での停止 → 逆行させずに発進 → 坂上のゴール ---
   if(M.successKind==='hill'){ hillLogic(); return; }
+  // --- 路上教習：交通・歩行者・合図・信号は ROAD モジュールが採点する ---
+  if(M.successKind==='road') return;
   // --- 信号交差点：赤で停止、青で発進、赤進入は即中止 ---
   if(M.successKind==='signal'){ signalLogic(); return; }
   // --- 踏切：停止線での一時停止 → 安全確認 → 渡り切ってゴール ---
@@ -1851,6 +3328,7 @@ function renderSceneInner(){
   if(M.stopLineX!=null&&M.successKind==='railway'){   // 停止線
     ctx.strokeStyle='#e8edf4'; ctx.lineWidth=4;
     ctx.beginPath(); ctx.moveTo(wx(M.stopLineX),wy(-1.75)); ctx.lineTo(wx(M.stopLineX),wy(1.75)); ctx.stroke(); }
+  if(M.successKind==='road'){ try{ ROAD.drawTop(); }catch(e){} }
   if(showLines&&!examMode) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
@@ -2110,7 +3588,8 @@ function mSignals(proj,g){
       if(i===on){ g.globalAlpha=0.35; g.beginPath(); g.arc(cx,head.y,r*1.5,0,7); g.fill(); g.globalAlpha=1; } }
   }
 }
-function mWorld(proj,g){
+function mWorld(proj,g,view){
+  if(M.successKind==='road'){ try{ ROAD.draw3D(proj,g,view||'front'); }catch(e){} return; }
   for(const r of M.rects) mRect(proj,g,r,'rgba(200,215,235,.10)',1,0);
   mCorridorEdges(proj,g);
   mRails(proj,g);
@@ -2358,7 +3837,7 @@ function renderDoorMirror(side){
   POST_LW_CAP=Math.min(w,h)*0.05;                   // 小さいドアミラーだけ柵支柱の太さを制限
   mMirGround(g,w,h,horizon);                        // 1) 空／路面（フラット地平線＋質感）
   if(showGuide&&!examMode) drawMirrorGrid(g,proj,cam.x,cam.y,look);  // 2) 奥行きグリッド（練習補助・検定では消す）
-  mWorld(proj,g);                                   // 3) コース（縁石・白線・柵・駐車車両）
+  mWorld(proj,g,'mirror');                          // 3) コース（縁石・白線・柵・駐車車両）
   POST_LW_CAP=Infinity;
   // 4) 柵の角 検知（poleInMirror は常時更新）＋コーチングリング（検定では非表示）
   if(M.successKind==='perp' && cuePoleRef && side===(M.lockLabel==='右'?'R':'L') && !result){
