@@ -115,13 +115,6 @@
 
     <div id="real-select">
       <div class="levelgrid" id="real-grid"></div>
-      <div class="allclear hide" id="real-allclear">
-        <div class="t">🏆 全ステージクリア</div>
-        <div class="tiny" style="opacity:.8">広告に偽りはありませんでした（このゲームに限り）</div>
-      </div>
-      <div style="padding:0 14px 22px;text-align:center">
-        <button class="tiny" id="real-reset" style="text-decoration:underline">進行状況を消す</button>
-      </div>
     </div>
 
     <div id="real-play" class="hide">
@@ -139,6 +132,61 @@
         <button class="btn ghost" id="real-retry">やり直す</button>
         <button class="btn buy hide" id="real-next">次へ ›</button>
       </div>
+    </div>
+  </section>
+
+
+  <!-- 6b. 広告ギャラリー -->
+  <section class="screen" id="gallery">
+    <div class="realhead">
+      <span class="grow">広告で見たやつ</span>
+      <span class="tiny" id="gallery-sub"></span>
+    </div>
+    <div id="gallery-list">
+      <div class="tiny" style="padding:10px 16px 4px;line-height:1.7">
+        どれも「広告では見たのに、入れたら無かった」ゲームです。全部あります。
+      </div>
+      <div class="cards" id="gallery-cards"></div>
+      <div class="allclear hide" id="real-allclear">
+        <div class="t">🏆 全部クリア</div>
+        <div class="tiny" style="opacity:.8">広告に偽りはありませんでした（このゲームに限り）</div>
+      </div>
+      <details class="note">
+        <summary>これ、実際にあった話です</summary>
+        <p>
+          2020年9月、英国の広告基準協議会 (ASA) は Playrix の
+          「Homescapes」「Gardenscapes」の広告を、誤解を招くとして禁止しました。
+          広告に出てくるピン抜きパズルは、4000以上あるレベルのうち<b>約10レベル</b>にしか存在せず、
+          そこへ到達したプレイヤーは Playrix 自身の申告で<b>約0.03%</b>。
+        </p>
+        <p>
+          「※実際のゲーム画面とは異なります」という注記も、
+          誤認を打ち消すものとしては認められませんでした。
+          以来この判断は「広告はゲームの中心的な体験を反映していなければならない」という基準として
+          引用され続けています。
+        </p>
+      </details>
+      <div style="padding:0 14px 22px;text-align:center">
+        <button class="tiny" id="real-reset" style="text-decoration:underline">進行状況を消す</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6c. ミニゲーム -->
+  <section class="screen" id="mini">
+    <div class="realhead">
+      <button id="mini-back" style="font-size:20px;width:24px">‹</button>
+      <span class="grow" id="mini-title"></span>
+      <span class="tiny" id="mini-stage"></span>
+    </div>
+    <div class="stagewrap">
+      <canvas id="minicanvas"></canvas>
+      <div class="banner hide" id="mini-banner"></div>
+    </div>
+    <div class="realfoot">
+      <div class="hint" id="mini-hint"></div>
+      <button class="btn ghost" id="mini-retry">やり直す</button>
+      <button class="btn buy hide" id="mini-next">次へ ›</button>
     </div>
   </section>
 

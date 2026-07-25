@@ -3,8 +3,16 @@
 
 import { LEVELS, AD_LEVEL } from './levels.js';
 import { PuzzleView, renderThumb } from './puzzle.js';
+import { MiniHost } from './mini.js';
 import { Popups, Interstitial, MergeGame } from './fake.js';
 import { sfx } from './sfx.js';
+import { DIG } from './ads/dig.js';
+import { DRAWLINE } from './ads/drawline.js';
+import { GATE } from './ads/gate.js';
+import { PARKING } from './ads/parking.js';
+import { RESCUE } from './ads/rescue.js';
+import { TOWER } from './ads/tower.js';
+import { WATER } from './ads/water.js';
 
 const $ = (s) => document.querySelector(s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -38,22 +46,35 @@ window.addEventListener('resize', fit);
 
 /* ---------- 進行状況の保存 ---------- */
 
-const SAVE_KEY = 'pin-ad-game/cleared';
-function loadCleared() {
+// ゲーム ID -> クリア済みステージのキー集合。
+// ピン抜きはステージ ID (1..5)、ミニゲームはステージ番号 (0 始まり) を入れる。
+const SAVE_KEY = 'pin-ad-game/progress';
+
+function loadProgress() {
   try {
-    return new Set(JSON.parse(localStorage.getItem(SAVE_KEY) ?? '[]'));
+    const raw = JSON.parse(localStorage.getItem(SAVE_KEY) ?? '{}');
+    const out = {};
+    for (const k of Object.keys(raw)) out[k] = new Set(raw[k]);
+    return out;
   } catch {
-    return new Set();
+    return {};
   }
 }
-function saveCleared(set) {
+function saveProgress() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify([...set]));
+    const plain = {};
+    for (const k of Object.keys(progress)) plain[k] = [...progress[k]];
+    localStorage.setItem(SAVE_KEY, JSON.stringify(plain));
   } catch {
     /* プライベートモードなどでは黙って諦める */
   }
 }
-let cleared = loadCleared();
+let progress = loadProgress();
+const doneSet = (id) => (progress[id] ??= new Set());
+function markDone(id, key) {
+  doneSet(id).add(key);
+  saveProgress();
+}
 
 /* ---------- 描画ループ ---------- */
 
@@ -62,7 +83,12 @@ const realView = new PuzzleView($('#realcanvas'));
 let realLevel = null;
 let realResolved = false;
 
-function loop() {
+const miniHost = new MiniHost($('#minicanvas'), {
+  onWin: (stage) => finishMini(true, stage),
+  onLose: (stage, reason) => finishMini(false, stage, reason),
+});
+
+function loop(now) {
   if (current === 'ad') {
     adView.update();
     adView.draw();
@@ -73,6 +99,13 @@ function loop() {
     if (!realResolved && realView.state !== 'play') {
       realResolved = true;
       finishRealLevel(realView.state === 'won');
+    }
+  } else if (current === 'mini') {
+    miniHost.frame(now ?? 0);
+    // ゲーム側が hint を書き換えることがあるので、プレイ中は毎フレーム拾い直す
+    if (miniHost.state === 'play') {
+      const h = miniHost.game?.hint ?? '';
+      if ($('#mini-hint').textContent !== h) $('#mini-hint').textContent = h;
     }
   }
   requestAnimationFrame(loop);
@@ -310,25 +343,112 @@ async function doRefund() {
   $('#refund-done').classList.remove('hide');
 }
 
+/* ---------- 広告ギャラリー ---------- */
+
+// 広告で見かける定番ジャンルたち。ピン抜きだけは専用の画面を持つので別扱い。
+const MINI_GAMES = [RESCUE, GATE, WATER, PARKING, DRAWLINE, TOWER, DIG];
+
+const PIN_CARD = {
+  id: 'pin',
+  title: 'ピン抜きパズル',
+  hook: '順番を間違えると勇者が溶岩に沈む',
+  icon: '🧩',
+  reality: '実際は…タマゴ合体ゲーム',
+  tint: '#7a3b1f',
+  get stages() { return LEVELS.length; },
+};
+
+function galleryEntries() {
+  return [
+    { kind: 'pin', meta: PIN_CARD },
+    ...MINI_GAMES.map((g) => ({ kind: 'mini', entry: g, meta: g.meta })),
+  ];
+}
+
+function buildGallery() {
+  const wrap = $('#gallery-cards');
+  wrap.innerHTML = '';
+  let done = 0;
+  let total = 0;
+  for (const e of galleryEntries()) {
+    const n = doneSet(e.meta.id).size;
+    const all = n >= e.meta.stages;
+    done += n;
+    total += e.meta.stages;
+    const b = document.createElement('button');
+    b.className = 'adcard';
+    b.style.setProperty('--tint', e.meta.tint);
+    b.innerHTML =
+      `<span class="ic">${e.meta.icon}</span>` +
+      `<span class="tx"><span class="nm">${e.meta.title}</span>` +
+      `<div class="hk">${e.meta.hook}</div>` +
+      `<div class="rl">${e.meta.reality}</div></span>` +
+      `<span class="pg${all ? ' done' : ''}">${all ? '★' : ''}${n}/${e.meta.stages}</span>`;
+    b.onclick = () => (e.kind === 'pin' ? showSelect() : startMini(e.entry, firstUncleared(e.entry)));
+    wrap.append(b);
+  }
+  $('#gallery-sub').textContent = `${done} / ${total}`;
+  $('#real-allclear').classList.toggle('hide', done < total);
+}
+
+/** まだクリアしていない最初のステージ。全部済みなら 0 に戻す。 */
+function firstUncleared(entry) {
+  const set = doneSet(entry.meta.id);
+  for (let i = 0; i < entry.meta.stages; i++) if (!set.has(i)) return i;
+  return 0;
+}
+
+function showGallery() {
+  buildGallery();
+  go('gallery');
+}
+
+function startMini(entry, stage) {
+  miniHost.load(entry, stage);
+  $('#mini-title').textContent = entry.meta.title;
+  $('#mini-stage').textContent = `${stage + 1} / ${entry.meta.stages}`;
+  $('#mini-hint').textContent = miniHost.game.hint ?? '';
+  $('#mini-banner').classList.add('hide');
+  $('#mini-next').classList.add('hide');
+  go('mini');
+}
+
+function finishMini(won, stage, reason) {
+  const banner = $('#mini-banner');
+  banner.classList.remove('hide');
+  if (won) {
+    markDone(miniHost.entry.meta.id, stage);
+    const more = stage + 1 < miniHost.entry.meta.stages;
+    banner.innerHTML =
+      '<div class="t" style="color:#ffe27a">クリア！</div>' +
+      `<div class="s">${more ? '次のステージへ' : 'このジャンルは全部クリア'}</div>`;
+    $('#mini-next').classList.toggle('hide', !more);
+    $('#mini-hint').textContent = '';
+  } else {
+    banner.innerHTML =
+      '<div class="t" style="color:#ff6b6b">失敗…</div>' +
+      `<div class="s">${reason || 'やり直そう'}</div>`;
+    $('#mini-hint').textContent = miniHost.game.hint ?? '';
+  }
+}
+
 /* ---------- 本物のパズル ---------- */
 
 function buildLevelGrid() {
   const grid = $('#real-grid');
   grid.innerHTML = '';
   LEVELS.forEach((lv, i) => {
-    const open = i === 0 || cleared.has(LEVELS[i - 1].id);
+    const open = i === 0 || doneSet('pin').has(LEVELS[i - 1].id);
     const b = document.createElement('button');
     b.className = 'levelcard';
     b.disabled = !open;
     b.innerHTML =
       `<div class="no">STAGE ${lv.id}</div>` +
       `<div class="nm">${open ? lv.name : '？？？'}</div>` +
-      `<div class="st">${cleared.has(lv.id) ? '★ クリア' : open ? `目標 ${lv.need}` : '🔒 未解放'}</div>`;
+      `<div class="st">${doneSet('pin').has(lv.id) ? '★ クリア' : open ? `目標 ${lv.need}` : '🔒 未解放'}</div>`;
     b.onclick = () => startRealLevel(lv);
     grid.append(b);
   });
-  const all = LEVELS.every((l) => cleared.has(l.id));
-  $('#real-allclear').classList.toggle('hide', !all);
 }
 
 function showSelect() {
@@ -337,7 +457,7 @@ function showSelect() {
   $('#real-select').classList.remove('hide');
   $('#real-play').classList.add('hide');
   $('#real-title').textContent = 'ステージ選択';
-  $('#real-sub').textContent = `${cleared.size} / ${LEVELS.length} クリア`;
+  $('#real-sub').textContent = `${doneSet('pin').size} / ${LEVELS.length} クリア`;
   $('#real-back').classList.add('hide');
   go('real');
 }
@@ -370,8 +490,7 @@ function finishRealLevel(won) {
   banner.classList.remove('hide');
   if (won) {
     sfx.win();
-    cleared.add(realLevel.id);
-    saveCleared(cleared);
+    markDone('pin', realLevel.id);
     banner.innerHTML = '<div class="t" style="color:#ffe27a">クリア！</div><div class="s">お宝を届けた</div>';
     $('#real-next').classList.remove('hide');
     $('#real-hint').textContent = '';
@@ -403,15 +522,20 @@ function wire() {
   $('#ad-install').onclick = toStore;
   $('#store-install').onclick = doInstall;
   $('#install-open').onclick = toGame;
-  $('#refund-play').onclick = showSelect;
+  $('#refund-play').onclick = showGallery;
 
-  $('#real-back').onclick = showSelect;
+  $('#real-back').onclick = showGallery;
   $('#real-retry').onclick = () => startRealLevel(realLevel);
   $('#real-next').onclick = () => {
     const i = LEVELS.indexOf(realLevel);
     if (i + 1 < LEVELS.length) startRealLevel(LEVELS[i + 1]);
     else showSelect();
   };
+
+  $('#mini-back').onclick = showGallery;
+  $('#mini-retry').onclick = () => startMini(miniHost.entry, miniHost.stage);
+  $('#mini-next').onclick = () => startMini(miniHost.entry, miniHost.stage + 1);
+
   $('#real-reset').onclick = async () => {
     const a = await popups.show({
       title: '進行状況を消しますか？',
@@ -422,8 +546,9 @@ function wire() {
       ],
     });
     if (a !== 'yes') return;
-    cleared = new Set();
-    saveCleared(cleared);
+    progress = {};
+    saveProgress();
+    buildGallery();
     buildLevelGrid();
     toast('進行状況を消しました');
   };
@@ -432,4 +557,5 @@ function wire() {
 fit();
 wire();
 buildLevelGrid();
+buildGallery();
 requestAnimationFrame(loop);

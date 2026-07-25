@@ -97,10 +97,17 @@ await page.evaluate(() => merge.onRefund());
 await page.waitForSelector('#refund-done:not(.hide)', { timeout: 20000 });
 await shot('09-refund');
 
-step('本物のパズル');
+step('広告ギャラリー');
 await tapCta('#refund-play');
+await page.waitForSelector('#gallery.on');
 await page.waitForTimeout(300);
-await shot('10-levels');
+await shot('10-gallery');
+
+step('ピン抜きパズル');
+await page.click('#gallery-cards .adcard');
+await page.waitForSelector('#real.on');
+await page.waitForTimeout(300);
+await shot('10b-levels');
 
 await page.click('#real-grid .levelcard');
 await page.waitForTimeout(600);
@@ -138,8 +145,23 @@ for (let i = 1; i < 5; i++) {
   console.log(`  ステージ${i + 1}: ${won ? 'クリア' : `失敗(${info.s})`} 回収 ${info.c}/${info.n}`);
   if (!won) allCleared = false;
 }
-await page.evaluate(() => showSelect());
-await shot('13-all-clear');
+await page.evaluate(() => showGallery());
+await shot('13-gallery-progress');
+
+// ギャラリーに並んだ広告ゲームも 1 本ずつ自動クリアできるか
+step('広告ゲームの通し確認');
+const minis = await page.evaluate(() => MINI_GAMES.map((g) => g.meta.title));
+for (let i = 0; i < minis.length; i++) {
+  const r = await page.evaluate(async (i) => {
+    startMini(MINI_GAMES[i], 0);
+    await new Promise((r) => setTimeout(r, 150));
+    miniHost.game.solve();
+    for (let t = 0; t < 400 && miniHost.state === 'play'; t++) await new Promise((r) => setTimeout(r, 50));
+    return miniHost.state;
+  }, i);
+  console.log(`  ${minis[i]}: ${r === 'won' ? 'OK' : 'NG ' + r}`);
+  if (r !== 'won') allCleared = false;
+}
 
 await browser.close();
 
