@@ -39,6 +39,108 @@ class Worker:
 
 
 @dataclass
+class Tote:
+    """One physical unit of goods moving through the warehouse, as a replay track.
+
+    Same keyframe contract as :class:`Worker` — ``(t, x, y, state)`` with the same
+    rounding — so a viewer lerps a tote exactly like it lerps an agent. ``state``
+    is one of ``"carry"`` (in a picker's hands), ``"belt"`` (riding a conveyor) or
+    ``"pack"`` (at the discharge/pack point). Purely a replay artefact: the DES
+    timing is unchanged whether or not a tote is being recorded."""
+
+    id: str
+    keyframes: list[tuple] = field(default_factory=list)
+
+    def kf(self, t: float, x: float, y: float, state: str) -> None:
+        self.keyframes.append((round(t, 2), round(x, 3), round(y, 3), state))
+
+
+# Replay memory guard: at most this many tote tracks are recorded per run (the
+# FIRST N totes inside the replay window; every later tote rides untracked). A
+# busy shift can move tens of thousands of totes and each track is a list of
+# keyframes, so an uncapped emitter would dwarf the worker tracks.
+MAX_TOTE_TRACKS = 400
+
+# Fallback belt speed for a conveyor authored with a non-positive speed (the
+# schema defaults to 0.5 m/s; a hand-edited 0 must not divide by zero or freeze
+# the belt -- never-blocks).
+DEFAULT_CONVEYOR_SPEED_MPS = 0.5
+
+
+@dataclass
+class ConveyorLine:
+    """ONE physical conveyor: its own polyline, speed and slot capacity.
+
+    Geometry is the authored polyline ``points[0] -> ... -> points[-1]``; the LAST
+    point is the discharge end (where totes leave the belt to be packed). A tote
+    boards at the nearest point *on the path* (``project``) and rides only the
+    REMAINING distance to the discharge end, so boarding next to the discharge is
+    genuinely quicker than boarding at the infeed.
+
+    ``belt`` is this line's own slot pool (~1 tote per metre of ITS length, min 1),
+    so two conveyors jam independently and a slow pack stage backs up only the
+    line that feeds it."""
+
+    id: str
+    points: list[tuple[float, float]]
+    seglens: list[float]                    # euclidean length of each segment
+    length: float                           # total path length (m)
+    speed: float                            # m/s (> 0)
+    capacity: int                           # slots (~1 tote / metre)
+    belt: simpy.Resource
+
+    def project(self, p) -> tuple[tuple[float, float], float]:
+        """Nearest point ON the polyline to ``p`` + its arc length from the infeed.
+
+        Projects onto every segment (clamped to its ends) rather than snapping to
+        the nearest vertex -- a picker standing beside the middle of a 30 m belt
+        boards there, not at the far corner."""
+        px, py = float(p[0]), float(p[1])
+        best_d2 = float("inf")
+        best_xy = self.points[0]
+        best_arc = 0.0
+        arc = 0.0
+        for i, (a, b) in enumerate(zip(self.points, self.points[1:])):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            seg = self.seglens[i]
+            if seg <= 1e-12:
+                t = 0.0
+            else:
+                t = ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)
+                t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+            qx, qy = a[0] + dx * t, a[1] + dy * t
+            d2 = (px - qx) ** 2 + (py - qy) ** 2
+            if d2 < best_d2:
+                best_d2, best_xy, best_arc = d2, (qx, qy), arc + seg * t
+            arc += seg
+        return best_xy, best_arc
+
+    def remaining(self, arc: float) -> float:
+        """Metres left from arc length ``arc`` to the discharge end."""
+        return max(self.length - max(arc, 0.0), 0.0)
+
+    def tail(self, arc: float) -> list[tuple[float, float]]:
+        """Corner waypoints from arc length ``arc`` to the discharge end.
+
+        The route a tote physically travels, so the replay can follow a BENT belt
+        instead of cutting the corner (same idea as ``World.path`` for walkers)."""
+        arc = max(arc, 0.0)
+        acc = 0.0
+        for i, seg in enumerate(self.seglens):
+            if arc <= acc + seg + 1e-9:
+                a, b = self.points[i], self.points[i + 1]
+                t = ((arc - acc) / seg) if seg > 1e-12 else 0.0
+                t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+                out = [(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)]
+                for p in self.points[i + 1:]:
+                    if math.dist(p, out[-1]) > 1e-9:   # drop a coincident head/corner
+                        out.append(p)
+                return out
+            acc += seg
+        return [self.points[-1]]
+
+
+@dataclass
 class World:
     env: simpy.Environment
     model: WarehouseModel
@@ -47,9 +149,7 @@ class World:
     fork_store: simpy.Store                 # inbound putaway tasks for forklifts
     packers: simpy.Resource
     put_wall: simpy.Resource                # 種まき put-wall stations (capacity); full => sort queue
-    belt: simpy.Resource                    # conveyor capacity (slots); full => jam
     has_conveyor: bool
-    conveyor_transit: float                 # seconds end-to-end on the belt
     n_pickers: int
     n_packers: int
     n_agvs: int
@@ -63,7 +163,6 @@ class World:
     n_forklifts: int
     fork_speed: float
     slot_xy: list[tuple[float, float]]      # storage slots (forklift putaway targets)
-    conveyor_points: list[tuple[float, float]]  # conveyor pickup points (if any)
     sku_xy: dict[str, tuple[float, float]]
     sku_ts: dict[str, float]
     sku_pick: dict[str, tuple]
@@ -94,8 +193,14 @@ class World:
     graph: AisleGraph | None = None         # wall-aware routing (when walls exist)
     use_graph: bool = False
     dist_overrides: dict = field(default_factory=dict)  # (rounded xy pair) -> metres
+    # コンベア搬送: one entry per authored conveyor (each with its own path,
+    # speed and slot capacity). Empty ⇒ no conveyor (has_conveyor False) and the
+    # engine takes the legacy carry-to-pack path unchanged.
+    conveyors: list[ConveyorLine] = field(default_factory=list)
     workers: list[Worker] = field(default_factory=list)
     helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
+    totes: list[Tote] = field(default_factory=list)      # goods tracks (replay only)
+    tote_cap: int = MAX_TOTE_TRACKS
     events: list[dict] = field(default_factory=list)
     replay_window_s: float = 0.0            # only record keyframes up to this time
     zone_edges: list[float] = field(default_factory=list)  # x cut points dividing picking zones
@@ -221,6 +326,16 @@ class World:
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s
 
+    def new_tote(self, order_id: str) -> "Tote | None":
+        """A replay track for one tote — or ``None`` when we are outside the replay
+        window or past ``tote_cap`` (MAX_TOTE_TRACKS). Callers treat ``None`` as
+        "move it, don't draw it", so the physics never depend on recording."""
+        if not self.recording() or len(self.totes) >= self.tote_cap:
+            return None
+        t = Tote(id=f"tote-{order_id}")
+        self.totes.append(t)
+        return t
+
     def aisle_lock(self, seg) -> "simpy.Resource":
         """The mutex (capacity-1 Resource) for a coarse aisle segment, created on
         first use. Only reached when ``aisle_locks`` is not None (interference on)."""
@@ -324,15 +439,27 @@ def build(
                  else (forks[0].x, forks[0].y) if forks else (0.0, model.layout.bounds.depth / 2))
     slot_xy = [(loc.x, loc.y) for loc in model.locations] or [home]
 
-    conveyor_points: list[tuple[float, float]] = []
-    conveyor_len = 0.0
-    conveyor_speed_sum = 0.0
+    # --- コンベア搬送: one ConveyorLine per authored conveyor -----------------
+    # Each belt keeps its OWN geometry, speed and capacity (~1 tote per metre of
+    # its own length, min 1) instead of being merged into one virtual belt, so a
+    # tote pays only the distance from where it boards to THAT line's discharge
+    # end. Degenerate entries (<2 points, or every point coincident) are skipped
+    # entirely — they are not physical transport (never blocks, never divides by
+    # zero); a non-positive speed falls back to the schema default.
+    conveyor_lines: list[ConveyorLine] = []
     for cv in model.resources.conveyors:
-        for p in cv.points:
-            conveyor_points.append((p[0], p[1]))
-        for a, b in zip(cv.points, cv.points[1:]):
-            conveyor_len += abs(a[0] - b[0]) + abs(a[1] - b[1])
-        conveyor_speed_sum += cv.speed_mps
+        pts = [(float(p[0]), float(p[1])) for p in cv.points if len(p) >= 2]
+        seglens = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
+        total = sum(seglens)
+        if len(pts) < 2 or total <= 1e-9:
+            continue
+        speed = float(cv.speed_mps)
+        if not (speed > 0.0):
+            speed = DEFAULT_CONVEYOR_SPEED_MPS
+        cap = max(1, int(total))
+        conveyor_lines.append(ConveyorLine(
+            id=cv.id, points=pts, seglens=seglens, length=total, speed=speed,
+            capacity=cap, belt=simpy.Resource(env, capacity=cap)))
     # Wall-aware routing graph (only meaningful when walls exist). A caller may
     # inject a pre-built one (shared across replications of the same layout).
     if graph is None:
@@ -464,11 +591,7 @@ def build(
     aisle_locks = ({} if (model.process.agv_interference and use_graph and n_agvs > 1)
                    else None)
 
-    has_conveyor = bool(model.resources.conveyors) and conveyor_len > 0
-    cv_speed = (conveyor_speed_sum / len(model.resources.conveyors)
-                if model.resources.conveyors else 0.5) or 0.5
-    belt_cap = max(1, int(conveyor_len))           # ~1 tote per metre of belt
-    conveyor_transit = conveyor_len / cv_speed
+    has_conveyor = bool(conveyor_lines)
 
     return World(
         env=env, model=model,
@@ -477,8 +600,7 @@ def build(
         fork_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
         put_wall=simpy.Resource(env, capacity=put_wall_cap),
-        belt=simpy.Resource(env, capacity=belt_cap),
-        has_conveyor=has_conveyor, conveyor_transit=conveyor_transit,
+        has_conveyor=has_conveyor, conveyors=conveyor_lines,
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),
@@ -490,7 +612,7 @@ def build(
         n_zones=n_zones, zone_edges=zone_edges,
         home=home, agv_home=agv_home,
         fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),
-        slot_xy=slot_xy, conveyor_points=conveyor_points,
+        slot_xy=slot_xy,
         sku_xy=sku_xy, sku_ts=sku_ts, sku_pick=sku_pick,
         sku_weights=sku_weights, sku_list=sku_list,
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,

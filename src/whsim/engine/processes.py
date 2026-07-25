@@ -28,10 +28,19 @@ def _accumulate_heat(world: World, a, b) -> None:
             world.heat[gy, gx] += 1.0
 
 
-def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
+def _walk(world: World, w: Worker, frm, to, speed: float, state: str, also=None):
+    """``also`` (optional) mirrors every emitted keyframe onto extra replay tracks
+    (the totes riding in this agent's hands), so goods follow the SAME real route
+    as the worker carrying them. Replay-only: timing is untouched."""
     d = world.dist(frm, to)            # measured override > wall-aware graph > Manhattan
     _accumulate_heat(world, frm, to)
     total_t = (d / speed) if speed > 0 else 0.0
+
+    def _emit(x, y):
+        w.kf(world.env.now, x, y, state)
+        for tk in (also or ()):
+            tk.kf(world.env.now, x, y, state)
+
     if not world.recording():
         yield world.env.timeout(total_t)
         return d
@@ -43,17 +52,17 @@ def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
     seglens = [((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2) ** 0.5
                for i in range(1, len(pts))]
     pathlen = sum(seglens)
-    w.kf(world.env.now, pts[0][0], pts[0][1], state)
+    _emit(pts[0][0], pts[0][1])
     if pathlen <= 1e-9:
         yield world.env.timeout(total_t)
         if world.recording():
             end = world.stand(to)
-            w.kf(world.env.now, end[0], end[1], state)
+            _emit(end[0], end[1])
         return d
     for i in range(1, len(pts)):
         yield world.env.timeout(total_t * seglens[i - 1] / pathlen)
         if world.recording():
-            w.kf(world.env.now, pts[i][0], pts[i][1], state)
+            _emit(pts[i][0], pts[i][1])
     return d
 
 
@@ -79,10 +88,24 @@ def _route_order(world: World, start, pts: list) -> list[int]:
     return nearest_neighbor_route(start, pts)
 
 
-def _nearest_conveyor(world: World, p):
-    if not world.conveyor_points:
+def _board_conveyor(world: World, p):
+    """Where a picker standing at ``p`` hands its totes to a belt.
+
+    Returns ``(line, boarding_xy, arc)`` — the conveyor whose PATH runs nearest
+    (each line projected onto its own segments, so boarding lands on the belt
+    beside the picker, not on a far-away vertex), the boarding point, and its arc
+    length from that line's infeed (how much belt is already behind it). ``None``
+    when no conveyor is active. Lines are compared by walking (Manhattan) distance
+    to their projected point, matching the metric the picker actually walks."""
+    best = None
+    for line in world.conveyors:
+        xy, arc = line.project(p)
+        d = manhattan(p, xy)
+        if best is None or d < best[0]:
+            best = (d, line, xy, arc)
+    if best is None:
         return None
-    return min(world.conveyor_points, key=lambda q: manhattan(p, q))
+    return best[1], best[2], best[3]
 
 
 def putaway_source(world: World, rng: random.Random):
@@ -642,6 +665,8 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
         handle_time = sum(q * t for q, t in zip(qtys, tss)) + sum(v[0] for v in vss)
 
         total_dist = 0.0
+        board = None            # (ConveyorLine, boarding xy, arc from infeed)
+        totes: list = []        # per-order replay tracks (None entries = untracked)
         if agv_mode:
             # totes already delivered by the AGV; the picker only handles
             if world.recording():
@@ -662,31 +687,46 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 else:
                     yield from _sort_phase(world, w, orders, pos)
             # carry to pack: a conveyor (if present) takes the long haul, so the
-            # picker only walks to the nearest conveyor pickup point.
-            conv = _nearest_conveyor(world, pos)
-            drop = conv if conv is not None else world.home
-            total_dist += yield from _walk(world, w, pos, drop, speed, "carry")
+            # picker only walks to the nearest point ON a belt's path.
+            board = _board_conveyor(world, pos)
+            drop = board[1] if board is not None else world.home
+            # The totes ride in the picker's hands over this leg: give each one a
+            # replay track (subject to the window/cap) and mirror the carry route
+            # onto it, so goods MOVE with the worker instead of appearing at the belt.
+            if board is not None:
+                totes = [world.new_tote(o.order_id) for o in orders]
+            total_dist += yield from _walk(world, w, pos, drop, speed, "carry",
+                                           also=[t for t in totes if t is not None])
             pos = drop
             picker_busy = env.now - busy_start
 
         dist_per_order = total_dist / len(orders)
 
-        if world.has_conveyor and not agv_mode:
+        if board is not None and not agv_mode:
             # The conveyor decouples pick from pack: the picker hands each tote
             # to the belt and is free again. So its busy time ends here (pick +
             # carry), logged now; packing happens downstream on its own process.
             world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
                       busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
-            # Hand each tote to the conveyor. Acquiring a belt slot BLOCKS when the
-            # belt is full (downstream pack can't keep up) -> the jam propagates
-            # back to the picker. The tote rides the belt (transit) then packs,
-            # holding its slot the whole time, modelling real accumulation.
-            for o, arr in zip(orders, arrivals):
-                slot = world.belt.request()
+            line, _board_xy, arc = board
+            ride_m = line.remaining(arc)
+            transit = ride_m / line.speed
+            # Hand each tote to THIS line. Acquiring one of its slots BLOCKS when
+            # that belt is full (downstream pack can't keep up) -> the jam
+            # propagates back to the picker. The tote then rides the belt from its
+            # boarding point to the discharge end and packs there, holding its slot
+            # the whole time, modelling real accumulation.
+            for o, arr, tote in zip(orders, arrivals, totes):
+                req_t = env.now
+                slot = line.belt.request()
                 yield slot   # blocks here when the conveyor is jammed
+                waited = env.now - req_t
                 world.log(t=env.now, event="conveyor_on", order_id=o.order_id,
-                          resource="conveyor")
-                env.process(_convey_tote(world, o, arr, slot, dist_per_order))
+                          resource="conveyor", conveyor=line.id, wait=waited,
+                          blocked=1 if waited > 1e-6 else 0,
+                          transit=transit, ride_m=ride_m)
+                env.process(_convey_tote(world, o, arr, line, arc, slot,
+                                         dist_per_order, tote))
             if world.recording():
                 w.kf(env.now, pos[0], pos[1], "idle")
             continue
@@ -782,23 +822,57 @@ def packer_agent(world: World, p: Worker, station_xy):
             p.kf(env.now, sx, sy, "idle")
 
 
-def _convey_tote(world: World, order: Order, arrival: float, slot, dist_per_order):
-    """A tote on the conveyor: transit delay, then pack -- holding its belt slot
-    the whole time so a slow pack stage backs up the belt (accumulation/jam)."""
+def _convey_tote(world: World, order: Order, arrival: float, line, arc: float,
+                 slot, dist_per_order, tote=None):
+    """A tote on ONE conveyor: ride from its boarding point (arc length ``arc``
+    from that line's infeed) to the line's discharge end, then pack -- holding its
+    belt slot the whole time so a slow pack stage backs up the belt
+    (accumulation/jam).
+
+    Transit is the REMAINING path length / this line's speed, so a tote handed
+    over near the discharge end rides for less time than one boarding at the far
+    end. When ``tote`` is a replay track, keyframes are emitted at every corner of
+    the remaining polyline (time-proportional, like ``_walk``) so a viewer lerping
+    between them follows a bent belt instead of cutting the corner."""
     env = world.env
     pack_time = max(world.model.process.pack_time_s, 0.0)
-    yield env.timeout(world.conveyor_transit)
+    board_t = env.now
+    ride_m = line.remaining(arc)
+    transit = ride_m / line.speed          # speed is guaranteed > 0 by build()
+    pts = line.tail(arc)
+    seglens = [((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2) ** 0.5
+               for i in range(1, len(pts))]
+    pathlen = sum(seglens)
+    if tote is not None and world.recording():
+        tote.kf(env.now, pts[0][0], pts[0][1], "belt")
+    if pathlen <= 1e-9 or tote is None:
+        yield env.timeout(transit)
+    else:
+        for i in range(1, len(pts)):
+            yield env.timeout(transit * seglens[i - 1] / pathlen)
+            if world.recording():
+                tote.kf(env.now, pts[i][0], pts[i][1], "belt")
+    end = pts[-1]
     pack_req_t = env.now
     preq = world.packers.request()
     yield preq
     seize_t = env.now
     world.log(t=env.now, event="pack_start", order_id=order.order_id,
               wait=seize_t - pack_req_t, resource="packer")
+    if tote is not None and world.recording():
+        tote.kf(env.now, end[0], end[1], "pack")
     yield env.timeout(pack_time)
     world.packers.release(preq)
-    world.belt.release(slot)   # leaves the belt only after packing completes
+    line.belt.release(slot)   # leaves the belt only after packing completes
+    if tote is not None and world.recording():
+        tote.kf(env.now, end[0], end[1], "pack")
     world.log(t=env.now, event="pack_done", order_id=order.order_id,
               busy=env.now - seize_t, resource="packer")
+    # Slot occupancy = board -> release (transit + pack): the accumulation the
+    # conveyor KPIs integrate for utilisation.
+    world.log(t=env.now, event="conveyor_off", order_id=order.order_id,
+              resource="conveyor", conveyor=line.id, transit=transit,
+              ride_m=ride_m, occupancy=env.now - board_t)
     world.log(t=env.now, event="order_complete", order_id=order.order_id,
               cycle=env.now - arrival, dist=dist_per_order, due=order.due_s)
 

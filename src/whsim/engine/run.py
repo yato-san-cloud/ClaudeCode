@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import simpy
 
-from whsim.engine.build import Worker, build
+from whsim.engine.build import Tote, Worker, build
 from whsim.engine.graph import AisleGraph
 from whsim.engine.processes import (
     agv_agent, forklift_agent, inspector_agent, order_source, packer_agent,
@@ -62,6 +62,12 @@ class RunResult:
     forklifts: list[Worker] = field(default_factory=list)
     packers: list[Worker] = field(default_factory=list)  # dedicated packer agents (staging mode)
     inspectors: list[Worker] = field(default_factory=list)  # 入荷検品 agents
+    # コンベア搬送: the goods themselves as replay tracks (carry -> belt -> pack),
+    # capped at build.MAX_TOTE_TRACKS per run and confined to the replay window.
+    # Empty for every model without a conveyor.
+    totes: list[Tote] = field(default_factory=list)
+    conveyor_capacity: int = 0              # total belt slots across all lines (0 = none)
+    n_conveyors: int = 0                    # active conveyor lines
     n_inspectors: int = 0
     n_replenishers: int = 0                 # 補充要員 servers (0 = replenishment off)
     staging_capacity: int = 0               # 仮置き buffer capacity (0 = disabled)
@@ -244,6 +250,9 @@ def run_once(
         consolidation=world.consolidation, pick_method=world.pick_method,
         workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
         packers=packers, inspectors=inspectors, n_inspectors=world.n_inspectors,
+        totes=world.totes,
+        conveyor_capacity=sum(c.capacity for c in world.conveyors),
+        n_conveyors=len(world.conveyors),
         n_replenishers=world.n_replenishers,
         staging_capacity=world.staging_capacity,
         replay_window_s=window, cost=_cost_inputs(model),

@@ -345,6 +345,15 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         {"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
         for c in model.resources.conveyors
     ]
+    # コンベア搬送: the goods as their own tracks — keyframes are (t, x, y, state)
+    # exactly like a worker's, with state in {"carry","belt","pack"}. Additive and
+    # guarded: an engine/run artefact without totes (or any model with no conveyor)
+    # yields an empty list, so viewers that ignore it are unaffected.
+    totes = [
+        {"id": t.id, "keyframes": t.keyframes}
+        for t in getattr(res, "totes", []) or []
+        if t.keyframes
+    ]
     equipment = [
         {"id": e.id, "type": e.type, "x": e.x, "y": e.y, "count": e.count}
         for e in model.resources.equipment
@@ -401,6 +410,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         "agvs": agvs,
         "forklifts": forklifts,
         "conveyors": conveyors,
+        "totes": totes,
         "equipment": equipment,
         "walls": walls,
         "doors": doors,

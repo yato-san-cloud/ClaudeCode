@@ -81,6 +81,7 @@
 ### replay（`render/replay.py` → 2D/3D）
 - `shelves[]`：authored shelf は **1棚=1ラン** `{x,y0,y1,depth,pitch,rack_type,name,facing,rect,vertical,cells:[{y,abc,sku,qty,name}]}`（parametric は列再構成にフォールバック）。
 - `workers[].keyframes`：`[t,x,y,state]`、pick 時のみ任意の5要素目 `hit={run_id,along,sku,qty}`（authored shelf モデルのみ）。**4要素 keyframe は常に有効**。
+- `totes[]`：`{id, keyframes:[[t,x,y,state]…]}`＝**荷物そのものの軌跡**。`state ∈ {"carry"(ピッカーの手元)|"belt"(コンベア搬送中)|"pack"(荷降ろし・梱包)}`、丸めは `workers[].keyframes` と同一。コンベア搬送のみ生成（無ければ `[]`）、リプレイ窓内かつ最大 `MAX_TOTE_TRACKS=400` 本。曲がったコンベアは折れ点も keyframe に出るので、線形補間でベルトの経路をなぞれる。
 - `navnet`：`{waypoints:[[x,y]…], edges:[[i,j]…]}`（形は固定、点だけ改善）。
 - 追加フィールドは additive＋guard（無→legacy描画）。
 

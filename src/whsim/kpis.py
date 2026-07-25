@@ -171,6 +171,26 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     sorter_lines = len(sorter_events)
     sorter_blocks = sum(e.get("blocked", 0) for e in sorter_events)
 
+    # --- コンベア搬送 (conveyor transport) ------------------------------------
+    # Populated only when a conveyor actually carried totes; every field is 0
+    # otherwise — additive, no legacy KPI shifts. Utilisation integrates the EXACT
+    # slot-occupancy step function (+1 at conveyor_on, -1 at conveyor_off) against
+    # the total belt capacity, so accumulation (a tote holding its slot through
+    # packing) and totes still riding at the end are both counted honestly.
+    cv_on = [e for e in res.events if e["event"] == "conveyor_on"]
+    cv_off = [e for e in res.events if e["event"] == "conveyor_off"]
+    cv_cap = getattr(res, "conveyor_capacity", 0)
+    cv_transits = [e.get("transit", 0.0) for e in cv_off]
+    cv_waits = [e.get("wait", 0.0) for e in cv_on]
+    cv_steps = sorted([(e["t"], 1) for e in cv_on] + [(e["t"], -1) for e in cv_off],
+                      key=lambda p: (p[0], -p[1]))
+    cv_area, _t, _occ = 0.0, 0.0, 0
+    for t, delta in cv_steps:
+        cv_area += _occ * (t - _t)
+        _t, _occ = t, _occ + delta
+    cv_area += _occ * max(res.duration_s - _t, 0.0)   # totes still on the belt at the end
+    cv_util = cv_area / max(cv_cap * res.duration_s, 1e-9) if cv_cap else 0.0
+
     # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
     # Populated only when replenishment was enabled (replenish_done / stockout_wait
     # events exist); otherwise every field is 0 — additive, no legacy KPI shifts.
@@ -272,6 +292,14 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "sorter_chute_blocks": sorter_blocks,              # シュート閉塞(back-pressure)発生回数
         "sorter_lines": sorter_lines,
         "sorter_channels": sorter_channels,
+        # コンベア搬送: 搬送数 / 平均搬送時間 / ジャム(待ち) / 稼働率.
+        "conveyor_utilization": cv_util,
+        "conveyor_totes": len(cv_off),
+        "conveyor_transit_mean_s": statistics.fmean(cv_transits) if cv_transits else 0.0,
+        "conveyor_wait_mean_s": statistics.fmean(cv_waits) if cv_waits else 0.0,
+        "conveyor_jams": sum(e.get("blocked", 0) for e in cv_on),
+        "conveyor_capacity": cv_cap,
+        "n_conveyors": getattr(res, "n_conveyors", 0),
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
         "pick_wait_mean_s": statistics.fmean(pick_waits) if pick_waits else 0.0,
@@ -405,11 +433,16 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         stages["sorter"] = agg["sorter_utilization"]
     if agg.get("n_replenishers"):
         stages["replenish"] = agg["replenisher_utilization"]
+    # コンベア搬送 is a real capacitated stage (its slots jam and back-pressure the
+    # picker), so it competes for 'bottleneck' whenever a belt is in use.
+    if agg.get("conveyor_capacity"):
+        stages["conveyor"] = agg["conveyor_utilization"]
     agg["bottleneck"] = max(stages, key=stages.get)
     agg["bottleneck_utilization"] = stages[agg["bottleneck"]]
     agg["bottleneck_jp"] = {"picking": "ピッキング", "packing": "梱包",
                             "agv": "AGV搬送", "sort": "種まき仕分け",
-                            "sorter": "ソーター仕分け", "replenish": "補充"}[agg["bottleneck"]]
+                            "sorter": "ソーター仕分け", "replenish": "補充",
+                            "conveyor": "コンベア搬送"}[agg["bottleneck"]]
 
     # --- Monte-Carlo robustness across replications -------------------------
     def _rep_bottleneck(p):
@@ -422,6 +455,8 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
             s["sorter"] = p["sorter_utilization"]
         if p.get("n_replenishers"):
             s["replenish"] = p["replenisher_utilization"]
+        if p.get("conveyor_capacity"):
+            s["conveyor"] = p["conveyor_utilization"]
         return max(s.values())
 
     rep_ok = [1.0 if (p["completion_rate"] >= 0.98 and _rep_bottleneck(p) < 0.95)
