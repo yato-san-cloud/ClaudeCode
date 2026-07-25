@@ -100,6 +100,7 @@
     <button id="btnDemo">▶実演</button>
     <button id="btnTutor">🎓解説付き</button>
     <button id="btnExam">検定</button>
+    <button id="btnExamRun">🎓修了検定</button>
     <button id="btnGuide" class="on">お手本</button>
     <button id="btnLines" class="on">タイヤ線</button>
     <button id="creep" class="on">クリープON</button>
@@ -424,7 +425,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   updateHbUI(); document.getElementById('resultPanel').classList.remove('show');
   document.getElementById('title').textContent=M.title;
   setCoach('① サイド解除 → ② シフトD → '+M.coach,''); computeBounds(); resize(); closeMenu(); }
-function resetCar(){ loadScenario(M.id); }
+function resetCar(){ examRun=null; loadScenario(M.id); }
 const coachEl=document.getElementById('coachMsg');
 function setCoach(t,cls){ coachEl.textContent=t; coachEl.className='msg'+(cls?(' '+cls):''); }
 
@@ -505,6 +506,7 @@ bindTap(document.getElementById('lookback'),()=>{ if(result)return; checks.back=
   setRearGlance(!rearGlance); if(!demoMode) setCoach(rearGlance?'後方を目視：柵の角がCピラー際に来る位置で止める':'後方ヨシ！','ok'); });
 bindTap(document.getElementById('btnDemo'),()=>startDemo(false));
 bindTap(document.getElementById('btnTutor'),()=>startDemo(true));
+bindTap(document.getElementById('btnExamRun'),()=>startExamRun());
 bindTap(document.getElementById('btnSound'),function(){ const on=SimAudio.setEnabled(!SimAudio.isEnabled());
   this.classList.toggle('on',on); this.textContent=on?'🔊音':'🔇音'; });
 bindTap(document.getElementById('tutorNext'),()=>{ tutorWait=false; document.getElementById('tutorPop').classList.remove('show'); });
@@ -1642,8 +1644,51 @@ function demoUpdate(dt){
   }
 }
 
+/* ==================== 修了検定（連続コース） ====================
+   実際の検定と同じく、複数の課題を続けて実施し、持ち点100からの減点を通算する。
+   ひとつでも中止事由（脱輪・接触・信号無視・踏切不停止など）を出したらそこで終了。 */
+const EXAM_COURSES=['scurve','crank','hill','railway','signal','perpR'];
+let examRun=null;   // {idx, score, log:[{id,title,deducted,faults}]}
+function startExamRun(){
+  examRun={ idx:0, deducted:0, log:[] };
+  examMode=true; document.getElementById('btnExam').classList.add('on');
+  loadScenario(EXAM_COURSES[0]);
+  setCoach('【修了検定】'+MODELS[EXAM_COURSES[0]].title+'：持ち点100から減点方式。中止事由で終了','warn');
+}
+function examAdvance(passed){
+  if(!examRun) return false;
+  const id=EXAM_COURSES[examRun.idx], t=MODELS[id].title;
+  const d=deductions.reduce((a,x)=>a+x.pts,0);
+  examRun.deducted+=Math.min(d,100);
+  examRun.log.push({id,title:t,deducted:d,faults:deductions.map(x=>x.name)});
+  if(!passed||d>=100){ showExamResult(false); return true; }     // 中止事由
+  examRun.idx++;
+  if(examRun.idx>=EXAM_COURSES.length){ showExamResult(true); return true; }
+  const nid=EXAM_COURSES[examRun.idx];
+  setTimeout(()=>{ loadScenario(nid); examMode=true;
+    setCoach('【修了検定 '+(examRun.idx+1)+'/'+EXAM_COURSES.length+'】'+MODELS[nid].title
+      +'（現在 '+Math.max(0,100-examRun.deducted)+'点）','warn'); }, 900);
+  return true;
+}
+function showExamResult(completed){
+  const score=Math.max(0,100-examRun.deducted), pass=completed&&score>=70;
+  const t=document.getElementById('resTitle'), sc=document.getElementById('resScore'), b=document.getElementById('resBody');
+  t.textContent=pass?'🎓 修了検定 合格！':'修了検定 不合格'; t.className=pass?'pass':'fail';
+  sc.textContent=score+'点 ／ 100点（70点以上で合格・'+examRun.log.length+'/'+EXAM_COURSES.length+'課題を実施）';
+  b.innerHTML='<div class="sec-t">課題ごとの結果</div><ul>'+
+    examRun.log.map(l=>'<li>'+l.title+'：'+(l.deducted?('−'+Math.min(l.deducted,100)+'点（'+l.faults.join('・')+'）'):'減点なし ✓')+'</li>').join('')+
+    '</ul>'+(completed?'':'<div class="adv">💡 中止事由が出たため、そこで終了しました</div>');
+  document.getElementById('resultPanel').classList.add('show');
+  const done=examRun; examRun=null;
+  if(pass) SimAudio.sfx.ok(); else SimAudio.sfx.ng();
+  return done;
+}
 /* ==================== 採点・結果 ==================== */
 function finish(kind,reason){ result=kind; car.v=0;
+  if(examRun){                                   // 検定中は次の課題へ進む（または終了）
+    if(kind==='fail'&&reason) deductions.push({name:reason+'＝検定中止',pts:100});
+    if(kind==='fail') SimAudio.sfx.ng(); else SimAudio.sfx.ok();
+    examAdvance(kind==='success'); return; }
   if(kind==='fail'){ if(reason&&/脱輪/.test(reason)) SimAudio.sfx.curb(); else SimAudio.sfx.crash(); setTimeout(()=>SimAudio.sfx.ng(),320); }
   else if(kind==='success') SimAudio.sfx.ok();
   if(kind==='fail'&&reason) deductions.push({name:reason+'＝検定中止',pts:100});
