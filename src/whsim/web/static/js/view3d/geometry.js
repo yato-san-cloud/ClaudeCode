@@ -25,6 +25,10 @@ import {
   GARMENT_TONES, RACK_LOD,
 } from './constants.js';
 
+// Scratch vector for renderer.getSize() (avoids a per-frame allocation in the
+// apparent-size LOD probe).
+const _v2 = new THREE.Vector2();
+
 // ---- tiny deterministic hash -----------------------------------------------
 // Stable pseudo-random in [0,1) from two integers. Used ONLY for cosmetic
 // variation (carton size/rotation/tone, which slot reads as empty when the model
@@ -148,9 +152,10 @@ export const geometryMethods = {
     return 2;
   },
 
-  // DISTANCE-based fine-detail rule. Bracing / wire decking / ABC labels are
-  // sub-pixel from a wide overview camera, so they are hidden until the camera
-  // orbits within RACK_LOD.detailDist metres of its target. Driven by a 1-triangle
+  // APPARENT-SIZE fine-detail rule. Bracing / wire decking / footplates / ABC
+  // labels are worth drawing exactly when they are big enough on screen to be
+  // seen — which is a function of the canvas height and the vertical fov, not of
+  // raw distance (see RACK_LOD in constants.js). Driven by a 1-triangle
   // always-rendered probe whose onBeforeRender gives us a per-frame camera hook
   // WITHOUT touching the renderer/agent loops (other lanes own those files).
   _armRackDetailLod() {
@@ -166,15 +171,36 @@ export const geometryMethods = {
     probe.renderOrder = -1000;
     probe.onBeforeRender = (renderer, scene, camera) => {
       if (this._disposed) return;
-      const tgt = (this.controls && this.controls.target) || probe.position;
-      const d = camera.position.distanceTo(tgt);
-      const on = d <= RACK_LOD.detailDist;
+      const on = this._detailWanted(camera, renderer);
       if (on === this._rackDetailOn) return;
       this._rackDetailOn = on;
       for (const mesh of detail) mesh.visible = on;
     };
     this._rackDetailOn = null;
     this.scene.add(probe);
+  },
+
+  // Screen pixels per world metre at the orbit target, compared against this
+  // scene's count-tier threshold (with hysteresis so hovering on the boundary
+  // can't strobe). Falls back to "show" when anything is unavailable — detail is
+  // the correct default; the rule only exists to shed cost when it can't be seen.
+  _detailWanted(camera, renderer) {
+    const cam = camera || this.camera;
+    if (!cam || !cam.isPerspectiveCamera) return true;
+    const tgt = (this.controls && this.controls.target) || null;
+    const d = tgt ? cam.position.distanceTo(tgt) : cam.position.length();
+    if (!(d > 0)) return true;
+    let hPx = 0;
+    if (renderer && renderer.getSize) {
+      hPx = renderer.getSize(_v2).y;
+    }
+    if (!(hPx > 0)) hPx = (this.container && this.container.clientHeight) || 600;
+    const pxPerM = hPx / (2 * d * Math.tan((cam.fov * Math.PI) / 360));
+    const tier = Math.max(0, Math.min(2, this._rackLod | 0));
+    const on = RACK_LOD.detailPxPerM[tier];
+    const off = on * RACK_LOD.detailHysteresis;
+    if (this._rackDetailOn === true) return pxPerM >= off;
+    return pxPerM >= on;
   },
 
   // Resolve a run's world-space frame: a start point (x0,z0), a unit axis (ux,uz)

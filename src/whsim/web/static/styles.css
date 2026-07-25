@@ -544,6 +544,58 @@ button.primary:disabled { background: var(--bg-active); border-color: transparen
 .preset-ctl select { height: 30px; font-size: var(--fs-xs); padding: 0 10px; }
 
 /* =============================================================================
+   MAXIMISED REPLAY VIEW (⛶ 拡大)  — 2D/3D だけの表示拡張
+   The 3D canvas is otherwise a ~986×434 window on a 1680×980 screen, which is
+   too small to sell a photoreal warehouse. Maximising lifts the WHOLE .stage
+   (sub-toggle + panel + transport) to fill the viewport, so the panel markup and
+   the journey→view convention (ARCHITECTURE 不変条件 9) are untouched: no panel
+   is reparented, nothing becomes a flat .tab, and every control keeps working.
+   ============================================================================= */
+.expand-view-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  align-self: center;
+  border: 1px solid var(--line-hair);
+  border-radius: var(--r-sm);
+  background: var(--bg-app);
+  color: var(--ink-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.expand-view-btn:hover { background: var(--bg-hover); color: var(--ink-primary); }
+.expand-view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+body.is-maxview .stage {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: var(--sp-2);
+  background: var(--bg-app);
+  box-shadow: none;
+}
+/* The per-phase goal banner is guidance, not content: reclaim its height. */
+body.is-maxview #phaseHint { display: none; }
+/* Keep the toggle reachable ON TOP of the overlay, and label it as the way out. */
+body.is-maxview #expandViewBtn {
+  position: fixed;
+  top: 8px;
+  right: 14px;
+  z-index: 90;
+  background: var(--bg-panel);
+  border-color: var(--accent);
+  color: var(--ink-primary);
+  box-shadow: var(--sh-lg);
+}
+/* Cross-cutting companions are chrome, not content: keep the frame full-bleed. */
+body.is-maxview .cody-companion { display: none; }
+body.is-maxview { overflow: hidden; }
+
+/* =============================================================================
    STAGE & PANELS  (canvas / 3D panels must fill — keep .panel display rules)
    ============================================================================= */
 .stage {

@@ -170,6 +170,11 @@
             <option value="mono">モノ</option>
           </select>
         </label>
+        <!-- 2D/3D の最大化。パネル規約(不変条件9)はそのまま — #view2d / #view3d は
+             .panel のまま、body に is-maxview クラスが付くだけ。Esc で戻る。 -->
+        <button id="expandViewBtn" type="button" class="expand-view-btn"
+                style="display:none" aria-pressed="false"
+                title="ビューを最大化（Esc で戻る）">⛶ 拡大</button>
       </div>
 
       <div class="stage">

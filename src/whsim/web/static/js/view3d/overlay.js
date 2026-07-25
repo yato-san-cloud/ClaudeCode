@@ -42,7 +42,12 @@ export const overlayMethods = {
     if (!anchor) return; // no matching zone and no congestion to fall back on
     const { cx, cz, r, src } = anchor;
     const span = Math.max(this.bounds.width, this.bounds.depth);
-    const beamH = Math.max(8, span * 0.85);
+    // The shaft belongs to the BUILDING, not to the site: it hangs from the roof
+    // steel down to the floor. Keying it off `span` (0.85 × 108 m ⇒ a 92 m tall
+    // cone over an 8.5 m hall) is what read as a bright vertical glow beam
+    // shooting out through the roof in every wide shot.
+    const ceil = this._clearHeight ? this._clearHeight() : Math.max(8, span * 0.1);
+    const beamH = _clamp(ceil * 0.94, 3.5, 24);
     const AMBER = 0xf5b05a;
     const group = new THREE.Group();
     const geoms = [];
@@ -53,7 +58,7 @@ export const overlayMethods = {
     //    floor narrowing toward a point above. Faint so it reads as a god-ray.
     const beamGeom = new THREE.ConeGeometry(r * 1.05, beamH, 40, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
-      color: AMBER, transparent: true, opacity: 0.12, side: THREE.DoubleSide,
+      color: AMBER, transparent: true, opacity: 0.09, side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending, depthWrite: false,
     });
     const beam = new THREE.Mesh(beamGeom, beamMat);
@@ -90,7 +95,7 @@ export const overlayMethods = {
 
     // 4) A real SpotLight so the zone floor genuinely brightens (cheap; shadows
     //    off — the key directional already owns the scene's contact shadows).
-    const light = new THREE.SpotLight(0xffd9a0, 3.6, beamH * 1.6,
+    const light = new THREE.SpotLight(0xffd9a0, beamH * 0.9, beamH * 1.9,
       Math.atan2(r * 1.2, beamH) + 0.05, 0.6, 1.0);
     light.position.set(cx, beamH, cz);
     light.target.position.set(cx, 0, cz);
@@ -105,8 +110,9 @@ export const overlayMethods = {
       map: tex, transparent: true, depthWrite: false, depthTest: false,
     });
     const label = new THREE.Sprite(labelMat);
-    const labY = Math.max(5, span * 0.10);
-    const labW = Math.max(10, r * 2.4);
+    // Bob just under the roof steel — above the racking, inside the building.
+    const labY = _clamp(beamH * 0.66, 3.0, 12);
+    const labW = _clamp(r * 2.4, 8, span * 0.13);
     label.scale.set(labW, labW * 0.5, 1);
     label.position.set(cx, labY, cz);
     label.center.set(0.5, 0.0);
@@ -223,7 +229,11 @@ export const overlayMethods = {
         const dx = c.x - b.cx, dz = c.z - b.cz;
         const d = Math.sqrt(dx * dx + c.y * c.y + dz * dz);
         const span = Math.max(this.bounds.width, this.bounds.depth);
-        b.labelMat.opacity = _clamp((d - span * 0.10) / (span * 0.25), 0.12, 1);
+        // Fade out HARD as the camera closes in. The chip draws with depthTest
+        // off so racks never hide it — which also means that at aisle range it is
+        // a billboard across the top of the frame. It is an overview cue: let it
+        // go to nothing once the user is inside the building.
+        b.labelMat.opacity = _clamp((d - span * 0.16) / (span * 0.30), 0, 1);
       }
     }
   },
@@ -878,12 +888,16 @@ export const overlayMethods = {
   _startIntro() {
     this._intro = null;
     if (this._reducedMotion()) return;
-    const cx = this.bounds.width / 2;
-    const cz = this.bounds.depth / 2;
-    const span = Math.max(this.bounds.width, this.bounds.depth);
-    // Start: high, far, slightly rotated; End: the default framing set in ctor.
-    const from = new THREE.Vector3(cx - span * 0.5, span * 1.6, cz + span * 1.6);
+    // End: the hero framing solved in the ctor. Start: the same shot pulled back
+    // and lifted, so the move is a gentle descent INTO the framing rather than a
+    // jump from an unrelated span-derived viewpoint (which, now that the framing
+    // is a fit, could be anywhere relative to it).
     const to = this.camera.position.clone();
+    const tgt = (this.controls && this.controls.target)
+      || new THREE.Vector3(this.bounds.width / 2, 0, this.bounds.depth / 2);
+    const off = to.clone().sub(tgt);
+    const from = tgt.clone().addScaledVector(off, 1.34);
+    from.y += off.length() * 0.30;
     this.camera.position.copy(from);
     this.controls.enabled = false;
     const cancel = () => this._cancelIntro();

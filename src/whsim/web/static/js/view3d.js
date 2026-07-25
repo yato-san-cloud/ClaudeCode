@@ -109,11 +109,15 @@ export class Scene3D {
     // Near plane at 0.1 on a 100 m building wastes most of the depth buffer and
     // shows up as z-fighting on the floor decals; 0.35 is still closer than the
     // camera ever gets and buys a couple of bits of precision back.
-    this.camera = new THREE.PerspectiveCamera(50, w / h, 0.35, Math.max(2000, fogSpan * 12));
+    // 42° vertical fov ≈ a 45 mm lens: wide enough that an aisle still reads as a
+    // corridor from inside, long enough that the hero shot doesn't diverge into a
+    // fish-eye where the near bay towers over the far wall. (Framing is a fit, so
+    // a longer lens costs nothing in apparent size — it just pulls the camera
+    // back — and the apparent-size LOD is unaffected: dist and tan(fov/2) cancel.)
+    this.camera = new THREE.PerspectiveCamera(42, w / h, 0.35, Math.max(2000, fogSpan * 12));
     const cx = this.bounds.width / 2;
     const cz = this.bounds.depth / 2;
-    const span = Math.max(this.bounds.width, this.bounds.depth);
-    this.camera.position.set(cx, span * 0.9, cz + span * 1.1);
+    this.camera.position.set(cx, fogSpan * 0.9, cz + fogSpan * 1.1);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -122,6 +126,19 @@ export class Scene3D {
     this.controls.dampingFactor = 0.10;
     this.controls.target.set(cx, 0, cz);
     this.controls.update();
+    // Once the user has driven the camera we stop re-framing on resize — their
+    // viewpoint is theirs. OrbitControls fires 'start' on any pointer/wheel input.
+    this._userMoved = false;
+    this._onCtrlStart = () => { this._userMoved = true; };
+    this.controls.addEventListener('start', this._onCtrlStart);
+
+    // HERO FRAMING. Must run before the lights (the fog band is clamped behind
+    // the resulting distance) and before setPreset. Solves for the camera
+    // distance at which the whole building fills the frame at the CURRENT aspect
+    // ratio, instead of the fixed span-multiple offset the merge inherited — that
+    // offset left a 108 m building occupying a third of a wide canvas and parked
+    // the camera outside every level-of-detail threshold.
+    this.frameDefault();
 
     // Image-based lighting FIRST: the baked environment map is what gives every
     // MeshStandardMaterial built below a real specular response.
@@ -185,6 +202,7 @@ export class Scene3D {
     // Frame delta (s), clamped so a backgrounded tab can't jump animations.
     const dt = Math.min(0.1, this._clock.getDelta());
     this._updateIntro();          // gentle one-shot camera move (if active)
+    this._updateCutaway();        // roof/near-wall cutaway follows the camera
     this._updateWorkers(t, dt);
     this._updateAgvs(t, dt);
     this._updateForklifts(t, dt);
@@ -278,6 +296,24 @@ export class Scene3D {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    // The hero framing is a FIT against the viewport, so a real size change (e.g.
+    // ⛶ 拡大 → the view fills the content area) must re-solve it — otherwise
+    // maximising just adds letterboxing around the same small warehouse. Skipped
+    // once the user has driven the camera themselves.
+    if (this._userMoved) return;
+    if (this._intro) {
+      // Mid-intro: re-aim the tween at the NEW framing instead of landing on the
+      // one solved for the old viewport (mount3d resizes right after construction,
+      // so this is the common path, not an edge case).
+      const from = this._intro.from.clone();
+      const before = this.camera.position.clone();
+      this.frameDefault();
+      this._intro.to.copy(this.camera.position);
+      this._intro.from.copy(from);
+      this.camera.position.copy(before);
+    } else {
+      this.frameDefault();
+    }
   }
 
   dispose() {
@@ -356,7 +392,12 @@ export class Scene3D {
     this._shelfRuns = [];
     this._sc = null;
     this._heat = null;
-    if (this.controls) this.controls.dispose();
+    this._roofParts = [];
+    this._wallPanels = [];
+    if (this.controls) {
+      if (this._onCtrlStart) this.controls.removeEventListener('start', this._onCtrlStart);
+      this.controls.dispose();
+    }
     for (const g of this._geometries) { if (g && g.dispose) g.dispose(); }
     for (const m of this._materials) { if (m && m.dispose) m.dispose(); }
     for (const t of this._textures) { if (t && t.dispose) t.dispose(); }

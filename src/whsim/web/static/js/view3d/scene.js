@@ -43,11 +43,19 @@ import { FLOOR_TONES, PRESETS, meta_grid, rackDims } from './constants.js';
 // merged on top. An unknown preset id falls back to ART_BASE, so presets can
 // never break the scene.
 // ---------------------------------------------------------------------------
+// FOG NOTE (the single biggest cause of the "brand renders almost black" merge
+// regression): fogNear/fogFar are multiples of the building span, but the DEFAULT
+// CAMERA sits at a distance derived from a frame FIT (frameDefault), not from a
+// span multiple. On a wide canvas that fit lands past the old fogNear, so the
+// whole warehouse was rendered ~40% blended into a near-black fog colour before
+// tone mapping ever ran. setPreset() now clamps the fog band to start behind the
+// hero framing, so fog does what it is for — dissolving the outdoor apron and the
+// far end of a long aisle — and never greys out the subject.
 const ART_BASE = {
   env: 0.55,          // scene.environment intensity multiplier
   exposure: null,     // null = use PRESETS[..].exposure verbatim
-  fogNear: 0.75,      // x span
-  fogFar: 2.9,        // x span
+  fogNear: 1.05,      // x span (floor; the hero-distance clamp may push it out)
+  fogFar: 3.4,        // x span
   // Rebalance factors on the shared PRESETS intensities. The stock values were
   // tuned for a flat hemi+ambient wash; once IBL carries the ambient term they
   // have to come DOWN or the key light has nothing to contrast against and no
@@ -63,7 +71,7 @@ const ART_BASE = {
   roomFloor: 0x2b3038,
   // Building shell tints.
   wall: 0xa2aab3, curb: 0x6d747c, ceil: 0xb8bec5, ceilEmissive: 0.05,
-  steel: 0x767d87, column: 0x9aa1a9,
+  steel: 0x767d87, column: 0x9aa1a9, parapet: 0x8f969e,
   fixture: 4.2,       // emissive intensity of the high-bay lens
   skylight: 0.9,      // skylight strip brightness
   points: 0,          // real PointLights hung in the fixture grid (perf-gated)
@@ -73,76 +81,83 @@ const ART_BASE = {
   apron: 0x3a4048,    // outdoor ground colour
 };
 
+// Re-tuned against the MERGED materials (painted-steel uprights at metalness
+// 0.18, galvanised decking at 0.9, matte kraft cartons, hi-vis agents). Every
+// preset is checked at BOTH framings that matter — the hero overview and an
+// interior aisle — and none may fall to a near-black plate.
 const ART = {
-  // ブランド — dark, cinematic hall; the fixtures do most of the work.
+  // ブランド — dark, cinematic hall; the fixtures do most of the work. The one
+  // that shipped near-black: fog started at 0.55·span (in FRONT of the hero
+  // camera), the key was the weakest of any preset, and the shell/floor tints
+  // were only a few levels above the background. All three are corrected here.
   brand: {
-    env: 0.62, exposure: 1.05,
-    fogNear: 0.55, fogFar: 2.0,
-    hemiScale: 0.46, ambScale: 0.42, dirScale: 1.45,
-    fillColor: 0x7fa8d8, fillInt: 0.18,
-    bounceColor: 0x4a6a92, bounceInt: 0.11,
-    roomStrip: 0xdcefff, roomStripInt: 5.0,
-    roomWall: 0x39424f, roomWallInt: 1.0, roomFloor: 0x0d1219,
-    wall: 0x454f5a, curb: 0x2c333d, ceil: 0x353e48, ceilEmissive: 0.10,
-    steel: 0x5b6673, column: 0x59636e,
+    env: 0.98, exposure: 1.32,
+    fogNear: 1.10, fogFar: 3.8,
+    hemiScale: 0.58, ambScale: 0.58, dirScale: 2.00,
+    fillColor: 0x8fb4de, fillInt: 0.30,
+    bounceColor: 0x51739c, bounceInt: 0.16,
+    roomStrip: 0xdcefff, roomStripInt: 6.2,
+    roomWall: 0x4a5666, roomWallInt: 1.05, roomFloor: 0x11171f,
+    wall: 0x5d6875, curb: 0x39424d, ceil: 0x3e4854, ceilEmissive: 0.10,
+    steel: 0x6d7887, column: 0x6b7684, parapet: 0x4c5764,
     fixture: 7.0, skylight: 0.55, points: 0,
-    floorTint: 0x454d57, mark: 0.80, grid: 0.16, apron: 0x101620,
+    floorTint: 0x6d7783, mark: 0.80, grid: 0.16, apron: 0x171f2c,
   },
   // ナチュラル (昼) — daylight high-bay, the neutral "photo" preset.
   natural: {
-    env: 0.50, exposure: 0.88,
-    fogNear: 0.80, fogFar: 2.6,
-    hemiScale: 0.30, ambScale: 0.25, dirScale: 1.70,
-    fillColor: 0xcfe0f2, fillInt: 0.18,
-    bounceColor: 0xffeacd, bounceInt: 0.10,
+    env: 0.64, exposure: 0.96,
+    fogNear: 1.20, fogFar: 4.2,
+    hemiScale: 0.34, ambScale: 0.30, dirScale: 1.74,
+    fillColor: 0xcfe0f2, fillInt: 0.22,
+    bounceColor: 0xffeacd, bounceInt: 0.12,
     roomStrip: 0xffffff, roomStripInt: 6.5,
     roomWall: 0x9aa4b2, roomWallInt: 1.05, roomFloor: 0x3a3f46,
-    wall: 0x99a1ab, curb: 0x6b727a, ceil: 0xb2b8bf, ceilEmissive: 0.05,
-    steel: 0x8d949d, column: 0x949ca4,
+    wall: 0xa6aeb8, curb: 0x6b727a, ceil: 0xb2b8bf, ceilEmissive: 0.05,
+    steel: 0x8d949d, column: 0x9aa2aa, parapet: 0x929aa3,
     fixture: 3.0, skylight: 0.75, points: 0,
-    floorTint: 0x969ba1, mark: 0.92, grid: 0.09, apron: 0x474d54,
+    floorTint: 0xa1a6ad, mark: 0.92, grid: 0.09, apron: 0x4d545c,
   },
   // 夕 — low warm key raking through the skylights.
   evening: {
-    env: 0.50, exposure: 1.05,
-    fogNear: 0.50, fogFar: 2.1,
-    hemiScale: 0.34, ambScale: 0.36, dirScale: 1.45,
-    fillColor: 0xffb27a, fillInt: 0.18,
-    bounceColor: 0xff9a5c, bounceInt: 0.14,
-    roomStrip: 0xffd9a8, roomStripInt: 5.0,
-    roomWall: 0x6b5262, roomWallInt: 1.0, roomFloor: 0x241a24,
-    wall: 0x826c79, curb: 0x4c3b46, ceil: 0x64505d, ceilEmissive: 0.09,
-    steel: 0x7d6a76, column: 0x87707c,
+    env: 0.76, exposure: 1.18,
+    fogNear: 1.00, fogFar: 3.5,
+    hemiScale: 0.44, ambScale: 0.50, dirScale: 1.70,
+    fillColor: 0xffb27a, fillInt: 0.24,
+    bounceColor: 0xff9a5c, bounceInt: 0.18,
+    roomStrip: 0xffd9a8, roomStripInt: 5.4,
+    roomWall: 0x7a5e70, roomWallInt: 1.0, roomFloor: 0x281d28,
+    wall: 0x8f7885, curb: 0x54424e, ceil: 0x6c5765, ceilEmissive: 0.09,
+    steel: 0x8a7583, column: 0x927a87, parapet: 0x765f6c,
     fixture: 5.5, skylight: 0.7, points: 0,
-    floorTint: 0x6f5e67, mark: 0.75, grid: 0.08, apron: 0x231a24,
+    floorTint: 0x8a7681, mark: 0.75, grid: 0.08, apron: 0x2f232d,
   },
   // 夜 (ドラマチック) — the hall is lit by its own fixtures only.
   night: {
-    env: 0.45, exposure: 1.12,
-    fogNear: 0.45, fogFar: 1.9,
-    hemiScale: 0.45, ambScale: 0.48, dirScale: 1.05,
-    fillColor: 0x6d86b4, fillInt: 0.12,
-    bounceColor: 0x3d5b86, bounceInt: 0.09,
-    roomStrip: 0xcfe6ff, roomStripInt: 4.5,
-    roomWall: 0x2a3550, roomWallInt: 0.85, roomFloor: 0x070b14,
-    wall: 0x333c52, curb: 0x1e2532, ceil: 0x262e3f, ceilEmissive: 0.13,
-    steel: 0x47526a, column: 0x4a5468,
+    env: 0.72, exposure: 1.30,
+    fogNear: 0.95, fogFar: 3.2,
+    hemiScale: 0.60, ambScale: 0.74, dirScale: 1.25,
+    fillColor: 0x7d97c4, fillInt: 0.16,
+    bounceColor: 0x46679a, bounceInt: 0.12,
+    roomStrip: 0xcfe6ff, roomStripInt: 5.0,
+    roomWall: 0x33405e, roomWallInt: 0.9, roomFloor: 0x080d16,
+    wall: 0x414c65, curb: 0x252d3c, ceil: 0x2d3648, ceilEmissive: 0.13,
+    steel: 0x53607a, column: 0x56617a, parapet: 0x3a4459,
     fixture: 9.0, skylight: 0.35, points: 3,
-    floorTint: 0x333b48, mark: 0.62, grid: 0.13, apron: 0x070c15,
+    floorTint: 0x4d5769, mark: 0.62, grid: 0.13, apron: 0x0b121d,
   },
   // モノ (図面風) — flat, even, drawing-like: strong grid, no drama.
   mono: {
-    env: 0.42, exposure: 0.95,
-    fogNear: 1.3, fogFar: 4.0,
-    hemiScale: 0.62, ambScale: 0.7, dirScale: 0.95,
+    env: 0.50, exposure: 1.00,
+    fogNear: 1.60, fogFar: 5.0,
+    hemiScale: 0.62, ambScale: 0.7, dirScale: 1.05,
     fillColor: 0xdfe4ea, fillInt: 0.30,
     bounceColor: 0xdfe4ea, bounceInt: 0.16,
     roomStrip: 0xffffff, roomStripInt: 4.0,
     roomWall: 0xc8d0da, roomWallInt: 1.3, roomFloor: 0x9aa2ac,
     wall: 0xd2d8de, curb: 0xacb3bb, ceil: 0xe4e8ec, ceilEmissive: 0.10,
-    steel: 0xa9b0b8, column: 0xc2c8cf,
+    steel: 0xa9b0b8, column: 0xc2c8cf, parapet: 0xbcc3ca,
     fixture: 1.6, skylight: 1.0, points: 0,
-    floorTint: 0xd4d9de, mark: 0.55, grid: 0.42, apron: 0xb9bfc6,
+    floorTint: 0xd4d9de, mark: 0.55, grid: 0.42, apron: 0xc2c8ce,
   },
 };
 
@@ -998,15 +1013,65 @@ export const sceneMethods = {
 
   // -- Building shell --------------------------------------------------------
   // Roof steel + deck, high-bay fixture grid, column grid, perimeter sandwich
-  // panels and dock doors. Every part is optional: an empty envelope, no doors
-  // or a tiny footprint just yields fewer pieces.
+  // panels, a roof-line parapet and dock doors. Every part is optional: an empty
+  // envelope, no doors or a tiny footprint just yields fewer pieces.
+  //
+  // CUTAWAY CONTRACT (see _updateCutaway): the shell is a real, enclosed building
+  // when you stand inside it, and an architectural cutaway model when you look at
+  // it from outside. Two collections drive that, both filled here:
+  //   _roofParts   — deck / skylights / roof steel / high-bay fixtures. Visible
+  //                  only while the camera is INSIDE the hall; from an overview
+  //                  camera they would be a lattice of dark steel laid over the
+  //                  whole layout (exactly what made the merged build unreadable).
+  //   _wallPanels  — per-segment {mesh, inward normal, midpoint}. A panel is
+  //                  hidden when the camera sits on its OUTSIDE face, so the near
+  //                  walls open up and the far walls stay standing.
+  // The perimeter curb and the parapet never hide: they are what keeps the
+  // building's footprint and roof line readable in the cutaway.
   _buildShell() {
     this._shellMats = [];
+    this._roofParts = [];
+    this._wallPanels = [];
+    this._cutInside = null;
     this._buildWalls();
     this._buildRoof();
+    this._buildParapet();
     this._buildColumns();
     this._buildFixtures();
     this._buildDoors();
+  },
+
+  // Per-frame cutaway state (called from Scene3D._loop). Pure visibility flags on
+  // a handful of objects — no geometry, no material, no allocation.
+  _updateCutaway() {
+    const parts = this._roofParts;
+    const panels = this._wallPanels;
+    if ((!parts || !parts.length) && (!panels || !panels.length)) return;
+    const ceil = this._clearHeight();
+    const c = this.camera.position;
+    const { width, depth } = this.bounds;
+    // "Inside" = under the roof steel AND within the footprint (a small margin so
+    // a camera hugging a wall still counts as indoors).
+    const inside = c.y < ceil - 0.2
+      && c.x > -1.5 && c.x < width + 1.5
+      && c.z > -1.5 && c.z < depth + 1.5;
+    if (inside !== this._cutInside) {
+      this._cutInside = inside;
+      for (const m of (parts || [])) m.visible = inside;
+      // Exception: in the presets where the building lights ITSELF (夜/夕/ブランド)
+      // the high-bay lenses stay lit through the cutaway, so the overview reads
+      // like a night aerial of a working DC rather than an unlit model. Daylight
+      // presets keep them hidden — dim white quads floating over the racks just
+      // look like artefacts.
+      if (this._fixtureLens && this._lensAlwaysOn) this._fixtureLens.visible = true;
+    }
+    for (const w of (panels || [])) {
+      // dot(camera - midpoint, inward normal) > 0 ⇒ the camera is on the panel's
+      // interior side ⇒ keep it. Inside the hall every panel qualifies anyway.
+      const vis = inside
+        || ((c.x - w.mx) * w.nx + (c.z - w.mz) * w.nz) > 0;
+      if (w.mesh.visible !== vis) w.mesh.visible = vis;
+    }
   },
 
   // Perimeter: a solid low curb (reads as a building edge from outside) plus
@@ -1058,6 +1123,8 @@ export const sceneMethods = {
       wall.receiveShadow = true;
       this.scene.add(wall);
       this._geometries.push(pg);
+      // Register for the per-frame cutaway (near walls open, far walls stand).
+      this._wallPanels.push({ mesh: wall, nx, nz, mx, mz });
       // Per-segment UV scale so panel seams stay ~1.2 m wide on every wall.
       if (len > 0) {
         const t = seam.clone();
@@ -1123,12 +1190,13 @@ export const sceneMethods = {
     deck.rotation.x = Math.PI / 2;   // normal -> -Y
     deck.position.set(width / 2, ceil, depth / 2);
     this.scene.add(deck);
+    this._roofParts.push(deck);
     this._ceilMat = dm;
     this._track(dg, dm);
 
-    // Skylight strips: like the deck, they face DOWN only. Seen from inside they
-    // are the daylight slots in the roof; seen from the overview camera they are
-    // culled with the rest of the roof so nothing floats over the layout.
+    // Skylight strips: like the deck, they face DOWN only, and they ride the same
+    // cutaway list — from inside they are the daylight slots in the roof, from an
+    // overview camera the whole roof is gone so nothing floats over the layout.
     const nSky = clamp(Math.round(depth / 18), 1, 4);
     const skyMat = new THREE.MeshBasicMaterial({ side: THREE.FrontSide });
     skyMat.color.setHex(0xffffff).multiplyScalar(a.skylight);
@@ -1142,9 +1210,51 @@ export const sceneMethods = {
       strip.rotation.x = Math.PI / 2;   // normal -> -Y, same as the deck
       strip.position.set(width / 2, ceil - 0.03, ((i + 0.5) * depth) / nSky);
       this.scene.add(strip);
+      this._roofParts.push(strip);
     }
 
     this._buildStructure(ceil);
+  },
+
+  // Roof-line parapet: a solid capping band that follows the envelope. It is the
+  // ONE piece of the roof that never hides, and it is what makes the cutaway read
+  // as a building instead of a plate — from outside you see a real roof line and
+  // eaves shadow above the walls; from inside it is out of shot behind the deck.
+  _buildParapet() {
+    const a = art(this._preset);
+    const env = this._envelope();
+    const ceil = this._clearHeight();
+    const H = 0.95;                 // band height (upstand above the roof line)
+    const T = 0.42;                 // thickness (proud of the wall panel)
+    const mat = new THREE.MeshStandardMaterial({
+      color: a.parapet, roughness: 0.62, metalness: 0.25,
+    });
+    this._materials.push(mat);
+    this._parapetMat = mat;
+    for (const s of env.segs) {
+      const dx = s.x1 - s.x0;
+      const dz = s.z1 - s.z0;
+      const len = Math.hypot(dx, dz);
+      if (len < 0.05) continue;
+      // Overrun by the thickness at each end so corners close cleanly.
+      const g = new THREE.BoxGeometry(len + T, H, T);
+      const band = new THREE.Mesh(g, mat);
+      const mx = (s.x0 + s.x1) / 2;
+      const mz = (s.z0 + s.z1) / 2;
+      band.position.set(mx, ceil - 0.1 + H / 2, mz);
+      band.rotation.y = -Math.atan2(dz, dx);
+      band.castShadow = false;      // a shadow-casting ring would rim the floor
+      band.receiveShadow = true;
+      this.scene.add(band);
+      this._geometries.push(g);
+      // The band rides the SAME cutaway as its wall panel: a near-side parapet
+      // seen from an elevated camera projects as a dark bar straight across the
+      // layout it is supposed to frame.
+      let nx = -dz / len;
+      let nz = dx / len;
+      if ((env.cx - mx) * nx + (env.cz - mz) * nz < 0) { nx = -nx; nz = -nz; }
+      this._wallPanels.push({ mesh: band, nx, nz, mx, mz });
+    }
   },
 
   // Corrugated deck: fine rib lines so the ceiling isn't a flat fill.
@@ -1174,8 +1284,9 @@ export const sceneMethods = {
   _buildStructure(ceil) {
     const { width, depth } = this.bounds;
     const a = art(this._preset);
+    // Shop-primed structural steel: mostly dielectric paint over a metal core.
     const mat = new THREE.MeshStandardMaterial({
-      color: a.steel, roughness: 0.42, metalness: 0.78,
+      color: a.steel, roughness: 0.5, metalness: 0.32,
     });
     this._materials.push(mat);
     this._steelMat = mat;
@@ -1202,6 +1313,7 @@ export const sceneMethods = {
     }
     girders.instanceMatrix.needsUpdate = true;
     this.scene.add(girders);
+    this._roofParts.push(girders);
 
     // Joists: top + bottom chord along X, with vertical posts and zig-zag webs.
     const chordTopY = ceil - 0.22;
@@ -1242,6 +1354,7 @@ export const sceneMethods = {
     for (const mesh of [chords, posts, diags]) {
       mesh.instanceMatrix.needsUpdate = true;
       this.scene.add(mesh);
+      this._roofParts.push(mesh);
     }
   },
 
@@ -1275,8 +1388,12 @@ export const sceneMethods = {
       }
     }
     if (spots.length === 0) return;
+    // PAINTED steel, not bare: at metalness 0.55 a column reads as a black spike
+    // against a dim environment (a forest of them was the loudest thing in the
+    // wide shot). A dielectric paint coat keeps its colour legible under every
+    // preset, which is also what a real primed/painted RC or steel column does.
     const mat = new THREE.MeshStandardMaterial({
-      color: a.column, roughness: 0.5, metalness: 0.55,
+      color: a.column, roughness: 0.58, metalness: 0.16,
     });
     this._materials.push(mat);
     this._columnMat = mat;
@@ -1362,8 +1479,11 @@ export const sceneMethods = {
     for (const mesh of [hM, lM, rM]) {
       mesh.instanceMatrix.needsUpdate = true;
       this.scene.add(mesh);
+      this._roofParts.push(mesh);
     }
     hM.castShadow = false;
+    this._fixtureLens = lM;          // kept lit through the cutaway (see _updateCutaway)
+    this._lensAlwaysOn = a.fixture >= 5;
     this._fixtureSpots = spots;
     this._fixtureY = y;
     this._syncPointLights(a);
@@ -1602,6 +1722,142 @@ export const sceneMethods = {
     this._heat = { mesh: inst, mat };
   },
 
+  // -- Default (hero) camera framing -----------------------------------------
+  // The merged build inherited a fixed camera offset (span·0.9 up, span·1.1 back)
+  // which, on a wide canvas, left a 108 m building occupying about a third of the
+  // frame. Framing is a FIT problem, not a constant: solve for the exact distance
+  // at which the building's bounding box fills `fill` of the current viewport,
+  // given the live aspect ratio. That way the hero shot is equally well framed in
+  // the small docked panel and in the maximised (⛶ 拡大) view, and the
+  // apparent-size rack LOD gets the closest camera the framing allows.
+  //
+  // Camera direction: an architectural three-quarter view — elevated ~27° (high
+  // enough to read the layout through the cutaway, low enough that the walls and
+  // roof line still read as a building), looking along the building's LONG axis
+  // so the widest dimension spans the widest side of the frame, and twisted
+  // toward the dock face so the doors are part of the shot.
+  frameDefault(fill) {
+    const { width, depth } = this.bounds;
+    const ceil = this._clearHeight();
+    const target = new THREE.Vector3(width / 2, ceil * 0.38, depth / 2);
+    const dir = this._heroDir();
+    const d = this._fitDistance(target, dir, fill || 0.92);
+    this.camera.position.copy(dir).multiplyScalar(d).add(target);
+    this.camera.updateProjectionMatrix();
+    if (this.controls) {
+      this.controls.target.copy(target);
+      this.controls.update();
+    }
+    this._heroDist = d;
+    this._syncFog();   // the fog band is clamped behind the (new) hero distance
+    return d;
+  },
+
+  // Unit vector from the orbit target toward the camera for the hero shot.
+  _heroDir() {
+    const { width, depth } = this.bounds;
+    const ELEV = 27 * (Math.PI / 180);
+    // Stand off the long side so the long axis spans the frame horizontally.
+    let hx = 0, hz = 1;
+    if (depth > width) { hx = 1; hz = 0; }
+    // Twist toward the wall that carries the most doors, so the dock face is in
+    // shot rather than hidden round the back. Falls back to a fixed twist.
+    const n = this._dockNormal();
+    let tw = 28 * (Math.PI / 180);
+    if (n) {
+      // Rotate the base bearing toward the OUTSIDE of the dock wall (-n). The 2D
+      // cross product picks the shorter way round: positive ⇒ rotate positively.
+      const cross = hx * -n.nz - hz * -n.nx;
+      if (cross < 0) tw = -tw;
+    }
+    const c = Math.cos(tw), s = Math.sin(tw);
+    const rx = hx * c - hz * s;
+    const rz = hx * s + hz * c;
+    const ce = Math.cos(ELEV);
+    return new THREE.Vector3(rx * ce, Math.sin(ELEV), rz * ce).normalize();
+  },
+
+  // Inward normal of the envelope edge carrying the most dock doors (or null).
+  _dockNormal() {
+    const tally = new Map();
+    for (const d of (this.replay.doors || [])) {
+      if (!d) continue;
+      const n = this._inwardNormal(+d.x || 0, +d.y || 0);
+      const k = `${n.nx},${n.nz}`;
+      tally.set(k, (tally.get(k) || 0) + 1);
+    }
+    let best = null, bn = 0;
+    for (const [k, v] of tally) {
+      if (v > bn) { bn = v; const p = k.split(','); best = { nx: +p[0], nz: +p[1] }; }
+    }
+    return best;
+  },
+
+  // Distance along `dir` at which the building AABB fills `fill` of the frame,
+  // WITH the shot recentred. Two coupled problems:
+  //   * fit — per AABB corner, the constraints |x| ≤ tanH·depth and |y| ≤ tanV·depth
+  //     in camera space; the binding corner sets the distance.
+  //   * centring — under perspective the near end of a 108 m hall projects much
+  //     larger than the far end, so aiming at the geometric centre leaves the
+  //     building low and left with dead sky above it, and the fit then has to pull
+  //     back to keep the near corner in frame. Nudging the aim point until the
+  //     PROJECTED bounding box is centred and re-fitting converges in 2-3 passes
+  //     and buys a materially bigger warehouse for the same frame.
+  // `target` is mutated in place with the recentred aim point.
+  _fitDistance(target, dir, fill) {
+    const cam = this.camera;
+    const f = clamp(fill, 0.2, 1.0);
+    const tanVf = Math.tan((cam.fov * Math.PI) / 360);   // true half-frustum
+    const tanHf = tanVf * (cam.aspect || 1);
+    const tanV = tanVf * f;                              // fitted (with margin)
+    const tanH = tanHf * f;
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(up, dir);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    const camUp = new THREE.Vector3().crossVectors(dir, right).normalize();
+    const { width, depth } = this.bounds;
+    const top = this._clearHeight() + 1.2;   // include the parapet band
+    const v = new THREE.Vector3();
+    const corners = [];
+    for (const x of [0, width]) {
+      for (const y of [0, top]) {
+        for (const z of [0, depth]) corners.push([x, y, z]);
+      }
+    }
+    const lo = Math.max(8, top * 1.6);
+    const hi = Math.max(width, depth) * 6;
+    let d = lo;
+    for (let pass = 0; pass < 4; pass++) {
+      d = 0;
+      for (const c of corners) {
+        v.set(c[0], c[1], c[2]).sub(target);
+        const a = v.dot(dir);                 // + = toward the camera
+        d = Math.max(d, a + Math.abs(v.dot(right)) / tanH,
+          a + Math.abs(v.dot(camUp)) / tanV);
+      }
+      d = clamp(d, lo, hi);
+      // Projected (NDC) bounding box at this distance.
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, zs = 0;
+      for (const c of corners) {
+        v.set(c[0], c[1], c[2]).sub(target);
+        const depthC = Math.max(0.5, d - v.dot(dir));
+        const sx = v.dot(right) / (depthC * tanHf);
+        const sy = v.dot(camUp) / (depthC * tanVf);
+        if (sx < x0) x0 = sx; if (sx > x1) x1 = sx;
+        if (sy < y0) y0 = sy; if (sy > y1) y1 = sy;
+        zs += depthC;
+      }
+      const ox = (x0 + x1) / 2;
+      const oy = (y0 + y1) / 2;
+      if (Math.abs(ox) < 0.004 && Math.abs(oy) < 0.004) break;
+      const dm = zs / corners.length;
+      target.addScaledVector(right, ox * tanHf * dm);
+      target.addScaledVector(camUp, oy * tanVf * dm);
+    }
+    return d;
+  },
+
   // -- Render / art presets --------------------------------------------------
   // Retune the WHOLE look coherently: background + fog distances, the four-light
   // rig, tone-mapping exposure, environment intensity, the shell tints, the
@@ -1619,12 +1875,8 @@ export const sceneMethods = {
       } else {
         this.scene.background = new THREE.Color(p.background);
       }
-      if (this.scene.fog) {
-        if (this.scene.fog.color) this.scene.fog.color.set(p.fogColor);
-        // Fog distances follow the preset so "dramatic" hazes sooner than "図面風".
-        if ('near' in this.scene.fog) this.scene.fog.near = span * a.fogNear;
-        if ('far' in this.scene.fog) this.scene.fog.far = span * a.fogFar;
-      }
+      if (this.scene.fog && this.scene.fog.color) this.scene.fog.color.set(p.fogColor);
+      this._syncFog();
     }
     if (this._hemi) {
       this._hemi.color.set(p.hemiSky);
@@ -1675,9 +1927,15 @@ export const sceneMethods = {
     }
     if (this._steelMat) this._steelMat.color.setHex(a.steel);
     if (this._columnMat) this._columnMat.color.setHex(a.column);
+    if (this._parapetMat) this._parapetMat.color.setHex(a.parapet);
     // High-bay fixtures + skylights: the building's own light sources.
     if (this._fixtureMat) {
       this._fixtureMat.color.setHex(0xfff6e2).multiplyScalar(clamp(a.fixture / 4, 0.35, 3));
+    }
+    // Whether the lenses survive the roof cutaway (see _updateCutaway).
+    this._lensAlwaysOn = a.fixture >= 5;
+    if (this._fixtureLens) {
+      this._fixtureLens.visible = this._cutInside !== false || this._lensAlwaysOn;
     }
     if (this._skyMat) this._skyMat.color.setHex(0xffffff).multiplyScalar(a.skylight);
     this._syncPointLights(a);
@@ -1685,6 +1943,22 @@ export const sceneMethods = {
     for (const m of this._rackMaterials) {
       if (m) m.emissiveIntensity = p.rackEmissive;
     }
+  },
+
+  // Fog band. Distances follow the preset so "夜/ドラマチック" hazes sooner than
+  // "図面風" — but the band is ALWAYS pushed behind the hero framing distance, so
+  // a preset can shade the horizon without greying out the warehouse itself.
+  // Called from setPreset AND from frameDefault, because the hero distance is a
+  // fit against the viewport and therefore changes on every resize (⛶ 拡大).
+  _syncFog() {
+    const fog = this.scene && this.scene.fog;
+    if (!fog || !('near' in fog)) return;
+    const a = art(this._preset);
+    const span = Math.max(this.bounds.width, this.bounds.depth);
+    const hero = this._heroDist || span * 1.25;
+    const near = Math.max(span * a.fogNear, hero * 1.02);
+    fog.near = near;
+    fog.far = Math.max(span * a.fogFar, near + Math.max(span, hero) * 1.8);
   },
 
   // Currently active preset name.

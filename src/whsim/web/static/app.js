@@ -532,6 +532,26 @@ function mount3d() {
   }
 }
 
+// ⛶ 拡大: maximise the replay stage over the whole window (and back). The
+// WebGL/2D surfaces are sized from their container, so both must be re-measured
+// AFTER the layout settles — hence the rAF. Scene3D.resize() also re-solves the
+// hero framing while the user hasn't driven the camera, so maximising actually
+// shows a bigger warehouse rather than the same one with more letterboxing.
+function setMaxView(on) {
+  const btn = $('expandViewBtn');
+  document.body.classList.toggle('is-maxview', !!on);
+  if (btn) {
+    btn.textContent = on ? '⛶ 戻す' : '⛶ 拡大';
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'ビューを元に戻す（Esc）' : 'ビューを最大化（Esc で戻る）';
+  }
+  requestAnimationFrame(() => {
+    fitCanvas();
+    S._needs2d = true;
+    if (S.scene3d) S.scene3d.resize();
+  });
+}
+
 function mountExport() {
   if (S.export) { S.export.refresh(); return; }
   S.export = new ExportView($('export'), {
@@ -658,6 +678,11 @@ function switchView(view) {
   // journey row otherwise, so it isn't persistent noise for the salesperson).
   const presetCtl = $('presetCtl');
   if (presetCtl) presetCtl.style.display = (view === 'view3d') ? 'inline-flex' : 'none';
+  // ⛶ 拡大 belongs to the replay views only; leaving them always un-maximises so
+  // the overlay can never strand a document view under a fixed stage.
+  const expandBtn = $('expandViewBtn');
+  if (expandBtn) expandBtn.style.display = replayView ? 'inline-flex' : 'none';
+  if (!replayView && document.body.classList.contains('is-maxview')) setMaxView(false);
   // Soft guidance: opening a run-gated result view (④検証 / ⑤提案) before any run
   // nudges toward 実行. Previously this keyed off a flat `.tab[data-need]` element
   // that no longer exists in the DOM (journey.js renders .jn-pill/.jn-sub), so the
@@ -1209,6 +1234,16 @@ function initUI() {
     S.preset = e.target.value;
     if (S.scene3d) S.scene3d.setPreset(S.preset);
   };
+
+  // ⛶ 拡大 / 戻す — maximise the 2D/3D replay view over the whole window.
+  $('expandViewBtn').onclick = () => setMaxView(!document.body.classList.contains('is-maxview'));
+  // Esc leaves the maximised view (matches the browser's own fullscreen habit).
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('is-maxview')) {
+      e.preventDefault();
+      setMaxView(false);
+    }
+  });
 
   // transport
   $('playBtn').onclick = () => {

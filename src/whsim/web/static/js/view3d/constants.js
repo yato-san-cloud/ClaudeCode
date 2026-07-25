@@ -122,13 +122,27 @@ export const GARMENT_TONES = [
 //                         per slot, labels kept
 //       tier 2 (coarse) — silhouette only: uprights + beams/panels + ONE merged
 //                         load block per slot; no bracing/decking/labels
-//  2. DISTANCE-based visibility for the finest meshes (bracing, decking, ABC
-//     labels): hidden while the camera is farther than `RACK_LOD.detailDist`
-//     metres from its orbit target — at that range they are sub-pixel anyway.
+//  2. APPARENT-SIZE visibility for the finest meshes (footplates, bracing, wire
+//     decking, ABC labels). The first cut of this rule used a raw camera→target
+//     DISTANCE (34 m), which silently broke the default hero framing: a 108 m
+//     building can never be framed from inside 34 m, so the salesperson's very
+//     first look at the warehouse showed racks stripped of their detail. What
+//     actually matters is how BIG a metre is on screen, which depends on the
+//     canvas height and the vertical fov as much as on distance:
+//
+//       pxPerM = canvasHeightPx / (2 · dist · tan(fov/2))
+//
+//     so the same scene shows detail sooner in a maximised (⛶ 拡大) view than in
+//     a small docked one — which is exactly the behaviour you want. Thresholds
+//     are per COUNT tier (a 3000-bay floor has to be stingier than a 200-bay
+//     one) and carry hysteresis so an orbit that hovers on the boundary doesn't
+//     flicker the meshes on and off.
 export const RACK_LOD = {
   fine: 260,        // <= this many bays in the scene → tier 0
   coarse: 900,      // <= this many bays → tier 1; above → tier 2
-  detailDist: 34,   // camera→target distance (m) beyond which fine meshes hide
+  // Screen pixels per world metre at/above which fine meshes are shown, per tier.
+  detailPxPerM: [2.2, 3.0, 6.0],
+  detailHysteresis: 0.8,   // turn OFF only below threshold × this
 };
 
 // Pick-event highlight: target cell pulse + connector colour.
