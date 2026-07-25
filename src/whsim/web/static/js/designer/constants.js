@@ -229,3 +229,23 @@ export const STAGE_ZONE_TYPES = {
   pack:    ['packing'],
   ship:    ['shipping', 'staging'],
 };
+
+// ---- レイアウト診断 / 人流アニメーション (動線タブ) -------------------------
+// Re-audit debounce: long enough that a drag doesn't spam the endpoint, short
+// enough that sealing an aisle turns the chip red while your hand is still on
+// the mouse. That immediacy IS the feature.
+export const AUDIT_DEBOUNCE_MS = 300;
+// How many walkers the 人流アニメーション puts on the floor (one per sampled
+// pick face). Enough to read as a flow, few enough to stay legible.
+export const PFLOW_WALKERS = 8;
+// Wall-clock seconds for one 入荷→ピック→出荷 tour, regardless of floor size —
+// a fixed cadence reads as "flow" on both a 30 m and a 110 m warehouse.
+export const PFLOW_TOUR_S = 16;
+// Audit overlay colours (canvas-side; the DOM chips use the app's CSS vars).
+export const AUDIT_COLOR = {
+  bad: '#e3401c',        // 到達できない棚 / 分断された床
+  warn: '#d98200',       // 人が通れない狭さ
+  info: '#c9a227',       // フォークリフトが通れない狭さ
+  walkIn: '#1f78b4',     // 入荷→ピック面 の脚
+  walkOut: '#1db954',    // ピック面→梱包/出荷 の脚
+};

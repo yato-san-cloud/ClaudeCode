@@ -6,7 +6,8 @@
 // SYNTHESIS: core.js does `Object.assign(Designer.prototype, renderMethods)`.
 
 import {
-  CP_HALF, DOOR_JP, DOOR_PALETTE, EQUIP_PALETTE, HANDLE, MOVER_COLOR, RACK_TYPES, ZONE_DEFAULT_COLOR, ZONE_JP,
+  AUDIT_COLOR, CP_HALF, DOOR_JP, DOOR_PALETTE, EQUIP_PALETTE, HANDLE, MOVER_COLOR,
+  RACK_TYPES, ZONE_DEFAULT_COLOR, ZONE_JP,
 } from './constants.js';
 import { cellAddress, clamp, hexA, shelfCells, snap } from './geometry.js';
 
@@ -137,9 +138,17 @@ export const renderMethods = {
         ctx.restore();
       }
       if (this.routeDraft) this._drawRoute(this.routeDraft, MOVER_COLOR[this.routeMover] || P.draft, true, null);
+      // 人流アニメーション: walkers travelling the SAME shortest paths the engine
+      // routes on (drawn under the audit marks so a red rack always wins).
+      this._drawPeopleFlow();
       // A→B計測 overlay: endpoint markers + the computed shortest path.
       this._drawMeasure();
     }
+
+    // レイアウト診断 overlay: 到達できない棚 / 分断された床 / 狭い通路. Drawn in BOTH
+    // 配置 and 動線 — the tab you draw in is the tab that has to tell you the
+    // shelf you just dropped sealed the aisle.
+    this._drawAuditOverlay();
 
     // placement ghost: the armed brush's real footprint under the cursor.
     if (this.tool === 'place') this._drawGhost();
@@ -150,6 +159,149 @@ export const renderMethods = {
     this._drawShelfChrome();
     // PowerPoint rubber-band rectangle while multi-selecting.
     if (this.tool === 'place' && this.marquee) this._drawMarquee();
+  },
+  // ---- 人流アニメーション ----------------------------------------------------
+  // Walkers loop 入荷 → ピック面 → 出荷 along the SERVER-computed shortest paths,
+  // so what you watch is literally the travel the simulation will charge for. A
+  // rack nobody ever walks to is a rack nobody can reach — that is the check.
+  // Under prefers-reduced-motion nothing moves: we draw the tours as static
+  // preview ribbons with the walkers parked at their phase positions instead.
+  _drawPeopleFlow() {
+    const ws = this.pflowWalkers;
+    if (!this.pflowOn || !ws || !ws.length) return;
+    const ctx = this.ctx;
+    const still = this._reducedMotion();
+    const now = (still ? 0 : performance.now()) / 1000;
+    ctx.save();
+    // faint tour ribbons underneath so the aisles being used stay readable
+    ctx.globalAlpha = still ? 0.5 : 0.16;
+    ctx.lineWidth = still ? 2 : 3;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const w of ws) {
+      ctx.strokeStyle = AUDIT_COLOR.walkIn;
+      ctx.beginPath();
+      ctx.moveTo(this._X(w.pts[0][0]), this._Y(w.pts[0][1]));
+      for (let i = 1; i < w.pts.length; i++) ctx.lineTo(this._X(w.pts[i][0]), this._Y(w.pts[i][1]));
+      ctx.stroke();
+    }
+    ctx.restore();
+    for (const w of ws) {
+      const t = ((now / w.dur) + w.phase) % 1;
+      const d = t * w.total;
+      const [x, y] = this._pflowAt(w, d);
+      const inbound = d <= w.pickDist;
+      const color = inbound ? AUDIT_COLOR.walkIn : AUDIT_COLOR.walkOut;
+      // short motion trail (the last ~3 m already walked)
+      ctx.save();
+      ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.globalAlpha = 0.45;
+      ctx.beginPath();
+      const tail = this._pflowAt(w, Math.max(0, d - 3));
+      ctx.moveTo(this._X(tail[0]), this._Y(tail[1]));
+      ctx.lineTo(this._X(x), this._Y(y));
+      ctx.stroke();
+      ctx.restore();
+      // the walker: a small person dot with a carried-tote pip on the way out
+      const px = this._X(x), py = this._Y(y);
+      ctx.save();
+      ctx.shadowColor = color; ctx.shadowBlur = 8;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = this.pal.markerStroke; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(px, py, 5, 0, 7); ctx.stroke();
+      if (!inbound) {
+        ctx.fillStyle = this.pal.markerStroke;
+        ctx.fillRect(px - 2, py - 2, 4, 4);       // 荷物を持って戻る
+      }
+    }
+  },
+  // ---- レイアウト診断 overlay -------------------------------------------------
+  // Quiet when the layout is fine; loud exactly where it is not.
+  _drawAuditOverlay() {
+    const a = this.routeAudit;
+    if (!a) return;
+    const ctx = this.ctx, sc = this._view.sc;
+
+    // 狭い通路: an amber bar down the aisle centreline. 人が通れない幅 is loud and
+    // labelled; フォークリフト不可 is a quiet hint (the count lives in the chip row)
+    // so an otherwise-fine layout does not look like it is on fire.
+    for (const nz of a.narrow || []) {
+      const seg = nz.segment || [];
+      if (seg.length < 2) continue;
+      const person = nz.level === 'person';
+      ctx.save();
+      ctx.strokeStyle = person ? AUDIT_COLOR.warn : AUDIT_COLOR.info;
+      ctx.globalAlpha = person ? 0.9 : 0.22;
+      ctx.lineWidth = person ? Math.max(3, Math.min((nz.gap_m || 1) * sc * 0.6, 10)) : 3;
+      ctx.setLineDash(person ? [] : [6, 7]);
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(this._X(seg[0][0]), this._Y(seg[0][1]));
+      ctx.lineTo(this._X(seg[1][0]), this._Y(seg[1][1]));
+      ctx.stroke();
+      ctx.restore();
+      if (person) {
+        const p = nz.point || seg[0];
+        this._chipLabel(this._X(p[0]), this._Y(p[1]), `通路 ${nz.gap_m}m`, 'center');
+      }
+    }
+
+    // 分断された床: every walkable pocket that is NOT the main floor.
+    for (const c of a.components || []) {
+      if (c.main) continue;
+      const px = this._X(c.point[0]), py = this._Y(c.point[1]);
+      const r = Math.max(14, Math.min(Math.sqrt(Math.max(c.area_m2, 1)) * sc * 0.4, 60));
+      ctx.save();
+      ctx.strokeStyle = AUDIT_COLOR.bad; ctx.lineWidth = 2; ctx.setLineDash([7, 5]);
+      ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.stroke();
+      ctx.fillStyle = hexA(AUDIT_COLOR.bad, 0.1);
+      ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill();
+      ctx.restore();
+      this._chipLabel(px, py - r - 10, `分断された床 ${c.area_m2}㎡`, 'center');
+    }
+
+    // 到達できない棚: the headline. Solid red wash + hatch + a ⚠ pin.
+    const un = a.unreachable || [];
+    for (const u of un) {
+      const [rx, ry, rw, rh] = u.rect;
+      const x = this._X(rx), yTop = this._Y(ry + rh), w = rw * sc, h = rh * sc;
+      ctx.save();
+      ctx.fillStyle = hexA(AUDIT_COLOR.bad, 0.35);
+      ctx.fillRect(x, yTop, w, h);
+      // 45° hatch so it reads as "blocked" even in a red-blind palette
+      ctx.beginPath(); ctx.rect(x, yTop, w, h); ctx.clip();
+      ctx.strokeStyle = hexA(AUDIT_COLOR.bad, 0.85); ctx.lineWidth = 1.4;
+      for (let k = -h; k < w + h; k += 7) {
+        ctx.beginPath(); ctx.moveTo(x + k, yTop + h); ctx.lineTo(x + k + h, yTop); ctx.stroke();
+      }
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = AUDIT_COLOR.bad; ctx.lineWidth = 2.2;
+      ctx.shadowColor = AUDIT_COLOR.bad; ctx.shadowBlur = 10;
+      ctx.strokeRect(x, yTop, w, h);
+      ctx.restore();
+      const cx = x + w / 2;
+      ctx.fillStyle = AUDIT_COLOR.bad;
+      ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⚠', cx, yTop + h / 2);
+    }
+    if (un.length) {
+      // one count chip pinned to the worst offender so it is impossible to miss
+      const u = un[0];
+      this._chipLabel(this._X(u.rect[0] + u.rect[2] / 2), this._Y(u.rect[1] + u.rect[3]) - 12,
+        `⚠ 到達できない棚 ${un.length}`, 'center');
+    }
+
+    // 行き止まり: tiny hollow dots — advisory, never shouting.
+    if ((a.deadends || []).length) {
+      ctx.save();
+      ctx.strokeStyle = hexA(AUDIT_COLOR.info, 0.8); ctx.lineWidth = 1.2;
+      for (const d of a.deadends) {
+        ctx.beginPath(); ctx.arc(this._X(d.point[0]), this._Y(d.point[1]), 3, 0, 7); ctx.stroke();
+      }
+      ctx.restore();
+    }
   },
   // ---- marquee (rubber-band multi-select) rectangle --------------------------
   _drawMarquee() {

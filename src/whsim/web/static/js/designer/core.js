@@ -192,6 +192,9 @@ export class Designer {
     this._listeners = [];
     if (this._raf) cancelAnimationFrame(this._raf);
     if (this._camRaf) cancelAnimationFrame(this._camRaf);
+    this._pflowStop();                      // 人流アニメーションの rAF
+    if (this._auditTimer) clearTimeout(this._auditTimer);
+    this._auditTimer = 0;
     if (this._dialogEl && this._dialogEl.parentNode) this._dialogEl.parentNode.removeChild(this._dialogEl);
     this._dialogEl = null;
     if (this._helpEl && this._helpEl.parentNode) this._helpEl.parentNode.removeChild(this._helpEl);
@@ -553,6 +556,8 @@ export class Designer {
     this.routeDraft = null;
     this.flowMethodStage = null;
     if (key !== 'flow') this.flowMode = false;
+    if (key !== 'route') this._pflowStop();
+    this._auditChip = null;          // rebuilt by whichever tool _renderTool draws
     for (const k in this._toolBtns) {
       const active = k === key;
       const b = this._toolBtns[k];
@@ -619,6 +624,7 @@ export class Designer {
     this._renderSide();
     this._drawCanvas();
     this._updateStatus();
+    this._auditSoon();          // first レイアウト診断 for this floor
   }
 
   // ---- thin bar above the canvas: zoom-to-fit / underlay / inventory --------
@@ -652,6 +658,10 @@ export class Designer {
     this._layoutStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;';
     this._layoutStatus.textContent = this._brushHint();
     bar.appendChild(this._layoutStatus);
+    // レイアウト診断 chip: 到達できない棚 / 床の分断 / 狭い通路 — live while you draw.
+    // (Same chip the 動線 tab shows; this is the tab where shelves actually move.)
+    this._auditChip = this._div(bar, 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;');
+    this._renderAuditChip();
     parent.appendChild(bar);
   }
 
@@ -1116,6 +1126,9 @@ export class Designer {
     if (sig === this._dirtySig) return;
     this._dirtySig = sig;
     document.dispatchEvent(new CustomEvent('whsim:design-dirty', { detail: { sections } }));
+    // 動線タブ: re-run the レイアウト診断 on the live (unsaved) layout. Moving a
+    // shelf that seals an aisle must flip the chip red immediately — no save.
+    this._auditSoon();
   }
   _applySnapshot(snap) {
     this.model.layout = clone(snap.layout);

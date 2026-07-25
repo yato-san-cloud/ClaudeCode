@@ -51,6 +51,7 @@
 ### 設計 / 在庫
 - `design.py`（`materialize_racks`：parametric/authored shelves→concrete locations、棚名→ロケ名伝播）/ `slotting.py`（ABC割付）/ `datagen.py`（不足生成）/ `racktypes.py`（9種プリセット＝**JS のミラー源**、`/api/racktypes`；台あたり間口/設備単価/償却月の unit economics 付き）。
 - `storage.py` — **保管設備の試算**（物量→保管方法→間口/台数/坪数→参考保管費；LOGISTEED 設備費用算出ステップ）＋ `place_equipment`（試算結果を ShelfArea 列として保管ゾーンへ自動配置、`POST /storage/apply-layout`）。
+- `layoutaudit.py` — **レイアウト診断**（作図中の設計時バリデーション、純関数・stateless）。`audit(width, depth, wall_segments, obstacles, graph=…)` が ①`unreachable`（開放面＝`navnet.NavNetwork._open_faces`〔`build=False` で Delaunay を建てずに幾何プローブだけ再利用〕が **主連結成分**に着地しない棚＝エンジンが経路を引けない棚と厳密に一致）②`components`（歩行可能床の連結成分。1超＝分断。1ノード島とMIN_POCKET_M2未満はラスタライズ副産物として除外）③`narrow`（棚矩形から**解析的に**測る通路幅。グリッド解像度に非依存。人 1.2m / フォークリフト 2.5m の2閾値・`seam_m` 未満は背中合わせクリアランス扱い・同幅同軸のスパンは1本にマージ）④`deadends`（通行可能隣接が1つだけの袋小路先端）⑤`pick_points`（到達可能な開放面＝人流アニメーションの目的地）＋ `summary`。API は `POST /api/routes/network` に `audit:true` を渡す**加算的**フラグ（AisleGraph の構築コストが支配的なので、通路網の描画とライブ診断で**同じグラフを1回**しか建てない）。retail_dc 規模で診断のみ ~94ms / 通路網込み ~157ms。→ ③設計「レイアウト」の 配置/動線 両タブに常設チップ（`designer/route.js` `_auditSoon`＝`_emitDirty` から 300ms デバウンス、**保存不要**）と canvas オーバレイ（`designer/render.js` `_drawAuditOverlay`）、動線タブの「人流アニメーション」（`_drawPeopleFlow`：入荷→ピック面→出荷を実経路で巡回、`prefers-reduced-motion` では静止プレビュー）。
 - ※ `design`/`slotting`/`datagen` は小モジュール群。将来 `design/` パッケージへ統合候補。
 
 ### 分析 / BI（2系統）

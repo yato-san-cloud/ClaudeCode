@@ -64,7 +64,8 @@ class NavNetwork:
                  obstacles: list[tuple[float, float, float, float]] | None = None,
                  clearance: float = 0.7,
                  facings: list[str | None] | None = None,
-                 offset: float = _OPEN_FACE_OFFSET) -> None:
+                 offset: float = _OPEN_FACE_OFFSET,
+                 build: bool = True) -> None:
         self.width = max(float(width), 1e-6)
         self.depth = max(float(depth), 1e-6)
         self.obstacles = list(obstacles or [])
@@ -91,7 +92,13 @@ class NavNetwork:
             for cx in range(int(rx // c), int((rx + rw) // c) + 1):
                 for cy in range(int(ry // c), int((ry + rh) // c) + 1):
                     self._obs_grid.setdefault((cx, cy), []).append(i)
-        self._build()
+        # ``build=False`` keeps the geometry probes (``_inside`` / ``_seg_free`` /
+        # ``_open_faces``) available WITHOUT paying for the Delaunay waypoint net.
+        # The layout audit only needs the open-face probe, and reusing this class
+        # is what keeps "which faces are open" identical to what the routed net
+        # (and therefore the simulation) believes. Default is unchanged.
+        if build:
+            self._build()
 
     # --------------------------------------------------------------- geometry
     def _near_obstacles(self, a, b):

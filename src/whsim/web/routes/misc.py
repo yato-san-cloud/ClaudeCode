@@ -200,8 +200,17 @@ def api_routes_network(payload: dict | None = None):
 
     Body: {bounds:{width,depth}, walls:[{points:[[x,y],..]},..],
            shelves:[[x,y,w,h],..], include_edges:bool,
-           queries:[{a:[x,y], b:[x,y]},..]}
-    →     {enabled, resolution, edges:[[x1,y1,x2,y2],..]?, paths:[{points,distance_m},..]}
+           queries:[{a:[x,y], b:[x,y]},..],
+           audit:bool, person_aisle_m:float?, forklift_aisle_m:float?}
+    →     {enabled, resolution, edges:[[x1,y1,x2,y2],..]?, paths:[{points,distance_m},..],
+           audit:{summary, unreachable, components, narrow, deadends}?}
+
+    ``audit`` is ADDITIVE (レイアウト診断): with the flag set, the very same graph
+    that produced the lane network is also asked "is every rack reachable, is the
+    floor one connected piece, is any aisle too narrow?" — see
+    :mod:`whsim.layoutaudit`. It shares the endpoint (rather than living in a
+    sibling route) precisely because the grid build dominates the cost: the 動線
+    editor re-audits on every debounced edit and must not pay for it twice.
 
     Tolerant: malformed walls/shelves/queries are skipped, never a 500.
     """
@@ -234,7 +243,13 @@ def api_routes_network(payload: dict | None = None):
     # Display-grade resolution: keep the grid small enough that the edge list
     # stays drawable (≤ ~6000 nodes → ≤ ~12k edges) while paths remain ~1m-true.
     res = max(1.0, ((width * depth) / 6000.0) ** 0.5)
-    g = AisleGraph(width, depth, segments, resolution=res, obstacle_rects=obstacles)
+    want_audit = bool(p.get("audit"))
+    # For the audit the pitch must at least resolve the narrowest genuine aisle,
+    # otherwise the grid itself would seal a lane and invent an unreachable rack.
+    # ``auto_resolution`` is the engine's own refinement rule (half the narrowest
+    # gap, capped by MAX_NODES) — same rule the simulation uses.
+    g = AisleGraph(width, depth, segments, resolution=res,
+                   obstacle_rects=obstacles, auto_resolution=want_audit)
 
     out: dict = {
         "enabled": bool(segments or obstacles),
@@ -253,6 +268,18 @@ def api_routes_network(payload: dict | None = None):
         dist = g.distance(a, b)
         out["paths"].append({"points": [list(pt) for pt in pts],
                              "distance_m": round(dist, 2)})
+    if want_audit:
+        from whsim import layoutaudit
+        try:
+            out["audit"] = layoutaudit.audit(
+                width, depth, segments, obstacles, graph=g,
+                person_aisle_m=_f(p.get("person_aisle_m"),
+                                  layoutaudit.DEFAULT_PERSON_AISLE_M),
+                forklift_aisle_m=_f(p.get("forklift_aisle_m"),
+                                    layoutaudit.DEFAULT_FORKLIFT_AISLE_M),
+            )
+        except Exception:  # noqa: BLE001 — 診断は補助情報: never blocks the editor
+            out["audit"] = layoutaudit.empty_audit()
     return out
 
 

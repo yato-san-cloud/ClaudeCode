@@ -1,11 +1,13 @@
 // designer/route.js — the 動線 tool: aisle-network fetch/draw, A→B measure, route
-// polyline drawing + table, save-measure-as-route, and 工程フロー動線自動生成.
+// polyline drawing + table, save-measure-as-route, 工程フロー動線自動生成, and the
+// レイアウト診断 + 人流アニメーション (design-time validation while you draw).
 // Mixed into Designer.prototype by core.js (pure structural move).
 //
 // SYNTHESIS: core.js does `Object.assign(Designer.prototype, routeMethods)`.
 
 import {
-  MOVER_COLOR, MOVER_JP, MOVER_OPTS, MOVER_SPEED,
+  AUDIT_DEBOUNCE_MS, MOVER_COLOR, MOVER_JP, MOVER_OPTS, MOVER_SPEED,
+  PFLOW_TOUR_S, PFLOW_WALKERS,
 } from './constants.js';
 import { clamp, snap, uid } from './geometry.js';
 
@@ -14,6 +16,7 @@ export const routeMethods = {
   _renderRoute() {
     if (!this.routeMode) this.routeMode = 'measure';   // 'measure' | 'draw'
     if (this.routeNetOn == null) this.routeNetOn = true;
+    if (this.pflowOn == null) this.pflowOn = false;
     // left column: control bar above the floor canvas
     const left = document.createElement('div');
     left.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;';
@@ -74,7 +77,28 @@ export const routeMethods = {
     netLbl.appendChild(netCb);
     netLbl.appendChild(document.createTextNode('通路網'));
     bar.appendChild(netLbl);
+    // 人流アニメーション: walkers on REAL routes — the fastest way to see whether
+    // every棚 can actually be reached and the aisles connect (MapMaker風).
+    const pfLbl = document.createElement('label');
+    pfLbl.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-secondary);cursor:pointer;font-weight:700;';
+    pfLbl.title = '入荷→ピック面→出荷を、壁・棚を迂回した実際の最短経路で人が歩きます。'
+      + '止まったまま動かない棚があれば、そこは到達できていません。';
+    const pfCb = document.createElement('input');
+    pfCb.type = 'checkbox';
+    pfCb.id = 'pflowToggle';
+    pfCb.checked = !!this.pflowOn;
+    this._on(pfCb, 'change', () => this._setPeopleFlow(pfCb.checked));
+    pfLbl.appendChild(pfCb);
+    pfLbl.appendChild(document.createTextNode('人流アニメーション'));
+    bar.appendChild(pfLbl);
     left.appendChild(bar);
+
+    // レイアウト診断 status chip (quiet green when everything is fine).
+    const chipBar = document.createElement('div');
+    chipBar.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:26px;';
+    this._auditChip = chipBar;
+    left.appendChild(chipBar);
+    this._renderAuditChip();
 
     // floor canvas
     const wrap = document.createElement('div');
@@ -103,33 +127,236 @@ export const routeMethods = {
   // ---- 経路ネットワーク自動生成 (engine.graph as a service) -------------------
   // The 動線 tab routes with the SAME AisleGraph the simulation uses, via the
   // stateless POST /api/routes/network — so drawn 動線 and simulated travel agree.
+  // Every DRAWN rack footprint, in floor metres — the JS mirror of the server's
+  // `rackgeom.rack_rects`. Authored 棚 (ShelfArea) AND parametric zones both count:
+  // the routing graph must see exactly what the canvas draws, otherwise the 動線
+  // (and the audit built on it) would happily walk through a rack row.
+  _rackRectsForRouting() {
+    const out = [];
+    for (const z of this.model.layout.zones || []) {
+      if (z.type !== 'storage') continue;
+      if (z.shelves && z.shelves.length) {
+        for (const sh of z.shelves) {
+          if (+sh.w > 0 && +sh.h > 0) out.push([+sh.x, +sh.y, +sh.w, +sh.h]);
+        }
+        continue;
+      }
+      if (!z.rack) continue;
+      // Materialised locations reconstruct into the same runs render._drawRack draws.
+      const locs = this._zoneLocations(z);
+      if (locs.length) {
+        for (const run of this._reconstructRuns(locs)) {
+          out.push([run.x - run.depth / 2, run.y0, run.depth, run.y1 - run.y0]);
+        }
+        continue;
+      }
+      // Parametric fallback (nothing materialised yet) — mirrors _drawRack.
+      const r = z.rack;
+      const cs = +r.col_spacing || 4, mg = +r.margin || 0;
+      if (z.w - 2 * mg <= 0 || z.h - 2 * mg <= 0) continue;
+      const depth = Math.max(0.3, Math.min(cs * 0.42, 1.5));
+      const y0 = z.y + mg, y1 = z.y + z.h - mg;
+      for (let cx = z.x + mg + depth / 2; cx <= z.x + z.w - mg + 1e-6; cx += cs) {
+        out.push([cx - depth / 2, y0, depth, y1 - y0]);
+      }
+    }
+    return out;
+  },
   _routeLayoutPayload() {
     const L = this.model.layout;
-    const shelves = [];
-    for (const z of L.zones || []) {
-      if (z.type !== 'storage') continue;
-      for (const sh of z.shelves || []) shelves.push([sh.x, sh.y, sh.w, sh.h]);
-    }
     return {
       bounds: { width: L.bounds.width, depth: L.bounds.depth },
       walls: (L.walls || []).map((w) => ({ points: w.points || [] })),
-      shelves,
+      shelves: this._rackRectsForRouting(),
     };
   },
   async _fetchRouteNet() {
-    if (this._routeNetBusy) return;
+    if (this._routeNetBusy) { this._routeNetAgain = true; return; }
     this._routeNetBusy = true;
     try {
       const res = await fetch('/api/routes/network', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...this._routeLayoutPayload(), include_edges: true }),
+        body: JSON.stringify({
+          ...this._routeLayoutPayload(), include_edges: true, audit: true,
+        }),
       });
       if (res.ok) {
         this.routeNet = await res.json();
-        if (this.tool === 'route') this._drawCanvas();
+        this.routeAudit = this.routeNet.audit || null;
+        this._renderAuditChip();
+        // the 動線 side panel hosts the findings list; 配置 keeps its inspector.
+        if (this.tool === 'route') {
+          this._renderRouteTable();
+          if (this.pflowOn) this._fetchPeopleFlow();
+        }
+        this._drawCanvas();
       }
     } catch (_e) { /* offline: the tab still works for manual drawing */ }
     this._routeNetBusy = false;
+    if (this._routeNetAgain) { this._routeNetAgain = false; this._fetchRouteNet(); }
+  },
+  // ---- レイアウト診断: live re-audit on every (debounced) layout edit --------
+  // Moving a shelf that seals an aisle must turn the chip red *while you drag* —
+  // that immediacy is the whole point, so this is wired to the designer's own
+  // dirty bus (core._emitDirty) rather than to a save.
+  _auditSoon() {
+    // Runs in 配置 too — that is the tab where a shelf actually gets dragged
+    // across an aisle, so that is where the chip has to go red.
+    if (this.tool !== 'route' && this.tool !== 'place') return;
+    if (this._auditTimer) clearTimeout(this._auditTimer);
+    this._auditTimer = setTimeout(() => {
+      this._auditTimer = 0;
+      this._fetchRouteNet();
+    }, AUDIT_DEBOUNCE_MS);
+  },
+  _auditSummary() {
+    return (this.routeAudit && this.routeAudit.summary) || null;
+  },
+  // One-line verdict: {text, tone} where tone is ok|warn|bad.
+  _auditVerdict() {
+    const s = this._auditSummary();
+    if (!s) return { text: '通路を診断中…', tone: 'idle' };
+    if (s.unreachable_n > 0) return { text: `⚠ 到達できない棚 ${s.unreachable_n}`, tone: 'bad' };
+    if (s.components > 1) return { text: `⚠ 床が分断 ${s.components}区画`, tone: 'bad' };
+    if (s.narrow_person_n > 0) return { text: `△ 狭い通路 ${s.narrow_person_n}`, tone: 'warn' };
+    if (!s.racks_n) return { text: '棚がまだありません', tone: 'idle' };
+    return { text: '✓ 通路OK', tone: 'ok' };
+  },
+  _renderAuditChip() {
+    const host = this._auditChip;
+    if (!host) return;
+    host.innerHTML = '';
+    const s = this._auditSummary();
+    const v = this._auditVerdict();
+    const COLOR = {
+      ok: ['var(--ok, #1db954)', 'rgba(29,185,84,0.12)'],
+      warn: ['#d98200', 'rgba(217,130,0,0.14)'],
+      bad: ['var(--bad, #e3401c)', 'rgba(227,64,28,0.14)'],
+      idle: ['var(--ink-secondary)', 'var(--bg-sunken)'],
+    };
+    const mk = (text, tone, title) => {
+      const [fg, bg] = COLOR[tone] || COLOR.idle;
+      const el = document.createElement('span');
+      el.textContent = text;
+      el.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;`
+        + `font-size:12px;font-weight:700;color:${fg};background:${bg};border:1px solid ${fg};`;
+      if (title) el.title = title;
+      host.appendChild(el);
+      return el;
+    };
+    const main = mk(v.text, v.tone, 'レイアウト診断: 棚の到達性・床の連結・通路幅を、シミュレーションと同じ経路網で判定します。');
+    main.id = 'auditChip';
+    if (!s) return;
+    if (s.narrow_n - s.narrow_person_n > 0) {
+      mk(`フォークリフト不可の通路 ${s.narrow_n - s.narrow_person_n}`, 'warn',
+        `幅 ${this.routeAudit.thresholds.forklift_m}m 未満の通路。人は通れますがフォークリフトは通れません。`);
+    }
+    if (s.min_aisle_m != null) {
+      mk(`最小通路 ${s.min_aisle_m}m`, 'idle', '棚と棚（および壁）の間の最も狭い隙間。');
+    }
+  },
+  // ---- 人流アニメーション ---------------------------------------------------
+  _setPeopleFlow(on) {
+    this.pflowOn = !!on;
+    if (this.pflowOn) {
+      this._fetchPeopleFlow();
+    } else {
+      this._pflowStop();
+      this.pflowWalkers = null;
+      this._drawCanvas();
+    }
+  },
+  // Plausible origin/destination: 入荷 → ピック面 → 出荷/梱包. Falls back to the
+  // floor edges so the animation runs even on a bare template ("never blocks").
+  _pflowHub(types, fallback) {
+    for (const t of types) {
+      const z = (this.model.layout.zones || []).find((q) => q.type === t);
+      if (z) return [z.x + z.w / 2, z.y + z.h / 2];
+    }
+    return fallback;
+  },
+  async _fetchPeopleFlow() {
+    const b = this.model.layout.bounds;
+    const picks = (this.routeAudit && this.routeAudit.pick_points) || [];
+    if (!picks.length) { this.pflowWalkers = null; this._drawCanvas(); return; }
+    const from = this._pflowHub(['receiving', 'staging'], [1, b.depth - 1]);
+    const to = this._pflowHub(['shipping', 'packing'], [1, 1]);
+    // Evenly sample pick faces across the whole rack field so the walkers spread.
+    const n = Math.min(PFLOW_WALKERS, picks.length);
+    const step = picks.length / n;
+    const targets = [];
+    for (let i = 0; i < n; i++) targets.push(picks[Math.floor(i * step)]);
+    const queries = [];
+    for (const p of targets) { queries.push({ a: from, b: p }); queries.push({ a: p, b: to }); }
+    try {
+      const res = await fetch('/api/routes/network', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...this._routeLayoutPayload(), queries }),
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      this.pflowWalkers = this._buildWalkers(d.paths || []);
+      if (this.pflowOn) this._pflowStart();
+    } catch (_e) { /* offline: no walkers, everything else still works */ }
+  },
+  // Turn (in-leg, out-leg) path pairs into looping walkers with staggered phases.
+  _buildWalkers(paths) {
+    const out = [];
+    for (let i = 0; i + 1 < paths.length; i += 2) {
+      const a = (paths[i] && paths[i].points) || [];
+      const bpts = (paths[i + 1] && paths[i + 1].points) || [];
+      if (a.length < 2 && bpts.length < 2) continue;
+      const pts = a.concat(bpts.length && a.length ? bpts.slice(1) : bpts);
+      if (pts.length < 2) continue;
+      const cum = [0];
+      let total = 0;
+      for (let k = 1; k < pts.length; k++) {
+        total += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+        cum.push(total);
+      }
+      if (total < 0.5) continue;
+      const pickAt = a.length ? Math.max(0, a.length - 1) : 0;
+      const idx = out.length;
+      out.push({
+        pts, cum, total,
+        pickDist: cum[Math.min(pickAt, cum.length - 1)],
+        // Same wall-clock tour for everyone (so the flow reads as one cadence),
+        // phase-shifted so they never march in a parade.
+        dur: PFLOW_TOUR_S,
+        phase: (idx * 0.618) % 1,
+      });
+    }
+    return out;
+  },
+  _pflowStart() {
+    if (this._reducedMotion()) { this._drawCanvas(); return; }  // static preview
+    if (this._pflowRaf) return;
+    this._pflowT0 = performance.now();
+    const step = () => {
+      this._pflowRaf = 0;
+      if (!this.pflowOn || this.tool !== 'route' || !this.ctx) return;
+      this._drawCanvas();
+      this._pflowRaf = requestAnimationFrame(step);
+    };
+    this._pflowRaf = requestAnimationFrame(step);
+  },
+  _pflowStop() {
+    if (this._pflowRaf) cancelAnimationFrame(this._pflowRaf);
+    this._pflowRaf = 0;
+  },
+  // Point + heading at arc-length `d` along a walker's polyline.
+  _pflowAt(w, d) {
+    const { pts, cum } = w;
+    let lo = 0, hi = cum.length - 1;
+    while (lo < hi - 1) {                       // binary search the segment
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] <= d) lo = mid; else hi = mid;
+    }
+    const seg = Math.max(1e-9, cum[hi] - cum[lo]);
+    const t = clamp((d - cum[lo]) / seg, 0, 1);
+    const a = pts[lo], bb = pts[hi];
+    return [a[0] + (bb[0] - a[0]) * t, a[1] + (bb[1] - a[1]) * t,
+      Math.atan2(bb[1] - a[1], bb[0] - a[0])];
   },
   // A→B計測: ask the server for the wall/棚-aware shortest path between 2 points.
   async _measureQuery() {
@@ -254,9 +481,59 @@ export const routeMethods = {
     }
     return d;
   },
+  // レイアウト診断の内訳 (右パネル): what is wrong, where, and how wide.
+  _renderAuditPanel(s) {
+    const a = this.routeAudit;
+    this._h(s, 'レイアウト診断');
+    if (!a) { this._note(s, '通路と棚の到達性を確認しています…'); return; }
+    const sm = a.summary || {};
+    const v = this._auditVerdict();
+    const box = this._div(s, 'padding:8px 10px;border-radius:var(--r-md);margin-bottom:8px;font-size:12px;line-height:1.7;'
+      + `border:1px solid ${v.tone === 'ok' ? 'var(--ok, #1db954)' : (v.tone === 'bad' ? 'var(--bad, #e3401c)' : '#d98200')};`
+      + 'background:var(--bg-app);');
+    box.innerHTML = `<div style="font-weight:700;font-size:13px;margin-bottom:2px;">${v.text}</div>`
+      + `<div style="color:var(--ink-secondary);">棚 ${sm.racks_n ?? 0} / 到達不可 ${sm.unreachable_n ?? 0}`
+      + ` ・ 床の区画 ${sm.components ?? 0} ・ 狭い通路 ${sm.narrow_n ?? 0}`
+      + (sm.min_aisle_m != null ? ` ・ 最小通路 ${sm.min_aisle_m}m` : '') + '</div>';
+    if ((a.unreachable || []).length) {
+      this._note(s, '赤い棚は、通路からたどり着けません。前面をふさいでいる棚・壁を動かすか、通路を開けてください。');
+      for (const u of a.unreachable.slice(0, 8)) {
+        const why = u.reason === 'blocked' ? '全面が塞がれています' : '通路とつながっていません';
+        this._note(s, `・棚 (${u.rect[0]}, ${u.rect[1]}) — ${why}`);
+      }
+    }
+    const pockets = (a.components || []).filter((c) => !c.main);
+    if (pockets.length) {
+      this._note(s, `床が ${(a.components || []).length} 区画に分断されています（行き来できません）。`);
+      for (const c of pockets.slice(0, 5)) this._note(s, `・孤立した床 ${c.area_m2}㎡ 付近 (${c.point[0]}, ${c.point[1]})`);
+    }
+    const narrow = a.narrow || [];
+    if (narrow.length) {
+      const th = a.thresholds || {};
+      this._note(s, `通路幅の目安: 人 ${th.person_m}m / フォークリフト ${th.forklift_m}m`);
+      for (const nz of narrow.filter((q) => q.level === 'person').slice(0, 6)) {
+        this._note(s, `・幅 ${nz.gap_m}m × 長さ ${nz.length_m}m (人も通れません)`);
+      }
+      // フォークリフト不可 is usually the same width repeated across every aisle —
+      // group it so the panel stays a summary, not a wall of identical rows.
+      const byGap = new Map();
+      for (const nz of narrow) {
+        if (nz.level === 'person') continue;
+        byGap.set(nz.gap_m, (byGap.get(nz.gap_m) || 0) + 1);
+      }
+      for (const [gap, cnt] of [...byGap].sort((x, y) => x[0] - y[0]).slice(0, 4)) {
+        this._note(s, `・幅 ${gap}m の通路 ${cnt}本 (フォークリフト不可)`);
+      }
+    }
+    if (v.tone === 'ok') {
+      this._note(s, '棚はすべて通路からたどり着けて、床もつながっています。'
+        + '「人流アニメーション」をONにすると、実際の経路を人が歩く様子で確認できます。');
+    }
+  },
   _renderRouteTable() {
     const s = this.side; if (!s) return;
     s.innerHTML = '';
+    this._renderAuditPanel(s);
 
     // A→B計測 panel (auto shortest-path measurement)
     if (this.routeMode === 'measure') {
