@@ -36,6 +36,7 @@ matplotlib.use("Agg")  # headless
 import matplotlib.patheffects as pe  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.collections import LineCollection  # noqa: E402
 from matplotlib.patches import (  # noqa: E402
     Circle,
     FancyArrowPatch,
@@ -71,6 +72,17 @@ FLOOR = "#FDFCFA"
 POCHE = "#514D46"      # wall fill (architectural poché)
 DIM_INK = "#9C988F"    # dimension lines / ticks
 
+# --- conveyor (搬送コンベア) plan symbol --------------------------------------
+# A takeaway belt is ~0.6 m across, so the symbol is drawn at that REAL width
+# (floored at draw time so it never collapses to a hairline on a huge floor).
+# The steel/teal family is deliberately outside the accent-blue used by doors,
+# 工程フロー and 動線: on the sheet a belt is a physical object, not an overlay.
+BELT_W_M = 0.6
+BELT_BED = "#E4E9ED"     # belt surface (the band's fill)
+BELT_EDGE = "#6F7B85"    # side frames (the band's outline)
+BELT_ROLLER = "#AEB9C2"  # roller / tread ticks across the bed
+BELT_FLOW = "#2C6E7F"    # direction-of-travel arrowheads + discharge glyph
+
 # Door type → (colour, 日本語 label)
 DOOR_STYLE = {
     "dock": (ACCENT, "ドック"),
@@ -104,8 +116,11 @@ CONTENT_TOP = 0.858
 CONTENT_BOT = 0.108
 STRIP_H = 0.098                # legend / scale / colourbar strip
 
-# Draw order inside the plan axes.
+# Draw order inside the plan axes. The belt sits ABOVE the heat field (it is
+# equipment, not floor) but BELOW the racking, so a conveyor drawn across a rack
+# run never buries the storage it serves.
 Z_FLOOR, Z_GRID, Z_ZONE, Z_HEAT = 0, 1, 2, 3
+Z_BELT = 3.4
 Z_RACK, Z_SHELL, Z_DOOR, Z_ROUTE, Z_FLOW, Z_MARK, Z_DIM = 4, 6, 6.6, 7, 8, 9, 10
 
 
@@ -237,6 +252,141 @@ def _fmt_m(v: float) -> str:
     return f"{v:,.0f}" if abs(v - round(v)) < 0.05 else f"{v:,.1f}"
 
 
+# --- belt geometry (pure; shared with render/anim2d.py) ----------------------
+
+def belt_points(points) -> list[tuple[float, float]]:
+    """Tolerant conveyor polyline → clean metre coordinates.
+
+    Drops anything unparseable / non-finite, collapses repeated vertices and
+    merges straight-through vertices (the MapMaker-style belts carry a vertex
+    every few metres, and a 21-vertex straight run must still read as ONE leg
+    when the sheet labels it). Returns [] when nothing usable is left, which is
+    how a degenerate conveyor becomes "simply not drawn" instead of a crash.
+    """
+    raw: list[tuple[float, float]] = []
+    for p in points or []:
+        try:
+            x, y = float(p[0]), float(p[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+        if raw and math.dist(raw[-1], (x, y)) <= 1e-9:
+            continue
+        raw.append((x, y))
+    if len(raw) < 3:
+        return raw
+    out = [raw[0]]
+    for cur, nxt in zip(raw[1:-1], raw[2:]):
+        ax_, ay_ = cur[0] - out[-1][0], cur[1] - out[-1][1]
+        bx, by = nxt[0] - cur[0], nxt[1] - cur[1]
+        # Collinear AND forward-going (a 180° switchback keeps its vertex).
+        if abs(ax_ * by - ay_ * bx) <= 1e-9 * max(1.0, abs(ax_) + abs(ay_)) \
+                and ax_ * bx + ay_ * by > 0:
+            continue
+        out.append(cur)
+    out.append(raw[-1])
+    return out
+
+
+def belt_length(pts) -> float:
+    """Total run length (m) of a cleaned polyline."""
+    return sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
+
+
+def belt_at(pts, s: float) -> tuple[float, float, float, float]:
+    """(x, y, ux, uy) at arc length `s` along the polyline (clamped at both ends).
+
+    `(ux, uy)` is the unit direction of travel there — points[0] → points[-1] is
+    the direction goods move, so this is what the flow arrowheads point along.
+    """
+    if not pts:
+        return (0.0, 0.0, 1.0, 0.0)
+    if len(pts) < 2:
+        return (pts[0][0], pts[0][1], 1.0, 0.0)
+    s = max(0.0, s)
+    acc = 0.0
+    u = (1.0, 0.0)
+    for a, b in zip(pts, pts[1:]):
+        d = math.dist(a, b)
+        if d <= 1e-12:
+            continue
+        u = ((b[0] - a[0]) / d, (b[1] - a[1]) / d)
+        if s <= acc + d:
+            f = s - acc
+            return (a[0] + u[0] * f, a[1] + u[1] * f, u[0], u[1])
+        acc += d
+    return (pts[-1][0], pts[-1][1], u[0], u[1])
+
+
+def belt_band(points, width: float) -> list[tuple[float, float]]:
+    """Closed polygon outlining a `width`-metre band centred on the polyline.
+
+    Offsets both sides with mitred corners (limited, so a hairpin never grows a
+    spike), which is what lets the belt be drawn at its true width in METRES —
+    identical at any sheet scale, in the PNG and in the GIF alike.
+    """
+    pts = belt_points(points)
+    if len(pts) < 2 or not math.isfinite(width) or width <= 0:
+        return []
+    h = width / 2.0
+    dirs = []
+    for a, b in zip(pts, pts[1:]):
+        d = math.dist(a, b)
+        if d <= 1e-12:
+            continue
+        dirs.append(((b[0] - a[0]) / d, (b[1] - a[1]) / d))
+    if not dirs:
+        return []
+
+    def _side(sign: float) -> list[tuple[float, float]]:
+        n0 = (-dirs[0][1] * sign, dirs[0][0] * sign)
+        edge = [(pts[0][0] + n0[0] * h, pts[0][1] + n0[1] * h)]
+        for i in range(1, len(dirs)):
+            u1, u2 = dirs[i - 1], dirs[i]
+            n1 = (-u1[1] * sign, u1[0] * sign)
+            n2 = (-u2[1] * sign, u2[0] * sign)
+            mx, my = n1[0] + n2[0], n1[1] + n2[1]
+            ml = math.hypot(mx, my)
+            p = pts[i]
+            if ml <= 1e-9:              # switchback: square the corner off
+                edge.append((p[0] + n1[0] * h, p[1] + n1[1] * h))
+                edge.append((p[0] + n2[0] * h, p[1] + n2[1] * h))
+                continue
+            mnx, mny = mx / ml, my / ml
+            ext = h / max(mnx * n1[0] + mny * n1[1], 0.34)   # miter limit ≈ 2.9×
+            edge.append((p[0] + mnx * ext, p[1] + mny * ext))
+        nz = (-dirs[-1][1] * sign, dirs[-1][0] * sign)
+        edge.append((pts[-1][0] + nz[0] * h, pts[-1][1] + nz[1] * h))
+        return edge
+
+    return _side(1.0) + _side(-1.0)[::-1]
+
+
+def belt_specs(model) -> list[dict]:
+    """Every conveyor worth drawing → {id, points, length_m, speed_mps}.
+
+    Degenerate lines (no points, one point, zero length, NaN) are dropped here,
+    so both renderers and the equipment list agree on what "a belt" is.
+    """
+    out: list[dict] = []
+    res = getattr(model, "resources", None)
+    for cv in (getattr(res, "conveyors", None) or []):
+        pts = belt_points(getattr(cv, "points", None))
+        length = belt_length(pts)
+        if len(pts) < 2 or length <= 1e-6:
+            continue
+        try:
+            speed = float(getattr(cv, "speed_mps", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            speed = 0.0
+        if not math.isfinite(speed) or speed < 0:
+            speed = 0.0
+        out.append({"id": str(getattr(cv, "id", "") or ""), "points": pts,
+                    "length_m": length, "speed_mps": speed})
+    return out
+
+
 def _content_extent(model, fw: float, fd: float) -> tuple[float, float, float, float]:
     """Union of the building envelope and everything authored on the floor.
 
@@ -267,6 +417,9 @@ def _content_extent(model, fw: float, fd: float) -> tuple[float, float, float, f
                 _grow(float(p[0]), float(p[1]), float(p[0]), float(p[1]))
             except (TypeError, ValueError, IndexError):
                 continue
+    for spec in belt_specs(model):
+        for px, py in spec["points"]:
+            _grow(px, py, px, py)
     return x0, y0, x1, y1
 
 
@@ -507,6 +660,131 @@ def _draw_racks(ax, model, m_per_px: float) -> list[str]:
     return present
 
 
+def _belt_spec(spec: dict, sep: str) -> str:
+    """「99 m ・ 0.8 m/s」 — the speed is dropped when the model does not carry
+    a usable one, rather than quoting a 0 m/s belt at the customer."""
+    txt = f"{spec['length_m']:,.0f} m"
+    if spec["speed_mps"] > 0:
+        txt += f"{sep}{spec['speed_mps']:g} m/s"
+    return txt
+
+
+def _belt_arrow(ax, x: float, y: float, ux: float, uy: float, bw: float,
+                zorder: float, scale: float = 1.0) -> None:
+    """One direction-of-travel arrowhead sitting ON the bed, centred at (x, y)."""
+    ln, half = bw * 1.30 * scale, bw * 0.42 * scale
+    nx, ny = -uy * half, ux * half
+    tip = (x + ux * ln * 0.5, y + uy * ln * 0.5)
+    tail = (x - ux * ln * 0.5, y - uy * ln * 0.5)
+    ax.add_patch(Polygon([tip, (tail[0] + nx, tail[1] + ny),
+                          (tail[0] - nx, tail[1] - ny)],
+                         closed=True, facecolor=BELT_FLOW, edgecolor="white",
+                         lw=0.3, zorder=zorder, gid="whsim-conveyor-arrow"))
+
+
+def _draw_conveyors(ax, model, span: float, m_per_px: float) -> list[dict]:
+    """Conveyors drawn as conveyors: a real-width belt, not a bare polyline.
+
+    Each line becomes a band of BELT_W_M metres with the roller/tread ticks
+    hatched across it, repeated arrowheads pointing the way goods actually
+    travel (points[0] → points[-1]) and a marked discharge end — the customer
+    asks "which way does it run and where does it drop?", and the sheet has to
+    answer without a caption. The equipment tag quotes the spec (length・speed)
+    on the longest straight leg, exactly like a drawn equipment callout.
+
+    Returns the spec list (draw order) for the legend / 搬送設備 list.
+    """
+    lines = belt_specs(model)
+    if not lines:
+        return []
+    # Real 0.6 m width, floored so the band survives a 200 m floor on one sheet.
+    bw = max(BELT_W_M, m_per_px * 3.2)
+    stations: list[tuple[float, float]] = []
+    for st in getattr(model.resources, "stations", []) or []:
+        try:
+            stations.append((float(st.x), float(st.y)))
+        except (TypeError, ValueError):
+            continue
+
+    # Pass 1 — every bed first, so a line that merges into / crosses another is
+    # never half-buried by its neighbour's band (branching geometry stays read-
+    # able because all the ticks and arrows land on top of every bed).
+    for spec in lines:
+        band = belt_band(spec["points"], bw)
+        if len(band) >= 3:
+            ax.add_patch(Polygon(band, closed=True, facecolor=BELT_BED,
+                                 edgecolor=BELT_EDGE, lw=0.7, joinstyle="miter",
+                                 zorder=Z_BELT, gid="whsim-conveyor-band"))
+
+    # Pass 2 — roller ticks across the bed (the texture that says "belt").
+    segs: list[list[tuple[float, float]]] = []
+    for spec in lines:
+        pts, length = spec["points"], spec["length_m"]
+        step = max(0.9, m_per_px * 7.0, length / 260.0)
+        for i in range(1, int(length / step) + 1):
+            bx, by, ux, uy = belt_at(pts, step * i)
+            nx, ny = -uy * bw * 0.40, ux * bw * 0.40
+            segs.append([(bx - nx, by - ny), (bx + nx, by + ny)])
+    if segs:
+        ax.add_collection(LineCollection(
+            segs, colors=[BELT_ROLLER], linewidths=0.35, zorder=Z_BELT + 0.1,
+            capstyle="butt", gid="whsim-conveyor-rollers"))
+
+    # Pass 3 — flow arrowheads, the discharge glyph and the equipment tag.
+    tagged = capped = 0
+    for spec in lines:
+        pts, length = spec["points"], spec["length_m"]
+        n_arrow = max(1, min(14, int(round(length / max(bw * 10.0, 6.0)))))
+        for k in range(n_arrow):
+            bx, by, ux, uy = belt_at(pts, length * (k + 0.5) / n_arrow)
+            _belt_arrow(ax, bx, by, ux, uy, bw, Z_BELT + 0.2)
+        # Discharge (排出端): a heavier arrowhead running into an end bar — the
+        # plan convention for "goods leave the line here". Drawn ABOVE the
+        # station glyphs (the belt almost always discharges onto one), so the
+        # sheet shows the hand-off instead of hiding it under the 梱包台 box.
+        ex, ey, ux, uy = belt_at(pts, length)
+        nx, ny = -uy * bw * 0.70, ux * bw * 0.70
+        _belt_arrow(ax, ex - ux * bw * 0.80, ey - uy * bw * 0.80, ux, uy, bw,
+                    Z_MARK + 0.15, scale=1.30)
+        ax.plot([ex + nx, ex - nx], [ey + ny, ey - ny], color=BELT_FLOW, lw=1.2,
+                solid_capstyle="butt", zorder=Z_MARK + 0.15)
+        # 排出 caption, on the upper side (station captions hang BELOW their
+        # glyph, so the top side is the one that stays free). Suppressed when a
+        # station sits right on the discharge — its own 梱包台 tag already names
+        # the destination and two labels would collide.
+        near_station = any(math.dist((ex, ey), s) <= max(bw * 3.0, span * 0.015)
+                           for s in stations)
+        if not near_station and capped < 6:
+            capped += 1
+            lx, ly = -uy, ux
+            if ly < 0:                    # keep the caption on the upper side
+                lx, ly = uy, -ux
+            ax.text(ex + lx * bw * 2.2, ey + ly * bw * 2.2, "排出", fontsize=6.0,
+                    color=BELT_FLOW, ha="center", va="center", zorder=Z_MARK + 0.3,
+                    path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
+        # Equipment tag on the longest straight leg. Only lines long enough to
+        # carry a callout get one (a stub belt sits among the station glyphs and
+        # their captions, where a box this size would cover them) and the count
+        # is capped, so a sorter loop of 30 lines cannot paper over the plan —
+        # 搬送設備 in the panel always quotes every line's spec regardless.
+        legs = list(zip(pts, pts[1:]))
+        a, b = max(legs, key=lambda ab: math.dist(*ab))
+        leg = math.dist(a, b)
+        if length >= max(span * 0.18, 12.0) and leg >= span * 0.07 and tagged < 4:
+            tagged += 1
+            ux2, uy2 = (b[0] - a[0]) / leg, (b[1] - a[1]) / leg
+            ang = math.degrees(math.atan2(uy2, ux2))
+            ang = ang - 180.0 if ang > 90.0 else (ang + 180.0 if ang < -90.0 else ang)
+            off = bw * 2.6
+            ax.text((a[0] + b[0]) / 2 - uy2 * off, (a[1] + b[1]) / 2 + ux2 * off,
+                    "コンベア " + _belt_spec(spec, " ・ "), fontsize=6.2,
+                    color=BELT_FLOW, ha="center", va="center", rotation=ang,
+                    rotation_mode="anchor", zorder=Z_MARK + 0.3,
+                    bbox=dict(boxstyle="round,pad=0.28", facecolor="white",
+                              edgecolor=BELT_EDGE, linewidth=0.5, alpha=0.92))
+    return lines
+
+
 def _draw_stations(ax, model, span: float) -> bool:
     """Packing stations / placed equipment as labelled top-view glyphs."""
     drawn = False
@@ -724,6 +1002,14 @@ def _chip(fig, ax, x: float, y: float, kind: str, color, label: str,
         fc, ec = color
         ax.add_patch(Rectangle((x, y - 0.055), sw, 0.11, facecolor=fc, edgecolor=ec,
                                lw=0.7, clip_on=False))
+    elif kind == "belt":
+        # The swatch IS the symbol: a bed with its frame and a travel arrow, so
+        # the reader maps 凡例→図面 without guessing.
+        ax.add_patch(Rectangle((x, y - 0.055), sw, 0.11, facecolor=BELT_BED,
+                               edgecolor=BELT_EDGE, lw=0.7, clip_on=False))
+        ax.annotate("", xy=(x + sw * 0.86, y), xytext=(x + sw * 0.16, y),
+                    arrowprops=dict(arrowstyle="-|>", color=BELT_FLOW, lw=0.9,
+                                    shrinkA=0, shrinkB=0, mutation_scale=6))
     else:  # solid swatch
         ax.add_patch(Rectangle((x, y - 0.048), sw, 0.096, facecolor=color,
                                edgecolor="none", clip_on=False))
@@ -980,6 +1266,7 @@ def render(
                   vmax=1, zorder=Z_HEAT, aspect="auto", interpolation="bilinear")
 
     rack_types = _draw_racks(ax, model, m_per_px)
+    belts = _draw_conveyors(ax, model, span, m_per_px)
     wall_t, door_kinds = _draw_shell(ax, model, fw, fd)
     has_routes = _draw_routes(ax, routes)
     flow_steps = _draw_flow(ax, model, span)
@@ -1020,6 +1307,8 @@ def render(
         items.append(("line", _shade(racktypes.color(rack_types[0]), 0.38),
                       "ピック面"))
     items.append(("solid", POCHE, "外壁"))
+    if belts:
+        items.append(("belt", None, "コンベア"))
     for k in door_kinds[:3]:
         items.append(("line", DOOR_STYLE.get(k, DOOR_STYLE["dock"])[0],
                       DOOR_STYLE.get(k, DOOR_STYLE["dock"])[1]))
@@ -1075,7 +1364,11 @@ def render(
     except Exception:  # noqa: BLE001 — a sizing failure must never break the PNG
         est = {"has_data": False}
     has_storage = bool(est.get("has_data"))
-    reserve = (0.121 if has_storage else 0.0) + 0.085  # 保管設計 band + 前提 note
+    # 保管設計 band + 搬送設備 band + 前提 note (reserved so the KPI cards never
+    # eat the space the equipment list needs).
+    belt_rows = min(len(belts), 3) + (1 if len(belts) > 3 else 0)
+    reserve = ((0.121 if has_storage else 0.0)
+               + ((0.050 + 0.024 * belt_rows) if belts else 0.0) + 0.085)
 
     y = _section(fig, panel, y, "主要指標")
     rows = _kpi_rows(kpis)
@@ -1109,6 +1402,32 @@ def render(
                        va="center", ha="left", transform=panel.transAxes)
             cx += 0.020 + _measure(fig, panel, chip, 6.8) + 0.024
         y -= 0.030
+
+    # 搬送設備: the belt's own spec sheet — length and speed are the first two
+    # questions a customer asks about a transport line, so they are quoted here
+    # (and on the plan tag) rather than left to be measured off the drawing.
+    if belts and y - 0.085 >= 0.046 + 0.024 * belt_rows:
+        y = _section(fig, panel, y, "搬送設備")
+        for i, spec in enumerate(belts[:3], start=1):
+            name = "コンベア" if len(belts) == 1 else f"コンベア{i}"
+            panel.add_patch(Rectangle((0.0, y - 0.013), 0.014, 0.010,
+                                      facecolor=BELT_BED, edgecolor=BELT_EDGE,
+                                      lw=0.5, transform=panel.transAxes,
+                                      clip_on=False))
+            panel.text(0.020, y - 0.008, name, fontsize=7.6, color=INK, ha="left",
+                       va="center", transform=panel.transAxes)
+            panel.text(1.0, y - 0.008, _belt_spec(spec, " ／ "), fontsize=7.2,
+                       color=INK_FAINT, ha="right", va="center",
+                       transform=panel.transAxes)
+            y -= 0.024
+        if len(belts) > 3:
+            total = sum(s["length_m"] for s in belts)
+            panel.text(0.020, y - 0.008,
+                       f"ほか {len(belts) - 3} 本（全 {len(belts)} 本・合計 "
+                       f"{total:,.0f} m）", fontsize=7.0, color=INK_FAINT,
+                       ha="left", va="center", transform=panel.transAxes)
+            y -= 0.024
+        y -= 0.014
 
     # 工程フロー: the same numbering as the badges on the plan, as readable text.
     if flow_steps and y - 0.085 >= 0.040 + 0.025 * len(flow_steps):

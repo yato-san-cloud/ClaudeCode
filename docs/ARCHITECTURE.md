@@ -61,6 +61,7 @@
 
 ### レンダ
 - `render/`：`replay.py`（**replay契約**）/ `png2d.py` / `shelves.py`（ロケ→棚ラン；authored shelf は1棚=1ラン、name/facing/cell sku-qty 付き）/ `anim2d.py` / `fonts.py` / `heatmap.py`。
+- **コンベア作図**：`png2d.belt_points/belt_length/belt_at/belt_band/belt_specs` が帯の純幾何（直線頂点の統合・マイター外形・弧長サンプル）。提案PNGは実幅0.6mの帯＋ローラー刻み＋進行方向の矢羽（`points[0]→points[-1]`）＋排出端記号＋設備タグ（長さ・速度）、凡例「コンベア」と右パネル「搬送設備」に諸元。`anim2d.py` は同じ幾何で帯を静止描画し、replayに `totes` があるときだけ荷物を軌跡で動かす（無ければ従来と1バイト同一）。コンベア無し＝出力不変、退化コンベア（1点/長さ0/NaN）は描かない＝never-blocks。
 
 ### エクスポート / Web / 横断
 - `export_doc.py`（PPTX+PDF）/ `web/app.py`（FastAPI ~50ルート、**最大ファイル**）/ `cli.py` / `project.py` / `notes.py` / `cody.py`。
