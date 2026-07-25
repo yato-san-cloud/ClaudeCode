@@ -32,6 +32,8 @@ from math import hypot
 
 import numpy as np
 
+from whsim.rackgeom import rack_facings, rack_rects
+
 # Outward offset for an open-face pick point, in metres. Ported verbatim intent
 # from MapMaker's CartNetworkGenerator.offset_mm = 500.0 (mm) → 0.5 m.
 _OPEN_FACE_OFFSET = 0.5
@@ -402,4 +404,19 @@ class NavNetwork:
                     continue
                 # Advisory facing hint (None when unset / unknown).
                 facings.append(getattr(sh, "facing", None))
+        # ...plus the rack runs as DRAWN. Parametric racks live only in
+        # ``model.locations``, so the authored loop above never sees them and the
+        # waypoint net came out EMPTY for template layouts (no 通路網, no open-face
+        # pick points). Same reconstruction ``engine.graph`` routes on and the
+        # 2D/3D draw, so the aisle network can never disagree with the racking.
+        # Deduped, so an authored MapMaker model is unchanged.
+        seen = {tuple(round(v, 4) for v in r) for r in obstacles}
+        extra_facings = rack_facings(model)
+        for i, rect in enumerate(rack_rects(model)):
+            key = tuple(round(v, 4) for v in rect)
+            if key in seen:
+                continue
+            seen.add(key)
+            obstacles.append(rect)
+            facings.append(extra_facings[i] if i < len(extra_facings) else None)
         return cls(width, depth, obstacles, facings=facings)
