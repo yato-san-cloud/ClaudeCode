@@ -85,6 +85,52 @@ export const ROLLER_COLOR = 0x9aa3ad;   // flow-rack inclined roller lanes
 export const ASRS_FRAME = 0x8d949c;     // AS/RS tower frame
 export const ASRS_CRANE = 0xf0c020;     // AS/RS stacker-crane mast (hi-vis yellow)
 
+// --- Realistic storage-equipment palette (v0.3.0 圧倒的にリアル) --------------
+// Real racking is painted steel, not neutral slabs: uprights are a deep blue
+// (the industry's most common frame colour), load beams a signature orange, and
+// decking/bracing raw galvanised grey. These feed PBR MeshStandardMaterials so
+// Lane A's lighting/environment makes them read as painted + galvanised steel.
+export const RACK_UPRIGHT = 0x2c5f9e;   // painted upright frame (deep blue)
+export const RACK_BRACE = 0x2f6cae;     // frame bracing (same paint, a touch lighter)
+export const RACK_FOOT = 0x252c36;      // upright footplate / anchor shoe (dark)
+export const RACK_GALV = 0x99a3ae;      // galvanised wire mesh deck / shelf panel
+export const SHELF_PANEL = 0x7e8894;    // 軽量/中量棚 shelf panel (painted steel)
+export const CARRIAGE_DARK = 0x333b46;  // 移動ラック carriage body
+export const RAIL_STEEL = 0x555f6b;     // floor rails (mobile rack / AS-RS crane)
+
+// Cardboard: a kraft base plus a few subtle per-carton tone multipliers so a
+// stack never reads as one flat colour. instanceColor multiplies the shared
+// corrugated CanvasTexture, so these stay *materially* cardboard (never neon).
+export const CARTON_BASE = 0xc49a68;
+export const CARTON_TONES = [0xffffff, 0xf0e6da, 0xe8dccb, 0xfdf6ec, 0xdccdb8];
+// Plastic totes (flow rack / AS-RS bins) — muted logistics greys/blues.
+export const TOTE_TONES = [0x4a5c72, 0x3f5166, 0x55677d, 0x45566b];
+// Apparel on hangers: muted retail garment tones (never neon).
+export const GARMENT_TONES = [
+  0x51607a, 0x7a4f52, 0x4d6155, 0x6b6072, 0x8a7a5e, 0x455063, 0x77626a,
+];
+
+// --- Rack level-of-detail (LOD) ---------------------------------------------
+// Storage detail is generated per BAY, so a 616-location DC can ask for tens of
+// thousands of parts. Two independent, documented rules keep it fast:
+//
+//  1. COUNT-based geometry tier, chosen once at build time from the scene's
+//     total bay count (`RACK_LOD.fine` / `RACK_LOD.coarse` thresholds):
+//       tier 0 (fine)   — bracing, wire-mesh decking, footplates, stringer
+//                         pallets, 3–5 varied cartons per slot, ABC labels
+//       tier 1 (mid)    — bracing + decking kept, simplified pallets, 2 cartons
+//                         per slot, labels kept
+//       tier 2 (coarse) — silhouette only: uprights + beams/panels + ONE merged
+//                         load block per slot; no bracing/decking/labels
+//  2. DISTANCE-based visibility for the finest meshes (bracing, decking, ABC
+//     labels): hidden while the camera is farther than `RACK_LOD.detailDist`
+//     metres from its orbit target — at that range they are sub-pixel anyway.
+export const RACK_LOD = {
+  fine: 260,        // <= this many bays in the scene → tier 0
+  coarse: 900,      // <= this many bays → tier 1; above → tier 2
+  detailDist: 34,   // camera→target distance (m) beyond which fine meshes hide
+};
+
 // Pick-event highlight: target cell pulse + connector colour.
 export const PICK_GLOW = 0xffe14d;      // warm amber pulse on the reached cell
 export const PICK_LINE = 0xffe14d;
