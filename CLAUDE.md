@@ -47,6 +47,13 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   dotted-path edits for what-if comparison (+ `payback_months` from operating-cost savings).
 - `kpis.py` includes cost: ¥/order, monthly_cost/opex, headcount, AGV utilisation.
 - `analytic.py` — closed-form M/M/c estimate; also the engine's sanity oracle in tests.
+  Travel is **aisle-routed like the DES**: `rackgeom.aisle_detour` charges the
+  aisle-escape detour in closed form off the drawn rack rectangles (ℓ/3 per
+  aisle-changing hop, 2d(ℓ-d)/ℓ per depot leg — no graph search, so it stays 爆速
+  for drag-time re-estimation), and the trip is amortised over
+  `workmethod.orders_per_trip` (the engine's own batch rule). No racking ⇒ the
+  historical Manhattan behaviour (never-blocks). 解析↔DES agreement is pinned by
+  `tests/test_analytic_aisle_travel.py` on both templates.
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict. Multi-rep runs
   add `kpis.ci` (95% t-CI per headline metric + n_recommended for a ±5% target);
   the KPI view shows 「±X (95%CI, n=N)」 and an honest n=1 disclosure.

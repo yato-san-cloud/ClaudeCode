@@ -16,6 +16,7 @@ import simpy
 from whsim.engine.graph import AisleGraph, simplify_collinear
 from whsim.engine.routing import manhattan
 from whsim.schema.model import WarehouseModel
+from whsim.workmethod import orders_per_trip as workmethod_orders_per_trip
 
 
 @dataclass
@@ -309,21 +310,10 @@ def build(
     # keep running identically. pick_strategy is still surfaced for routing.
     work = model.process.effective_work()
     strategy = model.process.pick_strategy
-    bs = max(model.process.batch_size, work.orders_per_trip)
-    # orders_per_trip (B) generalises batch_size: how many orders to pull per trip.
-    # When the user left it at 1 but picked a strategy that implies batching,
-    # fall back to a sensible default so the choice produces a real difference
-    # (more orders/trip -> less walking per order; wave pools most).
-    if work.orders_per_trip > 1:
-        batch_size = work.orders_per_trip
-    elif work.consolidation == "sort":
-        batch_size = bs if bs > 1 else 8   # 種まき pools many orders into one sweep
-    elif strategy == "discrete" and work.zoning == "none":
-        batch_size = 1
-    elif work.release == "wave":
-        batch_size = bs if bs > 1 else 8
-    else:  # batch, zone
-        batch_size = bs if bs > 1 else 4
+    # orders_per_trip (B) generalises batch_size: how many orders to pull per
+    # trip. The rule lives in ``workmethod.orders_per_trip`` so the closed-form
+    # oracle (analytic.estimate) resolves the SAME batch the engine sweeps.
+    batch_size = workmethod_orders_per_trip(model)
 
     # Forklifts handle inbound putaway (their own moving 動線).
     forks = [e for e in model.resources.equipment if e.type == "forklift"]

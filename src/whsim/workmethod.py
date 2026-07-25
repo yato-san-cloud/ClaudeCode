@@ -19,6 +19,31 @@ from dataclasses import dataclass
 from .schema.model import WarehouseModel, WorkMethod
 
 
+def orders_per_trip(model: WarehouseModel) -> int:
+    """How many orders one picking trip pulls — the engine's own resolution.
+
+    Extracted verbatim from ``engine.build.build_world`` so the DES and the
+    closed-form oracle (``analytic.estimate``) can never disagree about the
+    batch: the oracle amortises a trip's depot round-trip over exactly the
+    orders the engine sweeps together. ``orders_per_trip`` (B) generalises the
+    legacy ``batch_size``; when the user left it at 1 but picked a strategy that
+    implies batching, a sensible default is filled in so the choice produces a
+    real difference (more orders/trip -> less walking per order; wave pools most).
+    """
+    work = model.process.effective_work()
+    strategy = model.process.pick_strategy
+    bs = max(model.process.batch_size, work.orders_per_trip)
+    if work.orders_per_trip > 1:
+        return work.orders_per_trip
+    if work.consolidation == "sort":
+        return bs if bs > 1 else 8   # 種まき pools many orders into one sweep
+    if strategy == "discrete" and work.zoning == "none":
+        return 1
+    if work.release == "wave":
+        return bs if bs > 1 else 8
+    return bs if bs > 1 else 4       # batch, zone
+
+
 def legacy_strategy(work: WorkMethod) -> str:
     """Map the 5 axes back onto the legacy PickStrategy literal."""
     if work.release == "wave":

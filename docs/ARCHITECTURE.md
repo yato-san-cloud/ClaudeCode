@@ -22,7 +22,7 @@
 2. **全フィールドにデフォルト＝"never blocks"**。どのモデルも常に valid・実行可能。新フィールドは**必ず default を持つ**。新エンドポイントは欠損/部分データで **500 を返さない**。
 3. **取込は寛容**。壊れた/非JSONファイルはスキップ（致命的にしない）、部分取込OK。importer 系ルートは parse を `try/except … noqa: BLE001` で包み、フレンドリーな 400 を返す（`web/app.py`）。
 4. **provenance は第一級**。各 subtree の出所（imported/interview/provisional/generated）を追跡し「実データN%」として表示（`provenance.py`）。モデル書込み時に飛ばさない。
-5. **距離の解決順**：`World.dist` = 実測override(`distances.py`) > グラフDijkstra(`engine/graph.py`) > Manhattan。
+5. **距離の解決順**：`World.dist` = 実測override(`distances.py`) > グラフDijkstra(`engine/graph.py`) > Manhattan。**解析側も同じ通路を歩く**：`analytic.py` は `rackgeom.aisle_detour`（描かれたラック矩形からの閉形式=通路離脱の期待距離 ℓ/3・2d(ℓ-d)/ℓ）で移動距離を通路経由に補正し、`workmethod.orders_per_trip`（＝エンジンと同一のバッチ規則）で1巡に按分する。**解析とDESが構造的に食い違ってはいけない**（「解析で当てる→DESで裏取り」）。グラフ探索は使わない＝爆速（ドラッグ中の再計算に耐える）。ラック無し＝補正なし＝従来のManhattan。
 6. **replay/render は層状契約（V1/V2/V3）**。keyframe・`shelves`・`navnet` の形は **2Dキャンバス(`app.js` `interp`)と3D(`view3d.js`)の両方**が消費する。コメント「**must match the 3D view**」は厳守。新フィールドは additive＋guard（無ければ legacy 描画にフォールバック）、**古い replay を壊さない**。
 7. **ビルドレス / npm 無し / vendored**。フロントは素の ES modules（`<script type="module">` ＋ importmap）。three.js と ECharts は `static/vendor/`（importmap で `three`/`echarts`）。**バンドラや `package.json` を導入しない**。
 8. **日本語＝ユーザー向け文字列、英語＝コード/識別子/コメント**。
@@ -42,6 +42,7 @@
 ### 取込 / ETL（寛容）
 - `importer.py` — ZIP→subtree deep-merge。`mapcsv.py` / `rmpm.py`（MapMaker地図CSV / ネイティブ.rmpm.json）/ `tabular.py`（汎用CSV/Excel）/ `cad.py`（DXF）。各々 `/api/.../import-*` ルート。
 - `distances.py` — 実測 棚間距離行列（最大級ファイル；`engine/graph.py` と距離で概念重複）。
+- `rackgeom.py` — **描かれたラック＝ジオメトリの唯一の真実**。`rack_rects`（描画と routing 障害物の共通元）＋`aisle_block`/`aisle_detour`（通路travel の閉形式＝解析側の補正; `analytic.py` が消費）。
 - `provenance.py` — 出所追跡。
 
 ### エンジン（SimPy DES）

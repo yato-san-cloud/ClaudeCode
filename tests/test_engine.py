@@ -1,3 +1,5 @@
+import pytest
+
 from whsim import analytic, kpis, templates
 from whsim.engine.run import representative_day, run_once, run_replications
 from whsim.schema.model import Order, OrderLine
@@ -32,22 +34,23 @@ def test_kpis_are_sane():
 
 
 def test_analytic_estimate_is_in_the_same_ballpark_as_sim():
-    # The closed-form M/M/c estimate doubles as a sanity oracle for the engine.
+    # The closed-form M/M/c estimate doubles as a sanity oracle for the engine,
+    # and whsim's whole thesis is 「解析で当てる → DESで裏取り」 — so this is a
+    # genuine TWO-SIDED match, not a one-sided bound.
     #
-    # The oracle measures travel as MANHATTAN (`analytic.estimate` ->
-    # `engine.routing.manhattan`), i.e. straight through the racking, while the
-    # DES now routes around it (`engine.graph` registers every drawn rack run as
-    # an obstacle). So the oracle is a deliberate LOWER bound on picker
-    # utilisation, not a two-sided match: on ecommerce_small the aisle detour adds
-    # ~50% to walk distance, worth ~0.2 of utilisation. Both facts are asserted —
-    # the sign (oracle never above the sim) and a loosened magnitude — so this
-    # still catches an engine that has gone wrong in either direction.
-    m = _fast_model()
+    # The oracle prices travel on the same aisle network the DES routes on
+    # (`analytic` -> `rackgeom.aisle_detour`), amortised over the same batch
+    # (`workmethod.orders_per_trip`), so the two agree to a few points of
+    # utilisation. A full shift is simulated rather than 1h: an hour of a
+    # 6-picker floor completes ~120 orders, whose sampling noise alone moves
+    # picker_utilization by ±0.15 and would make a tight bound flaky.
+    m = templates.load_template_model("ecommerce_small")
     est = analytic.estimate(m)
     results, _ = run_replications(m)
     sim = kpis.compute(results)
-    assert est["picker_utilization"] <= sim["picker_utilization"] + 0.05
-    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.3
+    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.08
+    # ...and the travel the oracle priced is the travel the DES actually walked.
+    assert est["walk_m_per_order"] == pytest.approx(sim["walk_per_order_m"], rel=0.15)
 
 
 def test_multiday_imported_demand_is_simulated():

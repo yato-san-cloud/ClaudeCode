@@ -132,24 +132,20 @@ def test_picker_utilization_tracks_analytic_under_overload():
 
 def test_picker_utilization_tracks_analytic_at_moderate_load():
     m = templates.load_template_model("ecommerce_small")
-    m.simulation.duration_s = 3600.0
     m.orders.outbound = []
     m.orders.profile.peak_factor = 1.0
     est = analytic.estimate(m)
     results, _ = run_replications(m)
     sim = kpis.compute(results)
-    # The oracle now includes pack time in the picker service (no conveyor), so
-    # the two estimates track each other rather than the sim sitting well below.
-    #
-    # They no longer agree to within 0.12, and that is the correct result: the DES
-    # routes around the racking (every drawn rack run is an obstacle in
-    # `engine.graph`) while this closed-form oracle still measures travel as
-    # Manhattan — straight through the shelves. On ecommerce_small the aisle
-    # detour adds ~50% to walk distance, i.e. ~0.2 of picker utilisation. So the
-    # oracle is a deliberate LOWER bound; assert the sign as well as the size, and
-    # the test still catches an engine that has drifted in either direction.
-    assert est["picker_utilization"] <= sim["picker_utilization"] + 0.05
-    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.3
+    # A genuine two-sided match. The oracle includes pack time in the picker
+    # service (no conveyor, no 仮置き here, so the picker doubles as the packer)
+    # AND prices travel on the same aisle network the DES routes on — every drawn
+    # rack run is an obstacle in `engine.graph`, and `rackgeom.aisle_detour`
+    # charges the same aisle-escape detour in closed form. Measured across seeds
+    # the gap stays under 0.05; 0.08 leaves room for sampling noise without
+    # letting a real regression through. (A full shift, not 1h: an hour of this
+    # floor is only ~120 orders and its noise alone swings the sim by ±0.15.)
+    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.08
 
 
 def test_packer_utilization_stays_meaningful_and_distinct():
