@@ -556,7 +556,37 @@ function driveUpdate(car, dt, throttle, brake, gear, handbrake, grade){
   S.slip += ((Math.max(0, Math.abs(F) - grip) / grip) - S.slip) * Math.min(1, dt * 8);
   return { rpm: S.rpm, load: Math.max(0, Math.min(1, S.load)), slip: Math.max(0, Math.min(1, S.slip)), gearNum: S.gearNum };
 }
-function driveReset(){ DTstate.rpm = DT.idle; DTstate.gearNum = 1; DTstate.shiftTimer = 0; DTstate.load = 0; DTstate.slip = 0; }
+/* ---- 横方向：グリップ限界つき積分 ----------------------------------------
+   bicycle() 自体は変更しない。必要な旋回加速度が μg を超えるときだけ実効切れ角を
+   落として渡す＝アンダーステア。低速（駐車速度域）では scale=1 となり従来と完全に同一。 */
+const LAT = { mu: 0.95, margin: 0.95, slip: 0, scrub: 0, steerRate: 0 };
+function integrateLat(car, dt){
+  const v = car.v, t = Math.tan(car.steer);
+  const need = v * v * Math.abs(t) / C.wheelbase;          // 必要横加速度
+  const cap = LAT.mu * DT.gravity * LAT.margin;            // タイヤが出せる横加速度
+  if (need > cap && Math.abs(t) > 1e-6){
+    const scale = Math.sqrt(cap * C.wheelbase / (v * v * Math.abs(t)));
+    LAT.slip = clamp(1 - scale, 0, 1);
+    const saved = car.steer;
+    car.steer = Math.atan(t * scale);                      // 曲がりきれない＝外へ膨らむ
+    bicycle(car, dt);
+    car.steer = saved;
+  } else {
+    LAT.slip *= Math.max(0, 1 - dt * 6);
+    bicycle(car, dt);
+  }
+}
+/* ---- 操舵：速度が上がるほど素早くは切れない（据え切りは人間のドラッグ速度より十分速い上限） */
+function applySteerRate(car, target, dt){
+  const maxRate = 3.6 - 2.0 * Math.min(Math.abs(car.v) / 16, 1);
+  const d = clamp(target - car.steer, -maxRate * dt, maxRate * dt);
+  car.steer += d;
+  LAT.steerRate = dt > 0 ? d / dt : 0;
+  // 据え切り（低速で大きく回す）＝タイヤのこすれ音。単フレームの跳ねを平滑化
+  const raw = clamp(Math.abs(LAT.steerRate) * (1 - Math.min(Math.abs(car.v) / 2, 1)) * 0.85, 0, 1);
+  LAT.scrub += (raw - LAT.scrub) * clamp(dt * (raw > LAT.scrub ? 6 : 9), 0, 1);
+}
+function driveReset(){ LAT.slip=0; LAT.scrub=0; LAT.steerRate=0; DTstate.rpm = DT.idle; DTstate.gearNum = 1; DTstate.shiftTimer = 0; DTstate.load = 0; DTstate.slip = 0; }
 
 /* ============================================================================
    SimAudio — 手続き生成サウンドエンジン（Web Audio API のみ・音声ファイル不使用）
@@ -732,7 +762,8 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     // 遊び（デッドゾーン）を挟んでハンドル→前輪切れ角
     // ハンドルを時計回り(右)に回す=wheelAngle正 → 前輪は右に切れる=car.steer負、という向きなので符号を反転する
     const eff=Math.max(0,Math.abs(wheelAngle)-WHEEL_PLAY)*Math.sign(wheelAngle);
-    car.steer=-MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
+    const targetSteer=-MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
+    if(demoMode) car.steer=targetSteer; else applySteerRate(car,targetSteer,dt);
     // 速度：実演は従来の目標追従（お手本の決定性を保つ）／通常運転は駆動系の物理で解く
     const dir=gear==='D'?1:gear==='R'?-1:0;
     // サイドを引いたままアクセルを「踏み続けた」ときだけ減点。坂道発進の正しい手順
@@ -749,12 +780,13 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
       const brk=brakeHeld?1:0;
       drive=driveUpdate(car,dt,thr,brk,gear,handbrake,gradeAlong(car.x,car.y,car.th));
     }
-    bicycle(car,dt);
+    integrateLat(car,dt);
     // 自分の軌跡（後車軸）を記録
     if(Math.abs(car.v)>0.03){ const lt=trail[trail.length-1];
       if(!lt||Math.hypot(car.x-lt.x,car.y-lt.y)>0.12){ trail.push({x:car.x,y:car.y}); if(trail.length>2500)trail.shift(); } }
     // --- サウンド：現状の速度/操作から回転数と負荷を推定して駆動（ドライブトレイン実装後は実RPMに差し替え） ---
-    SimAudio.update({rpm:drive.rpm,speed:Math.abs(car.v),load:drive.load,slip:drive.slip,gear,braking:brakeHeld});
+    SimAudio.update({rpm:drive.rpm,speed:Math.abs(car.v),load:drive.load,
+      slip:Math.max(drive.slip,LAT.slip,LAT.scrub*0.7),gear,braking:brakeHeld});
     if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
   }
