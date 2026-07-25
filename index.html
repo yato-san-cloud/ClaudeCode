@@ -94,6 +94,11 @@
   #crashCv{position:fixed; inset:0; width:100%; height:100%; z-index:39; pointer-events:none; display:none;}
   #crashCv.on{display:block;}
   #app.shake{will-change:transform;}
+  #hwySig{display:none; gap:6px; margin-bottom:6px;}
+  #hwySig.on{display:flex;}
+  #hwySig button{flex:1; height:30px; border:0; border-radius:8px; background:#1b2233;
+    color:#e8eef8; font-weight:800; font-size:12.5px;}
+  #hwySig button.act{background:#e8a33d; color:#2a1c00;}
   #rotate{position:fixed; inset:0; background:#0d1118; color:var(--ink); display:none; align-items:center; justify-content:center; text-align:center; z-index:50; font-size:15px; padding:24px;}
   @media (orientation:portrait){ #rotate{display:flex;} }
 </style>
@@ -123,7 +128,8 @@
 
   <!-- 左親指：サイド/目視＋ペダル -->
   <div id="leftCluster">
-    <div id="prep"><button id="handbrake" class="on">🅿 サイド</button><button id="lookback">👀 後方目視</button></div>
+    <div id="hwySig"><button id="sigL">⬅ 合図</button><button id="sigR">合図 ➡</button></div>
+  <div id="prep"><button id="handbrake" class="on">🅿 サイド</button><button id="lookback">👀 後方目視</button></div>
     <div id="pedals"><button class="pedal brake" id="brake">ブレーキ</button><button class="pedal accel" id="accel">アクセル</button></div>
   </div>
   <!-- 右親指：シフト＋ハンドル -->
@@ -161,6 +167,7 @@
     <h3 class="grp">路上</h3>
     <div class="cards">
       <button class="card" data-id="road"><canvas data-ico="road"></canvas><div><div class="t">路上教習</div><div class="d">一般道・交通あり</div></div></button>
+      <button class="card" data-id="highway"><canvas data-ico="highway"></canvas><div><div class="t">高速教習</div><div class="d">合流・車線変更・車間</div></div></button>
     </div>
     <p class="lead">※ 教習車＝マツダ アクセラ セダン（全長4.58m・軸距2.70m）。道路幅3.5mは実コース実測。</p>
     <button class="close" id="menuClose">閉じる</button>
@@ -272,6 +279,39 @@ function buildHill(){
     coach:'坂の停止線でいったん停止→サイドを引く→半クラの要領で発進（逆行させない）' };
 }
 
+/* 高速の交通：本線を一定速で流れ、前車には車間を詰めすぎない（簡易IDM）。
+   自車も「前車」として扱うので、追い越されたり、詰められたりする。 */
+function hwySpawn(){
+  if(!M.hwy) return;
+  HWY.cars.length=0;
+  const H=M.hwy;
+  for(let i=0;i<14;i++){
+    const lane = i%3===0 ? H.yPass : H.yCruise;                 // 追越車線は少なめ
+    const base = lane===H.yPass ? 28 : 23;                      // 100km/h / 83km/h 相当
+    HWY.cars.push({ x: 60+i*55+Math.random()*30, y: lane,
+      v: base+Math.random()*3, len:4.6, wid:1.8, th:0,
+      col: ['#46506b','#5a4a4a','#3f5a4a','#5a5340'][i%4] });
+  }
+}
+function hwyUpdate(dt){
+  if(!M||!M.hwy||!HWY.cars.length) return;
+  const H=M.hwy;
+  for(const a of HWY.cars){
+    // 同じ車線の前車（自車を含む）との車間で減速
+    let gap=1e9, leadV=a.v;
+    for(const b of HWY.cars){ if(b===a||Math.abs(b.y-a.y)>1.0) continue;
+      const d=b.x-a.x; if(d>0&&d<gap){ gap=d; leadV=b.v; } }
+    if(Math.abs(car.y-a.y)<1.6){ const d=car.x-a.x; if(d>0&&d<gap){ gap=d; leadV=Math.abs(car.v); } }
+    const want = a.tgt || (a.tgt = a.v);
+    const safe = 12 + a.v*1.1;
+    let acc = (want-a.v)*0.4;
+    if(gap<safe) acc -= (safe-gap)*0.25 + Math.max(0,a.v-leadV)*0.8;
+    a.v = Math.max(0, Math.min(34, a.v + acc*dt));
+    a.x += a.v*dt;
+    if(a.x > car.x+520) a.x -= 700;                 // 自車の周りだけ実体化（前後に巡回）
+    if(a.x < car.x-220) a.x += 700;
+  }
+}
 /* 信号機：青→黄→赤を周期で回す。路上教習でも同じ部品を使う。 */
 const SIGNAL={ green:9.0, yellow:3.0, red:9.0 };
 function signalUpdate(dt){
@@ -332,6 +372,31 @@ function buildSCurve(){
    踏切不停止は実際の検定でも即中止なので、そのまま再現する。 */
 /* 信号交差点：赤で停止線の手前に止まり、青で発進して交差点を渡る。
    赤信号で交差点に進入したら実際の検定どおり即中止。 */
+/* 高速教習：加速車線で流れに乗る速度まで加速して本線へ合流 → 車間を保って走行 →
+   追越車線へ車線変更して追い越し → 走行車線へ戻る → 出口へ。
+   日本は左側通行なので、進行方向(+x)に対して左＝+y が走行車線、右＝-y が追越車線。 */
+function buildHighway(){
+  const LW=3.5, LH=LW/2;
+  const yCruise=+LH, yPass=-LH;            // 走行車線 / 追越車線 の中心
+  const X0=-40, XMERGE=120, X1=900, XEXIT=760;
+  const main=rect(X0, -LW, X1, LW);                    // 本線2車線（y:-3.5〜3.5）
+  const accel=rect(X0, LW, XMERGE, LW+LW);             // 加速車線（左に併設）
+  const taper=rect(XMERGE, LW, XMERGE+70, LW+LW*0.62); // 合流のテーパー（実際の高速に近い長さ）
+  const shoulder=rect(X0,-LW-2.2,X1,-LW);              // 路肩
+  const goal=rect(XEXIT+40, LW, X1-20, LW+LW);         // 出口（減速車線）
+  const exitLane=rect(XEXIT, LW, X1, LW+LW);
+  const center=[]; for(let x=X0+4;x<=X1-30;x+=4) center.push({x, y:(x<XMERGE? LW+LH : yCruise)});
+  const path=followCenterline(truncForRunoff(center,20),{x:X0+4,y:LW+LH,th:0},18,14);
+  return { id:'highway', title:'高速教習', lockLabel:'右', successKind:'highway', speedLimitMs:31,
+    turnRefX:XMERGE, appY:LW+LH,
+    rects:[main,accel,taper,shoulder,exitLane], corridors:[], obstacles:[], bay:goal,
+    poles:[], parkedCars:[], curbY:null,
+    curbs:[{x0:X0,x1:X1,y:LW+LW,dir:+1},{x0:X0,x1:X1,y:-LW-2.2,dir:-1}],
+    hwy:{ LW, LH, yCruise, yPass, yAccel:LW+LH, XMERGE, XEXIT, X0, X1, limitKmh:100, minKmh:50 },
+    goalRect:goal, goalX:XEXIT+40,
+    ideal:{path,end:path[path.length-1]}, start:{x:X0+4,y:LW+LH,th:0},
+    coach:'加速車線で本線の流れに乗る速度まで加速→後方確認・合図・目視→合流。車間は速度と同じ数字のメートルを目安に' };
+}
 function buildSignal(){
   const HW=1.75, X0=-20, X1=60, IX=26, CROSS=4.0, STOP=IX-CROSS-1.2;
   const goal=rect(IX+10,-HW,IX+22,HW);
@@ -1906,7 +1971,7 @@ const ROAD=(()=>{
 
 const _perpR=buildPerpR();
 const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill(),
-  scurve:buildSCurve(), crank:buildCrank(), railway:buildRailway(), signal:buildSignal() };
+  scurve:buildSCurve(), crank:buildCrank(), railway:buildRailway(), signal:buildSignal(), highway:buildHighway() };
 try{ MODELS.road=ROAD.buildCourse(); }catch(e){ console.error('road course build failed',e); }
 
 /* ==================== 状態・エンジン ==================== */
@@ -1920,6 +1985,28 @@ let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned
 let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
 let demoIdx=0, demoStopPhase=0;
+/* ウインカー：side は -1(左)/0/+1(右)。onT は点けてからの経過秒 */
+const SIG={ side:0, onT:0, blink:0 };
+function sigSet(side){
+  SIG.side = (SIG.side===side) ? 0 : side; SIG.onT=0;
+  if(SIG.side) try{ SimAudio.sfx.winker&&SimAudio.sfx.winker(); }catch(_){}
+  const L=document.getElementById('sigL'), R=document.getElementById('sigR');
+  if(L) L.classList.toggle('act', SIG.side===-1);
+  if(R) R.classList.toggle('act', SIG.side===1);
+}
+function sigUpdate(dt){
+  if(SIG.side){ SIG.onT+=dt; const b=Math.floor(SIG.onT*1.5)%2;
+    if(b!==SIG.blink){ SIG.blink=b; if(b) try{ SimAudio.sfx.winker&&SimAudio.sfx.winker(); }catch(_){} } }
+  else SIG.onT=0;
+}
+function sigReset(){ SIG.side=0; SIG.onT=0; SIG.blink=0;
+  const L=document.getElementById('sigL'), R=document.getElementById('sigR');
+  if(L) L.classList.remove('act'); if(R) R.classList.remove('act'); }
+const HWY={ cars:[], phase:0, lastLane:'accel', indT:0, indSide:null, lookT:-1e9, changes:0,
+  overT:0, overWarn:false, overFail:false, slowT:0, slowWarn:false, gapT:0, gapWarn:false, mergeFail:false };
+function hwyReset(){ HWY.cars.length=0; HWY.phase=0; HWY.lastLane='accel'; HWY.indT=0; HWY.indSide=null;
+  HWY.lookT=-1e9; HWY.changes=0; HWY.overT=0; HWY.overWarn=false; HWY.overFail=false;
+  HWY.slowT=0; HWY.slowWarn=false; HWY.gapT=0; HWY.gapWarn=false; HWY.mergeFail=false; }
 let sigEntered=false, sigYellowSeen=false, sigCouldStop=false;
 let railPhase=0, railStopTick=0, railWarned=false, railStalled=false;
 let hillPhase=0, hillStartX0=null, hillMinX=null, hillRolled=false, hillUsedHb=false, hillOver=false, hillHoldTick=0, hillHbWarned=false;
@@ -1959,7 +2046,8 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
   handbrake=true; hbWarned=false; hbHoldT=0; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
-  crashReset();
+  crashReset(); hwyReset(); sigReset(); if(M.hwy) hwySpawn();
+  { const r=document.getElementById('hwySig'); if(r) r.classList.toggle('on', !!M.hwy); }
   driveReset(); drive={rpm:DT.idle,load:0,slip:0,gearNum:1};
   demoIdx=0; demoStopPhase=0;
   sigEntered=false; sigYellowSeen=false; sigCouldStop=false;
@@ -2058,6 +2146,8 @@ bindTap(document.getElementById('lookback'),()=>{ if(result)return; checks.back=
 bindTap(document.getElementById('btnDemo'),()=>startDemo(false));
 bindTap(document.getElementById('btnTutor'),()=>startDemo(true));
 bindTap(document.getElementById('btnExamRun'),()=>startExamRun());
+bindTap(document.getElementById('sigL'),()=>{ if(!result) sigSet(-1); });
+bindTap(document.getElementById('sigR'),()=>{ if(!result) sigSet(1); });
 bindTap(document.getElementById('btnSound'),function(){ const on=SimAudio.setEnabled(!SimAudio.isEnabled());
   this.classList.toggle('on',on); this.textContent=on?'🔊音':'🔇音'; });
 bindTap(document.getElementById('tutorNext'),()=>{ tutorWait=false; document.getElementById('tutorPop').classList.remove('show'); });
@@ -2968,6 +3058,8 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
       slip:Math.max(drive.slip,LAT.slip,LAT.scrub*0.7),gear,braking:brakeHeld});
     signalUpdate(dt);
     crashUpdate(dt);
+    sigUpdate(dt);
+    if(M.successKind==='highway'&&!result) hwyUpdate(dt);
     if(M.successKind==='road'&&!result){ try{ ROAD.update(dt); }catch(e){} }
     if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
@@ -3019,6 +3111,8 @@ function updateLogic(){
   if(M.successKind==='hill'){ hillLogic(); return; }
   // --- 路上教習：交通・歩行者・合図・信号は ROAD モジュールが採点する ---
   if(M.successKind==='road') return;
+  // --- 高速教習：合流・車線変更・車間・出口 ---
+  if(M.successKind==='highway'){ hwyLogic(1/60); return; }
   // --- 信号交差点：赤で停止、青で発進、赤進入は即中止 ---
   if(M.successKind==='signal'){ signalLogic(); return; }
   // --- 踏切：停止線での一時停止 → 安全確認 → 渡り切ってゴール ---
@@ -3064,6 +3158,83 @@ function signalLogic(){
   if(sigEntered && car.x>M.interX1 && inGoalZone() && Math.abs(car.v)<0.05){
     if(gear==='P'&&handbrake) finish('success');
     else if(tick%40===0&&!examMode) setCoach('ゴール！停止 → P → サイドで完了','ok'); }
+}
+/* 高速教習の判定：合流・車線変更の手順・速度・車間・出口
+   車線変更の正しい手順＝①ミラーで後方確認 ②合図（3秒前）③目視で死角確認 ④変更 ⑤合図戻す */
+function whichLane(){
+  const H=M.hwy; if(!H) return 'none';
+  if(car.y > H.LW+0.2) return 'accel';                 // 加速車線／出口
+  if(car.y > 0) return 'cruise';                       // 走行車線
+  if(car.y > -H.LW-0.2) return 'pass';                 // 追越車線
+  return 'shoulder';
+}
+function hwyLogic(dt){
+  const H=M.hwy, sp=Math.abs(car.v), kmh=sp*3.6, lane=whichLane();
+  // --- 合図の保持時間（ROADのウインカーUIを流用。無ければ手動フラグ） ---
+  HWY.indT = SIG.side ? SIG.onT : 0; HWY.indSide = SIG.side || null;
+  // --- 目視（後方目視ボタン）を車線変更の確認とみなす ---
+  if(rearGlance || (tick-checks.back)<180) HWY.lookT=tick;
+
+  // --- 合流（加速車線→走行車線） ---
+  if(HWY.phase===0){
+    if(!examMode && tick%45===0 && kmh<60) setCoach('加速車線で本線の流れ（約100km/h）まで加速。合流は「加速して入る」','warn');
+    if(lane==='cruise'){                                  // 合流した瞬間に評価
+      HWY.phase=1;
+      if(kmh<60){ deduct('合流速度の不足',10);
+        if(!examMode) setCoach('遅すぎる合流は後続に急ブレーキを踏ませる（−10点）','bad'); }
+      if(HWY.indT<1.0){ deduct('合流の合図不足',10);
+        if(!examMode) setCoach('合流前に合図と後方確認を（−10点）','warn'); }
+      else if(tick-HWY.lookT>240){ deduct('合流時の目視不足',10);
+        if(!examMode) setCoach('ミラーだけでなく目視で死角を確認（−10点）','warn'); }
+      else if(!examMode) setCoach('合流OK。車間を保って走行車線を維持','ok');
+    }
+    if(car.x>H.XMERGE+55 && lane==='accel' && !HWY.mergeFail){ HWY.mergeFail=true;
+      finish('fail','加速車線の終わりまでに合流できなかった'); return; }
+  }
+  // --- 車線変更の手順評価（走行↔追越） ---
+  if(lane!==HWY.lastLane && (lane==='pass'||lane==='cruise') && HWY.lastLane!=='accel' && HWY.phase>0){
+    const okSignal = HWY.indT>=2.0;                      // 3秒前が原則。2秒未満は不足とみなす
+    const okLook   = (tick-HWY.lookT)<240;               // 4秒以内に目視していれば可
+    if(!okSignal){ deduct('進路変更の合図不足',10);
+      if(!examMode) setCoach('進路変更は3秒前に合図（−10点）','warn'); }
+    else if(!okLook){ deduct('進路変更時の目視不足',10);
+      if(!examMode) setCoach('合図のあと、目視で死角を確認してから（−10点）','warn'); }
+    else if(!examMode) setCoach('手順どおりの進路変更 ✓（ミラー→合図→目視）','ok');
+    HWY.changes++;
+  }
+  HWY.lastLane=lane;
+
+  // --- 速度：高速の下限・上限 ---
+  if(HWY.phase>0){
+    if(kmh>H.limitKmh+20){ if(!HWY.overFail){ HWY.overFail=true; finish('fail','速度超過（+20km/h超）'); return; } }
+    else if(kmh>H.limitKmh+5){ if(++HWY.overT>60 && !HWY.overWarn){ HWY.overWarn=true;
+      deduct('速度超過',10); if(!examMode) setCoach('制限'+H.limitKmh+'km/hを超えています（−10点）','warn'); } }
+    else HWY.overT=0;
+    if(kmh<H.minKmh && car.x<H.XEXIT && !HWY.slowWarn && HWY.phase===1){ if(++HWY.slowT>90){ HWY.slowWarn=true;
+      deduct('最低速度違反のおそれ',10); if(!examMode) setCoach('高速では遅すぎるのも危険（−10点）','warn'); } }
+    else HWY.slowT=0;
+  }
+  // --- 車間距離：速度と同じ数字のメートルが目安（100km/hなら100m） ---
+  let minGap=1e9;
+  for(const a of HWY.cars){ if(Math.abs(a.y-car.y)>1.6) continue;
+    const d=a.x-car.x-C.length; if(d>0&&d<minGap) minGap=d; }
+  const wantGap=Math.max(20, kmh*0.55);                  // 走行車線での実務的な目安
+  if(minGap<wantGap*0.45 && kmh>60){ if(++HWY.gapT>50 && !HWY.gapWarn){ HWY.gapWarn=true;
+    deduct('車間距離不足',10); if(!examMode) setCoach('この速度では車間が足りない（−10点）','bad'); } }
+  else HWY.gapT=0;
+  if(minGap>wantGap*0.9) HWY.gapWarn=false;
+
+  // --- AI車との接触＝高速では最悪の結果 ---
+  for(const a of HWY.cars){
+    if(Math.abs(a.x-car.x)<(C.length+a.len)/2*0.92 && Math.abs(a.y-car.y)<(C.width+a.wid)/2*0.92){
+      finish('fail','高速道路上での車両衝突'); return; } }
+
+  // --- 出口 ---
+  if(car.x>H.XEXIT && HWY.phase===1){ HWY.phase=2;
+    if(!examMode) setCoach('出口です。合図をして減速車線へ入り、十分に減速','ok'); }
+  if(inGoalZone()&&kmh<30){
+    if(Math.abs(car.v)<0.05 && gear==='P' && handbrake) finish('success');
+    else if(tick%40===0&&!examMode) setCoach('減速車線で十分に速度を落として停止 → P → サイド','ok'); }
 }
 /* 踏切の判定：①停止線の手前で完全停止 ②左右の安全確認 ③渡り切る（不停止＝即中止） */
 function railwayLogic(){
@@ -3323,15 +3494,29 @@ function showCrashResult(){
       '<li>相手の家族の人生と、自分と自分の家族の人生が、この一瞬で変わる</li>'+
       '</ul>';
   } else if(kind==='car'){
-    head='車両との衝突事故';
+    // 落下換算：h = v^2/(2g)。「何階から落ちたのと同じ衝撃か」は教習でよく使われる説明
+    const v=kmh/3.6, fallM=v*v/(2*9.81), floors=Math.max(1,Math.round(fallM/3.0));
+    const hi=kmh>=70;                                   // 高速域は別格の重大性
+    head = hi ? '高速走行中の衝突事故' : '車両との衝突事故';
     body+='<div class="sec-t">被害</div><ul>'+
       '<li>衝突速度：<b>'+kmh.toFixed(0)+' km/h</b></li>'+
-      '<li>'+(kmh>40?'相手・自分ともに負傷する可能性が高い（むち打ち〜骨折以上）':'車両は大きく損傷。むち打ち等の負傷が起こりうる')+'</li>'+
+      '<li>この衝撃は、<b>約'+fallM.toFixed(0)+'m（およそ'+floors+'階）から車ごと落ちる</b>のと同じエネルギー</li>'+
+      '<li>'+(hi
+        ? '<b>死亡・重度後遺障害に直結する速度域</b>。シートベルトとエアバッグがあっても、車室が潰れれば助からない'
+        : (kmh>40?'相手・自分ともに負傷する可能性が高い（むち打ち〜骨折以上）':'車両は大きく損傷。むち打ち等の負傷が起こりうる'))+'</li>'+
+      '<li>衝突のエネルギーは<b>速度の2乗</b>に比例する。速度が2倍なら衝撃は4倍</li>'+
+      (hi?'<li><b>二次事故</b>：高速道路上で停止した車に後続車が追突する。事故そのものより二次事故で亡くなることが多い</li>':'')+
       '</ul>';
     body+='<div class="sec-t">運転者に科されるもの</div><ul>'+
       '<li>負傷者が出れば<b>人身事故</b>となり、過失運転致死傷罪の対象</li>'+
       '<li>警察への報告義務。怠れば報告義務違反</li>'+
+      (hi?'<li>高速道路上では<b>後続車を巻き込む多重事故</b>になり、被害者が何人にも増える</li>':'')+
       '<li>行政処分の点数、保険料の増加、車両の修理費</li>'+
+      '</ul>';
+    if(hi) body+='<div class="sec-t">高速道路で事故を起こしたら</div><ul>'+
+      '<li>ハザード → 同乗者を<b>ガードレールの外</b>へ避難させる（車内・路肩に留まらない）</li>'+
+      '<li>停止表示器材を後方に置き、非常電話または110番</li>'+
+      '<li>車の陰は安全ではない。とにかく本線から離れる</li>'+
       '</ul>';
   } else {
     head='物損事故';
@@ -3641,6 +3826,20 @@ function renderSceneInner(){
     ctx.strokeStyle='#e8edf4'; ctx.lineWidth=4;
     ctx.beginPath(); ctx.moveTo(wx(M.stopLineX),wy(-1.75)); ctx.lineTo(wx(M.stopLineX),wy(1.75)); ctx.stroke(); }
   if(M.successKind==='road'){ try{ ROAD.drawTop(); }catch(e){} }
+  if(M.hwy){                                            // 高速：車線境界線と流れる車
+    const H=M.hwy;
+    ctx.strokeStyle='rgba(240,246,252,.75)'; ctx.lineWidth=2; ctx.setLineDash([9,9]);
+    ctx.beginPath(); ctx.moveTo(wx(H.X0),wy(0)); ctx.lineTo(wx(H.X1),wy(0)); ctx.stroke();  // 車線境界
+    ctx.setLineDash([]);
+    ctx.strokeStyle='rgba(240,246,252,.9)'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(wx(H.X0),wy(-H.LW)); ctx.lineTo(wx(H.X1),wy(-H.LW)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx(H.X0),wy(H.LW)); ctx.lineTo(wx(H.XMERGE),wy(H.LW)); ctx.stroke();
+    for(const a of HWY.cars){ const X=wx(a.x), Y=wy(a.y);
+      if(X<-40||X>W+40) continue;
+      ctx.save(); ctx.translate(X,Y);
+      ctx.fillStyle=a.col; ctx.fillRect(-a.len/2*PPM,-a.wid/2*PPM,a.len*PPM,a.wid*PPM);
+      ctx.fillStyle='#cfd6e2'; ctx.fillRect(-a.len*0.12*PPM,-a.wid*0.34*PPM,a.len*0.3*PPM,a.wid*0.68*PPM);
+      ctx.restore(); } }
   if(showLines&&!examMode) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
@@ -3900,12 +4099,26 @@ function mSignals(proj,g){
       if(i===on){ g.globalAlpha=0.35; g.beginPath(); g.arc(cx,head.y,r*1.5,0,7); g.fill(); g.globalAlpha=1; } }
   }
 }
+function mHwyCars(proj,g){
+  if(!M.hwy) return;
+  const list=HWY.cars.slice().sort((a,b)=>Math.hypot(b.x-car.x,b.y-car.y)-Math.hypot(a.x-car.x,a.y-car.y));
+  for(const a of list){
+    const d=Math.hypot(a.x-car.x,a.y-car.y); if(d>260) continue;
+    mCarBox(proj,g,rect(a.x-a.len/2,a.y-a.wid/2,a.x+a.len/2,a.y+a.wid/2),1.45);
+    const t=proj(a.x-a.len/2,a.y,0.85);                 // テールランプ
+    if(t&&t.depth>0.5){ const r=clamp(20/t.depth,1,7);
+      g.fillStyle='rgba(255,70,60,.9)';
+      g.beginPath(); g.arc(t.x-r*1.5,t.y,r*0.6,0,7); g.fill();
+      g.beginPath(); g.arc(t.x+r*1.5,t.y,r*0.6,0,7); g.fill(); }
+  }
+}
 function mWorld(proj,g,view){
   if(M.successKind==='road'){ try{ ROAD.draw3D(proj,g,view||'front'); }catch(e){} return; }
   for(const r of M.rects) mRect(proj,g,r,'rgba(200,215,235,.10)',1,0);
   mCorridorEdges(proj,g);
   mRails(proj,g);
   mSignals(proj,g);
+  mHwyCars(proj,g);
   mBayFill(proj,g);
   if(M.curbY!=null) mCurb(proj,g,M.curbY);
   for(const cb of (M.curbs||[])) mCurb(proj,g,cb.y);          // 反対側の縁石（3.5m道路の外縁）
@@ -4190,6 +4403,10 @@ function renderFront(){
   // 切り始めの目安ライン（地面の青ライン）が前方に見える
   if(showGuide&&!examMode&&(M.successKind==='perp'||M.successKind==='parallel')){ let prev=null; g.strokeStyle='rgba(77,163,255,.85)'; g.lineWidth=3;
     for(let y=bounds.minY;y<=bounds.maxY;y+=0.4){ const p=proj(M.turnRefX,y,0.02); if(p&&prev){g.beginPath();g.moveTo(prev.x,prev.y);g.lineTo(p.x,p.y);g.stroke();} prev=p; } }
+  // ウインカーの作動表示（点滅）
+  if(SIG.side && Math.floor(SIG.onT*1.5)%2===0){
+    g.fillStyle='#4ade80'; g.font='bold 20px system-ui'; g.textAlign='center';
+    g.fillText(SIG.side<0?'◀':'▶', SIG.side<0? 22 : w-22, 26); g.textAlign='left'; }
   // 信号インジケータ：接近すると実際の灯器は視界の上に外れるため、隅に現在の表示を出す
   if(M.signals&&M.signals.length){
     const sg=M.signals[0], d=sg.x-car.x;
