@@ -141,6 +141,7 @@
       <button class="card" data-id="hill"><canvas data-ico="hill"></canvas><div><div class="t">坂道発進</div><div class="d">10%の坂で逆行させず発進</div></div></button>
       <button class="card" data-id="scurve"><canvas data-ico="scurve"></canvas><div><div class="t">S字カーブ</div><div class="d">幅3.5mの曲線路</div></div></button>
       <button class="card" data-id="crank"><canvas data-ico="crank"></canvas><div><div class="t">クランク</div><div class="d">直角に折れる狭路</div></div></button>
+      <button class="card" data-id="railway"><canvas data-ico="railway"></canvas><div><div class="t">踏切</div><div class="d">一時停止と安全確認</div></div></button>
     </div>
     <p class="lead">※ コース寸法は仮の標準値。教習車＝マツダ アクセラ セダン想定。実寸で本人仕様に。</p>
     <button class="close" id="menuClose">閉じる</button>
@@ -295,6 +296,21 @@ function buildSCurve(){
     goalRect:goal, coach:'ふちに寄せすぎず、内側の後輪を意識してゆっくり通過' };
 }
 /* ---- クランク：直角に折れる幅3.5mの狭路。角が正確な直角になるよう矩形で構成 ---- */
+/* 踏切：停止線でいったん完全停止し、窓を開けて左右を確認してから一気に渡る。
+   踏切不停止は実際の検定でも即中止なので、そのまま再現する。 */
+function buildRailway(){
+  const HW=1.75, X0=-16, X1=60, RAIL=24, STOP=RAIL-3.2;   // ゴール後の余走を十分に確保
+  const goal=rect(RAIL+8,-HW,RAIL+20,HW);
+  const center=[]; for(let x=X0;x<=X1;x+=0.5) center.push({x,y:0});
+  const path=followCenterline(truncForRunoff(center,5),{x:X0+2,y:0,th:0},C.creep,2.6);
+  return { id:'railway', title:'踏切', lockLabel:'右', successKind:'railway', speedLimitMs:5.5,
+    turnRefX:STOP, appY:0, rects:[rect(X0,-HW,X1,HW)], corridors:[], obstacles:[], bay:goal,
+    poles:[], parkedCars:[], curbY:null,
+    curbs:[{x0:X0,x1:X1,y:HW,dir:+1},{x0:X0,x1:X1,y:-HW,dir:-1}],
+    rails:[{x:RAIL-0.75},{x:RAIL+0.75}], stopLineX:STOP, goalX:RAIL+8, railX:RAIL,
+    ideal:{path,end:path[path.length-1]}, start:{x:X0+2,y:0,th:0},
+    goalRect:goal, coach:'踏切の直前で必ず一時停止→左右の安全を確認→一気に渡り切る（不停止は即中止）' };
+}
 function buildCrank(){
   const HW=1.75, R=5, X0=-14, XC=4, YC=9, X1=30;   // 角は中心線半径5mで丸める
   const c=[];
@@ -313,7 +329,7 @@ function buildCrank(){
 }
 const _perpR=buildPerpR();
 const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill(),
-  scurve:buildSCurve(), crank:buildCrank() };
+  scurve:buildSCurve(), crank:buildCrank(), railway:buildRailway() };
 
 /* ==================== 状態・エンジン ==================== */
 let M=null, bounds=null;
@@ -325,6 +341,7 @@ let hbHoldT=0;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
 let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
+let railPhase=0, railStopTick=0, railWarned=false, railStalled=false;
 let hillPhase=0, hillStartX0=null, hillMinX=null, hillRolled=false, hillUsedHb=false, hillOver=false, hillHoldTick=0, hillHbWarned=false;
 let demoMode=false, demoPhase=0, demoT=0, demoTargetV=0, demoWheelTarget=0, demoChecksDone=false;
 let tutorMode=false, tutorWait=false, tutorFired=new Set();
@@ -363,6 +380,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   handbrake=true; hbWarned=false; hbHoldT=0; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
   driveReset(); drive={rpm:DT.idle,load:0,slip:0,gearNum:1};
+  railPhase=0; railStopTick=0; railWarned=false; railStalled=false;
   hillPhase=0; hillStartX0=null; hillMinX=null; hillRolled=false; hillUsedHb=false; hillOver=false; hillHoldTick=0; hillHbWarned=false;
   tutorMode=false; tutorWait=false; document.getElementById('tutorPop').classList.remove('show');
   demoMode=false; demoPhase=0; demoT=0; demoTargetV=0; demoWheelTarget=0; demoChecksDone=false;
@@ -1409,10 +1427,11 @@ function updateLogic(){
     setCoach('鼻先が縁石の上に出るのは正常。タイヤが越えなければ脱輪ではない','ok'); break; } }
   // --- 坂道発進：停止線での停止 → 逆行させずに発進 → 坂上のゴール ---
   if(M.successKind==='hill'){ hillLogic(); return; }
+  // --- 踏切：停止線での一時停止 → 安全確認 → 渡り切ってゴール ---
+  if(M.successKind==='railway'){ railwayLogic(); return; }
   // --- 通過型（S字・クランク）：脱輪せずゴール枠へ入り、停止→P→サイドで完了 ---
   if(M.successKind==='course'){
-    const inGoal=carCorners(car).every(p=>inRect(M.goalRect,p.x,p.y));
-    if(inGoal&&Math.abs(car.v)<0.05){
+    if(inGoalZone()&&Math.abs(car.v)<0.05){
       if(gear==='P'&&handbrake) finish('success');
       else if(tick%40===0&&!examMode) setCoach('ゴール！停止 → P → サイドで完了','ok'); }
     return; }
@@ -1423,6 +1442,34 @@ function updateLogic(){
   if(posOK&&Math.abs(car.v)<0.03){
     if(gear==='P'&&handbrake){ finish('success'); }
     else if(tick%40===0) setCoach('OK！ここで停止 → シフトP → サイドを掛けて完了','ok');
+  }
+}
+// 通過型コースのゴール判定：後車軸がゴール帯の中にあれば到達とみなす
+function inGoalZone(){ const gr=M.goalRect; if(!gr) return false;
+  return inRect(gr,car.x,car.y) || carCorners(car).every(p=>inRect(gr,p.x,p.y)); }
+/* 踏切の判定：①停止線の手前で完全停止 ②左右の安全確認 ③渡り切る（不停止＝即中止） */
+function railwayLogic(){
+  const nose=Math.max(...carCorners(car).map(p=>p.x));
+  if(railPhase===0){                                  // 停止線へ接近
+    if(Math.abs(car.v)<0.05 && nose>M.stopLineX-2.5 && nose<M.stopLineX+0.3){
+      railPhase=1; railStopTick=tick;
+      if(!examMode) setCoach('停止OK！左右の安全を確認（ミラー／目視）してから渡る','ok'); }
+    else if(nose>M.stopLineX+0.3){ finish('fail','踏切不停止'); return; }
+  } else if(railPhase===1){                           // 停止保持＋安全確認
+    if(tick-railStopTick>30){                          // 0.5秒以上止まっていれば発進可
+      if(allChecked()||railWarned){ railPhase=2;
+        if(!examMode) setCoach('確認OK！ここからは止まらず一気に渡り切る','ok'); }
+      else if(car.v>0.25){ railWarned=true; railPhase=2;
+        deduct('踏切での安全確認不足',10);
+        if(!examMode) setCoach('左右の確認をしてから渡る（−10点）','warn'); } }
+  } else if(railPhase===2){                           // 渡っている最中
+    if(Math.abs(car.v)<0.03 && Math.abs(car.x-M.railX)<2.5 && !railStalled){ railStalled=true;
+      deduct('踏切内で停止',20); if(!examMode) setCoach('踏切の中で止まらない！（−20点）','bad'); }
+    if(car.x>M.railX+3) railPhase=3;
+  } else {                                            // ゴール
+    if(inGoalZone()&&Math.abs(car.v)<0.05){
+      if(gear==='P'&&handbrake) finish('success');
+      else if(tick%40===0&&!examMode) setCoach('ゴール！停止 → P → サイドで完了','ok'); }
   }
 }
 /* 坂道発進の判定：①停止線に前端を合わせて停止 ②サイドで保持 ③逆行30cm以内で発進 ④ゴール */
@@ -1680,6 +1727,15 @@ function renderSceneInner(){
         const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1, nx=-dy/L*co.hw*sgn, ny=dx/L*co.hw*sgn;
         const X=wx(co.pts[i].x+nx), Y=wy(co.pts[i].y+ny); i?ctx.lineTo(X,Y):ctx.moveTo(X,Y); }
       ctx.stroke(); } }
+  if(M.rails) for(const r of M.rails){          // 線路（枕木＋レール）
+    ctx.strokeStyle='#6b6357'; ctx.lineWidth=1.5;
+    for(let y=-3.2;y<=3.2;y+=0.6){ ctx.beginPath();
+      ctx.moveTo(wx(r.x-0.55),wy(y)); ctx.lineTo(wx(r.x+0.55),wy(y)); ctx.stroke(); }
+    ctx.strokeStyle='#9aa3ad'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(wx(r.x),wy(-3.4)); ctx.lineTo(wx(r.x),wy(3.4)); ctx.stroke(); }
+  if(M.stopLineX!=null&&M.successKind==='railway'){   // 停止線
+    ctx.strokeStyle='#e8edf4'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(wx(M.stopLineX),wy(-1.75)); ctx.lineTo(wx(M.stopLineX),wy(1.75)); ctx.stroke(); }
   if(showLines&&!examMode) drawWheelTrails(car);
   drawCar(car);
   drawCourseCue();
@@ -1907,9 +1963,24 @@ function mCorridorEdges(proj,g){
     }
   }
 }
+function mRails(proj,g){
+  if(M.rails) for(const r of M.rails){
+    for(let i=-7;i<7;i++){                       // レール（少し盛り上げて立体に）
+      const y0=i*0.5, y1=y0+0.5;
+      const a=proj(r.x,y0,0.08), b=proj(r.x,y1,0.08);
+      if(a&&b&&Math.min(a.depth,b.depth)>0.5){ g.strokeStyle='#9aa3ad'; g.lineWidth=clamp(14/a.depth,1.2,7);
+        g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); } }
+  }
+  if(M.stopLineX!=null&&M.successKind==='railway'){
+    const a=proj(M.stopLineX,-1.75,0.02), b=proj(M.stopLineX,1.75,0.02);
+    if(a&&b&&Math.min(a.depth,b.depth)>0.4){ g.strokeStyle='rgba(240,246,252,.95)';
+      g.lineWidth=clamp(26/Math.min(a.depth,b.depth),2,14);
+      g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); } }
+}
 function mWorld(proj,g){
   for(const r of M.rects) mRect(proj,g,r,'rgba(200,215,235,.10)',1,0);
   mCorridorEdges(proj,g);
+  mRails(proj,g);
   mBayFill(proj,g);
   if(M.curbY!=null) mCurb(proj,g,M.curbY);
   for(const cb of (M.curbs||[])) mCurb(proj,g,cb.y);          // 反対側の縁石（3.5m道路の外縁）
