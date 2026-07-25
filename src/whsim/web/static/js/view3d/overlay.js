@@ -336,6 +336,12 @@ export const overlayMethods = {
       body.appendChild(cap);
       for (const [c, l] of agents) body.appendChild(swatchRow(c, l, true));
     }
+    // 荷物（ワーク）: the goods themselves (replay.totes). Square swatch, because
+    // in the scene they are boxes, not people. Guarded — a replay without totes
+    // gets no row, exactly as before.
+    if ((this.replay.totes || []).length) {
+      body.appendChild(swatchRow('#ffc94d', '荷物（ワーク）', false));
+    }
     // Pick-event glow: only meaningful when the replay carries pick targets.
     const hasPickFx = (this.replay.workers || []).some(
       (w) => Array.isArray(w.keyframes) && w.keyframes.some((kf) => kf && kf[4]));

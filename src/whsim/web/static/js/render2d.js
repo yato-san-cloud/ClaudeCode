@@ -16,6 +16,7 @@ import { $ } from './util.js';
 import { S } from './state.js';
 import {
   ZONE_JP, EQUIP_JP, ABC_COLOR, STATE_COLOR, RACK_COLOR, AGV_COLOR,
+  WORK_COLOR, WORK_DEFAULT,
 } from './constants.js';
 
 const DOOR_COLOR = { dock: '#1f78b4', personnel: '#33a02c', shutter: '#8d99ae' };
@@ -284,6 +285,10 @@ export function draw2d() {
     const lm = (st === 'pick') ? pickMeta(wk.keyframes, S.t) : null;
     if (lm) drawLevelCue(px, py, lm, rep);
   }
+  // 荷物（ワーク）: the GOODS themselves, riding the belt / in a picker's hands /
+  // landed at packing. Drawn LAST of the movers so a carried box is never buried
+  // under its carrier's glyph. Additive + guarded: no `rep.totes` → nothing.
+  drawTotes(rep, X, Y, P);
   // V3 viewport extras (additive; each guarded so absent data = legacy render):
   // staging fill-ring + bottleneck ⚠ marker + bottom-left legend.
   if (sg) drawStagingRing(X(sg.x + sg.w / 2), Y(sg.y + sg.h / 2), sg);
@@ -394,8 +399,9 @@ function drawLiveHUD(ctx, rep, t) {
 }
 
 // Role → symbol (Mini-Metro style). Shapes match the V3 mock & 3D view:
-// ● picker, ◆ AGV, ▲ forklift, ■ packer / inspector. Fill/stroke are set by
-// the caller (state colour). Unknown roles fall back to the round dot.
+// ● picker, ◆ AGV, ▲ forklift, ■ packer / inspector, ▢ 荷物（ワーク）.
+// Fill/stroke are set by the caller (state colour). Unknown roles fall back to
+// the round dot.
 function agentGlyph(cx, cy, role, r) {
   ctx.beginPath();
   if (role === 'forklift') {                       // ▲
@@ -404,12 +410,56 @@ function agentGlyph(cx, cy, role, r) {
   } else if (role === 'agv') {                      // ◆
     ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy);
     ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath();
+  } else if (role === 'work') {                     // ▢ goods — a rounded square
+    // A rounded square reads as a *box* at plan scale (the packer's hard-edged
+    // ■ stays the person), and is still legible down to a couple of pixels.
+    const s = r * 2;
+    if (ctx.roundRect) ctx.roundRect(cx - r, cy - r, s, s, Math.max(0.8, r * 0.4));
+    else ctx.rect(cx - r, cy - r, s, s);
   } else if (role === 'packer' || role === 'inspector') { // ■
     ctx.rect(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7);
   } else {                                          // ● picker / fallback
     ctx.arc(cx, cy, r, 0, TAU);
   }
   ctx.fill(); ctx.stroke();
+}
+
+// 荷物（ワーク）: draw the work itself as small state-coloured box markers.
+// `rep.totes` = [{ id, keyframes: [[t, x, y, state], …] }] with state ∈
+// carry | belt | pack; the keyframes already run along the conveyor POLYLINE,
+// so the same `interp` the agents use walks a box round the belt's corners.
+//
+// Legibility rules (a busy hour must not turn the plan into confetti):
+//   * a tote is drawn ONLY inside its own keyframe span — the population on
+//     screen is therefore the work actually in flight at the playhead, not the
+//     whole shift;
+//   * `carry` boxes are nudged off their carrier so both stay readable;
+//   * the marker never shrinks below ~3 px, and a hard cap stops a pathological
+//     replay from spending the whole frame budget here.
+const WORK_MAX_DRAW = 160;
+function drawTotes(rep, X, Y, P) {
+  const totes = rep.totes;
+  if (!Array.isArray(totes) || totes.length === 0) return;
+  const a0 = ctx.globalAlpha;
+  ctx.save();
+  ctx.lineWidth = 0.7;
+  let drawn = 0;
+  for (const tt of totes) {
+    const kf = tt && tt.keyframes;
+    if (!kf || kf.length < 2) continue;
+    if (S.t < kf[0][0] || S.t > kf[kf.length - 1][0]) continue;  // not in flight
+    const [x, y, st] = interp(kf, S.t);
+    let px = X(x), py = Y(y);
+    const held = (st === 'carry');
+    if (held) { px += 7; py -= 7; }        // sit beside the carrier, not under it
+    ctx.fillStyle = WORK_COLOR[st] || WORK_DEFAULT;
+    ctx.strokeStyle = P.agentStroke;
+    ctx.globalAlpha = a0 * (held ? 0.92 : 1);
+    agentGlyph(px, py, 'work', 4);
+    if (++drawn >= WORK_MAX_DRAW) break;
+  }
+  ctx.restore();
+  ctx.globalAlpha = a0; ctx.lineWidth = 1;
 }
 
 // Per-replay max 段, cached on the rep object (lazy, computed once) so the lift
@@ -570,8 +620,16 @@ function drawLegend(rep, w, h, P) {
   if ((rep.agvs || []).length || (rep.workers || []).some(o => o.role === 'agv')) items.push(['agv', 'AGV']);
   if ((rep.forklifts || []).length || (rep.workers || []).some(o => o.role === 'forklift')) items.push(['forklift', 'フォーク']);
   if ((rep.workers || []).some(o => o.role === 'packer' || o.role === 'inspector')) items.push(['packer', '検品/梱包']);
+  // The goods get a row too, so the new markers aren't an unexplained swarm.
+  // Third element = an explicit swatch colour (the agent rows keep the accent).
+  if ((rep.totes || []).length) items.push(['work', '荷物（ワーク）', WORK_COLOR.belt]);
   if (!items.length) return;
-  const pad = 10, lh = 16, bw = 96, bh = items.length * lh + 10;
+  const pad = 10, lh = 16, bh = items.length * lh + 10;
+  // Width follows the widest label (was a fixed 96, which the longer 荷物 row
+  // would have overrun); existing legends measure under 96 and are unchanged.
+  ctx.font = '10px sans-serif';
+  let bw = 96;
+  for (const it of items) bw = Math.max(bw, Math.ceil(ctx.measureText(it[1]).width) + 34);
   const x0 = pad, y0 = h - bh - pad;
   // Floating card on the Void bg: panel fill + faint accent low-alpha border
   // (matches the HUD card so the two overlays read as one brand surface).
@@ -581,9 +639,9 @@ function drawLegend(rep, w, h, P) {
   else { ctx.fillRect(x0, y0, bw, bh); ctx.strokeRect(x0, y0, bw, bh); }
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.font = '10px sans-serif';
-  items.forEach(([role, label], i) => {
+  items.forEach(([role, label, sw], i) => {
     const gy = y0 + 9 + i * lh;
-    ctx.fillStyle = P.accent; ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.6;
+    ctx.fillStyle = sw || P.accent; ctx.strokeStyle = P.agentStroke; ctx.lineWidth = 0.6;
     agentGlyph(x0 + 12, gy, role, 4);
     ctx.fillStyle = P.zoneInk || '#8a93a0';
     ctx.fillText(label, x0 + 24, gy);

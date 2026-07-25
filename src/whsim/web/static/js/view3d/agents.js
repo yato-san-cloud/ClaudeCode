@@ -23,7 +23,8 @@ import * as THREE from '../../vendor/three/three.module.js';
 import {
   STATE_COLOR, AGV_COLOR, AGV_Y, GLOW_CYAN,
   ACTIVE_WORKER, ACTIVE_AGV, CARRY_AGV, ROUTE_COLOR,
-  PICK_GLOW, PICK_LINE, sampleKeyframes, approach, _enableShadows,
+  PICK_GLOW, PICK_LINE, CARTON_BASE, CARTON_TONES,
+  sampleKeyframes, approach, _enableShadows,
 } from './constants.js';
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,26 @@ const WALK_SPEED_FULL = 0.55; // m/s at which the gait blend reaches a full stri
 // Forklift / AGV wheel radii (used to roll wheels by real distance travelled).
 const FK_WHEEL_R = 0.24;
 const AGV_WHEEL_R = 0.10;
+
+// ---------------------------------------------------------------------------
+// 荷物（ワーク） — the goods themselves
+// ---------------------------------------------------------------------------
+// `replay.totes` = [{ id, keyframes: [[t, x, y, state], …] }], state ∈
+//   "carry" (in a picker's hands) | "belt" (riding a conveyor) | "pack" (at the
+//   station). Keyframes are already emitted along the conveyor POLYLINE, so a
+//   plain lerp follows the path round its corners.
+// Heights are read off the objects the work actually sits on, so a box never
+// floats or sinks into the thing carrying it:
+const BELT_TOP_Y = 0.21;     // conveyor tread surface (scene.js: yMid .12 + h/2)
+const STATION_TOP_Y = 0.885; // pack bench top (scene.js _buildStations)
+const TOTE_H = 0.26;         // A.gTote box height — the box rests ON the surface
+const CARRY_Y = 1.06;        // fallback hand height (no picker within reach)
+// A `carry` tote is handed to the nearest picker within this radius (the rig
+// already owns a tote/carton child, so drawing ours too would double-draw).
+const CARRY_SNAP_M = 1.8;
+// Once past its last keyframe the work is done: shrink it away over this long
+// instead of popping out of existence.
+const PACK_FADE_S = 0.9;
 
 // ---------------------------------------------------------------------------
 // Build-time geometry helpers (never called per frame)
@@ -955,6 +976,11 @@ export const agentMethods = {
   // aware (no pulse, steady marker), and dropped entirely under fps pressure
   // (tier-3 degrade also disables this via `_glowEnabled`, sharing the halo gate).
   _buildPickFx() {
+    // 荷物（ワーク）. The scene's build chain lives in view3d.js (a file this lane
+    // must not touch), so the tote builder rides in on the LAST build hook that
+    // is already ours. It must run after _buildContactShadows (it reuses that
+    // blob texture) and is idempotent, so the ordering is safe either way.
+    this._buildTotes();
     this._pickFx = [];
     const n = (this.replay.workers || []).length;
     if (n === 0) return;
@@ -1076,15 +1102,233 @@ export const agentMethods = {
     fx.lineMat.opacity = pulse * 0.55;
   },
 
+  // -- 荷物（ワーク）: the goods, made visible ------------------------------
+  // Before this, a replay showed a conveyor whose tread scrolled under workers
+  // who teleported their cartons to packing: there was no work ENTITY at all.
+  // `replay.totes` is the contract that fixes it, and everything here is
+  // ADDITIVE and GUARDED — a replay without `totes` (i.e. every run made before
+  // the contract landed) builds nothing and renders exactly as it did.
+  //
+  // ONE InstancedMesh holds every tote (shared A.gTote geometry — the same box
+  // the pickers and AGVs carry — one kraft material, per-instance tone via
+  // instanceColor), so the whole shift's worth of goods is TWO draw calls (boxes
+  // + their shadow decals) however many boxes there are.
+  //
+  // A run's `totes` array is the whole SHIFT, but only the handful in flight at
+  // the playhead are ever on screen, so _updateTotes COMPACTS: it writes the
+  // visible boxes into slots 0…k-1 and sets `.count = k`. That matters — an
+  // InstancedMesh submits `count` instances to BOTH the colour and the shadow
+  // pass whether or not they are degenerate, so parking the other 1,980 boxes
+  // at zero scale would still run ~72k vertex shader invocations per pass for
+  // nothing (measured: 9.4 → 6.3 fps on the software rasteriser at N=2000).
+  // Compaction makes the cost track what is VISIBLE, not what the run recorded.
+  _buildTotes() {
+    if (this._totes) return;           // idempotent (see the _buildPickFx hook)
+    this._totes = [];
+    const totes = (this.replay && this.replay.totes) || [];
+    if (!Array.isArray(totes) || totes.length === 0) return;
+    const A = this._agentAssets();
+    const n = totes.length;
+    // Cardboard, not a neon marker: the kraft base is multiplied by the same
+    // per-carton tone table the racks use, so a queue of boxes on a belt never
+    // reads as one flat extruded strip.
+    const mat = new THREE.MeshStandardMaterial({
+      color: CARTON_BASE, roughness: 0.86, metalness: 0.03,
+      emissive: new THREE.Color(0x3a2a18), emissiveIntensity: 0.14,
+    });
+    this._materials.push(mat);
+    const inst = new THREE.InstancedMesh(A.gTote, mat, n);
+    inst.frustumCulled = false;        // matrices move every frame
+    inst.castShadow = true;
+    inst.receiveShadow = false;
+    inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.scene.add(inst);
+    // InstancedMesh.dispose() frees the instance buffers; parking it in the
+    // tracked-geometry list means Scene3D.dispose() frees it with everything
+    // else (the shared A.gTote geometry is tracked separately and untouched).
+    this._geometries.push(inst);
+    const col = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      // Seed the colour buffer so `instanceColor` exists; _updateTotes rewrites
+      // slot colours as boxes are compacted into different slots each frame.
+      col.setHex(CARTON_TONES[i % CARTON_TONES.length]);
+      inst.setColorAt(i, col);
+      const src = totes[i] || {};
+      const kfs = Array.isArray(src.keyframes) ? src.keyframes : [];
+      this._totes.push({
+        id: src.id || `tote${i}`,
+        keyframes: kfs,
+        t0: kfs.length ? kfs[0][0] : 0,
+        t1: kfs.length ? kfs[kfs.length - 1][0] : 0,
+        seed: (i * 0.7548776662) % 1,
+        tone: new THREE.Color(CARTON_TONES[i % CARTON_TONES.length]),
+        yaw: 0, on: false, idx: i,
+      });
+    }
+    inst.count = 0;                    // nothing in flight until the first update
+    if (inst.instanceColor) {
+      inst.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      inst.instanceColor.needsUpdate = true;
+    }
+    this._toteInst = inst;
+
+    // Contact-shadow decals, the same cheap grounding cue the agents get — but
+    // on a PER-TOTE Y, because a box riding a belt must drop its blob on the
+    // BELT (0.21 m) and a box landed at packing onto the BENCH (0.885 m). The
+    // agents' shared decal mesh is floor-locked, so totes carry their own.
+    const sGeom = new THREE.PlaneGeometry(1, 1);
+    sGeom.rotateX(-Math.PI / 2);
+    this._geometries.push(sGeom);
+    const sMat = new THREE.MeshBasicMaterial({
+      map: this._shadowTex || this._makeBlobTexture(), color: 0x000000,
+      transparent: true, opacity: 0.34, depthWrite: false, depthTest: true,
+    });
+    this._materials.push(sMat);
+    const shade = new THREE.InstancedMesh(sGeom, sMat, n);
+    shade.frustumCulled = false;
+    shade.renderOrder = 3;             // over the surface, under the boxes
+    shade.castShadow = false;
+    shade.receiveShadow = false;
+    shade.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    shade.count = 0;
+    this.scene.add(shade);
+    this._geometries.push(shade);
+    this._toteShadow = shade;
+  },
+
+  // Nearest picker to (x, z) within `maxD` metres, or null. Used to hand a
+  // `carry` tote to the human who is actually carrying it.
+  _nearestWorker(x, z, maxD) {
+    let best = null;
+    let bestD = maxD * maxD;
+    for (const w of this._workers) {
+      const p = w.mesh.position;
+      const dx = p.x - x, dz = p.z - z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = w; }
+    }
+    return best;
+  },
+
+  // Per-frame: place every tote off its keyframes. Behaviour by state:
+  //   carry → handed to the nearest picker (its rig's own tote is revealed and
+  //           the standalone box is hidden, so the carton is never double-drawn);
+  //           with no picker in reach we draw it at hand height rather than lose
+  //           the work entirely (never-blocks).
+  //   belt  → rides the belt: sat ON the tread surface, yawed along the
+  //           direction of travel, with a subtle bob (frozen under reduced
+  //           motion / fps degrade, like every other motion cue here).
+  //   pack  → set down on the station bench, then shrunk away over PACK_FADE_S
+  //           once its last keyframe passes.
+  // Boxes that are in HAND, not yet released, or already shipped simply are not
+  // written into the instance buffer at all (see the compaction note on
+  // _buildTotes), so the GPU only ever sees the work that is actually in flight.
+  // Allocation-free: one cached Matrix4/Quaternion/Euler/Vector3 set, reused.
+  // Takes only `t` (like _updateAsrs / _updateStaging): every easing here is a
+  // function of the playhead or of the render clock, never of the frame delta.
+  _updateTotes(t) {
+    const T = this._totes;
+    const inst = this._toteInst;
+    if (!T || T.length === 0 || !inst) return;
+    if (!this._tM) {
+      this._tM = new THREE.Matrix4();
+      this._tQ = new THREE.Quaternion();
+      this._tE = new THREE.Euler();
+      this._tP = new THREE.Vector3();
+      this._tS = new THREE.Vector3(1, 1, 1);
+    }
+    const m = this._tM, q = this._tQ, e = this._tE, p = this._tP, sv = this._tS;
+    const shade = this._toteShadow;
+    const motion = this._beltSpeed !== 0;
+    const now = this._clock.elapsedTime;
+    let k = 0;                          // next free instance slot (compaction)
+    for (let i = 0; i < T.length; i++) {
+      const r = T[i];
+      const kfs = r.keyframes;
+      let show = kfs.length >= 2 && t >= r.t0 && t <= r.t1 + PACK_FADE_S;
+      let px = 0, pz = 0, py = 0, surfaceY = 0, scale = 1;
+      if (show) {
+        const s = sampleKeyframes(kfs, t);
+        px = s.x; pz = s.y;
+        // Facing: real displacement is the truthful signal; a look-ahead covers
+        // the frames where the box is parked or playback is paused.
+        let vx = px - (r._px === undefined ? px : r._px);
+        let vz = pz - (r._pz === undefined ? pz : r._pz);
+        r._px = px; r._pz = pz;
+        if (vx * vx + vz * vz < 1e-8) {
+          const ahead = sampleKeyframes(kfs, t + 0.4);
+          vx = ahead.x - px; vz = ahead.y - pz;
+        }
+        // A.gTote's long axis is local +X, and a Y-rotation of -atan2(vz, vx)
+        // is exactly what maps local +X onto (vx, vz) — the SAME expression
+        // scene.js uses to lay a belt segment down, so box and belt agree.
+        if (vx * vx + vz * vz > 1e-9) r.yaw = -Math.atan2(vz, vx);
+        if (s.state === 'carry') {
+          const w = this._nearestWorker(px, pz, CARRY_SNAP_M);
+          if (w) {
+            if (w.tote) w.tote.visible = true;   // it's in HIS hands, not ours
+            show = false;
+          }
+          surfaceY = 0;
+          py = CARRY_Y;
+        } else if (s.state === 'pack') {
+          surfaceY = STATION_TOP_Y;
+          py = STATION_TOP_Y + TOTE_H / 2;
+        } else {                                  // 'belt' + any unknown state
+          surfaceY = BELT_TOP_Y;
+          py = BELT_TOP_Y + TOTE_H / 2;
+          if (motion) py += 0.014 * Math.sin(now * 7.5 + r.seed * TWO_PI);
+        }
+        if (t > r.t1) {
+          scale = 1 - _clamp((t - r.t1) / PACK_FADE_S, 0, 1);
+          py -= (1 - scale) * 0.08;              // settles as it goes
+        }
+        if (scale <= 0.02) show = false;
+      }
+      if (!show) { r.on = false; continue; }
+      e.set(0, r.yaw, 0);
+      q.setFromEuler(e);
+      p.set(px, py, pz);
+      sv.set(scale, scale, scale);
+      m.compose(p, q, sv);
+      inst.setMatrixAt(k, m);
+      inst.setColorAt(k, r.tone);       // slot ↔ box changes frame to frame
+      r.on = true;
+      if (shade) {
+        const sk = 0.66 * scale;
+        m.makeScale(sk, 1, sk);
+        m.setPosition(px, surfaceY + 0.012, pz);
+        shade.setMatrixAt(k, m);
+      }
+      k++;
+    }
+    inst.count = k;
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    if (shade) {
+      shade.count = k;
+      shade.instanceMatrix.needsUpdate = true;
+    }
+  },
+
   // Per-frame: scroll each conveyor belt's tread texture by delta * speed.
   // _beltSpeed gates it globally (0 under reduced-motion or fps auto-degrade).
+  //
+  // DIRECTION (this used to be backwards). three samples `uv * repeat + offset`,
+  // so RAISING offset.x slides the pattern toward -u; and the belt box's local
+  // +X — which is its u axis — points DOWNSTREAM (scene.js lays each segment
+  // out p0→p1 with rotation.y = -atan2(dz, dx)). The old `+=` therefore ran the
+  // cleats UPSTREAM: fine while the belt was empty, but now that real totes ride
+  // it, a belt flowing against its own boxes is worse than no animation at all.
+  // Subtracting makes the tread and the work travel the same way.
   _updateBelts(dt) {
     if (this._belts.length === 0 || this._beltSpeed === 0) return;
     const d = dt * this._beltSpeed;
     for (const b of this._belts) {
       const m = b.mat.map;
       if (!m) continue;
-      m.offset.x = (m.offset.x + d * b.speed * 0.5) % 1;
+      const o = m.offset.x - d * b.speed * 0.5;
+      m.offset.x = o - Math.floor(o);   // wrap into [0,1) (JS % keeps the sign)
     }
   },
 
@@ -1290,6 +1534,12 @@ export const agentMethods = {
       // Pick-event viz: pulse the reached cell + draw a connector from the hand.
       this._updatePickEvent(w, s, t);
     }
+    // 荷物（ワーク）. Runs AFTER the worker loop (and from inside it) for two
+    // reasons: the per-frame update chain lives in view3d.js, which this lane
+    // must not touch, and a `carry` tote overrides the picker's tote visibility
+    // — which only sticks if the worker loop has already had its say. No-ops
+    // (and allocates nothing) when the replay carries no `totes`.
+    this._updateTotes(t);
   },
 
   // Per-frame: interpolate each AGV's position + action colour, ramp its cyan

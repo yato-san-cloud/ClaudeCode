@@ -41,3 +41,15 @@ export const AGV_COLOR = {
   idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
   dropoff: '#f57f17', charge: '#8e24aa',
 };
+
+// 荷物（ワーク） state -> colour. The GOODS, as opposed to the people and
+// machines moving them (`replay.totes[].keyframes[][3]`). Deliberately a warm
+// cardboard/amber family so work reads as *cargo* against the cool blue/green
+// agent palette above, and so a box on a grey belt is the brightest thing on
+// that belt. `belt` is the family's anchor and is what the legends swatch.
+export const WORK_COLOR = {
+  carry: '#c9a36b',   // 作業者の手の中 (kraft — matches the 3D carton)
+  belt:  '#ffc94d',   // コンベヤ搬送中 (amber — pops off the grey belt line)
+  pack:  '#ff7a59',   // 梱包ステーション着荷
+};
+export const WORK_DEFAULT = WORK_COLOR.carry;
