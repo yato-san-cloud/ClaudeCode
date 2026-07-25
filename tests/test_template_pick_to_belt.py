@@ -111,9 +111,14 @@ def test_belt_derives_a_sane_engine_capacity(model):
     from whsim.engine.build import build
     world = build(model, simpy.Environment())
     assert world.has_conveyor is True
-    # ~1 tote per metre of belt, and a ~2 min end-to-end ride.
-    assert world.belt.capacity == int(_belt_len(model.resources.conveyors[0]))
-    assert 60.0 < world.conveyor_transit < 300.0
+    # Each authored conveyor becomes ONE independent line with its own slot pool
+    # (~1 tote per metre of ITS length) and its own speed.
+    assert len(world.conveyors) == len(model.resources.conveyors)
+    line = world.conveyors[0]
+    assert line.capacity == max(1, int(line.length))
+    assert line.length == pytest.approx(_belt_len(model.resources.conveyors[0]), rel=0.02)
+    # A ~2 min ride end-to-end (boarding at the infeed rides the whole belt).
+    assert 60.0 < line.length / line.speed < 300.0
 
 
 def test_conveyor_never_crosses_a_rack(model):
@@ -157,12 +162,17 @@ def test_conveyor_discharges_at_the_packing_station(model):
 
 
 def test_every_pick_aisle_has_an_induction_point(model):
-    """One vertex per aisle centreline, so ``_nearest_conveyor`` sends a picker
-    out of its OWN aisle head rather than across the rack field."""
+    """A picker leaving ANY aisle head boards the belt straight out of its own
+    aisle — no cross-traffic over the rack field.
+
+    Boarding now projects onto the belt POLYLINE (``_board_conveyor``) rather than
+    snapping to the nearest vertex, so the assertion is the stronger one: the
+    boarding point sits at this aisle's own x, on the collection run.
+    """
     import simpy
 
     from whsim.engine.build import build
-    from whsim.engine.processes import _nearest_conveyor
+    from whsim.engine.processes import _board_conveyor
 
     world = build(model, simpy.Environment())
     rects = sorted(rack_rects(model))
@@ -170,19 +180,17 @@ def test_every_pick_aisle_has_an_induction_point(model):
     aisles = [(a + b) / 2.0 for a, b in zip(centres, centres[1:])]
     assert len(aisles) == 17
 
-    # The collection run: every vertex sharing the belt's lowest y.
-    belt_y = min(p[1] for p in world.conveyor_points)
-    on_run = sorted(p[0] for p in world.conveyor_points if p[1] == belt_y)
-    for cx in aisles:
-        assert any(abs(cx - x) < 1e-6 for x in on_run), f"aisle {cx} has no 投入口"
-
-    # Standing at any aisle head, the belt point a picker is sent to is the
-    # induction port of that same aisle — a straight walk out, no cross-traffic.
+    line = world.conveyors[0]
+    belt_y = min(p[1] for p in line.points)          # the collection run's y
     for cx in aisles:
         head = (cx, min(r[1] for r in rects) - 1.0)
-        near = _nearest_conveyor(world, head)
-        assert near is not None
-        assert near[0] == pytest.approx(cx), f"{head} → {near} is not its own aisle"
+        board = _board_conveyor(world, head)
+        assert board is not None
+        _line, xy, arc = board
+        assert xy[1] == pytest.approx(belt_y), f"{head} boards off the collection run"
+        assert xy[0] == pytest.approx(cx), f"{head} → {xy} is not its own aisle"
+        # ...and it rides only what is left of the belt from there.
+        assert 0.0 <= arc <= _line.length + 1e-6
 
 
 def test_layout_audit_is_clean(model):
