@@ -138,6 +138,7 @@
       <button class="card" data-id="perpR"><canvas data-ico="perpR"></canvas><div><div class="t">方向転換（右バック）</div><div class="d">右のポケットへ後退</div></div></button>
       <button class="card" data-id="perpL"><canvas data-ico="perpL"></canvas><div><div class="t">方向転換（左バック）</div><div class="d">左のポケットへ後退</div></div></button>
       <button class="card" data-id="parallel"><canvas data-ico="parallel"></canvas><div><div class="t">縦列駐車</div><div class="d">S字で切り返し</div></div></button>
+      <button class="card" data-id="hill"><canvas data-ico="hill"></canvas><div><div class="t">坂道発進</div><div class="d">10%の坂で逆行させず発進</div></div></button>
     </div>
     <p class="lead">※ コース寸法は仮の標準値。教習車＝マツダ アクセラ セダン想定。実寸で本人仕様に。</p>
     <button class="close" id="menuClose">閉じる</button>
@@ -231,8 +232,25 @@ function buildParallel(){
     ideal:{path,end}, start:{x:TX-2.6,y:P.approachY,th:0},
     coach:'前進で前の車と横に並ぶ→後退＋右いっぱい。斜め約40°で「左いっぱい」に切り返して真っ直ぐ' };
 }
+
+/* 坂道発進：10%勾配の坂の途中で停止線に前輪を合わせて停止 → サイドで保持 →
+   逆行させずに発進 → 坂上のゴールへ。標高は M.ramps（zAt/gradeAlong）で与える。 */
+function buildHill(){
+  const HW=1.75, X0=-10, X1=52;                       // 3.5m幅の坂路（ゴール後の余走を確保）
+  const rampA=6, rampB=26, GRADE=0.10, STOP=17;       // 停止線は坂の中腹
+  const goal=rect(35,-HW,41,HW);
+  const path=[]; for(let x=X0+4;x<=39;x+=0.25) path.push({x,y:0,th:0});
+  return { id:'hill', title:'坂道発進', lockLabel:'右', successKind:'hill',
+    turnRefX:STOP, appY:0, speedLimitMs:5.5,
+    rects:[rect(X0,-HW,X1,HW)], obstacles:[], bay:goal, poles:[], parkedCars:[], curbY:null,
+    curbs:[{x0:X0,x1:X1,y:HW,dir:+1},{x0:X0,x1:X1,y:-HW,dir:-1}],
+    ramps:[{a:{x:rampA,y:0},b:{x:rampB,y:0},halfWidth:HW+0.5,grade:GRADE,trans:3}],
+    stopLineX:STOP, goalX:35,
+    ideal:{path,end:{x:38,y:0,th:0}}, start:{x:X0+3,y:0,th:0},
+    coach:'坂の停止線でいったん停止→サイドを引く→半クラの要領で発進（逆行させない）' };
+}
 const _perpR=buildPerpR();
-const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel() };
+const MODELS={ perpR:_perpR, perpL:reflectModel(_perpR), parallel:buildParallel(), hill:buildHill() };
 
 /* ==================== 状態・エンジン ==================== */
 let M=null, bounds=null;
@@ -240,9 +258,11 @@ const car={x:0,y:0,th:0,steer:0,v:0};
 let wheelAngle=0, gear='P', brakeHeld=false, accelHeld=false, creepMode=true;
 let reverses=0, wasReversing=false, result=null, cutRecorded=false, parPhase=0;
 let showGuide=true, showLines=true, examMode=false, rearGlance=false;
+let hbHoldT=0;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
 let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
+let hillPhase=0, hillStartX0=null, hillMinX=null, hillRolled=false, hillUsedHb=false, hillOver=false, hillHoldTick=0, hillHbWarned=false;
 let demoMode=false, demoPhase=0, demoT=0, demoTargetV=0, demoWheelTarget=0, demoChecksDone=false;
 let tutorMode=false, tutorWait=false, tutorFired=new Set();
 const DEMO_WHEEL_RATE=WHEEL_LOCK/2.0;   // 約2秒で回し切る（実車の据え切りの手応え感）
@@ -259,15 +279,17 @@ function drivable(x,y){ let ok=false; for(const r of M.rects) if(inRect(r,x,y)){
   for(const o of M.obstacles) if(inRect(o,x,y))return false; return true; }
 function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=M.start.th;car.steer=0;car.v=0;
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
-  handbrake=true; hbWarned=false; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
+  handbrake=true; hbWarned=false; hbHoldT=0; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
   driveReset(); drive={rpm:DT.idle,load:0,slip:0,gearNum:1};
+  hillPhase=0; hillStartX0=null; hillMinX=null; hillRolled=false; hillUsedHb=false; hillOver=false; hillHoldTick=0; hillHbWarned=false;
   tutorMode=false; tutorWait=false; document.getElementById('tutorPop').classList.remove('show');
   demoMode=false; demoPhase=0; demoT=0; demoTargetV=0; demoWheelTarget=0; demoChecksDone=false;
   poleInMirror=false; poleSeenEver=false; earlyReverseWarned=false;
   if(typeof setRearGlance==='function') setRearGlance(false); else rearGlance=false;
   cuePoleRef=M.poles.length?M.poles.reduce((a,b)=>Math.abs(b.x-M.turnRefX)<Math.abs(a.x-M.turnRefX)?b:a):null;
   checks.room=checks.L=checks.R=checks.back=-1e9;
+  CAM.cx=car.x; CAM.cy=car.y;
   updateHbUI(); document.getElementById('resultPanel').classList.remove('show');
   document.getElementById('title').textContent=M.title;
   setCoach('① サイド解除 → ② シフトD → '+M.coach,''); computeBounds(); resize(); closeMenu(); }
@@ -713,7 +735,10 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     car.steer=-MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
     // 速度：実演は従来の目標追従（お手本の決定性を保つ）／通常運転は駆動系の物理で解く
     const dir=gear==='D'?1:gear==='R'?-1:0;
-    if(handbrake&&accelHeld&&dir&&!hbWarned){ hbWarned=true; deduct('サイドブレーキ戻し忘れ',10); setCoach('サイドブレーキが掛かっています！左下で解除','bad'); }
+    // サイドを引いたままアクセルを「踏み続けた」ときだけ減点。坂道発進の正しい手順
+    // （アクセルを当ててからサイドを緩める）を誤って減点しないよう猶予を持たせる
+    if(handbrake&&accelHeld&&dir){ hbHoldT+=dt; } else hbHoldT=0;
+    if(hbHoldT>1.5&&!hbWarned){ hbWarned=true; deduct('サイドブレーキ戻し忘れ',10); setCoach('サイドブレーキが掛かっています！左下で解除','bad'); }
     if(demoMode){ car.v+=(demoTargetV-car.v)*Math.min(1,dt*5); if(Math.abs(car.v)<0.015&&demoTargetV===0)car.v=0;
       drive={rpm:700+Math.abs(car.v)*900,load:0.15,slip:0,gearNum:1};
     } else {
@@ -743,10 +768,11 @@ function updateLogic(){
     if(reverses>=4){ finish('fail','切り返し超過（4回）'); return; } }
   if(reversing)wasReversing=true; else if(car.v>0.05)wasReversing=false;
   // 後退開始時の安全確認チェック
-  if(reversing&&!revCheckDone){ revCheckDone=true; safetyOK=allChecked();
+  if(reversing&&gear==='R'&&!revCheckDone){ revCheckDone=true; safetyOK=allChecked();
     if(!safetyOK){ deduct('後退時の安全不確認',10); if(!examMode)setCoach('安全確認が不足！ルーム→左右ミラー→👀目視をタップしてから後退','bad'); } }
   // 速度の出しすぎ
-  if(Math.abs(car.v)>1.7){ if(++spdTicks>50&&!spdWarned){ spdWarned=true; deduct('速度の出しすぎ',5); if(!examMode)setCoach('課題中はもっとゆっくり（クリープ＋ブレーキ）','warn'); } } else spdTicks=0;
+  const spdCap=((M&&M.speedLimitMs)||2.2)*1.35;   // 課題ごとの上限に余裕をみた閾値
+  if(Math.abs(car.v)>spdCap){ if(++spdTicks>50&&!spdWarned){ spdWarned=true; deduct('速度の出しすぎ',5); if(!examMode)setCoach('この課題では速度を抑えて','warn'); } } else spdTicks=0;
   // 「柵の角が見えてから下がる」の癖づけ（＝手前すぎ後退の矯正。今回の検定NGの真因対策）
   if(M.successKind==='perp' && cuePoleRef){
     if(!poleSeenEver && poleInMirror && !reversing){ poleSeenEver=true;
@@ -773,6 +799,8 @@ function updateLogic(){
   // 鼻先のはみ出しは正常な挙動であることを一度だけ通知
   if(!examMode&&!noseInfoShown){ for(const p of carPerimeter(car)) if(!drivable(p.x,p.y)){ noseInfoShown=true;
     setCoach('鼻先が縁石の上に出るのは正常。タイヤが越えなければ脱輪ではない','ok'); break; } }
+  // --- 坂道発進：停止線での停止 → 逆行させずに発進 → 坂上のゴール ---
+  if(M.successKind==='hill'){ hillLogic(); return; }
   // 正着判定 → 完了手順（停止→P→サイド）で終了
   const posOK = M.successKind==='perp'
     ? (inRect(M.bay,cs[2].x,cs[2].y)&&inRect(M.bay,cs[3].x,cs[3].y)&&alignedV(car.th))
@@ -780,6 +808,33 @@ function updateLogic(){
   if(posOK&&Math.abs(car.v)<0.03){
     if(gear==='P'&&handbrake){ finish('success'); }
     else if(tick%40===0) setCoach('OK！ここで停止 → シフトP → サイドを掛けて完了','ok');
+  }
+}
+/* 坂道発進の判定：①停止線に前端を合わせて停止 ②サイドで保持 ③逆行30cm以内で発進 ④ゴール */
+function hillLogic(){
+  const nose=Math.max(...carCorners(car).map(p=>p.x));
+  const stopped=Math.abs(car.v)<0.05;
+  if(hillPhase===0){                                   // 停止線をねらう
+    if(nose>M.stopLineX+0.30 && !hillOver){ hillOver=true;      // 行き過ぎは減点。ただし課題は続行する
+      deduct('停止線オーバー',10); if(!examMode) setCoach('停止線を越えた（−10点）そのまま坂道発進へ','warn'); }
+    // 停止線の手前2mから+30cmで止まれば正規。行き過ぎた場合も止まれば発進フェーズへ進む
+    if(stopped && nose>M.stopLineX-2.0){
+      hillPhase=1; hillHoldTick=tick; hillMinX=car.x;
+      if(!examMode&&!hillOver) setCoach('停止OK！サイドブレーキを引いて、発進の準備','ok'); }
+  } else if(hillPhase===1){                            // 停止保持 → 発進待ち
+    if(hillStartX0===null) hillStartX0=car.x;          // 基準は「停止した位置」（逆行量の起点）
+    hillMinX=Math.min(hillMinX,car.x);
+    if(handbrake) hillUsedHb=true;
+    if(car.v>0.25){ hillPhase=2; if(!examMode) setCoach('発進！このまま坂の上のゴールへ','ok'); }
+    const back=hillStartX0-car.x;                      // 起点より後ろ＝逆行
+    if(back>0.30 && !hillRolled){ hillRolled=true;
+      if(back>0.5){ finish('fail','逆行（30cm超）'); return; }
+      deduct('逆行',10); if(!examMode) setCoach('逆行した（−10点）サイドを使って発進','bad'); }
+    if(!hillUsedHb && tick-hillHoldTick>150 && !hillHbWarned){ hillHbWarned=true;
+      if(!examMode) setCoach('坂ではサイドブレーキを使って発進するのが基本','warn'); }
+  } else {                                             // ゴール判定
+    if(car.x>=M.goalX && Math.abs(car.v)<0.05 && gear==='P' && handbrake) finish('success');
+    else if(car.x>=M.goalX && tick%40===0 && !examMode) setCoach('ゴール！停止 → P → サイドで完了','ok');
   }
 }
 /* ==================== お手本実演（自動運転チュートリアル） ==================== */
@@ -895,6 +950,8 @@ function showResult(pass,score,kind){
 /* ==================== 俯瞰の描画（左） ==================== */
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
 let PPM=22,W=0,H=0,ox=0,oyTop=0,frontBottom=0;
+// 俯瞰カメラ：小さい課題は全体表示、長いコースは自車追従にする（サーキット／路上に必須）
+const CAM={ follow:false, cx:0, cy:0, viewX:0, viewY:0, viewW:0, viewH:0 };
 // アスファルトの質感パターン（初回のみ生成）
 const asphPat=(()=>{ const c=document.createElement('canvas'); c.width=c.height=48; const g=c.getContext('2d');
   for(let i=0;i<150;i++){ g.fillStyle=`rgba(${185+Math.random()*45|0},${195+Math.random()*40|0},${215+Math.random()*30|0},${0.04+Math.random()*0.09})`;
@@ -914,8 +971,12 @@ function resize(){ const r=document.getElementById('app').getBoundingClientRect(
   if(bounds){ const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY;
     const availTop=frontBottom+8, availBot=48, insetL=186, insetR=252;
     const availW=Math.max(120,W-insetL-insetR), drawH=Math.max(70,H-availTop-availBot);
-    PPM=Math.min(availW/ww, drawH/wh)*0.98;
-    ox=insetL+(availW-ww*PPM)/2; oyTop=availTop+(drawH-wh*PPM)/2; }
+    CAM.viewX=insetL; CAM.viewY=availTop; CAM.viewW=availW; CAM.viewH=drawH;
+    const fit=Math.min(availW/ww, drawH/wh)*0.98;
+    // 全体表示だと 1m あたり9px を切るほど縮む長いコースは、自車追従＋固定縮尺にする
+    CAM.follow = fit < 9;
+    PPM = CAM.follow ? Math.min(16, Math.max(9, drawH/14)) : fit;
+    if(!CAM.follow){ ox=insetL+(availW-ww*PPM)/2; oyTop=availTop+(drawH-wh*PPM)/2; } }
   sizeCanvas(wheelCv); sizeCanvas(document.getElementById('frontCv'));
   sizeCanvas(document.getElementById('mirL')); sizeCanvas(document.getElementById('mirR')); sizeCanvas(document.getElementById('mirC')); }
 function sizeCanvas(c){ const dpr=window.devicePixelRatio||1;
@@ -927,7 +988,25 @@ function wx(x){ return ox+(x-bounds.minX)*PPM; } function wy(y){ return oyTop+(b
 function fillR(r,col){ ctx.fillStyle=col; ctx.fillRect(wx(r.x0),wy(r.y1),(r.x1-r.x0)*PPM,(r.y1-r.y0)*PPM); }
 function strokeR(r,col,w){ ctx.strokeStyle=col; ctx.lineWidth=w; ctx.strokeRect(wx(r.x0),wy(r.y1),(r.x1-r.x0)*PPM,(r.y1-r.y0)*PPM); }
 
-function renderScene(){ ctx.clearRect(0,0,W,H); if(!M||!bounds)return;
+function updateTopCam(){
+  if(!CAM.follow||!bounds) return;
+  const halfW=CAM.viewW/(2*PPM), halfH=CAM.viewH/(2*PPM);
+  const ww=bounds.maxX-bounds.minX, wh=bounds.maxY-bounds.minY;
+  // 自車を中心に。ただしコースより視野が広い軸は中央固定
+  let cx = ww<=halfW*2 ? (bounds.minX+bounds.maxX)/2 : clamp(car.x, bounds.minX+halfW, bounds.maxX-halfW);
+  let cy = wh<=halfH*2 ? (bounds.minY+bounds.maxY)/2 : clamp(car.y, bounds.minY+halfH, bounds.maxY-halfH);
+  CAM.cx += (cx-CAM.cx)*0.15; CAM.cy += (cy-CAM.cy)*0.15;      // 追従を少しなめらかに
+  ox = CAM.viewX + CAM.viewW/2 - (CAM.cx-bounds.minX)*PPM;
+  oyTop = CAM.viewY + CAM.viewH/2 - (bounds.maxY-CAM.cy)*PPM;
+}
+function renderScene(){ ctx.clearRect(0,0,W,H); if(!M||!bounds)return; updateTopCam();
+  // 追従時はコースが画面いっぱいに伸びるため、俯瞰の描画領域でクリップして
+  // シフト／ハンドルなどのUIに被らないようにする
+  const _clip=CAM.follow&&CAM.viewW>0;
+  if(_clip){ ctx.save(); ctx.beginPath(); ctx.rect(CAM.viewX,CAM.viewY,CAM.viewW,CAM.viewH); ctx.clip(); }
+  try{ renderSceneInner(); } finally { if(_clip) ctx.restore(); }
+}
+function renderSceneInner(){
   // 周辺の芝生
   ctx.fillStyle='#16251c';
   ctx.fillRect(wx(bounds.minX),wy(bounds.maxY),(bounds.maxX-bounds.minX)*PPM,(bounds.maxY-bounds.minY)*PPM);
