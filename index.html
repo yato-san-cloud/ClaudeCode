@@ -1857,6 +1857,7 @@ let hbHoldT=0;
 let handbrake=true, hbWarned=false, revCheckDone=false, safetyOK=null, spdWarned=false, spdTicks=0;
 let deductions=[], advice='', contactFail=false, noseInfoShown=false;
 let cuePoleRef=null, poleInMirror=false, poleSeenEver=false, earlyReverseWarned=false;
+let demoIdx=0, demoStopPhase=0;
 let sigEntered=false, sigYellowSeen=false, sigCouldStop=false;
 let railPhase=0, railStopTick=0, railWarned=false, railStalled=false;
 let hillPhase=0, hillStartX0=null, hillMinX=null, hillRolled=false, hillUsedHb=false, hillOver=false, hillHoldTick=0, hillHbWarned=false;
@@ -1897,6 +1898,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   handbrake=true; hbWarned=false; hbHoldT=0; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
   driveReset(); drive={rpm:DT.idle,load:0,slip:0,gearNum:1};
+  demoIdx=0; demoStopPhase=0;
   sigEntered=false; sigYellowSeen=false; sigCouldStop=false;
   railPhase=0; railStopTick=0; railWarned=false; railStalled=false;
   hillPhase=0; hillStartX0=null; hillMinX=null; hillRolled=false; hillUsedHb=false; hillOver=false; hillHoldTick=0; hillHbWarned=false;
@@ -3055,6 +3057,7 @@ function hillLogic(){
 const sideTurns=(WHEEL_LOCK/(2*Math.PI)).toFixed(1);           // 中央→ロック ≈1.4回転
 const fullTurns=(WHEEL_LOCK*2/(2*Math.PI)).toFixed(1);         // ロック→逆ロック ≈2.8回転
 function startDemo(withTutor){ loadScenario(M.id); demoMode=true; tutorMode=!!withTutor; tutorFired=new Set();
+  demoIdx=0; demoStopPhase=0;
   handbrake=false; updateHbUI(); gear='D'; setGearUI();
   setCoach('【お手本】① 前進：切り始めラインまで進む（ポールが見えてもラインまで）','ok');
   if(M.successKind==='perp')
@@ -3075,6 +3078,8 @@ function demoUpdate(dt){
   const lockSign=M.lockLabel==='右'?1:-1;                       // wheelAngle正＝右回し
   const doChecks=()=>{ if(demoChecksDone)return; demoChecksDone=true;
     registerCheck('C'); setTimeout(()=>registerCheck('L'),350); setTimeout(()=>registerCheck('R'),700); setTimeout(()=>{checks.back=tick;},1050); };
+  // --- 通過型コースの汎用実演：理想経路を純追従でなぞり、要所で停止・解説する ---
+  if(M.successKind!=='perp' && M.successKind!=='parallel'){ demoFollowPath(dt); return; }
   if(M.successKind==='perp'){
     const targetTh=lockSign*Math.PI/2;
     switch(demoPhase){
@@ -3195,6 +3200,54 @@ function showExamResult(completed){
   const done=examRun; examRun=null;
   if(pass) SimAudio.sfx.ok(); else SimAudio.sfx.ng();
   return done;
+}
+/* 理想経路を純追従でなぞる汎用実演。停止が要る課題（坂道・踏切・信号）では
+   その地点でいったん止まり、解説を出してから再発進する。 */
+function demoFollowPath(dt){
+  const P=M.ideal&&M.ideal.path; if(!P||!P.length){ demoMode=false; return; }
+  // 進捗：いま自車に一番近い経路点から先へ進める
+  while(demoIdx<P.length-1 && Math.hypot(P[demoIdx].x-car.x,P[demoIdx].y-car.y)<2.4) demoIdx++;
+  const tgt=P[Math.min(P.length-1,demoIdx)];
+  // 純追従で目標切れ角を出し、画面のハンドルもそれに追従させる
+  const dx=tgt.x-car.x, dy=tgt.y-car.y;
+  const lx= Math.cos(car.th)*dx + Math.sin(car.th)*dy;
+  const ly=-Math.sin(car.th)*dx + Math.cos(car.th)*dy;
+  const L2=lx*lx+ly*ly, curv=L2>1e-6?(2*ly/L2):0;
+  const want=clamp(Math.atan(curv*C.wheelbase),-MAXSTEER,MAXSTEER);
+  car.steer += clamp(want-car.steer, -2.5*dt, 2.5*dt);
+  wheelAngle = -(car.steer/MAXSTEER)*WHEEL_LOCK;      // 実演中もハンドル表示を一致させる
+  // 速度：曲率がきついほど落とす
+  const base=Math.min((M.speedLimitMs||2.2)*0.55, 2.2);
+  let v=base*(1-0.55*Math.min(1,Math.abs(car.steer)/MAXSTEER));
+  // 停止が要る地点（坂道／踏切の停止線、赤信号）では止まる
+  const nose=Math.max(...carCorners(car).map(p=>p.x));
+  if(M.stopLineX!=null && demoStopPhase===0 && nose>M.stopLineX-0.4){
+    demoStopPhase=1; demoT=0;
+    tutor('d-stop', M.successKind==='railway'
+      ? '踏切の直前で必ず一時停止。窓を開けて左右の音と姿を確認してから、止まらず一気に渡る。'
+      : '停止線の手前で確実に止まる。ここで止まれるかが評価の分かれ目。'); }
+  if(demoStopPhase===1){ v=0;
+    if(Math.abs(car.v)<0.05 && demoT>1.6){ demoStopPhase=2;
+      registerCheck('C'); registerCheck('L'); registerCheck('R'); checks.back=tick; } }
+  if(M.signals&&M.signals.length){                    // 赤・黄なら交差点の手前で待つ
+    const sg=M.signals[0];
+    if((sg.state==='red'||sg.state==='yellow') && M.interX0!=null && nose>M.interX0-8 && car.x<M.interX0){
+      v=0; tutor('d-sig','信号は早めに確認する。赤・黄で交差点に入らないよう、停止線の手前で待つ。'); } }
+  // 終端・ゴールが近づいたら減速して確実に停止する（走り抜け防止）
+  const remain=P.length-1-demoIdx;
+  if(remain<40 || inGoalZone()) v=Math.min(v, Math.max(0, remain*0.03));
+  demoTargetV=v;
+  // 解説：コースの中盤で1回だけ要点を出す
+  if(demoIdx>P.length*0.35) tutor('d-mid', M.successKind==='course'
+    ? '狭路は「ゆっくり・大きく回る」。内輪差で内側の後輪が落ちやすいので、ミラーで後輪を見る。'
+    : M.successKind==='hill' ? 'サイドブレーキを使い、アクセルを当ててから緩めると逆行しない。' : '');
+  // ゴールに入ったら P＋サイドで締める
+  if(inGoalZone() && Math.abs(car.v)<0.06){
+    demoTargetV=0; gear='P'; setGearUI(); handbrake=true; updateHbUI();
+    result='demo'; demoMode=false;
+    setCoach('【お手本】完了！この線と速度を覚えて、同じように走ってみる','ok'); }
+  else if(demoIdx>=P.length-1 && Math.abs(car.v)<0.06){ demoMode=false; result='demo';
+    setCoach('【お手本】完了','ok'); }
 }
 /* ==================== 採点・結果 ==================== */
 function finish(kind,reason){ result=kind; car.v=0;
