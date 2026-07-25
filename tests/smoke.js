@@ -126,17 +126,22 @@ function check(name, ok, detail) {
   check("空マニュアルは残らない", await page.locator(".mcard").count() === 1);
 
   // 未提出の変更チップ（書き出し→クリア、編集→再表示）
+  // goHome() は非同期。cur===null になるまで待たないと一覧の再描画前を読んでしまう
+  const backToHome = async () => {
+    await page.click("#btn-back");
+    await page.waitForFunction(() => cur === null);
+  };
   await page.click(".mcard");
   await page.waitForSelector("#v-edit:not([hidden])");
   await page.evaluate(() => exportHTML(cur));
   await page.waitForTimeout(300);
-  await page.click("#btn-back");
+  await backToHome();
   const dirtyAfterExport = await page.locator(".chip.st-dirty").count();
   await page.click(".mcard");
   await page.click("details.mgmt summary");
   await page.fill("#m-note", "手順3を修正");
   await page.waitForTimeout(600);
-  await page.click("#btn-back");
+  await backToHome();
   const dirtyAfterEdit = await page.locator(".chip.st-dirty").count();
   check("未提出の変更チップ", dirtyAfterExport === 0 && dirtyAfterEdit === 1,
     `afterExport=${dirtyAfterExport} afterEdit=${dirtyAfterEdit}`);
