@@ -150,7 +150,6 @@ export const ROPE = {
     let clearT = 0;
     let calmT = 0;
     let acc = 0;
-    let tSim = 0;
     let shake = 0;
     let auto = []; // solve() が積む予約
     let autoT = 0;
@@ -159,7 +158,6 @@ export const ROPE = {
     let px = 0;
     let py = 0;
     let heroMood = 'calm';
-    let stageIx = 0;
 
     // シーソーの板は毎ステップ座標が変わるので使い回す
     const seeBar = bar(0, 0, 0, 0, { style: 'seesaw', half: 6, mu: 2.4 });
@@ -277,7 +275,6 @@ export const ROPE = {
       const nvt = vt * Math.max(0, 1 - b.mu * h);
       it.vx += (nvt - vt) * tx;
       it.vy += (nvt - vt) * ty;
-      it.touch = true;
       it.spin = it.vx / it.r;
       armBomb(it);
       if (b.frag && it.mass >= 2.5 && vn < -100) {
@@ -347,9 +344,14 @@ export const ROPE = {
       }
       if (phase !== 'play') return;
       if (it.kind === 'treasure') {
-        if (inBox(catchBox(), it.x, it.y)) { it.alive = false; clearStage(); }
+        if (inBox(catchBox(), it.x, it.y)) {
+          // カゴに収まった姿で止める
+          it.x = world.hero;
+          it.y = FLOOR - 54;
+          it.vx = 0; it.vy = 0; it.rot = 0;
+          clearStage();
+        }
       } else if (inBox(hurtBox(), it.x, it.y)) {
-        it.alive = false;
         shake = 12;
         fail(it.kind === 'bomb' ? '爆弾が勇者に直撃した' : '落ちてきた物が勇者を潰した');
       }
@@ -400,7 +402,6 @@ export const ROPE = {
     };
 
     const step = (h) => {
-      tSim += h;
       stepSee(h);
       for (const r of world.ropes) {
         if (r.cut) continue;
@@ -417,7 +418,6 @@ export const ROPE = {
         it.x += it.vx * h;
         it.y += it.vy * h;
         it.onSee = false;
-        it.touch = false;
         for (const b of bars) hitBar(it, b, h);
         it.rot += it.spin * h;
       }
@@ -609,10 +609,11 @@ export const ROPE = {
       ctx.rotate(ang);
       const t = b.half * 2;
       if (b.style === 'steel') {
-        const w = len * b.anim;
-        gfx.roundRect(ctx, -len / 2, -t / 2, Math.max(2, w), t, 3, '#98a2b4', '#5b6472', 2);
+        const w = Math.max(11, len * b.anim);
+        gfx.roundRect(ctx, -len / 2 - 4, -t / 2 - 3, 9, t + 6, 2, '#5b6472', '#39404b', 2); // 扉が収まる枠
+        gfx.roundRect(ctx, -len / 2, -t / 2, w, t, 3, '#98a2b4', '#5b6472', 2);
         ctx.fillStyle = 'rgba(255,255,255,.35)';
-        for (let i = 0; i < 5; i++) ctx.fillRect(-len / 2 + 6 + i * (w / 5), -t / 2 + 2, 2, t - 4);
+        for (let i = 0; i < 5; i++) ctx.fillRect(-len / 2 + 5 + i * (w / 5), -t / 2 + 2, 2, t - 4);
       } else if (b.style === 'grate') {
         gfx.roundRect(ctx, -len / 2, -t / 2, len, t, 2, '#5d6470', '#333944', 2);
         ctx.strokeStyle = '#39404b';
@@ -723,8 +724,7 @@ export const ROPE = {
       hint: STAGES[0].hint,
 
       start(i) {
-        stageIx = i % STAGES.length;
-        const st = STAGES[stageIx];
+        const st = STAGES[i % STAGES.length];
         const w = st.make();
         w.pits = w.pits ?? [];
         w.bars = [...w.bars, ...ground(w.pits)];
@@ -737,20 +737,18 @@ export const ROPE = {
           const it = {
             kind: r.kind, r: kd.r, mass: kd.mass, x: r.x ?? 0, y: CEIL + r.len,
             vx: 0, vy: 0, rot: 0, spin: 0, alive: true, free: false, fuse: -1,
-            onSee: false, seeOff: 0, touch: false, seed: k % 9,
+            onSee: false, seeOff: 0, seed: k % 9,
           };
           r.item = it;
           w.items.push(it);
         });
         if (w.see) w.see.ang = 0;
         world = w;
-        game._w = w; // ★調整用（あとで消す）
         game.hint = st.hint;
         phase = 'play';
         clearT = 0;
         calmT = 0;
         acc = 0;
-        tSim = 0;
         shake = 0;
         auto = [];
         autoT = 0;
@@ -857,8 +855,10 @@ export const ROPE = {
         ctx.fill();
 
         for (const b of world.bars) {
-          if (!b.on && b.style !== 'steel') continue;
-          if (!b.on) { b.anim = Math.max(0, b.anim - 0.09); if (b.anim <= 0.01) continue; }
+          if (!b.on) {
+            if (b.style !== 'steel') continue; // 壊れた板は消える。鉄扉は引っ込んだ姿を残す
+            b.anim = Math.max(0, b.anim - 0.09);
+          }
           drawBar(ctx, b);
         }
 

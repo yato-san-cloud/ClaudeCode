@@ -4543,9 +4543,14 @@ const ROPE = {
       }
       if (phase !== 'play') return;
       if (it.kind === 'treasure') {
-        if (inBox(catchBox(), it.x, it.y)) { it.alive = false; clearStage(); }
+        if (inBox(catchBox(), it.x, it.y)) {
+          // カゴに収まった姿で止める
+          it.x = world.hero;
+          it.y = FLOOR - 54;
+          it.vx = 0; it.vy = 0; it.rot = 0;
+          clearStage();
+        }
       } else if (inBox(hurtBox(), it.x, it.y)) {
-        it.alive = false;
         shake = 12;
         fail(it.kind === 'bomb' ? '爆弾が勇者に直撃した' : '落ちてきた物が勇者を潰した');
       }
@@ -4805,10 +4810,11 @@ const ROPE = {
       ctx.rotate(ang);
       const t = b.half * 2;
       if (b.style === 'steel') {
-        const w = len * b.anim;
-        gfx.roundRect(ctx, -len / 2, -t / 2, Math.max(2, w), t, 3, '#98a2b4', '#5b6472', 2);
+        const w = Math.max(11, len * b.anim);
+        gfx.roundRect(ctx, -len / 2 - 4, -t / 2 - 3, 9, t + 6, 2, '#5b6472', '#39404b', 2); // 扉が収まる枠
+        gfx.roundRect(ctx, -len / 2, -t / 2, w, t, 3, '#98a2b4', '#5b6472', 2);
         ctx.fillStyle = 'rgba(255,255,255,.35)';
-        for (let i = 0; i < 5; i++) ctx.fillRect(-len / 2 + 6 + i * (w / 5), -t / 2 + 2, 2, t - 4);
+        for (let i = 0; i < 5; i++) ctx.fillRect(-len / 2 + 5 + i * (w / 5), -t / 2 + 2, 2, t - 4);
       } else if (b.style === 'grate') {
         gfx.roundRect(ctx, -len / 2, -t / 2, len, t, 2, '#5d6470', '#333944', 2);
         ctx.strokeStyle = '#39404b';
@@ -4940,7 +4946,6 @@ const ROPE = {
         });
         if (w.see) w.see.ang = 0;
         world = w;
-        game._w = w; // ★調整用（あとで消す）
         game.hint = st.hint;
         phase = 'play';
         clearT = 0;
@@ -5053,8 +5058,10 @@ const ROPE = {
         ctx.fill();
 
         for (const b of world.bars) {
-          if (!b.on && b.style !== 'steel') continue;
-          if (!b.on) { b.anim = Math.max(0, b.anim - 0.09); if (b.anim <= 0.01) continue; }
+          if (!b.on) {
+            if (b.style !== 'steel') continue; // 壊れた板は消える。鉄扉は引っ込んだ姿を残す
+            b.anim = Math.max(0, b.anim - 0.09);
+          }
           drawBar(ctx, b);
         }
 
