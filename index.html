@@ -261,6 +261,7 @@ function loadScenario(id){ M=MODELS[id]; car.x=M.start.x;car.y=M.start.y;car.th=
   wheelAngle=0; gear='P'; setGearUI(); reverses=0;wasReversing=false;result=null;cutRecorded=false;parPhase=0;
   handbrake=true; hbWarned=false; revCheckDone=false; safetyOK=null; spdWarned=false; spdTicks=0;
   deductions=[]; advice=''; contactFail=false; noseInfoShown=false; trail.length=0;
+  driveReset(); drive={rpm:DT.idle,load:0,slip:0,gearNum:1};
   tutorMode=false; tutorWait=false; document.getElementById('tutorPop').classList.remove('show');
   demoMode=false; demoPhase=0; demoT=0; demoTargetV=0; demoWheelTarget=0; demoChecksDone=false;
   poleInMirror=false; poleSeenEver=false; earlyReverseWarned=false;
@@ -376,6 +377,113 @@ function openMenu(){menu.classList.add('show');} function closeMenu(){menu.class
 bindTap(document.getElementById('btnMenu'),openMenu);
 bindTap(document.getElementById('menuClose'),closeMenu);
 document.querySelectorAll('.card').forEach(c=>bindTap(c,()=>loadScenario(c.dataset.id)));
+
+/* ============================================================================
+   Drivetrain — 実在の駆動系を模した縦方向ダイナミクス
+   エンジン（トルク曲線）→トルコン→AT→終減速→タイヤ→駆動力
+   走行抵抗（転がり・空気・勾配・ブレーキ）と釣り合わせて加速度を積分する。
+   低速の駐車フィール（クリープ約0.55m/s）は実測して合わせてあるため、
+   既存の課題ジオメトリ・採点はそのまま通る。
+   ========================================================================== */
+const DT = {
+  mass: 1400,            // kg（アクセラセダン相当）
+  wheelR: 0.31,          // m 駆動輪半径
+  finalDrive: 4.33,
+  gears: { P:0, R:-3.20, N:0, D1:3.55, D2:2.02, D3:1.35, D4:1.00, D5:0.72 },
+  idle: 700, redline: 6200, stall: 450,
+  effi: 0.88,            // 駆動系効率
+  Crr: 0.014,            // 転がり抵抗係数
+  CdA: 0.68,             // 空気抵抗 Cd*A (m^2)
+  rhoAir: 1.2,
+  brakeMaxN: 9000,       // 最大制動力(N)
+  creepTorqueN: 355,     // トルコンのクリープ推力(N)：平地の釣り合いが約0.55m/sになるよう較正
+  gravity: 9.81,
+  shiftUp:   [0, 2600, 2900, 3050, 3200],   // 各段からのシフトアップ回転
+  shiftDown: [0, 0, 1250, 1350, 1450],
+};
+// 全開時のトルク曲線（Nm）：アイドル〜レッドラインの実車らしい山形
+function engineTorqueWOT(rpm){
+  const r = Math.max(DT.stall, Math.min(DT.redline, rpm));
+  // 200Nm 級のNAガソリン：3800rpm 付近でピーク、上下でだれる
+  const peak = 200, x = (r - 3800) / 2600;
+  let t = peak * (1 - 0.55 * x * x);
+  if (r > 5600) t *= 1 - (r - 5600) / 1400 * 0.35;      // 高回転の落ち込み
+  return Math.max(18, t);
+}
+// エンジンブレーキのトルク（Nm・常に正の値）。アクセルを戻すほど大きい
+function engineBrakeTorque(rpm, throttle){ return (1 - throttle) * (22 + rpm / 140); }
+const DTstate = { rpm: DT.idle, gearNum: 1, shiftTimer: 0, load: 0, slip: 0, running: true };
+
+// 現在ギアの総減速比（P/N は 0）
+function ratioFor(gear, gearNum){
+  if (gear === 'P' || gear === 'N') return 0;
+  if (gear === 'R') return DT.gears.R;
+  return DT.gears['D' + gearNum] || DT.gears.D1;
+}
+/* 1フレーム分の縦方向更新。throttle/brake は 0..1。grade は勾配(rise/run)。
+   戻り値：サウンドとHUDが使う {rpm, load, slip, gearNum} */
+function driveUpdate(car, dt, throttle, brake, gear, handbrake, grade){
+  const S = DTstate;
+  const dir = gear === 'D' ? 1 : gear === 'R' ? -1 : 0;
+  const v = car.v, sp = Math.abs(v);
+
+  // --- AT の変速（Dのみ・ヒステリシスとシフト間インターバル付き） ---
+  S.shiftTimer = Math.max(0, S.shiftTimer - dt);
+  if (gear === 'D' && S.shiftTimer === 0){
+    if (S.gearNum < 5 && S.rpm > DT.shiftUp[S.gearNum]   + (throttle>0.7? 1500:0)){ S.gearNum++; S.shiftTimer = 0.5; }
+    else if (S.gearNum > 1 && S.rpm < DT.shiftDown[S.gearNum]){ S.gearNum--; S.shiftTimer = 0.4; }
+  } else if (gear !== 'D') S.gearNum = 1;
+
+  const ratio = ratioFor(gear, S.gearNum) * DT.finalDrive;
+  // --- 回転数：車速から逆算。トルコンのスリップでアイドルを下回らない ---
+  const wheelRad = sp / DT.wheelR;                                  // rad/s
+  let rpmFromWheel = Math.abs(wheelRad * ratio) * 60 / (2 * Math.PI);
+  const conv = sp < 3 ? 1 - sp / 3 : 0;                             // 低速ほどトルコンが滑る
+  S.rpm += ((Math.max(DT.idle, rpmFromWheel) + throttle * (1200 + 2200 * conv)) - S.rpm) * Math.min(1, dt * 6);
+  S.rpm = Math.max(DT.idle * 0.9, Math.min(DT.redline, S.rpm));
+
+  // --- 駆動力（常にギアの向き dir に働く。エンジンブレーキは抵抗側で扱う） ---
+  let F = 0;
+  if (dir !== 0 && !handbrake && gear !== 'P'){
+    const tq = engineTorqueWOT(S.rpm) * throttle;                    // 正のトルクのみ
+    F = tq * Math.abs(ratio) * DT.effi / DT.wheelR * dir;
+    // トルコンのクリープ（ブレーキを離すとにじり出る力）。停止付近だけ効く
+    if (sp < 1.2) F += DT.creepTorqueN * dir * (1 - sp / 1.2);
+    if (S.rpm >= DT.redline * 0.995) F *= 0.25;                      // レブリミット
+  }
+  // --- 抵抗（進行方向 sgn に逆らう向き＝符号付きで合算し、最後に F と釣り合わせる） ---
+  const sgn = v > 0.001 ? 1 : v < -0.001 ? -1 : 0;
+  let R = 0;
+  R += DT.Crr * DT.mass * DT.gravity * sgn;                          // 転がり
+  R += 0.5 * DT.rhoAir * DT.CdA * v * sp;                            // 空気（符号込み）
+  R += (grade || 0) * DT.mass * DT.gravity;                          // 勾配（登りで正＝後ろへ引く）
+  // エンジンブレーキ：ギアが入っていて走行中のみ、進行方向と逆に効く。
+  // ただしトルコンが滑る低速域では伝わらない（実車がクリープで進めるのはこのため）。
+  if (dir !== 0 && sgn !== 0 && Math.abs(ratio) > 0){
+    const lockup = Math.max(0, Math.min(1, (sp - 1.5) / 4));
+    R += engineBrakeTorque(S.rpm, throttle) * Math.abs(ratio) * DT.effi / DT.wheelR * sgn * lockup;
+  }
+  // ブレーキ／サイド／P：速度をゼロへ引き戻す向きにのみ働く
+  const bF = brake * DT.brakeMaxN + (handbrake ? 4200 : 0) + (gear === 'P' ? 12000 : 0);
+  R += bF * sgn;
+
+  const net = F - R;
+  let nv = v + (net / DT.mass) * dt;
+  // 制動系で行き過ぎてゼロを跨いだら止める（振動防止）
+  if (bF > 0 && sgn !== 0 && Math.sign(nv) !== sgn) nv = 0;
+  if (gear === 'P' || (handbrake && Math.abs(nv) < 0.05)) nv = 0;
+  // 静止摩擦：ほぼ止まっていて押す力も無いなら完全停止（ハンチング防止）
+  if (Math.abs(nv) < 0.012 && Math.abs(net) < 60) nv = 0;
+  car.v = nv;
+  const a = (nv - v) / dt;
+
+  // --- サウンド用の負荷とスリップ ---
+  S.load += ((throttle * 0.8 + Math.min(0.2, Math.abs(a) / 6)) - S.load) * Math.min(1, dt * 5);
+  const grip = 7000;                                                  // タイヤの限界駆動力(N)
+  S.slip += ((Math.max(0, Math.abs(F) - grip) / grip) - S.slip) * Math.min(1, dt * 8);
+  return { rpm: S.rpm, load: Math.max(0, Math.min(1, S.load)), slip: Math.max(0, Math.min(1, S.slip)), gearNum: S.gearNum };
+}
+function driveReset(){ DTstate.rpm = DT.idle; DTstate.gearNum = 1; DTstate.shiftTimer = 0; DTstate.load = 0; DTstate.slip = 0; }
 
 /* ============================================================================
    SimAudio — 手続き生成サウンドエンジン（Web Audio API のみ・音声ファイル不使用）
@@ -544,6 +652,7 @@ const SimAudio = (()=>{
 
 /* ==================== 更新ループ ==================== */
 let last=null, tick=0;
+let drive={rpm:DT.idle,load:0,slip:0,gearNum:1};   // 駆動系の出力（音・HUDが参照）
 function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>0.05)dt=0.05; tick++;
   if(M && !result && !menu.classList.contains('show')){
     if(recenterWheel){ wheelAngle+=Math.sign(-wheelAngle)*Math.min(Math.abs(wheelAngle),8*dt); if(Math.abs(wheelAngle)<0.02){wheelAngle=0;recenterWheel=false;} }
@@ -551,25 +660,25 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     // ハンドルを時計回り(右)に回す=wheelAngle正 → 前輪は右に切れる=car.steer負、という向きなので符号を反転する
     const eff=Math.max(0,Math.abs(wheelAngle)-WHEEL_PLAY)*Math.sign(wheelAngle);
     car.steer=-MAXSTEER*clamp(eff/(WHEEL_LOCK-WHEEL_PLAY),-1,1);
-    // 速度：ギア＋サイド＋クリープ＋アクセル−ブレーキ（実演中は自動制御）
-    const dir=gear==='D'?1:gear==='R'?-1:0; let target=0, rate=6;
-    if(demoMode){ target=demoTargetV; rate=5; }
-    else if(gear==='P'){ target=0; rate=12; }
-    else if(handbrake){ target=0; rate=10;
-      if(accelHeld&&dir&&!hbWarned){ hbWarned=true; deduct('サイドブレーキ戻し忘れ',10); setCoach('サイドブレーキが掛かっています！左下で解除','bad'); } }
-    else if(brakeHeld){ target=0; rate=10; }
-    else if(accelHeld && dir){ target=dir*C.maxSpeed; }
-    else if(creepMode && dir){ target=dir*C.creep; }
-    else { target=0; rate=4; }
-    car.v+=(target-car.v)*Math.min(1,dt*rate); if(Math.abs(car.v)<0.015&&target===0)car.v=0;
+    // 速度：実演は従来の目標追従（お手本の決定性を保つ）／通常運転は駆動系の物理で解く
+    const dir=gear==='D'?1:gear==='R'?-1:0;
+    if(handbrake&&accelHeld&&dir&&!hbWarned){ hbWarned=true; deduct('サイドブレーキ戻し忘れ',10); setCoach('サイドブレーキが掛かっています！左下で解除','bad'); }
+    if(demoMode){ car.v+=(demoTargetV-car.v)*Math.min(1,dt*5); if(Math.abs(car.v)<0.015&&demoTargetV===0)car.v=0;
+      drive={rpm:700+Math.abs(car.v)*900,load:0.15,slip:0,gearNum:1};
+    } else {
+      // 課題ごとの上限速度に近づくとスロットルを絞る（構内課題での非現実的な速度超過を防ぐ）
+      const vmax=(M&&M.speedLimitMs)||2.2, sp0=Math.abs(car.v);
+      let thr=accelHeld? clamp(1-(sp0-vmax*0.7)/(vmax*0.6),0,1) : 0;
+      if(!creepMode&&!accelHeld) thr=0;
+      const brk=brakeHeld?1:0;
+      drive=driveUpdate(car,dt,thr,brk,gear,handbrake,(M&&M.gradeAt)?M.gradeAt(car.x,car.y):0);
+    }
     bicycle(car,dt);
     // 自分の軌跡（後車軸）を記録
     if(Math.abs(car.v)>0.03){ const lt=trail[trail.length-1];
       if(!lt||Math.hypot(car.x-lt.x,car.y-lt.y)>0.12){ trail.push({x:car.x,y:car.y}); if(trail.length>2500)trail.shift(); } }
     // --- サウンド：現状の速度/操作から回転数と負荷を推定して駆動（ドライブトレイン実装後は実RPMに差し替え） ---
-    { const sp=Math.abs(car.v), rpm=700+sp*980+(accelHeld?520:0)+(gear==="P"||gear==="N"?0:60);
-      const load=accelHeld?0.62:(brakeHeld?0.04:(sp>0.05?0.18:0.06));
-      SimAudio.update({rpm,speed:sp,load,slip:0,gear,braking:brakeHeld}); }
+    SimAudio.update({rpm:drive.rpm,speed:Math.abs(car.v),load:drive.load,slip:drive.slip,gear,braking:brakeHeld});
     if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
   }
