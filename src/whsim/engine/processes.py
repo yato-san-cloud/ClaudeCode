@@ -47,7 +47,8 @@ def _walk(world: World, w: Worker, frm, to, speed: float, state: str):
     if pathlen <= 1e-9:
         yield world.env.timeout(total_t)
         if world.recording():
-            w.kf(world.env.now, to[0], to[1], state)
+            end = world.stand(to)
+            w.kf(world.env.now, end[0], end[1], state)
         return d
     for i in range(1, len(pts)):
         yield world.env.timeout(total_t * seglens[i - 1] / pathlen)
@@ -133,16 +134,11 @@ def _do_putaway(world: World, f: Worker, slot):
     """One inbound putaway trip: ferry a pallet dock -> storage slot -> dock."""
     env = world.env
     trip_start = env.now
-    d1 = world.dist(world.fork_home, slot)
-    _accumulate_heat(world, world.fork_home, slot)
-    if world.recording():
-        f.kf(env.now, world.fork_home[0], world.fork_home[1], "putaway")
-    yield env.timeout(d1 / world.fork_speed)
-    if world.recording():
-        f.kf(env.now, slot[0], slot[1], "putaway")
+    # Both legs follow the REAL aisle route (``_walk``), so a forklift no longer
+    # teleports through the racking on its way to a slot.
+    yield from _walk(world, f, world.fork_home, slot, world.fork_speed, "putaway")
     yield env.timeout(8.0)  # place the pallet
-    _accumulate_heat(world, slot, world.fork_home)
-    yield env.timeout(world.dist(slot, world.fork_home) / world.fork_speed)
+    yield from _walk(world, f, slot, world.fork_home, world.fork_speed, "putaway")
     if world.recording():
         f.kf(env.now, world.fork_home[0], world.fork_home[1], "idle")
     world.log(t=env.now, event="forklift_done", busy=env.now - trip_start,
@@ -189,13 +185,7 @@ def _do_replenish(world: World, w: Worker, face: dict):
     dest = face["xy"]
     fspeed = max(world.fork_speed, 0.1)
     start = env.now
-    d1 = world.dist(home, dest)
-    _accumulate_heat(world, home, dest)
-    if world.recording():
-        w.kf(env.now, home[0], home[1], "putaway")
-    yield env.timeout(d1 / fspeed)
-    if world.recording():
-        w.kf(env.now, dest[0], dest[1], "putaway")
+    d1 = yield from _walk(world, w, home, dest, fspeed, "putaway")
     yield env.timeout(world.replen_place_s)   # top-up / place time
     # Refill the face and wake any pickers blocked on it BEFORE the return trip.
     face["qty"] = max(face["qty"], face["refill_to"])
@@ -204,8 +194,7 @@ def _do_replenish(world: World, w: Worker, face: dict):
     if ev is not None and not ev.triggered:
         face["event"] = None
         ev.succeed()
-    _accumulate_heat(world, dest, home)
-    yield env.timeout(world.dist(dest, home) / fspeed)
+    yield from _walk(world, w, dest, home, fspeed, "putaway")
     if world.recording():
         w.kf(env.now, home[0], home[1], "idle")
     world.log(t=env.now, event="replenish_done", busy=env.now - start,
@@ -309,6 +298,11 @@ def _agv_travel(world: World, a: Worker, frm, to, depart_state: str, arrive_stat
 
     if world.aisle_locks is None:
         # Legacy path (byte-identical): one departure kf, one arrival kf.
+        # NOTE: travel DISTANCE/time already routes around the racking (world.dist
+        # goes through the aisle graph); only the two-keyframe replay track is a
+        # straight line here, so an AGV is drawn crossing racks it did not walk
+        # through. Interference ON (below) draws the real waypoints. Left as-is
+        # deliberately: this branch is contract-frozen byte-identical.
         if world.recording():
             a.kf(env.now, frm[0], frm[1], depart_state)
         yield env.timeout(total_t)
@@ -440,7 +434,10 @@ def _walk_route(world: World, w: Worker, start, points, qtys, tss, vss, speed):
             # Upper 段 carry a meta dict so the 2D/3D replay raise the picker/forklift
             # to the level height; 段1 stays a clean 4-tuple (legacy contract).
             meta = {"lv": lv, "by": by, "h": h} if lv > 1 else None
-            w.kf(world.env.now, pos[0], pos[1], "pick", meta)
+            # Stand at the aisle face of the slot (see World.stand), not on the
+            # rack centre-line the slot is addressed at.
+            face = world.stand(pos)
+            w.kf(world.env.now, face[0], face[1], "pick", meta)
         # handle = horizontal unit handling + vertical 段 access (lift/reach); the
         # replay dwell at this keyframe lengthens with the vertical time.
         yield world.env.timeout(qtys[idx] * tss[idx] + vert_s)

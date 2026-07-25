@@ -201,6 +201,22 @@ class World:
                 pass
         return [tuple(a), tuple(b)]
 
+    def stand(self, p) -> tuple[float, float]:
+        """Where an agent physically STANDS to serve point ``p``.
+
+        Slots are addressed at the rack centre-line, but a picker stands in the
+        aisle and reaches in — so every *stationary* keyframe at a slot (pick,
+        putaway, replenish) is emitted here, matching the aisle node the router
+        measures from. Without this the replay draws a half-rack-depth hop into
+        and back out of the rack around every pick. Identity when no graph is
+        active or the point is already on free floor."""
+        if self.use_graph and self.graph is not None:
+            try:
+                return self.graph.access_point(p)
+            except Exception:  # noqa: BLE001 — viz must never break the run
+                pass
+        return (float(p[0]), float(p[1]))
+
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s
 

@@ -33,11 +33,21 @@ def test_kpis_are_sane():
 
 def test_analytic_estimate_is_in_the_same_ballpark_as_sim():
     # The closed-form M/M/c estimate doubles as a sanity oracle for the engine.
+    #
+    # The oracle measures travel as MANHATTAN (`analytic.estimate` ->
+    # `engine.routing.manhattan`), i.e. straight through the racking, while the
+    # DES now routes around it (`engine.graph` registers every drawn rack run as
+    # an obstacle). So the oracle is a deliberate LOWER bound on picker
+    # utilisation, not a two-sided match: on ecommerce_small the aisle detour adds
+    # ~50% to walk distance, worth ~0.2 of utilisation. Both facts are asserted —
+    # the sign (oracle never above the sim) and a loosened magnitude — so this
+    # still catches an engine that has gone wrong in either direction.
     m = _fast_model()
     est = analytic.estimate(m)
     results, _ = run_replications(m)
     sim = kpis.compute(results)
-    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.2
+    assert est["picker_utilization"] <= sim["picker_utilization"] + 0.05
+    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.3
 
 
 def test_multiday_imported_demand_is_simulated():
