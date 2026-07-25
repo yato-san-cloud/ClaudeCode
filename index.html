@@ -984,6 +984,61 @@ const ROAD=(()=>{
              col:['#7a7f8a','#5c6470','#8a7a6a'][rint(3)], alive:true};
     peds.push(p); return p;
   }
+  /* --- 飛び出し（危険予測）---------------------------------------------
+     駐車車両の陰から歩行者が車道へ出てくる。左右を見ずに歩き出すので、
+     運転者が「駐車車両の陰を予測して減速しているか」だけが安全余裕を決める。 */
+  const DART={ armed:false, done:false, ped:null, hinted:false, closest:9e9, slowed:false };
+  function dartReset(){ DART.armed=false; DART.done=false; DART.ped=null; DART.hinted=false;
+    DART.closest=9e9; DART.slowed=false; }
+  function newPedDart(px,py,dir,col){
+    const p={id:nextId++, kind:'ped', dart:true, dirv:dir, v:1.55+rnd()*0.5,
+             x:px, y:py, waiting:false, alive:true, tLive:0,
+             col:col||'#d0453a'};
+    peds.push(p); return p;
+  }
+  /* 自車が駐車車両に近づいたら発火。1回の走行で1度だけ。 */
+  function dartCheck(){
+    if(DART.done||!net) return;
+    const pk=net.props.filter(o=>o.kind==='parked'); if(!pk.length) return;
+    const tgt=pk[pk.length-1];                      // 手前側の駐車車両の陰から
+    const dx=tgt.x-car.x, dy=tgt.y-car.y;
+    const ahead=dx*Math.cos(car.th)+dy*Math.sin(car.th);
+    const dist=Math.hypot(dx,dy), sp=Math.abs(car.v);
+    if(ahead<=0||dist>34) return;
+    // 練習では少し手前で予告（検定では出さない）
+    if(!DART.hinted && dist<30 && !examMode){ DART.hinted=true;
+      setCoach('駐車車両の陰に注意。見えない所から人が出てくるかもしれない','warn'); }
+    if(sp<2.5) DART.slowed=true;                     // 予測して減速できていたか
+    if(!DART.armed && dist<15 && sp>0.35){            // 陰から歩き出す
+      DART.armed=true;
+      const n=leftN(V(Math.cos(car.th),Math.sin(car.th)));   // 車道側（自車から見て右）へ
+      const st={x:tgt.x - n.x*1.4, y:tgt.y - n.y*1.4};
+      DART.ped=newPedDart(st.x, st.y, {x:-n.x,y:-n.y});
+      SimAudio.sfx.chime&&SimAudio.sfx.chime();
+      if(!examMode) setCoach('！ 人が飛び出した','bad');
+    }
+  }
+  function dartUpdate(dt){
+    const p=DART.ped; if(!p||!p.alive) return;
+    p.tLive+=dt;
+    p.x+=p.dirv.x*p.v*dt; p.y+=p.dirv.y*p.v*dt;
+    if(p.tLive>7){ p.alive=false; }
+    // 自車との距離を記録し、接触・ニアミスを判定
+    const c=Math.cos(car.th), s2=Math.sin(car.th);
+    let near=9e9;
+    for(const q of carPerimeter(car,0.4)) near=Math.min(near, Math.hypot(q.x-p.x,q.y-p.y));
+    DART.closest=Math.min(DART.closest,near);
+    if(near<0.35 && !DART.done){ DART.done=true; SimAudio.sfx.crash();
+      finish('fail','歩行者と接触（飛び出し）'); return; }
+    // 通り過ぎたら評価を確定する
+    const dx=p.x-car.x, dy=p.y-car.y;
+    if((dx*c+dy*s2) < -2.0 && !DART.done){ DART.done=true;
+      const kmh=Math.abs(car.v)*3.6;
+      if(DART.closest<1.0 && kmh>15){ deduct('危険予測不足（飛び出しへの備え）',10);
+        if(!examMode) setCoach('駐車車両の陰では、いつでも止まれる速度に落としておく（−10点）','warn'); }
+      else if(!examMode) setCoach(DART.slowed?'よく予測できていました。安全に回避 ✓':'回避できました ✓','ok');
+    }
+  }
   function vehicleGap(cr){                       // 最も早く横断歩道へ到達する車までの秒数
     let best=99;
     const test=(x,y,th,v)=>{
@@ -1425,7 +1480,8 @@ const ROAD=(()=>{
     }
     for(const Wy of net.ways) Wy.actors.sort((p,q)=>p.s-q.s);
     for(const a of cars) if(a.alive) stepCar(a,dt);
-    for(const p of peds) if(p.alive) stepPed(p,dt);
+    for(const p of peds) if(p.alive){ if(p.dart) continue; stepPed(p,dt); }
+    dartCheck(); dartUpdate(dt);
   }
   function update(dt){
     if(!net||!model) return;
@@ -1822,6 +1878,7 @@ const ROAD=(()=>{
     PS.gapT=PS.klT=PS.spdT=PS.centerT=PS.offT=PS.stopT=0;
     PS.minStop=99; PS.stopOK=false; PS.yellowAt=null;
     PS.enteredNode=null; PS.approachLat=null; PS.nextNode=null; PS.evalDone={};
+    dartReset();
     mountUI(); showUI(true); syncIndUI();
     projectPlayer();
     // 走り出しの街を先に走らせておく（無人の街から始めない）
@@ -1838,7 +1895,8 @@ const ROAD=(()=>{
     get model(){return model;}, get net(){return net;}, get state(){return PS;},
     get indicator(){return IND;}, get faults(){return faults;},
     get cars(){return cars;}, get peds(){return peds;},
-    sigVeh, sigPed, CFG
+    sigVeh, sigPed, CFG,
+    get dart(){return DART;}, dartArm(){ DART.done=false; DART.armed=false; }
   };
 })();
 
