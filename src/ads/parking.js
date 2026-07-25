@@ -21,22 +21,23 @@ export const PARKING = {
   create(api) {
     const { W, H, sfx } = api;
 
-    // 各ステージ: マス目・出口になる辺・詰め込む台数・一言説明
+    // 各ステージ: マス目・出口になる辺・詰め込む台数・一言説明。
+    // cars は上限で、置ける場所が尽きたらそこで打ち切る (実際は 5 / 7 / 8 / 11 台)。
     const STAGES = [
       {
         cols: 4, rows: 4, exits: ['up', 'right', 'down', 'left'], cars: 5,
         hint: '車をタップ！向いている方へまっすぐ発進する',
       },
       {
-        cols: 5, rows: 5, exits: ['up', 'right', 'down', 'left'], cars: 9,
+        cols: 5, rows: 5, exits: ['up', 'right', 'down', 'left'], cars: 7,
         hint: 'ふさがれた車は動けない。外側の車から逃がそう',
       },
       {
-        cols: 5, rows: 6, exits: ['up', 'right', 'down'], cars: 12,
+        cols: 5, rows: 6, exits: ['up', 'right', 'down'], cars: 9,
         hint: '左は壁。上・右・下の3方向からしか出られない',
       },
       {
-        cols: 6, rows: 6, exits: ['up', 'right'], cars: 14,
+        cols: 6, rows: 6, exits: ['up', 'right'], cars: 12,
         hint: '出口は上と右だけ。手前をどかしてから奥を出す',
       },
     ];
@@ -57,10 +58,12 @@ export const PARKING = {
       ['#e2cf46', '#93840f'],
     ];
 
-    // 盤面の配置領域 (この中に収まるようマス目のサイズを決める)
-    const AREA_TOP = 92;
-    const AREA_H = 416;
-    const AREA_W = 316;
+    // 盤面の配置領域。この中に収まるようマス目のサイズを決め、上下中央に置く。
+    // 外周には出口の矢印を描くので、左右・上下ともに 20px 以上の余白が残る大きさにしてある。
+    const AREA_TOP = 92;   // 上の HUD の下端
+    const AREA_H = 416;    // 縦方向に使ってよい高さ
+    const MAX_W = 316;     // 盤面の最大幅
+    const MAX_H = 360;     // 盤面の最大高さ
 
     // --- 状態はすべてここに閉じ込める ---
     let cfg = STAGES[0];
@@ -89,7 +92,7 @@ export const PARKING = {
         game.hint = cfg.hint;
         cols = cfg.cols;
         rows = cfg.rows;
-        cell = Math.min(AREA_W / cols, 360 / rows);
+        cell = Math.min(MAX_W / cols, MAX_H / rows);
         bw = cell * cols;
         bh = cell * rows;
         bx = (W - bw) / 2;

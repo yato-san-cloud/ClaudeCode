@@ -11,6 +11,7 @@ import { DRAWLINE } from './ads/drawline.js';
 import { GATE } from './ads/gate.js';
 import { PARKING } from './ads/parking.js';
 import { RESCUE } from './ads/rescue.js';
+import { ROPE } from './ads/rope.js';
 import { TOWER } from './ads/tower.js';
 import { WATER } from './ads/water.js';
 
@@ -346,7 +347,7 @@ async function doRefund() {
 /* ---------- 広告ギャラリー ---------- */
 
 // 広告で見かける定番ジャンルたち。ピン抜きだけは専用の画面を持つので別扱い。
-const MINI_GAMES = [RESCUE, GATE, WATER, PARKING, DRAWLINE, TOWER, DIG];
+const MINI_GAMES = [RESCUE, GATE, WATER, PARKING, DRAWLINE, ROPE, TOWER, DIG];
 
 const PIN_CARD = {
   id: 'pin',

@@ -15,17 +15,24 @@ Everything is Japanese-facing. UI strings, comments, and docs are in Japanese.
 
 ```
 node build.mjs            # src/ + template.html -> index.html (the distributable)
-node tools/verify.mjs     # headless physics verification of every level
+node tools/verify.mjs     # headless physics verification of every pin-puzzle level
 node tools/verify.mjs -v  # same, with per-step logs
-npm i && node tools/smoke.mjs [outdir]   # real-browser playthrough + screenshots
+node qa/one.mjs <id>      # verify ONE ad mini-game in isolation (parallel-safe)
+npm i && node qa/check.mjs [outdir]      # verify every ad mini-game in a real browser
+npm i && node tools/smoke.mjs [outdir]   # full-story playthrough + screenshots
 ```
 
-There is no test runner, linter, or dev server. `tools/verify.mjs` is the test suite:
-it asserts that each level's `solution` wins, each `traps` entry loses, and that the
-collectable maximum exceeds `need` by at least 10%.
+There is no test runner, linter, or dev server. Verification is split in two:
 
-`tools/smoke.mjs` needs Playwright (`npm i`). It points at the preinstalled Chromium at
-`/opt/pw-browsers/chromium-1194/chrome-linux/chrome`; do not run `playwright install`.
+- `tools/verify.mjs` covers the pin puzzle's physics: each level's `solution` must win,
+  each `traps` entry must lose, and the collectable maximum must exceed `need` by 10%+.
+- `qa/one.mjs` / `qa/check.mjs` cover the ad mini-games: each calls the game's mandatory
+  `solve()` hook and asserts the browser reaches a win, plus that idling never wins.
+  `qa/one.mjs` writes to a temp file rather than `index.html`, so several people (or agents)
+  can verify different games concurrently without stepping on each other.
+
+Playwright is needed for the qa/ and smoke scripts (`npm i`). They point at the preinstalled
+Chromium at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`; do not run `playwright install`.
 
 ## Architecture
 
@@ -41,13 +48,24 @@ must be unique across modules**.
   verifier and the in-game hints. Its header comment records the geometry rules that must
   hold; violating them produces levels that look fine but are unwinnable or unfair.
 - `src/puzzle.js` — canvas rendering and pin input, shared by the ad demo and the real game.
+- `src/mini.js` — the contract and host for the ad mini-games. Its header comment is the
+  authoritative spec; read it before touching anything under `src/ads/`.
+- `src/ads/*.js` — one ad genre per file, auto-discovered by the bundler. Each file must
+  declare **exactly one** top-level binding (`export const <UPPER_ID> = { meta, create }`)
+  because everything lands in one scope; `qa/one.mjs` enforces this mechanically.
+- `src/gfx.js` — shared canvas drawing helpers for the mini-games.
 - `src/fake.js` — the merge game, popup queue, and full-screen interstitials.
-- `src/app.js` — screen routing and the scripted ad sequence.
+- `src/app.js` — screen routing, the scripted ad sequence, and the `MINI_GAMES` registry.
 
 ## Conventions
 
 - Changing anything in `sand.js` or `levels.js` requires re-running `tools/verify.mjs`.
   Level geometry is unforgiving and visual inspection is not sufficient.
+- Every mini-game must implement `solve()`. Where the correct play is non-obvious (pathfinding,
+  ordering), put an actual solver inside the game and drive `solve()` from it — see
+  `src/ads/dig.js` (BFS) and `src/ads/tower.js` (bitmask DFS). This makes shipping an
+  unsolvable stage structurally impossible rather than merely unlikely.
+- Adding a file to `src/ads/` without registering it in `MINI_GAMES` fails the build by design.
 - Keep the escape routes out of the fake merge game intact — there are three, so a player can
   always reach the real puzzle.
 - Do not name real companies or apps; all brands in the parody are invented.

@@ -290,7 +290,6 @@ export const WATER = {
           vy: up ? -60 - Math.random() * 120 : -20 - Math.random() * 60,
           r: 1.6 + Math.random() * 2.4,
           life: 0.45 + Math.random() * 0.4,
-          max: 0.9,
         });
       }
     };
@@ -652,11 +651,13 @@ export const WATER = {
       ctx.stroke();
     }
 
-    /** 注ぎ中の本体＋液の流れ。 */
-    function drawPouring(ctx) {
-      const { tw, th, segH, wall } = geo;
+    /**
+     * 注ぎ演出の現在の姿勢。流れとガラス本体で 2 回使うのでまとめて出す。
+     * k は「持ち上がり具合」、p は「注ぎ終わり具合」。
+     */
+    function pourFrame() {
+      const { tw, th } = geo;
       const from = geo.slots[anim.fi];
-      const to = geo.slots[anim.ti];
       const po = anim.pose;
       const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t));
 
@@ -668,56 +669,59 @@ export const WATER = {
       const cx = from.cx + (po.cx - from.cx) * k;
       const cy = from.cy + (po.cy - from.cy) * k - Math.sin(k * Math.PI) * 16;
       const ang = po.ang * k;
+      const co = Math.cos(ang), si = Math.sin(ang);
+      const lx = po.dir * tw / 2, ly = -th / 2; // 注ぎ口
+      return { cx, cy, ang, p, px: cx + lx * co - ly * si, py: cy + lx * si + ly * co };
+    }
 
-      // 残っている中身（上から n 段ぶんが p に応じて減る）
-      const rest = anim.preF.slice(0, anim.preF.length - anim.n);
-      const runs = addUnits(runsOf(rest), anim.c, anim.n * (1 - p));
-
-      // 流れは試験管より奥に描くので先に
-      if (anim.ph === 'pour') {
-        const co = Math.cos(ang), si = Math.sin(ang);
-        const lx = po.dir * tw / 2, ly = -th / 2;
-        const px = cx + lx * co - ly * si;
-        const py = cy + lx * si + ly * co;
-        const lv = anim.preT.length + anim.n * p;
-        const qx = to.cx;
-        const qy = to.cy + th / 2 - wall - lv * segH;
-        const c = COLORS[anim.c];
-        ctx.save();
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.quadraticCurveTo((px + qx) / 2 + po.dir * 12, py + (qy - py) * 0.18, qx, qy);
-        ctx.strokeStyle = c.b;
-        ctx.lineWidth = 8;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.quadraticCurveTo((px + qx) / 2 + po.dir * 12, py + (qy - py) * 0.18, qx, qy);
-        ctx.strokeStyle = c.l;
-        ctx.lineWidth = 3;
-        ctx.globalAlpha = 0.75;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        // 着水のきらめき
-        ctx.fillStyle = c.l;
-        ctx.globalAlpha = 0.55 + 0.35 * Math.sin(time * 26);
-        ctx.beginPath();
-        ctx.ellipse(qx, qy, 9, 3.4, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.restore();
-      }
+    /** 注ぎ口から注ぎ先の水面へ、弧を描いて落ちる流れ。 */
+    function drawStream(ctx, fr) {
+      const { th, segH, wall } = geo;
+      const to = geo.slots[anim.ti];
+      const c = COLORS[anim.c];
+      const lv = anim.preT.length + anim.n * fr.p;
+      const qx = to.cx;
+      const qy = to.cy + th / 2 - wall - lv * segH;
+      const kx = qx; // 口から横へ出て、注ぎ先の真上で落ちる形
+      const ky = fr.py + (qy - fr.py) * 0.1;
 
       ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(ang);
-      // 手前に浮いていることが分かるよう、影を落として中身を不透明にする
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(fr.px, fr.py);
+      ctx.quadraticCurveTo(kx, ky, qx, qy);
+      ctx.strokeStyle = c.b;
+      ctx.lineWidth = 9;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(fr.px, fr.py);
+      ctx.quadraticCurveTo(kx, ky, qx, qy);
+      ctx.strokeStyle = c.l;
+      ctx.lineWidth = 3.2;
+      ctx.globalAlpha = 0.8;
+      ctx.stroke();
+      // 着水のきらめき
+      ctx.globalAlpha = 0.5 + 0.35 * Math.sin(time * 26);
+      ctx.fillStyle = c.l;
+      ctx.beginPath();
+      ctx.ellipse(qx, qy, 10, 3.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /** 傾いた本体。奥の試験管と混ざらないよう、影付き・中は不透明で描く。 */
+    function drawPourTube(ctx, fr) {
+      const { tw, th } = geo;
+      const rest = anim.preF.slice(0, anim.preF.length - anim.n);
+      const runs = addUnits(runsOf(rest), anim.c, anim.n * (1 - fr.p));
+      ctx.save();
+      ctx.translate(fr.cx, fr.cy);
+      ctx.rotate(fr.ang);
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,.6)';
       ctx.shadowBlur = 18;
       glassPath(ctx, -tw / 2, -th / 2, tw, th);
-      ctx.fillStyle = 'rgba(10,15,30,.94)';
+      ctx.fillStyle = 'rgba(34,48,80,.94)';
       ctx.fill();
       ctx.restore();
       drawTube(ctx, runs, { sel: false, done: false, wob: 0.5 });
