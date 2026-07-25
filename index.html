@@ -96,6 +96,7 @@
     <button class="menu" id="btnMenu">≡課題</button>
     <span class="t" id="title">方向転換（右バック）</span>
     <span class="sp"></span>
+    <button id="btnSound" class="on">🔊音</button>
     <button id="btnDemo">▶実演</button>
     <button id="btnTutor">🎓解説付き</button>
     <button id="btnExam">検定</button>
@@ -277,7 +278,9 @@ function setCoach(t,cls){ coachEl.textContent=t; coachEl.className='msg'+(cls?('
 // AirDrop/LINE等のプレビュー表示（Quick Look系）ではPointer Events APIが動かないことがあるため、
 // 対応していれば従来通りpointer*を使い、非対応ならtouch/mouseに自動フォールバックする。
 const HAS_POINTER = typeof window.PointerEvent === 'function';
+function audioUnlock(){ if(!SimAudio.ready){ if(SimAudio.init()) SimAudio.start(); } else SimAudio.resume(); }
 function bindDrag(el,{start,move,end}){
+  const _s0=start; start=(x,y)=>{ audioUnlock(); _s0&&_s0(x,y); };
   if(HAS_POINTER){
     el.addEventListener('pointerdown',e=>{ e.preventDefault(); try{el.setPointerCapture(e.pointerId);}catch(_){} start&&start(e.clientX,e.clientY); });
     el.addEventListener('pointermove',e=>{ move&&move(e.clientX,e.clientY); });
@@ -297,15 +300,19 @@ function bindDrag(el,{start,move,end}){
 // clickが抑制される端末があるため。pointerupなら他の指の保持中でも確実に反応する＝
 // 実車のように「ブレーキを踏みながらシフト・サイドを操作」ができる。
 function bindTap(el,fn){
+  // ラッパーは通常関数＋call で this（＝要素）を保持する。アロー関数にすると
+  // this.classList を使うトグル系ハンドラが全滅するので注意。
+  const _f0=fn; fn=function(e){ audioUnlock(); return _f0&&_f0.call(this,e); };
   if(HAS_POINTER){
     let sx=null,sy=null,moved=false;
     el.addEventListener('pointerdown',e=>{ sx=e.clientX; sy=e.clientY; moved=false; });
     el.addEventListener('pointermove',e=>{ if(sx!=null&&Math.hypot(e.clientX-sx,e.clientY-sy)>12) moved=true; });
-    el.addEventListener('pointerup',e=>{ if(sx!=null&&!moved){ e.preventDefault(); fn(e); } sx=null; });
+    // fn は必ず el を this にして呼ぶ（this.classList を使うトグル系ハンドラのため）
+    el.addEventListener('pointerup',e=>{ if(sx!=null&&!moved){ e.preventDefault(); fn.call(el,e); } sx=null; });
     el.addEventListener('pointercancel',()=>{ sx=null; });
   } else {
-    el.addEventListener('touchend',e=>{ e.preventDefault(); fn(e); },{passive:false});
-    el.addEventListener('click',e=>{ fn(e); });   // PointerEvent非対応のデスクトップ（マウス）向け
+    el.addEventListener('touchend',e=>{ e.preventDefault(); fn.call(el,e); },{passive:false});
+    el.addEventListener('click',e=>{ fn.call(el,e); });   // PointerEvent非対応のデスクトップ（マウス）向け
   }
 }
 
@@ -335,7 +342,7 @@ bindTap(document.getElementById('btnExam'),function(){ examMode=!examMode; this.
   if(examMode) setCoach('検定モード：お手本・ヒントなし。手順どおりに！','warn'); });
 // サイドブレーキ・後方目視
 function updateHbUI(){ document.getElementById('handbrake').classList.toggle('on',handbrake); }
-bindTap(document.getElementById('handbrake'),()=>{ if(result||demoMode)return; handbrake=!handbrake; updateHbUI(); });
+bindTap(document.getElementById('handbrake'),()=>{ if(result||demoMode)return; handbrake=!handbrake; updateHbUI(); SimAudio.sfx.handbrake(); });
 function setRearGlance(on){ rearGlance=on;
   const lb=document.getElementById('lookback'), fl=document.getElementById('frontLab');
   lb.classList.toggle('on',on); if(fl) fl.textContent=on?'後方（振り返り）':'フロント';
@@ -344,6 +351,8 @@ bindTap(document.getElementById('lookback'),()=>{ if(result)return; checks.back=
   setRearGlance(!rearGlance); if(!demoMode) setCoach(rearGlance?'後方を目視：柵の角がCピラー際に来る位置で止める':'後方ヨシ！','ok'); });
 bindTap(document.getElementById('btnDemo'),()=>startDemo(false));
 bindTap(document.getElementById('btnTutor'),()=>startDemo(true));
+bindTap(document.getElementById('btnSound'),function(){ const on=SimAudio.setEnabled(!SimAudio.isEnabled());
+  this.classList.toggle('on',on); this.textContent=on?'🔊音':'🔇音'; });
 bindTap(document.getElementById('tutorNext'),()=>{ tutorWait=false; document.getElementById('tutorPop').classList.remove('show'); });
 // 結果パネル
 bindTap(document.getElementById('resRetry'),()=>resetCar());
@@ -367,6 +376,171 @@ function openMenu(){menu.classList.add('show');} function closeMenu(){menu.class
 bindTap(document.getElementById('btnMenu'),openMenu);
 bindTap(document.getElementById('menuClose'),closeMenu);
 document.querySelectorAll('.card').forEach(c=>bindTap(c,()=>loadScenario(c.dataset.id)));
+
+/* ============================================================================
+   SimAudio — 手続き生成サウンドエンジン（Web Audio API のみ・音声ファイル不使用）
+   4気筒ガソリン車の吸排気を加算合成で再現。RPM/負荷/スリップに実時間追従。
+   モバイルの自動再生制限に対応（初回タップで unlock）。AudioContext 不可なら無音動作。
+   ========================================================================== */
+const SimAudio = (()=>{
+  let ctx=null, master=null, ready=false, enabled=true, started=false;
+  const N={};                                  // ノード置き場
+
+  // ---- ホワイトノイズのバッファ（1度だけ生成して使い回す） ----
+  let noiseBuf=null;
+  function makeNoise(){ if(noiseBuf)return noiseBuf;
+    const len=Math.floor(ctx.sampleRate*2), b=ctx.createBuffer(1,len,ctx.sampleRate), d=b.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    noiseBuf=b; return b; }
+  function noiseSrc(){ const s=ctx.createBufferSource(); s.buffer=makeNoise(); s.loop=true; return s; }
+  const now=()=>ctx.currentTime;
+  // パラメータは必ずランプで動かす（ジッパーノイズ防止）
+  function ramp(p,v,t=0.05){ try{ p.setTargetAtTime(v, now(), Math.max(0.005,t/3)); }catch(_){ try{p.value=v;}catch(__){}} }
+
+  /* ---------------- 初期化（初回ユーザー操作で呼ぶ） ---------------- */
+  function init(){
+    if(ready||!enabled) return ready;
+    const AC = window.AudioContext||window.webkitAudioContext;
+    if(!AC) { enabled=false; return false; }                 // 非対応環境は静かに無効化
+    try{ ctx=new AC(); }catch(_){ enabled=false; return false; }
+    master=ctx.createGain(); master.gain.value=0.0; master.connect(ctx.destination);
+
+    /* === エンジン === 4気筒＝2次の点火。基音＋倍音を加算し、負荷でローパスを開く。
+       rpm→周波数: f = rpm/60 * (気筒数/2) = rpm/60*2 */
+    const eg=ctx.createGain(); eg.gain.value=0;              // エンジン全体
+    const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700; lp.Q.value=0.7;
+    eg.connect(lp); lp.connect(master);
+    // 倍音列（次数, 音量, 波形）— 実車の粗さを出すため奇数次と1.5次(不等間隔感)を混ぜる
+    const HARM=[[0.5,0.55,'sine'],[1,1.0,'sawtooth'],[1.5,0.28,'square'],[2,0.5,'sawtooth'],[3,0.22,'square'],[4,0.12,'sawtooth']];
+    N.osc=HARM.map(([mult,amp,type])=>{
+      const o=ctx.createOscillator(); o.type=type;
+      const g=ctx.createGain(); g.gain.value=amp;
+      const d=ctx.createOscillator(); d.type='sine'; d.frequency.value=0.6+Math.random()*1.4;  // 微小デチューン＝機械的な揺らぎ
+      const dg=ctx.createGain(); dg.gain.value=1.2; d.connect(dg); dg.connect(o.detune); d.start();
+      o.connect(g); g.connect(eg); o.start();
+      return {o,g,mult,amp};
+    });
+    // 排気のバルブノイズ（負荷が高いほど混ざる）
+    const en=noiseSrc(), enf=ctx.createBiquadFilter(); enf.type='bandpass'; enf.frequency.value=180; enf.Q.value=1.1;
+    const eng=ctx.createGain(); eng.gain.value=0; en.connect(enf); enf.connect(eng); eng.connect(eg); en.start();
+    N.engine={eg,lp,eng,enf};
+
+    /* === タイヤ（転がり）=== 速度でバンドパスとゲインが上がる */
+    const tn=noiseSrc(), tf=ctx.createBiquadFilter(); tf.type='bandpass'; tf.frequency.value=420; tf.Q.value=0.8;
+    const tg=ctx.createGain(); tg.gain.value=0; tn.connect(tf); tf.connect(tg); tg.connect(master); tn.start();
+    N.tyre={tg,tf};
+
+    /* === スキール（スリップ）=== 高めのピークで擦れ音 */
+    const sn=noiseSrc(), sf=ctx.createBiquadFilter(); sf.type='bandpass'; sf.frequency.value=1500; sf.Q.value=6;
+    const sg=ctx.createGain(); sg.gain.value=0; sn.connect(sf); sf.connect(sg); sg.connect(master); sn.start();
+    N.slip={sg,sf};
+
+    /* === 風切り === 速度で開くハイパス */
+    const wn=noiseSrc(), wf=ctx.createBiquadFilter(); wf.type='highpass'; wf.frequency.value=600;
+    const wg=ctx.createGain(); wg.gain.value=0; wn.connect(wf); wf.connect(wg); wg.connect(master); wn.start();
+    N.wind={wg,wf};
+
+    /* === 環境音（遠くの交通＋小鳥）=== 常時薄く鳴らして"屋外"の空気感 */
+    const an=noiseSrc(), af=ctx.createBiquadFilter(); af.type='lowpass'; af.frequency.value=350;
+    const ag=ctx.createGain(); ag.gain.value=0.012; an.connect(af); af.connect(ag); ag.connect(master); an.start();
+    N.amb={ag};
+    scheduleBird();
+
+    ready=true;
+    ramp(master.gain, 0.9, 0.4);
+    return true;
+  }
+  // 起動シーケンス（セル→アイドル）
+  function start(){ if(!ready||started)return; started=true; crank(); }
+
+  /* ---------------- 単発音（すべて合成） ---------------- */
+  function ping(freq,dur,type,vol,sweepTo){
+    if(!ready)return; const o=ctx.createOscillator(), g=ctx.createGain();
+    o.type=type||'sine'; o.frequency.setValueAtTime(freq, now());
+    if(sweepTo) o.frequency.exponentialRampToValueAtTime(Math.max(20,sweepTo), now()+dur);
+    g.gain.setValueAtTime(0.0001, now());
+    g.gain.exponentialRampToValueAtTime(vol||0.2, now()+Math.min(0.02,dur*0.2));
+    g.gain.exponentialRampToValueAtTime(0.0001, now()+dur);
+    o.connect(g); g.connect(master); o.start(); o.stop(now()+dur+0.02);
+  }
+  function burst(dur,vol,f,q,type){
+    if(!ready)return; const s=noiseSrc(), b=ctx.createBiquadFilter(), g=ctx.createGain();
+    b.type=type||'bandpass'; b.frequency.value=f||800; b.Q.value=q||1;
+    g.gain.setValueAtTime(vol||0.3, now());
+    g.gain.exponentialRampToValueAtTime(0.0001, now()+dur);
+    s.connect(b); b.connect(g); g.connect(master); s.start(); s.stop(now()+dur+0.02);
+  }
+  function crank(){ // セルモーター→初爆
+    if(!ready)return; const o=ctx.createOscillator(), g=ctx.createGain();
+    o.type='square'; o.frequency.setValueAtTime(38, now());
+    g.gain.setValueAtTime(0.12, now()); g.gain.setTargetAtTime(0.0001, now()+0.75, 0.12);
+    o.connect(g); g.connect(master); o.start(); o.stop(now()+1.1);
+    burst(0.25,0.25,300,0.8);                                  // 初爆
+  }
+  const S={
+    winker(){ ping(1650,0.035,'square',0.10); setTimeout(()=>ping(1150,0.05,'square',0.075),55); }, // リレーのカチッ
+    gear(){ burst(0.07,0.22,190,2.0); ping(95,0.09,'sine',0.09); },                                  // シフトのゴトッ
+    handbrake(){ for(let i=0;i<7;i++) setTimeout(()=>burst(0.02,0.14,1250,4),i*42); },                // ラチェット
+    curb(){ burst(0.16,0.55,260,0.7); ping(70,0.16,'sawtooth',0.22,45); },                            // 脱輪・縁石ヒット
+    crash(){ burst(0.42,0.8,180,0.4,'lowpass'); ping(58,0.4,'sawtooth',0.32,30); },                   // 衝突
+    brakeSqueal(){ ping(2300,0.35,'sine',0.045,2050); },                                              // 低速時の鳴き
+    chime(){ ping(880,0.16,'sine',0.14); setTimeout(()=>ping(660,0.22,'sine',0.12),190); },           // 警告チャイム
+    ok(){ ping(880,0.1,'sine',0.13); setTimeout(()=>ping(1320,0.16,'sine',0.12),110); },              // 成功
+    ng(){ ping(320,0.18,'square',0.13); setTimeout(()=>ping(200,0.3,'square',0.12),150); },           // 失敗
+  };
+  function scheduleBird(){ // 環境：たまに鳥の声（屋外らしさ）
+    if(!ready&&!ctx) return;
+    const t=4000+Math.random()*11000;
+    setTimeout(()=>{ if(ready&&enabled&&ctx.state==='running'){
+        const f=2300+Math.random()*900;
+        ping(f,0.07,'sine',0.035,f*1.35);
+        setTimeout(()=>ping(f*1.1,0.06,'sine',0.028,f*0.85),95);
+      } scheduleBird(); }, t);
+  }
+
+  /* ---------------- 毎フレーム更新（60fps・軽量） ---------------- */
+  let prevGear=null, lastSqueal=0;
+  function update(st){
+    if(!ready||!enabled||ctx.state!=='running') return;
+    const rpm=clampN(st.rpm||750,500,7000), speed=Math.abs(st.speed||0),
+          load=clampN(st.load||0,0,1), slip=clampN(st.slip||0,0,1);
+    // エンジン：基本周波数＝rpm/60*2（4気筒2次）
+    const f0=rpm/60*2;
+    for(const h of N.osc){ ramp(h.o.frequency, f0*h.mult, 0.045); }
+    // 音量：アイドルでも存在感、負荷/回転で増加
+    const evol=0.055+0.16*load+0.055*Math.min(1,(rpm-600)/5200);
+    ramp(N.engine.eg.gain, evol, 0.07);
+    // ローパス：負荷と回転で開く＝「踏むと抜けの良い音」
+    ramp(N.engine.lp.frequency, 380+2100*load+rpm*0.12, 0.07);
+    ramp(N.engine.eng.gain, 0.02+0.075*load, 0.09);            // 排気ノイズ
+    ramp(N.engine.enf.frequency, 120+f0*0.7, 0.09);
+    // タイヤ：速度に比例（停止時は無音）
+    ramp(N.tyre.tg.gain, Math.min(0.1, speed*0.011), 0.09);
+    ramp(N.tyre.tf.frequency, 300+speed*22, 0.09);
+    // スリップ：擦れ/鳴き
+    ramp(N.slip.sg.gain, slip>0.12? Math.min(0.09, slip*0.14):0, 0.05);
+    ramp(N.slip.sf.frequency, 1150+slip*1500, 0.05);
+    // 風切り：速度の2乗的に
+    ramp(N.wind.wg.gain, Math.min(0.06, speed*speed*0.0016), 0.12);
+    ramp(N.wind.wf.frequency, 500+speed*45, 0.12);
+    // シフト操作音
+    if(st.gear && st.gear!==prevGear){ if(prevGear!==null) S.gear(); prevGear=st.gear; }
+    // 低速でブレーキ→たまに鳴き
+    if(st.braking && speed>0.15 && speed<1.6){ const t=Date.now();
+      if(t-lastSqueal>1400){ lastSqueal=t; S.brakeSqueal(); } }
+  }
+  function clampN(v,a,b){ return v<a?a:v>b?b:v; }
+
+  function setEnabled(on){ enabled=on;
+    if(ready) ramp(master.gain, on?0.9:0.0, 0.15);
+    if(on&&ctx&&ctx.state==='suspended') ctx.resume();
+    return enabled; }
+  function isEnabled(){ return enabled; }
+  function resume(){ if(ctx&&ctx.state==='suspended') ctx.resume(); }
+
+  return { init, start, update, sfx:S, setEnabled, isEnabled, resume,
+           get ready(){return ready;}, get ctx(){return ctx;} };
+})();
 
 /* ==================== 更新ループ ==================== */
 let last=null, tick=0;
@@ -392,6 +566,10 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
     // 自分の軌跡（後車軸）を記録
     if(Math.abs(car.v)>0.03){ const lt=trail[trail.length-1];
       if(!lt||Math.hypot(car.x-lt.x,car.y-lt.y)>0.12){ trail.push({x:car.x,y:car.y}); if(trail.length>2500)trail.shift(); } }
+    // --- サウンド：現状の速度/操作から回転数と負荷を推定して駆動（ドライブトレイン実装後は実RPMに差し替え） ---
+    { const sp=Math.abs(car.v), rpm=700+sp*980+(accelHeld?520:0)+(gear==="P"||gear==="N"?0:60);
+      const load=accelHeld?0.62:(brakeHeld?0.04:(sp>0.05?0.18:0.06));
+      SimAudio.update({rpm,speed:sp,load,slip:0,gear,braking:brakeHeld}); }
     if(demoMode) demoUpdate(dt); else updateLogic();
     handAnim(dt);
   }
@@ -530,6 +708,8 @@ function demoUpdate(dt){
 
 /* ==================== 採点・結果 ==================== */
 function finish(kind,reason){ result=kind; car.v=0;
+  if(kind==='fail'){ if(reason&&/脱輪/.test(reason)) SimAudio.sfx.curb(); else SimAudio.sfx.crash(); setTimeout(()=>SimAudio.sfx.ng(),320); }
+  else if(kind==='success') SimAudio.sfx.ok();
   if(kind==='fail'&&reason) deductions.push({name:reason+'＝検定中止',pts:100});
   const total=deductions.reduce((a,d)=>a+d.pts,0), score=Math.max(0,100-total);
   const pass=kind==='success'&&score>=70;
