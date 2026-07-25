@@ -379,6 +379,57 @@ bindTap(document.getElementById('menuClose'),closeMenu);
 document.querySelectorAll('.card').forEach(c=>bindTap(c,()=>loadScenario(c.dataset.id)));
 
 /* ============================================================================
+   標高（坂道）— 平面ワールドに1次元スロープを重ねる軽量ハイトフィールド
+   教習所の坂は「一本の勾配路」なので汎用ハイトマップは不要。始点a→終点bの
+   区間に勾配を与え、出入口を滑らかに繋いだ高さ z(x,y) と勾配 grade(x,y) を返す。
+   mkProj は元から pz を受け取るので、投影側は z を渡すだけで立体になる。
+   ========================================================================== */
+function smoothstep(e0,e1,x){ const t=clamp((x-e0)/(e1-e0),0,1); return t*t*(3-2*t); }
+
+/* ramp = {a:{x,y}, b:{x,y}, halfWidth, grade, trans} を配列で持つ。
+   区間に沿う距離 s に対し、勾配を trans[m] でなめらかに立ち上げ／終端で寝かせる。 */
+function rampHeight(rp, x, y){
+  const ax=rp.a.x, ay=rp.a.y, bx=rp.b.x, by=rp.b.y;
+  const dx=bx-ax, dy=by-ay, L=Math.hypot(dx,dy); if(L<1e-6) return null;
+  const ux=dx/L, uy=dy/L;
+  const px=x-ax, py=y-ay;
+  const s=px*ux+py*uy;                       // 進行方向の距離
+  const off=Math.abs(-px*uy+py*ux);          // 中心線からの横距離
+  const hw=rp.halfWidth||3.0;
+  if(off>hw+0.6) return null;                // 路肩外は影響なし
+  const tr=Math.max(0.5, rp.trans||3.0), g=rp.grade||0;
+  // 高さ = 勾配を s に沿って積分（出入口を smoothstep で滑らかに）
+  let z;
+  if(s<=0) z=0;
+  else if(s>=L) z=g*(L-tr);                  // 全区間の総上昇（両端の緩和分を差し引く）
+  else {
+    // 立ち上がり：0..tr で線形→勾配、終端：L-tr..L で勾配→0
+    const upEnd=Math.min(tr,L), dnStart=Math.max(0,L-tr);
+    let acc;
+    if(s<=upEnd) acc=g*s*s/(2*tr);
+    else if(s<=dnStart) acc=g*(upEnd/2)+g*(s-upEnd);
+    else { const t=s-dnStart, rem=L-dnStart;
+      acc=g*(upEnd/2)+g*(dnStart-upEnd)+g*(t-t*t/(2*Math.max(1e-6,rem))); }
+    z=acc;
+  }
+  // 幅方向の縁は緩やかに0へ（縁石外へなだらかに落とす）
+  const wf=1-smoothstep(hw,hw+0.6,off);
+  return { z:z*wf, s, L, g:(s>0&&s<L)? g*wf*(s<tr? s/tr : (s>L-tr? (L-s)/tr : 1)) : 0 };
+}
+/* ワールド全体の高さ。M.ramps が無ければ常に 0（＝従来通りの平面）。 */
+function zAt(x,y){
+  if(!M||!M.ramps||!M.ramps.length) return 0;
+  let z=0; for(const rp of M.ramps){ const r=rampHeight(rp,x,y); if(r) z+=r.z; }
+  return z;
+}
+/* 進行方向の勾配（rise/run）。駆動系の重力項に渡す。前後の高さ差から数値微分。 */
+function gradeAlong(x,y,th,ds){
+  if(!M||!M.ramps||!M.ramps.length) return 0;
+  const d=ds||1.0, c=Math.cos(th), s=Math.sin(th);
+  return (zAt(x+c*d, y+s*d) - zAt(x-c*d, y-s*d)) / (2*d);
+}
+
+/* ============================================================================
    Drivetrain — 実在の駆動系を模した縦方向ダイナミクス
    エンジン（トルク曲線）→トルコン→AT→終減速→タイヤ→駆動力
    走行抵抗（転がり・空気・勾配・ブレーキ）と釣り合わせて加速度を積分する。
@@ -671,7 +722,7 @@ function step(ts){ if(last==null)last=ts; let dt=(ts-last)/1000; last=ts; if(dt>
       let thr=accelHeld? clamp(1-(sp0-vmax*0.7)/(vmax*0.6),0,1) : 0;
       if(!creepMode&&!accelHeld) thr=0;
       const brk=brakeHeld?1:0;
-      drive=driveUpdate(car,dt,thr,brk,gear,handbrake,(M&&M.gradeAt)?M.gradeAt(car.x,car.y):0);
+      drive=driveUpdate(car,dt,thr,brk,gear,handbrake,gradeAlong(car.x,car.y,car.th));
     }
     bicycle(car,dt);
     // 自分の軌跡（後車軸）を記録
@@ -1354,7 +1405,7 @@ function renderDoorMirror(side){
   const autoPitch=0.18*_mirAutoTilt[side];
   const sgn=side==='R'?1:-1, S=side==='L'?1:-1;
   // ミラーは実車どおり車体側面より外側に張り出し、やや外向き＝自車フランクが痩せた縦帯で正しく映る
-  const cam=toWorld(car, C.wheelbase*0.55, S*(C.width/2+0.30)), camH=1.02;
+  const cam=toWorld(car, C.wheelbase*0.55, S*(C.width/2+0.30)), camH=1.02+zAt(car.x,car.y);
   const look=car.th+Math.PI + sgn*0.36 + mirrorPan[side];
   const effPitch=clamp(mirrorPitch[side]+autoPitch,-0.4,0.55);
   const focal=w*0.48, horizon=clamp(h*0.46 - effPitch*h, -0.30*h, h-8);
@@ -1394,7 +1445,7 @@ function renderFront(){
   const w=el.getBoundingClientRect().width, h=el.getBoundingClientRect().height; if(!M||w<2)return;
   g.clearRect(0,0,w,h);
   if(rearGlance){ renderRearGlance(g,w,h); return; }
-  const cam=toWorld(car,1.5,-(C.width/2-0.55)), camH=1.22;        // 右ハンドル運転席の目線
+  const cam=toWorld(car,1.5,-(C.width/2-0.55)), camH=1.22+zAt(car.x,car.y);   // 右ハンドル運転席の目線（路面高さに追従）
   const look=car.th, focal=w*0.46, horizon=h*0.50;
   mSky(g,w,h,horizon);
   const proj=mkProj(cam.x,cam.y,camH,look,focal,horizon,w,+1);    // 前方＝鏡像なし
