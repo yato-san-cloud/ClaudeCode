@@ -884,27 +884,6 @@ function mWheelSolid(proj,g,rwx,rwy,side,fender){
       g.beginPath(); topArc.forEach((p,i)=>i?g.lineTo(p.x,p.y):g.moveTo(p.x,p.y)); g.stroke();
       g.lineJoin='miter'; g.lineCap='butt'; } }
 }
-function mEgoFlank(proj,g,side){                 // 自車の側面（ドアミラー内側）＝ボディ＋ガラス＋後輪
-  const S=side==='L'?1:-1, ly=S*(C.width/2);
-  const lxs=[0.7,0.0,-0.8,-1.5,-C.rearOverhang-0.05], beltZ=0.74, roofZ=1.02;
-  const bot=[],belt=[],roof=[];
-  for(const lx of lxs){ const p=toWorld(car,lx,ly); bot.push(proj(p.x,p.y,0)); belt.push(proj(p.x,p.y,beltZ)); roof.push(proj(p.x,p.y,roofZ)); }
-  if(bot.some(p=>!p)||belt.some(p=>!p))return;
-  // 窓（グラスハウス）：roofが取れない点はフレーム上端にクランプ＝赤い三角に崩れない
-  const roofC=roof.map((p,i)=> p||{x:belt[i].x,y:2});
-  g.beginPath(); g.moveTo(roofC[0].x,roofC[0].y); for(let i=1;i<roofC.length;i++)g.lineTo(roofC[i].x,roofC[i].y);
-  for(let i=belt.length-1;i>=0;i--)g.lineTo(belt[i].x,belt[i].y); g.closePath();
-  const gg=g.createLinearGradient(0,roofC[0].y,0,belt[0].y); gg.addColorStop(0,'#3a4653'); gg.addColorStop(1,'#1b232d'); g.fillStyle=gg; g.fill();
-  // 下部ボディ（赤）
-  g.beginPath(); g.moveTo(belt[0].x,belt[0].y); for(let i=1;i<belt.length;i++)g.lineTo(belt[i].x,belt[i].y);
-  for(let i=bot.length-1;i>=0;i--)g.lineTo(bot[i].x,bot[i].y); g.closePath();
-  const grd=g.createLinearGradient(0,belt[0].y,0,bot[0].y); grd.addColorStop(0,'#ec6a60'); grd.addColorStop(0.5,CARCOL); grd.addColorStop(1,'#7c231d');
-  g.fillStyle=grd; g.fill();
-  g.strokeStyle='#f4b0aa'; g.lineWidth=1.4; g.beginPath(); g.moveTo(belt[0].x,belt[0].y); for(let i=1;i<belt.length;i++)g.lineTo(belt[i].x,belt[i].y); g.stroke(); // キャラクターライン
-  // 後輪：3D円柱として投影（ドアミラーの角度では側面リムは見えずトレッドだけ見える）
-  const rw=side==='L'?wheelPositions(car).RL:wheelPositions(car).RR;
-  mWheelSolid(proj,g,rw.x,rw.y,side);
-}
 function roundRectSub(g,x,y,w,h,r){ r=Math.min(r,w/2,h/2); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
 
 /* ============================================================================
@@ -919,23 +898,7 @@ function roundRectSub(g,x,y,w,h,r){ r=Math.min(r,w/2,h/2); g.moveTo(x+r,y); g.ar
    mWorld, drawMirrorGrid, roundRectG, clamp, C, CARCOL, car, M, cuePoleRef,
    poleInMirror, mirrorPan, mirrorPitch, examMode, showGuide, gear, result, tick.
    ========================================================================== */
-const MIR={ k1:-0.22, k2:-0.06, rSeam:0.72, kAsph:-0.34, fCurv:0.60 };
 const _mirAutoTilt={L:0,R:0};                     // 0..1 : Rギアで下向きへ自動チルト
-// 画面空間バレル歪み（光学中心まわり）。凸面外周圧縮＋アスフェリック追加圧縮。
-function mirWarp(sx,sy,cx,cy,A,aspheric){
-  const u=(sx-cx)/A, v=(sy-cy)/A, r2=u*u+v*v, r=Math.sqrt(r2);
-  let D=1+MIR.k1*r2+MIR.k2*r2*r2;
-  if(aspheric && r>MIR.rSeam){ const t=r-MIR.rSeam; D+=MIR.kAsph*t*t; }
-  if(D<0.05) D=0.05;                              // 像の折返し防止
-  return { x:cx+A*u*D, y:cy+A*v*D, D };
-}
-// 既存ピンホール投影器を包んで凸面ミラー化。null は素通し（クラッシュ耐性）。
-function convexProj(base,cx,cy,A,aspheric){
-  return (px,py,pz)=>{ const p=base(px,py,pz); if(!p) return null;
-    const wpt=mirWarp(p.x,p.y,cx,cy,A,aspheric);
-    const m=MIR.fCurv/(MIR.fCurv+Math.max(0.2,p.depth));   // 凸面 minification
-    return { x:wpt.x, y:wpt.y, depth:p.depth, D:wpt.D, mag:m }; };
-}
 // アスファルトの微細ノイズ（1度だけ生成してタイル化＝ちらつかない）
 let _asphaltTile=null;
 function asphaltTile(){ if(_asphaltTile) return _asphaltTile;
