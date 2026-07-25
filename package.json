@@ -1,0 +1,15 @@
+{
+  "name": "deceptive-game-ad",
+  "version": "1.0.0",
+  "private": true,
+  "description": "広告で見たゲームと、実際に落としたゲームは違う",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "verify": "node tools/verify.mjs",
+    "smoke": "node build.mjs && node tools/smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
