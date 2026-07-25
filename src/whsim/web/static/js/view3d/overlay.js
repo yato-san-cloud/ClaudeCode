@@ -12,6 +12,18 @@ import {
   RACK_DEFAULT, RACK_LEGEND, GLOW_CYAN, SEL_STATE_LABEL, sampleKeyframes,
 } from './constants.js';
 
+// ---------------------------------------------------------------------------
+// Label legibility helpers
+// ---------------------------------------------------------------------------
+// A richer 3D scene (dark floor, hi-vis agents, additive glows) will happily eat
+// a plain translucent chip, so every floating label gets the SAME treatment: a
+// dark scrim, a hairline accent border, and a text shadow that survives being
+// drawn over a bright rack or a glow halo.
+const SCRIM = 'rgba(11,15,22,0.86)';
+const SCRIM_SOFT = 'rgba(11,15,22,0.78)';
+const TEXT_SHADOW = 'text-shadow:0 1px 3px rgba(0,0,0,0.9),0 0 1px rgba(0,0,0,0.8)';
+function _clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 export const overlayMethods = {
   // -- Bottleneck spotlight --------------------------------------------------
   // Dramatise the run's binding constraint in 3D: a warm translucent light
@@ -201,7 +213,19 @@ export const overlayMethods = {
       b.sonarMat.opacity = 0.55 * (1 - sp);  // brightest at birth, gone at edge
     }
     if (b.beamMat) b.beamMat.opacity = 0.09 + 0.07 * pulse;
-    if (b.label) b.label.position.y = b.labY + 0.35 * Math.sin(e * 1.6);
+    if (b.label) {
+      b.label.position.y = b.labY + 0.35 * Math.sin(e * 1.6);
+      // The ⚠ chip draws with depthTest off (so racks never hide it), which means
+      // it would otherwise blot out an agent close-up. Fade it as the camera
+      // closes in — it is an overview cue, not a foreground one.
+      if (b.labelMat) {
+        const c = this.camera.position;
+        const dx = c.x - b.cx, dz = c.z - b.cz;
+        const d = Math.sqrt(dx * dx + c.y * c.y + dz * dz);
+        const span = Math.max(this.bounds.width, this.bounds.depth);
+        b.labelMat.opacity = _clamp((d - span * 0.10) / (span * 0.25), 0.12, 1);
+      }
+    }
   },
 
   _disposeBottleneck() {
@@ -239,10 +263,10 @@ export const overlayMethods = {
     root.style.cssText = [
       'position:absolute', 'left:10px', 'top:10px', 'z-index:5',
       'max-width:230px', 'padding:8px 10px', 'border-radius:8px',
-      'background:rgba(15,20,29,0.72)', 'backdrop-filter:blur(4px)',
+      `background:${SCRIM}`, 'backdrop-filter:blur(5px)',
       'color:#e6edf3', 'font:11px/1.4 system-ui,-apple-system,sans-serif',
-      'box-shadow:0 2px 10px rgba(0,0,0,0.35)',
-      'border:1px solid rgba(0,184,212,0.25)',
+      'box-shadow:0 3px 14px rgba(0,0,0,0.5)',
+      'border:1px solid rgba(0,184,212,0.28)', TEXT_SHADOW,
     ].join(';');
 
     // Header: controls hint + a collapse/expand toggle ("?" ⇄ "×").
@@ -336,12 +360,23 @@ export const overlayMethods = {
     this._info = { root };
   },
 
-  // -- Click-to-select interactivity ----------------------------------------
-  // Lets the user click any moving agent (worker / AGV / forklift) to SELECT it.
-  // A bright cyan floor ring tracks the selection every frame, a small DOM card
-  // (`.v3d-seltip`, child of the container, pointer-events:none) shows its role /
-  // state / (x,z) in metres, and an optional soft follow-camera eases the orbit
-  // target toward it. Everything here is additive and torn down in dispose().
+  // -- Click-to-select + hover interactivity --------------------------------
+  // Lets the user HOVER any moving agent (worker / AGV / forklift) for a compact
+  // role chip, and CLICK it to SELECT it. A bright cyan floor ring tracks the
+  // selection every frame, a small DOM card shows its role / state / (x,z) in
+  // metres, and double-click arms a soft follow-camera.
+  //
+  // Label discipline (a crowded replay must not become a wall of chips):
+  //   * at most TWO labels are ever on screen — the selection card and one hover
+  //     chip — and the hover chip is suppressed when it would duplicate the
+  //     selection;
+  //   * both fade with camera distance so far-away agents stop shouting;
+  //   * both sit on a dark scrim with a text shadow so they stay readable over
+  //     bright racks, hi-vis vests and additive glow halos.
+  //
+  // Both DOM elements live inside ONE `s.tip` wrapper, because Scene3D.dispose()
+  // removes exactly that node — keeping them nested means the teardown contract
+  // is unchanged while the overlay can grow.
   _buildSelection() {
     this._sel = null;
     // Nothing to select against → skip the whole feature (no listener, no DOM).
@@ -371,42 +406,75 @@ export const overlayMethods = {
     ring.visible = false;
     this.scene.add(ring);
 
-    // Live DOM info card — mirrors the HUD/info card styling (dark translucent,
-    // cyan accent). pointer-events:none so it never eats canvas drags.
+    // Label layer: one pointer-transparent wrapper pinned over the canvas that
+    // owns BOTH floating labels. dispose() removes this single node.
     const tip = document.createElement('div');
     tip.className = 'v3d-seltip';
     tip.setAttribute('data-v3d-sel', '1');
     tip.style.cssText = [
-      'position:absolute', 'left:0', 'top:0', 'z-index:6',
-      'transform:translate(-50%,calc(-100% - 14px))',
+      'position:absolute', 'left:0', 'top:0', 'right:0', 'bottom:0', 'z-index:6',
+      'pointer-events:none', 'overflow:hidden',
+    ].join(';');
+
+    // Selection card (dark scrim + cyan accent + text shadow so it stays legible
+    // over racks, hi-vis vests and the additive activity halos).
+    const card = document.createElement('div');
+    card.className = 'v3d-selcard';
+    card.style.cssText = [
+      'position:absolute', 'left:0', 'top:0',
+      'transform:translate(-50%,calc(-100% - 14px))', 'transform-origin:50% 100%',
       'min-width:120px', 'max-width:200px', 'padding:6px 9px', 'border-radius:8px',
-      'background:rgba(15,20,29,0.82)', 'backdrop-filter:blur(4px)',
+      `background:${SCRIM}`, 'backdrop-filter:blur(5px)',
       'color:#e6edf3', 'font:11px/1.4 system-ui,-apple-system,sans-serif',
-      'pointer-events:none', 'box-shadow:0 2px 10px rgba(0,0,0,0.4)',
+      'pointer-events:none', 'box-shadow:0 3px 14px rgba(0,0,0,0.55)',
       'border:1px solid rgba(0,184,212,0.45)', 'white-space:nowrap', 'display:none',
+      TEXT_SHADOW, 'will-change:transform,opacity',
     ].join(';');
     const tipRole = document.createElement('div');
     tipRole.style.cssText = 'color:#00d4f0;font-weight:600;margin-bottom:2px';
     const tipState = document.createElement('div');
-    tipState.style.cssText = 'color:#cdd6e0';
+    tipState.style.cssText = 'color:#dbe4ee';
     const tipPos = document.createElement('div');
-    tipPos.style.cssText = 'color:#8b98a8;font-size:10px;margin-top:1px';
+    tipPos.style.cssText = 'color:#93a1b2;font-size:10px;margin-top:1px';
     const tipHint = document.createElement('div');
-    tipHint.style.cssText = 'color:#566273;font-size:9px;margin-top:3px';
+    tipHint.style.cssText = 'color:#6b7789;font-size:9px;margin-top:3px';
     tipHint.textContent = 'ダブルクリックで追従';
-    tip.appendChild(tipRole); tip.appendChild(tipState); tip.appendChild(tipPos);
-    tip.appendChild(tipHint);
+    card.appendChild(tipRole); card.appendChild(tipState); card.appendChild(tipPos);
+    card.appendChild(tipHint);
+    tip.appendChild(card);
+
+    // Hover chip: deliberately smaller/quieter than the selection card so the two
+    // never compete, and only ever ONE is shown.
+    const hover = document.createElement('div');
+    hover.className = 'v3d-selhover';
+    hover.style.cssText = [
+      'position:absolute', 'left:0', 'top:0',
+      'transform:translate(-50%,calc(-100% - 10px))', 'transform-origin:50% 100%',
+      'padding:3px 7px', 'border-radius:7px',
+      `background:${SCRIM_SOFT}`, 'backdrop-filter:blur(4px)',
+      'color:#e6edf3', 'font:10px/1.35 system-ui,-apple-system,sans-serif',
+      'pointer-events:none', 'box-shadow:0 2px 8px rgba(0,0,0,0.5)',
+      'border:1px solid rgba(255,255,255,0.16)', 'white-space:nowrap', 'display:none',
+      TEXT_SHADOW, 'will-change:transform,opacity',
+    ].join(';');
+    tip.appendChild(hover);
     this.container.appendChild(tip);
 
     // Raycaster + pointer state. We record the down position so a click that is
     // really a camera-drag does not trigger a (de)selection.
     this._sel = {
-      ring, ringMat, tip, tipRole, tipState, tipPos,
+      ring, ringMat, tip, card, hover, tipRole, tipState, tipPos,
       ref: null, follow: false,
       raycaster: new THREE.Raycaster(),
       ndc: new THREE.Vector2(),
       proj: new THREE.Vector3(),
       downX: 0, downY: 0, downT: 0,
+      // Latest pointer position in canvas pixels (-1 = pointer is off-canvas).
+      // Hover resolution runs ONCE per frame off this, never per event.
+      // `nearRef` is the raw nearest agent (what a click falls back to);
+      // `hoverRef` is that minus the current selection (what gets a chip).
+      hx: -1, hy: -1, hoverRef: null, nearRef: null,
+      fade: 1,
     };
 
     const el = this.renderer.domElement;
@@ -420,7 +488,11 @@ export const overlayMethods = {
       // Treat as a click only if the pointer barely moved (else it was a drag).
       const dx = e.clientX - s.downX, dy = e.clientY - s.downY;
       if (dx * dx + dy * dy > 36) return; // >6px → camera drag, ignore
-      const hit = this._pickAgent(e);
+      // Prefer a real raycast hit; fall back to the same screen-space proximity
+      // test the hover chip uses. In a warehouse an agent is behind a rack half
+      // the time, and a pointer that is already showing "ピッカー #6" must select
+      // ピッカー #6 when clicked — otherwise the affordance lies.
+      const hit = this._pickAgent(e) || s.nearRef;
       if (hit) this._selectAgent(hit);
       else this._deselect();
     };
@@ -429,9 +501,27 @@ export const overlayMethods = {
       const s = this._sel;
       if (s && s.ref) { s.follow = !s.follow; this._refreshSelTip(); }
     };
+    // Hover only RECORDS the pointer here; the (cheap, O(agents), screen-space)
+    // resolution happens once per frame in _updateHover. Self-detaching so a
+    // disposed scene leaves nothing behind (dispose() predates this listener).
+    this._onSelMove = (e) => {
+      if (this._disposed || !this._sel) {
+        el.removeEventListener('pointermove', this._onSelMove);
+        el.removeEventListener('pointerleave', this._onSelLeave);
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      this._sel.hx = e.clientX - rect.left;
+      this._sel.hy = e.clientY - rect.top;
+    };
+    this._onSelLeave = () => {
+      if (this._sel) { this._sel.hx = -1; this._sel.hy = -1; }
+    };
     el.addEventListener('pointerdown', this._onSelDown);
     el.addEventListener('pointerup', this._onSelUp);
     el.addEventListener('dblclick', this._onSelDbl);
+    el.addEventListener('pointermove', this._onSelMove);
+    el.addEventListener('pointerleave', this._onSelLeave);
   },
 
   // Raycast the pointer against the agent meshes and return the nearest agent
@@ -468,7 +558,7 @@ export const overlayMethods = {
     if (!s) return;
     s.ref = ref;
     s.ring.visible = true;
-    s.tip.style.display = 'block';
+    s.card.style.display = 'block';
     this._refreshSelTip();
   },
 
@@ -479,7 +569,7 @@ export const overlayMethods = {
     s.ref = null;
     s.follow = false;
     s.ring.visible = false;
-    s.tip.style.display = 'none';
+    s.card.style.display = 'none';
   },
 
   // Role label for a selected agent record.
@@ -496,15 +586,103 @@ export const overlayMethods = {
     if (!s || !s.ref) return;
     const n = (s.ref.idx != null ? s.ref.idx + 1 : '');
     s.tipRole.textContent = this._selRole(s.ref) + (n !== '' ? ' #' + n : '');
-    s.tip.style.borderColor = s.follow ? 'rgba(0,212,240,0.85)' : 'rgba(0,184,212,0.45)';
+    s.card.style.borderColor = s.follow ? 'rgba(0,212,240,0.85)' : 'rgba(0,184,212,0.45)';
   },
 
-  // Per-frame: track the ring under the selected agent, project its world
-  // position to screen for the tooltip, refresh the state/pos readout, and
-  // gently ease the orbit target toward it when follow is on.
+  // Screen-space label anchor for an agent: the point just above its head/mast,
+  // projected to canvas pixels. Returns null when it is behind the camera.
+  // Cheap enough (one project() per agent) to run over the whole crowd each
+  // frame, which is why hover needs no raycast.
+  _labelAnchor(ref, out) {
+    const obj = ref.mesh || ref.group;
+    if (!obj) return null;
+    const y = ref.kind === 'agv' ? 0.7 : (ref.kind === 'forklift' ? 2.3 : 1.85);
+    out.set(obj.position.x, y + (ref.lift || 0), obj.position.z).project(this.camera);
+    if (out.z >= 1) return null;
+    const el = this.renderer.domElement;
+    return {
+      x: (out.x * 0.5 + 0.5) * el.clientWidth,
+      y: (-out.y * 0.5 + 0.5) * el.clientHeight,
+    };
+  },
+
+  // How strongly a label at `worldDist` metres from the camera should read.
+  // Near agents get a full-strength chip; far ones fade out rather than piling
+  // up into noise over a busy floor.
+  _labelFade(px, pz) {
+    const c = this.camera.position;
+    const dx = c.x - px, dz = c.z - pz, dy = c.y;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const span = Math.max(this.bounds.width, this.bounds.depth);
+    const near = Math.max(8, span * 0.22);
+    const far = Math.max(26, span * 0.95);
+    return _clamp(1 - (d - near) / (far - near), 0.0, 1);
+  },
+
+  // Per-frame: resolve which agent the pointer is over (nearest screen-space
+  // label anchor inside a small pixel radius) and drive the hover chip. Skipped
+  // entirely when the pointer is off-canvas. At most ONE chip is ever shown, and
+  // it yields to the selection card so the two never stack on the same agent.
+  _updateHover(t) {
+    const s = this._sel;
+    if (!s) return;
+    if (s.hx < 0) {
+      if (s.hover.style.display !== 'none') s.hover.style.display = 'none';
+      s.hoverRef = null;
+      s.nearRef = null;
+      return;
+    }
+    let best = null, bestD = 46 * 46, bx = 0, by = 0;
+    const scan = (list) => {
+      for (const ref of list) {
+        const a = this._labelAnchor(ref, s.proj);
+        if (!a) continue;
+        const dx = a.x - s.hx, dy = a.y - s.hy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = ref; bx = a.x; by = a.y; }
+      }
+    };
+    scan(this._workers);
+    scan(this._agvs);
+    scan(this._forklifts);
+    s.nearRef = best;
+    // The selection card already names that agent — don't double-label it.
+    if (best && s.ref === best) best = null;
+    s.hoverRef = best;
+    // Only touch the cursor when it actually changes (a style write every frame
+    // would be a pointless layout poke).
+    const setCursor = (v) => {
+      if (s._cursor === v) return;
+      s._cursor = v;
+      this.renderer.domElement.style.cursor = v;
+    };
+    if (!best) {
+      if (s.hover.style.display !== 'none') s.hover.style.display = 'none';
+      setCursor('');
+      return;
+    }
+    const obj = best.mesh || best.group;
+    const fade = this._labelFade(obj.position.x, obj.position.z);
+    const sample = sampleKeyframes(best.keyframes, t);
+    const label = SEL_STATE_LABEL[sample.state] || sample.state || '–';
+    const n = (best.idx != null ? ' #' + (best.idx + 1) : '');
+    s.hover.textContent = this._selRole(best) + n + ' ・ ' + label;
+    s.hover.style.display = 'block';
+    s.hover.style.left = bx + 'px';
+    s.hover.style.top = by + 'px';
+    s.hover.style.opacity = String(0.35 + 0.65 * fade);
+    setCursor('pointer');
+  },
+
+  // Per-frame: run hover resolution, then track the ring under the selected
+  // agent, project its world position to screen for the card, refresh the
+  // state/pos readout, fade it with camera distance, and gently ease the orbit
+  // target toward it when follow is on.
   _updateSelection(t, dt) {
     const s = this._sel;
-    if (!s || !s.ref) return;
+    if (!s) return;
+    this._updateHover(t);
+    if (!s.ref) return;
     const ref = s.ref;
     const obj = ref.mesh || ref.group;
     if (!obj) return;
@@ -521,16 +699,23 @@ export const overlayMethods = {
     s.tipState.textContent = '状態: ' + label;
     s.tipPos.textContent = `位置: ${px.toFixed(1)}, ${pz.toFixed(1)} m`;
 
-    // Project the agent's head-height world position to screen pixels.
-    s.proj.set(px, 1.6, pz).project(this.camera);
-    const rect = this.renderer.domElement;
-    const w = rect.clientWidth, h = rect.clientHeight;
-    const sx = (s.proj.x * 0.5 + 0.5) * w;
-    const sy = (-s.proj.y * 0.5 + 0.5) * h;
-    // Hide the card when the agent is behind the camera (z>1) or off-canvas.
-    const onScreen = s.proj.z < 1 && sx >= -40 && sx <= w + 40 && sy >= -40 && sy <= h + 40;
-    s.tip.style.display = onScreen ? 'block' : 'none';
-    if (onScreen) { s.tip.style.left = sx + 'px'; s.tip.style.top = sy + 'px'; }
+    // Project the agent's label anchor to screen pixels.
+    const a = this._labelAnchor(ref, s.proj);
+    const el = this.renderer.domElement;
+    const w = el.clientWidth, h = el.clientHeight;
+    const onScreen = !!a && a.x >= -40 && a.x <= w + 40 && a.y >= -40 && a.y <= h + 40;
+    s.card.style.display = onScreen ? 'block' : 'none';
+    if (onScreen) {
+      s.card.style.left = a.x + 'px';
+      s.card.style.top = a.y + 'px';
+      // Distance fade: shrink + soften rather than vanish, so the selection is
+      // still findable across a big floor without dominating a close-up.
+      const fade = this._labelFade(px, pz);
+      s.fade += (fade - s.fade) * (1 - Math.exp(-(dt > 0 ? dt : 0.016) * 6));
+      s.card.style.opacity = String(0.45 + 0.55 * s.fade);
+      const k = (0.86 + 0.14 * s.fade).toFixed(3);
+      s.card.style.transform = `translate(-50%,calc(-100% - 14px)) scale(${k})`;
+    }
 
     // Soft follow-camera: ease controls.target toward the agent without snapping,
     // so OrbitControls stays fully usable (the user can still drag/zoom freely).
@@ -561,10 +746,10 @@ export const overlayMethods = {
     root.style.cssText = [
       'position:absolute', 'right:10px', 'bottom:10px', 'z-index:5',
       'width:220px', 'padding:8px 10px', 'border-radius:8px',
-      'background:rgba(15,20,29,0.72)', 'backdrop-filter:blur(4px)',
+      `background:${SCRIM}`, 'backdrop-filter:blur(5px)',
       'color:#e6edf3', 'font:11px/1.35 system-ui,-apple-system,sans-serif',
-      'pointer-events:none', 'box-shadow:0 2px 10px rgba(0,0,0,0.35)',
-      'border:1px solid rgba(0,184,212,0.25)',
+      'pointer-events:none', 'box-shadow:0 3px 14px rgba(0,0,0,0.5)',
+      'border:1px solid rgba(0,184,212,0.28)', TEXT_SHADOW,
     ].join(';');
 
     const title = document.createElement('div');

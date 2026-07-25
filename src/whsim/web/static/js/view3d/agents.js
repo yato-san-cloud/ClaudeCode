@@ -1,18 +1,157 @@
 // view3d/agents.js — Scene3D's moving population + their per-frame animation:
-// the human picker figures, the timetable staffing snapshot, AGVs, moving
-// forklifts, manual route flow-lines, the soft contact-shadow blobs, the
-// additive cyan activity halos (pseudo-bloom), the pooled pick-event markers,
-// and every _update*() that interpolates them off the keyframe sampler each
-// frame (workers/AGVs/forklifts/AS-RS crane/staging buffer/belts/shadows/halos).
-// Mixed into Scene3D.prototype by view3d.js; every method is moved verbatim (no
-// value changes) and runs with `this` bound to the Scene3D instance, so the
-// shared agent records + tracked GPU resources match the monolith exactly.
+// the ARTICULATED human picker figures (walk cycle / idle stance / reach), the
+// timetable staffing snapshot, the AMR-style AGVs, the counterbalance forklifts
+// (mast + fork carriage + seated driver + rolling/steering wheels + beacon),
+// manual route flow-lines, the instanced soft contact-shadow decals, the additive
+// cyan activity halos (pseudo-bloom), the pooled pick-event markers, and every
+// _update*() that interpolates them off the keyframe sampler each frame.
+// Mixed into Scene3D.prototype by view3d.js; every method runs with `this` bound
+// to the Scene3D instance, so the shared agent records + tracked GPU resources
+// match what the shell expects.
+//
+// ANIMATION MODEL (the part that makes a replay feel alive):
+//   * Nothing is driven by wall-clock alone. Locomotion phase is advanced by the
+//     agent's REAL per-frame displacement (`dist / STRIDE_M`), so feet never slide
+//     regardless of playback speed, scene scale or frame rate.
+//   * Every pose is a blend between an idle pose and a moving pose, eased with
+//     `approach()` so starts/stops are smooth instead of popping.
+//   * Each agent carries a deterministic phase offset (from its index) so a crowd
+//     never marches in lockstep.
+//   * Geometry/materials are shared across agents and merged where parts are
+//     rigid, so dozens of movers stay cheap (no per-frame allocation anywhere).
 import * as THREE from '../../vendor/three/three.module.js';
 import {
-  STATE_COLOR, ABC_COLOR, AGV_COLOR, AGV_Y, GLOW_CYAN,
+  STATE_COLOR, AGV_COLOR, AGV_Y, GLOW_CYAN,
   ACTIVE_WORKER, ACTIVE_AGV, CARRY_AGV, ROUTE_COLOR,
   PICK_GLOW, PICK_LINE, sampleKeyframes, approach, _enableShadows,
 } from './constants.js';
+
+// ---------------------------------------------------------------------------
+// Rig constants (metres / radians)
+// ---------------------------------------------------------------------------
+const TWO_PI = Math.PI * 2;
+// A 1.72 m warehouse operator. `spine`-local coordinates are measured UP FROM
+// THE HIPS, so the leg chain and the torso chain never fight each other.
+const HIP_Y = 0.86;          // hip joint height above the floor
+const SHOULDER_SY = 0.52;    // shoulder height, spine-local (world 1.38)
+// Shoulders sit OUTSIDE the vest silhouette (vest half-width is 0.23) so the
+// swinging arms read as arms instead of disappearing into the torso block.
+const SHOULDER_X = 0.245;
+const THIGH_L = 0.42;
+const SHIN_L = 0.44;
+const UPPER_ARM_L = 0.30;
+// Ground distance covered by ONE FULL walk cycle (= two steps). Phase advances by
+// realDistance / STRIDE_M, which is exactly what removes foot-sliding.
+const STRIDE_M = 1.45;
+// Cap the cycle rate so 60× playback reads as "hurrying", not a strobe.
+const MAX_CYCLES_PER_S = 2.6;
+const WALK_SPEED_FULL = 0.55; // m/s at which the gait blend reaches a full stride
+
+// Forklift / AGV wheel radii (used to roll wheels by real distance travelled).
+const FK_WHEEL_R = 0.24;
+const AGV_WHEEL_R = 0.10;
+
+// ---------------------------------------------------------------------------
+// Build-time geometry helpers (never called per frame)
+// ---------------------------------------------------------------------------
+const _bE = new THREE.Euler();
+const _bQ = new THREE.Quaternion();
+const _bV = new THREE.Vector3();
+const _bS = new THREE.Vector3(1, 1, 1);
+
+// Describe one rigid sub-part of a merged mesh: a geometry placed at a local
+// offset/rotation. Returns { geom, matrix } for _merge().
+function _part(geom, x, y, z, rx, ry, rz) {
+  _bE.set(rx || 0, ry || 0, rz || 0);
+  _bQ.setFromEuler(_bE);
+  _bV.set(x || 0, y || 0, z || 0);
+  return { geom, matrix: new THREE.Matrix4().compose(_bV, _bQ, _bS) };
+}
+
+// Merge rigid parts into ONE BufferGeometry (position/normal/uv). The vendored
+// three build has no BufferGeometryUtils (that lives in addons), and fewer meshes
+// = fewer draw calls, which is what keeps dozens of articulated agents cheap.
+// The SOURCE geometries are throwaway build scratch and are disposed here.
+function _merge(parts) {
+  const prepped = [];
+  let total = 0;
+  for (const p of parts) {
+    const src = p.geom;
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    if (p.matrix) g.applyMatrix4(p.matrix);
+    prepped.push(g);
+    total += g.attributes.position.count;
+    src.dispose();
+  }
+  const pos = new Float32Array(total * 3);
+  const nor = new Float32Array(total * 3);
+  const uv = new Float32Array(total * 2);
+  let o3 = 0, o2 = 0;
+  for (const g of prepped) {
+    const n = g.attributes.position.count;
+    pos.set(g.attributes.position.array, o3);
+    if (g.attributes.normal) nor.set(g.attributes.normal.array, o3);
+    if (g.attributes.uv) uv.set(g.attributes.uv.array, o2);
+    o3 += n * 3;
+    o2 += n * 2;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.computeBoundingSphere();
+  return out;
+}
+
+// Rounded-rectangle Shape (centred on the origin) — the AMR silhouette. Shape /
+// ExtrudeGeometry are three CORE classes, so this needs no addon.
+function _roundedRect(w, l, r) {
+  const s = new THREE.Shape();
+  const x = -w / 2, y = -l / 2;
+  const rr = Math.min(r, Math.min(w, l) / 2);
+  s.moveTo(x + rr, y);
+  s.lineTo(x + w - rr, y);
+  s.quadraticCurveTo(x + w, y, x + w, y + rr);
+  s.lineTo(x + w, y + l - rr);
+  s.quadraticCurveTo(x + w, y + l, x + w - rr, y + l);
+  s.lineTo(x + rr, y + l);
+  s.quadraticCurveTo(x, y + l, x, y + l - rr);
+  s.lineTo(x, y + rr);
+  s.quadraticCurveTo(x, y, x + rr, y);
+  return s;
+}
+
+// A rounded slab lying in the XZ plane, `h` tall, base at local y = 0.
+function _slab(w, l, r, h, bevel) {
+  const g = new THREE.ExtrudeGeometry(_roundedRect(w, l, r), {
+    depth: h, curveSegments: 5, bevelEnabled: !!bevel,
+    bevelSize: 0.018, bevelThickness: 0.018, bevelSegments: 1,
+  });
+  g.rotateX(-Math.PI / 2); // extrude along +Z → stand it up along +Y
+  return g;
+}
+
+// A wheel whose spin axis is local X (so `mesh.rotation.x += …` rolls it).
+function _wheel(r, width, seg) {
+  const g = new THREE.CylinderGeometry(r, r, width, seg || 12);
+  g.rotateZ(Math.PI / 2);
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Per-frame math helpers (allocation-free)
+// ---------------------------------------------------------------------------
+// Shortest signed difference a-b wrapped to (-π, π].
+function _angDelta(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= TWO_PI;
+  while (d < -Math.PI) d += TWO_PI;
+  return d;
+}
+function _clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+// smoothstep(0,1,x)
+function _smooth(x) { const t = _clamp(x, 0, 1); return t * t * (3 - 2 * t); }
 
 // Vertical-pick envelope: given a worker's keyframes and the playback time `t`,
 // return how "raised" the picker should be (0 at the start of the pick dwell,
@@ -37,111 +176,356 @@ function _dwellEnv(keyframes, t) {
   if (f < _LIFT_EDGE) e = f / _LIFT_EDGE;                  // ease up
   else if (f > 1 - _LIFT_EDGE) e = (1 - f) / _LIFT_EDGE;   // ease down
   else e = 1;                                              // hold at the level
-  e = Math.max(0, Math.min(1, e));
+  e = _clamp(e, 0, 1);
   return e * e * (3 - 2 * e); // smoothstep the edges
 }
 
+// Track an agent's REAL ground motion between frames and keep a locomotion phase
+// in sync with the distance actually covered. `rec` gains _px/_pz/speed/phase/
+// gait/_yawPrev. Returns the distance moved this frame (metres).
+// This one function is why nothing foot-slides: the cycle is a function of
+// DISTANCE, not of time.
+function _stepMotion(rec, x, z, dt) {
+  if (rec._px === undefined) { rec._px = x; rec._pz = z; }
+  const dx = x - rec._px, dz = z - rec._pz;
+  rec._px = x; rec._pz = z;
+  let dist = Math.sqrt(dx * dx + dz * dz);
+  // A teleport (scrub / loop wrap) must not spin the wheels for a kilometre. The
+  // threshold has to stay well ABOVE a legitimate fast-playback step: at 60×
+  // speed a walking picker legitimately covers ~1.3 m per 60 fps frame, and far
+  // more on a slow GPU, so only a genuine jump (a scrub, or the replay looping)
+  // clears this bar.
+  if (dist > 30) dist = 0;
+  rec._vx = dx; rec._vz = dz;
+  const inst = dt > 0 ? dist / dt : 0;
+  rec.speed = approach(rec.speed || 0, inst, dt, 7);
+  // Advance the cycle by ground covered, capped so extreme playback speeds read
+  // as a fast walk rather than a blur.
+  const capped = Math.min(dist, MAX_CYCLES_PER_S * STRIDE_M * Math.max(dt, 0));
+  rec.phase = (rec.phase || 0) + (capped / STRIDE_M) * TWO_PI;
+  if (rec.phase > TWO_PI) rec.phase -= TWO_PI * Math.floor(rec.phase / TWO_PI);
+  return dist;
+}
+
 export const agentMethods = {
-  // Workers are now ~1.7 m HUMANS, not spheres — the fix for the user's #1
-  // complaint (spheres towered over the old 1.2 m racks and "突き抜け"-ed). Each
-  // figure is a small Group: legs + a state-coloured hi-vis vest torso + skin
-  // head + helmet + a near arm that REACHES on pick + a tote held when carrying.
-  // Geometry is shared across all workers; only the vest material is per-worker
-  // (so it can lerp to the state colour) plus a reused glow-emissive on the vest.
-  // The Group exposes a `position` proxy at floor level, so the existing contact
-  // shadows / glow halos (which read `ref.mesh.position`) keep working unchanged.
+  // -- Shared agent art assets ----------------------------------------------
+  // Every geometry + every non-per-agent material used by the human figures, the
+  // AMRs and the forklifts, built ONCE per scene and shared by all agents (this
+  // is what makes "dozens of movers" affordable). Tracked in _geometries /
+  // _materials so Scene3D.dispose() frees them exactly as before.
+  _agentAssets() {
+    if (this._aa) return this._aa;
+    const G = [];
+    const M = [];
+    const geo = (g) => { G.push(g); return g; };
+    const mat = (o) => { const m = new THREE.MeshStandardMaterial(o); M.push(m); return m; };
+
+    // ---- materials -------------------------------------------------------
+    const A = {
+      // human
+      mSkin: mat({ color: 0xe3b98d, roughness: 0.72, metalness: 0.02 }),
+      mShirt: mat({ color: 0x33404f, roughness: 0.85, metalness: 0.03 }),
+      mTrouser: mat({ color: 0x232c38, roughness: 0.9, metalness: 0.02 }),
+      mBand: mat({
+        color: 0xe8eef2, roughness: 0.32, metalness: 0.15,
+        emissive: new THREE.Color(0x9fb6c2), emissiveIntensity: 0.22,
+      }),
+      mCap: mat({ color: 0xf2c200, roughness: 0.5, metalness: 0.08 }),
+      mTote: mat({ color: 0xc9a36b, roughness: 0.85, metalness: 0.04 }),
+      mCarton: mat({ color: 0xd8b483, roughness: 0.9, metalness: 0.02 }),
+      // order-picker platform
+      mDeck: mat({ color: 0xf57c00, roughness: 0.5, metalness: 0.4 }),
+      mMast: mat({ color: 0xb0b6bd, roughness: 0.4, metalness: 0.6 }),
+      // forklift
+      mFkBody: mat({ color: 0xf5a021, roughness: 0.42, metalness: 0.45 }),
+      mFkDark: mat({ color: 0x272c33, roughness: 0.6, metalness: 0.35 }),
+      mFkSteel: mat({ color: 0xa8afb7, roughness: 0.34, metalness: 0.72 }),
+      mTyre: mat({ color: 0x14181d, roughness: 0.95, metalness: 0.02 }),
+      mPallet: mat({ color: 0xb08247, roughness: 0.92, metalness: 0.02 }),
+      // AGV
+      mAgvShell: mat({ color: 0x2b3441, roughness: 0.42, metalness: 0.35 }),
+      mAgvDeck: mat({ color: 0x1a212b, roughness: 0.7, metalness: 0.2 }),
+    };
+    A._mats = M;
+
+    // ---- human figure ----------------------------------------------------
+    // torsoBase = pelvis + waist + chest + neck (rigid, one draw call). The three
+    // stacked boxes taper, which is what stops the figure reading as one slab.
+    // Spine-local: y = 0 is the hip joint, +y is up.
+    A.gTorso = geo(_merge([
+      _part(new THREE.BoxGeometry(0.355, 0.24, 0.235), 0, -0.02, 0),  // pelvis
+      _part(new THREE.BoxGeometry(0.375, 0.20, 0.235), 0, 0.16, 0),   // waist
+      _part(new THREE.BoxGeometry(0.425, 0.36, 0.25), 0, 0.40, 0),    // chest
+      _part(new THREE.CylinderGeometry(0.055, 0.060, 0.11, 8), 0, 0.615, 0), // neck
+    ]));
+    // Hi-vis over-vest (state-coloured, per-worker material) — proud of the shirt
+    // but narrower than the shoulders, so the arms stay visible beside it.
+    A.gVest = geo(new THREE.BoxGeometry(0.455, 0.38, 0.285));
+    // Two reflective bands wrapping the vest + short shoulder straps.
+    A.gBands = geo(_merge([
+      _part(new THREE.BoxGeometry(0.465, 0.036, 0.295), 0, 0.245, 0),
+      _part(new THREE.BoxGeometry(0.465, 0.036, 0.295), 0, 0.395, 0),
+      _part(new THREE.BoxGeometry(0.048, 0.13, 0.295), -0.135, 0.485, 0),
+      _part(new THREE.BoxGeometry(0.048, 0.13, 0.295), 0.135, 0.485, 0),
+    ]));
+    A.gHead = geo(new THREE.SphereGeometry(0.113, 14, 12));
+    A.gCap = geo(_merge([   // crown + peak
+      _part(new THREE.SphereGeometry(0.122, 14, 8, 0, TWO_PI, 0, Math.PI / 2), 0, 0, 0),
+      _part(new THREE.BoxGeometry(0.225, 0.020, 0.13), 0, 0.006, 0.112),
+    ]));
+    A.gThigh = geo(new THREE.BoxGeometry(0.155, THIGH_L, 0.185));
+    A.gShin = geo(_merge([  // shin + shoe (rigid below the knee)
+      _part(new THREE.BoxGeometry(0.135, SHIN_L, 0.155), 0, -SHIN_L / 2, 0),
+      _part(new THREE.BoxGeometry(0.155, 0.085, 0.265), 0, -SHIN_L + 0.042, 0.048),
+    ]));
+    A.gUpperArm = geo(new THREE.BoxGeometry(0.100, UPPER_ARM_L, 0.112));
+    A.gForearm = geo(_merge([ // forearm + hand
+      _part(new THREE.BoxGeometry(0.088, 0.30, 0.100), 0, -0.15, 0),
+      _part(new THREE.BoxGeometry(0.092, 0.10, 0.104), 0, -0.345, 0.012),
+    ]));
+    A.gTote = geo(new THREE.BoxGeometry(0.36, 0.26, 0.28));
+    A.gCarton = geo(new THREE.BoxGeometry(0.21, 0.17, 0.19));
+    // Order-picker deck (cage floor + two rails) and its telescoping mast.
+    A.gDeck = geo(_merge([
+      _part(new THREE.BoxGeometry(0.78, 0.06, 0.78), 0, 0, 0),
+      _part(new THREE.BoxGeometry(0.78, 0.05, 0.05), 0, 0.5, -0.37),
+      _part(new THREE.BoxGeometry(0.05, 0.05, 0.78), -0.37, 0.5, 0),
+      _part(new THREE.BoxGeometry(0.05, 0.05, 0.78), 0.37, 0.5, 0),
+      _part(new THREE.BoxGeometry(0.05, 0.5, 0.05), -0.37, 0.25, -0.37),
+      _part(new THREE.BoxGeometry(0.05, 0.5, 0.05), 0.37, 0.25, -0.37),
+    ]));
+    A.gDeckMast = geo(new THREE.BoxGeometry(0.12, 1.0, 0.12)); // scaled in y
+
+    // ---- forklift (counterbalance truck, forks pointing +Z) ---------------
+    A.gFkChassis = geo(_merge([
+      _part(new THREE.BoxGeometry(1.06, 0.52, 1.30), 0, 0.44, -0.28),  // frame
+      _part(new THREE.BoxGeometry(0.98, 0.44, 0.62), 0, 0.80, -0.80),  // counterweight
+      _part(new THREE.BoxGeometry(1.02, 0.08, 0.62), 0, 0.74, -0.36),  // operator floor
+    ]));
+    A.gFkGuard = geo(_merge([   // ROPS overhead guard: 4 posts + roof
+      _part(new THREE.BoxGeometry(0.07, 1.40, 0.07), -0.47, 1.36, -0.16),
+      _part(new THREE.BoxGeometry(0.07, 1.40, 0.07), 0.47, 1.36, -0.16),
+      _part(new THREE.BoxGeometry(0.07, 1.40, 0.07), -0.47, 1.36, -0.94),
+      _part(new THREE.BoxGeometry(0.07, 1.40, 0.07), 0.47, 1.36, -0.94),
+      _part(new THREE.BoxGeometry(1.06, 0.07, 0.94), 0, 2.08, -0.55),
+    ]));
+    A.gFkSeat = geo(_merge([
+      _part(new THREE.BoxGeometry(0.44, 0.11, 0.44), 0, 0.98, -0.66),
+      _part(new THREE.BoxGeometry(0.44, 0.44, 0.11), 0, 1.24, -0.90),
+    ]));
+    A.gFkWheelF = geo(_wheel(FK_WHEEL_R, 0.20, 14));
+    A.gFkWheelR = geo(_wheel(0.19, 0.17, 12));
+    A.gFkMast = geo(_merge([    // two rails + a cross member (tilts as a unit)
+      _part(new THREE.BoxGeometry(0.11, 1.95, 0.11), -0.35, 0.98, 0),
+      _part(new THREE.BoxGeometry(0.11, 1.95, 0.11), 0.35, 0.98, 0),
+      _part(new THREE.BoxGeometry(0.81, 0.09, 0.09), 0, 1.92, 0),
+      _part(new THREE.BoxGeometry(0.81, 0.09, 0.09), 0, 0.10, 0),
+    ]));
+    A.gFkCarriage = geo(_merge([ // backrest + two forks (rides up the mast)
+      _part(new THREE.BoxGeometry(0.78, 0.46, 0.06), 0, 0.26, 0.09),
+      _part(new THREE.BoxGeometry(0.11, 0.20, 0.07), -0.23, 0.10, 0.09),
+      _part(new THREE.BoxGeometry(0.11, 0.20, 0.07), 0.23, 0.10, 0.09),
+      _part(new THREE.BoxGeometry(0.115, 0.045, 1.00), -0.23, 0.02, 0.62),
+      _part(new THREE.BoxGeometry(0.115, 0.045, 1.00), 0.23, 0.02, 0.62),
+    ]));
+    A.gPallet = geo(_merge([
+      _part(new THREE.BoxGeometry(0.92, 0.035, 1.00), 0, 0.12, 0),
+      _part(new THREE.BoxGeometry(0.92, 0.030, 1.00), 0, 0.015, 0),
+      _part(new THREE.BoxGeometry(0.11, 0.075, 1.00), -0.38, 0.07, 0),
+      _part(new THREE.BoxGeometry(0.11, 0.075, 1.00), 0, 0.07, 0),
+      _part(new THREE.BoxGeometry(0.11, 0.075, 1.00), 0.38, 0.07, 0),
+    ]));
+    A.gLoad = geo(_merge([   // shrink-wrapped carton stack on the pallet
+      _part(new THREE.BoxGeometry(0.86, 0.30, 0.94), 0, 0.15, 0),
+      _part(new THREE.BoxGeometry(0.80, 0.28, 0.88), 0, 0.44, 0),
+    ]));
+    A.gWheelSm = geo(_wheel(AGV_WHEEL_R, 0.07, 10));
+    A.gDome = geo(new THREE.SphereGeometry(0.10, 12, 7, 0, TWO_PI, 0, Math.PI / 2));
+    A.gSteering = geo(new THREE.TorusGeometry(0.135, 0.024, 6, 14));
+    // Seated driver: hips on the cushion (y≈1.03), knees forward, feet on the
+    // operator floor (y≈0.78), hands out to the steering wheel (y≈1.27).
+    A.gDriverBody = geo(_merge([
+      _part(new THREE.BoxGeometry(0.37, 0.48, 0.25), 0, 1.33, -0.68),          // torso
+      _part(new THREE.BoxGeometry(0.10, 0.09, 0.38), -0.17, 1.29, -0.46, 0.4, 0, 0),
+      _part(new THREE.BoxGeometry(0.10, 0.09, 0.38), 0.17, 1.29, -0.46, 0.4, 0, 0),
+    ]));
+    A.gDriverLegs = geo(_merge([
+      _part(new THREE.BoxGeometry(0.32, 0.17, 0.46), 0, 1.10, -0.42),          // thighs
+      _part(new THREE.BoxGeometry(0.30, 0.30, 0.17), 0, 0.92, -0.22),          // shins
+    ]));
+    A.gDriverBands = geo(_merge([
+      _part(new THREE.BoxGeometry(0.385, 0.038, 0.265), 0, 1.25, -0.68),
+      _part(new THREE.BoxGeometry(0.385, 0.038, 0.265), 0, 1.39, -0.68),
+    ]));
+
+    // ---- AGV / AMR (base at local y = -AGV_Y so the mesh origin rides high) --
+    const B = -AGV_Y;
+    A.gAgvShell = geo(_slab(0.96, 1.36, 0.26, 0.30, true));           // base at 0
+    A.gAgvShell.translate(0, B + 0.055, 0);
+    A.gAgvDeck = geo(_slab(0.80, 1.16, 0.20, 0.045, false));
+    A.gAgvDeck.translate(0, B + 0.365, 0);
+    A.gAgvBand = geo(_slab(1.00, 1.40, 0.28, 0.045, false));          // light skirt
+    A.gAgvBand.translate(0, B + 0.185, 0);
+    A.gAgvStrip = geo(_merge([   // direction-of-travel bar + two rear markers
+      _part(new THREE.BoxGeometry(0.46, 0.045, 0.035), 0, B + 0.30, 0.685),
+      _part(new THREE.BoxGeometry(0.11, 0.045, 0.035), -0.30, B + 0.30, -0.685),
+      _part(new THREE.BoxGeometry(0.11, 0.045, 0.035), 0.30, B + 0.30, -0.685),
+    ]));
+    A.gAgvLeds = geo(_merge([    // status pods on the deck corners
+      _part(new THREE.SphereGeometry(0.055, 10, 6, 0, TWO_PI, 0, Math.PI / 2), -0.32, B + 0.385, -0.46),
+      _part(new THREE.SphereGeometry(0.055, 10, 6, 0, TWO_PI, 0, Math.PI / 2), 0.32, B + 0.385, -0.46),
+    ]));
+    A.gAgvCasters = geo(_merge([
+      _part(new THREE.SphereGeometry(0.07, 8, 6), -0.30, B + 0.07, 0.50),
+      _part(new THREE.SphereGeometry(0.07, 8, 6), 0.30, B + 0.07, 0.50),
+      _part(new THREE.SphereGeometry(0.07, 8, 6), -0.30, B + 0.07, -0.50),
+      _part(new THREE.SphereGeometry(0.07, 8, 6), 0.30, B + 0.07, -0.50),
+    ]));
+    A.gAgvTote = geo(new THREE.BoxGeometry(0.62, 0.44, 0.84));
+    A.agvBase = B;
+
+    for (const g of G) this._geometries.push(g);
+    for (const m of M) this._materials.push(m);
+    this._aa = A;
+    return A;
+  },
+
+  // Cast/receive flags for agent parts: only the big silhouette pieces feed the
+  // shadow map (LEDs/bands/beacons add cost and contribute nothing), and every
+  // mover also gets a contact-shadow decal, which is what really grounds it.
+  _shadeAgent(root) {
+    _enableShadows(root);
+    root.traverse((c) => {
+      if (c.isMesh && c.userData.noShadow) { c.castShadow = false; c.receiveShadow = false; }
+    });
+  },
+
+  // Workers are ARTICULATED ~1.72 m humans: a two-segment leg chain (hip→knee)
+  // and arm chain (shoulder→elbow) hanging off a spine that leans/bobs, wearing
+  // work trousers, a shirt, a state-coloured hi-vis over-vest with reflective
+  // bands, and a cap. The Group `g` is the FLOOR ANCHOR (its .position is the
+  // agent's ground position), so contact shadows / glow halos / the selection
+  // ring — which all read `ref.mesh.position` — keep working unchanged.
+  //
+  // Hierarchy (why it's shaped this way):
+  //   g ── lifter ── body ─┬─ hipL/hipR ── kneeL/kneeR      (legs stay vertical)
+  //                        └─ spine ─┬─ torso/vest/head/cap (lean + bob + twist)
+  //                                  └─ shoulderL/R ── elbowL/R
+  //   g ── platform                                          (order-picker deck)
   _buildWorkers() {
     const workers = this.replay.workers || [];
     if (workers.length === 0) return;
-    // Shared geometries for the human figure (metres).
-    const legG = new THREE.BoxGeometry(0.18, 0.7, 0.22);
-    const torsoG = new THREE.BoxGeometry(0.46, 0.62, 0.28);   // hi-vis vest
-    const headG = new THREE.SphereGeometry(0.13, 14, 12);
-    const helmetG = new THREE.SphereGeometry(0.15, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
-    const armG = new THREE.BoxGeometry(0.11, 0.5, 0.11);
-    const toteG = new THREE.BoxGeometry(0.34, 0.26, 0.30);
-    // Order-picker platform: a small cage floor + mast that appears UNDER a worker
-    // only while they ride up to a forklift-served upper 段 (hidden at ground/manual).
-    const platDeckG = new THREE.BoxGeometry(0.7, 0.06, 0.7);   // cage floor under the feet
-    const platMastG = new THREE.BoxGeometry(0.1, 1.0, 0.1);    // telescoping mast (scaled in y)
-    this._geometries.push(legG, torsoG, headG, helmetG, armG, toteG, platDeckG, platMastG);
-    // Shared non-vest materials.
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.8, metalness: 0.05 });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0b48a, roughness: 0.7, metalness: 0.02 });
-    const helmetMat = new THREE.MeshStandardMaterial({ color: 0xf2c200, roughness: 0.45, metalness: 0.1 });
-    const armMat = new THREE.MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.7, metalness: 0.05 });
-    const toteMat = new THREE.MeshStandardMaterial({ color: 0xc9a36b, roughness: 0.85, metalness: 0.04 });
-    const platDeckMat = new THREE.MeshStandardMaterial({ color: 0xf57c00, roughness: 0.5, metalness: 0.4 });
-    const platMastMat = new THREE.MeshStandardMaterial({ color: 0xb0b6bd, roughness: 0.4, metalness: 0.6 });
-    this._materials.push(legMat, skinMat, helmetMat, armMat, toteMat, platDeckMat, platMastMat);
+    const A = this._agentAssets();
 
     for (const wk of workers) {
       const g = new THREE.Group();
-      // `lifter` holds the whole figure (legs→helmet→arm→tote). Raising its y lifts
-      // the picker like an order-picker truck deck WITHOUT moving `g` (the floor
-      // anchor that the contact shadow / glow halo follow). Manual reaches don't
-      // move it; only forklift/crane upper-段 picks raise it (see _updateWorkers).
+      // `lifter` raises the whole figure like an order-picker deck WITHOUT moving
+      // `g` (the floor anchor the shadow/halo followers track).
       const lifter = new THREE.Group();
       g.add(lifter);
-      // Two legs.
-      for (const dx of [-0.12, 0.12]) {
-        const leg = new THREE.Mesh(legG, legMat);
-        leg.position.set(dx, 0.35, 0);
-        lifter.add(leg);
+      const body = new THREE.Group();   // walk bob lives here
+      lifter.add(body);
+
+      // --- legs (rooted at the hips, never inherit the torso lean) ----------
+      const hips = [];
+      const knees = [];
+      for (const sx of [-1, 1]) {
+        const hip = new THREE.Group();
+        hip.position.set(sx * 0.105, HIP_Y, 0);
+        const thigh = new THREE.Mesh(A.gThigh, A.mTrouser);
+        thigh.position.y = -THIGH_L / 2;
+        hip.add(thigh);
+        const knee = new THREE.Group();
+        knee.position.y = -THIGH_L;
+        const shin = new THREE.Mesh(A.gShin, A.mTrouser);
+        knee.add(shin);
+        hip.add(knee);
+        body.add(hip);
+        hips.push(hip);
+        knees.push(knee);
       }
-      // Hi-vis vest torso — per-worker material (state colour + glow emissive).
+
+      // --- spine (torso chain) ---------------------------------------------
+      const spine = new THREE.Group();
+      spine.position.y = HIP_Y;
+      body.add(spine);
+      const torso = new THREE.Mesh(A.gTorso, A.mShirt);
+      spine.add(torso);
+      // Per-worker vest material: lerps to the state colour + carries the glow.
       const vestMat = new THREE.MeshStandardMaterial({
-        color: STATE_COLOR.idle, roughness: 0.5, metalness: 0.05,
+        color: STATE_COLOR.idle, roughness: 0.48, metalness: 0.05,
         emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
       });
       this._materials.push(vestMat);
-      const torso = new THREE.Mesh(torsoG, vestMat);
-      torso.position.set(0, 1.0, 0);
-      lifter.add(torso);
-      // Head + helmet.
-      const head = new THREE.Mesh(headG, skinMat);
-      head.position.set(0, 1.45, 0);
-      lifter.add(head);
-      const helmet = new THREE.Mesh(helmetG, helmetMat);
-      helmet.position.set(0, 1.5, 0);
-      lifter.add(helmet);
-      // Near arm pivoting from the shoulder — reaches forward (+Z) on pick. We
-      // parent it to a pivot at the shoulder so a rotation swings the hand up.
-      const armPivot = new THREE.Group();
-      armPivot.position.set(0.27, 1.22, 0);
-      const arm = new THREE.Mesh(armG, armMat);
-      arm.position.set(0, -0.22, 0); // hangs down from the pivot at rest
-      armPivot.add(arm);
-      lifter.add(armPivot);
-      // Tote held in front while carrying (hidden otherwise).
-      const tote = new THREE.Mesh(toteG, toteMat);
-      tote.position.set(0, 0.95, 0.32);
+      const vest = new THREE.Mesh(A.gVest, vestMat);
+      vest.position.y = 0.32;
+      spine.add(vest);
+      const bands = new THREE.Mesh(A.gBands, A.mBand);
+      bands.userData.noShadow = true;
+      spine.add(bands);
+      const head = new THREE.Mesh(A.gHead, A.mSkin);
+      head.position.y = 0.745;
+      spine.add(head);
+      const cap = new THREE.Mesh(A.gCap, A.mCap);
+      cap.position.y = 0.762;
+      spine.add(cap);
+
+      // --- arms --------------------------------------------------------------
+      const shoulders = [];
+      const elbows = [];
+      for (const sx of [-1, 1]) {
+        const sh = new THREE.Group();
+        sh.position.set(sx * SHOULDER_X, SHOULDER_SY, 0);
+        const ua = new THREE.Mesh(A.gUpperArm, A.mShirt);
+        ua.position.y = -UPPER_ARM_L / 2;
+        sh.add(ua);
+        const el = new THREE.Group();
+        el.position.y = -UPPER_ARM_L;
+        const fa = new THREE.Mesh(A.gForearm, A.mSkin);
+        el.add(fa);
+        sh.add(el);
+        spine.add(sh);
+        shoulders.push(sh);
+        elbows.push(el);
+      }
+      // Carton grabbed at the end of a reach — rides in the right hand.
+      const carton = new THREE.Mesh(A.gCarton, A.mCarton);
+      carton.position.set(0, -0.40, 0.03);
+      carton.visible = false;
+      elbows[1].add(carton);
+      // Tote carried in front of the chest while hauling.
+      const tote = new THREE.Mesh(A.gTote, A.mTote);
+      tote.position.set(0, 0.10, 0.32);
       tote.visible = false;
-      lifter.add(tote);
-      // Order-picker platform: a cage deck (rides UP under the feet) + a mast that
-      // telescopes from the floor to the deck. The whole group is HIDDEN unless a
-      // forklift-served upper-段 pick raises the worker (driven in _updateWorkers
-      // off meta.by) — so ground / manual picks never show it (legacy look intact).
-      // Lives on `g` (the floor anchor), so the deck.y is set to the lift height
-      // each frame rather than inheriting the lifter's rise.
-      const platDeck = new THREE.Mesh(platDeckG, platDeckMat);
-      platDeck.position.set(0, 0.03, 0); // y re-driven to the lift height per frame
-      const platMast = new THREE.Mesh(platMastG, platMastMat);
-      platMast.position.set(-0.34, 0.5, -0.3); // back-left, scaled to deck height
+      spine.add(tote);
+
+      // --- order-picker platform (hidden unless a forklift-served 段 lifts) ---
       const platform = new THREE.Group();
+      const platDeck = new THREE.Mesh(A.gDeck, A.mDeck);
+      platDeck.position.y = 0.03;
+      const platMast = new THREE.Mesh(A.gDeckMast, A.mMast);
+      platMast.position.set(-0.40, 0.5, -0.40);
       platform.add(platDeck);
       platform.add(platMast);
       platform.visible = false;
       g.add(platform);
 
-      _enableShadows(g);
+      this._shadeAgent(g);
       this.scene.add(g);
-      // `mesh` proxy = the group (its .position is the floor anchor) so shadow /
-      // glow followers keep working. Extra refs drive the pick reach + carry tote.
+      const idx = this._workers.length;
       const rec = {
-        mesh: g, lifter, vestMat, armPivot, tote, platform, platDeck, platMast,
+        mesh: g, lifter, body, spine, vestMat, tote, carton,
+        hips, knees, shoulders, elbows,
+        // `armPivot` kept as an alias of the reaching (right) shoulder so any
+        // external/legacy reference to the reach joint still resolves.
+        armPivot: shoulders[1],
+        platform, platDeck, platMast,
         keyframes: wk.keyframes || [],
-        glow: 0, reach: 0, lift: 0, faceYaw: 0, idx: this._workers.length, kind: 'worker',
+        glow: 0, reach: 0, lift: 0, faceYaw: 0, speed: 0, gait: 0,
+        phase: (idx * 2.399963) % TWO_PI,  // golden-angle offset → no lockstep
+        seed: (idx * 0.7548776662) % 1,
+        roll: 0, lean: 0, carry: 0,
+        idx, kind: 'worker',
       };
       g.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
       this._workers.push(rec);
@@ -198,120 +582,197 @@ export const agentMethods = {
     return this._staffMeshes.length;
   },
 
-  // AGVs: small flat boxes (distinct from worker spheres), raised slightly,
-  // colored by action. Missing/empty `replay.agvs` -> nothing.
+  // AGVs are low-profile AMRs: a rounded extruded chassis, a recessed deck, an
+  // emissive light SKIRT + status pods + a direction-of-travel bar (all coloured
+  // by the action), four wheels that roll with real distance, and a tote that
+  // visibly sits on the deck while hauling. Missing/empty `replay.agvs` → nothing.
   _buildAgvs() {
     const agvs = this.replay.agvs || [];
     if (agvs.length === 0) return;
-    const geom = new THREE.BoxGeometry(1.0, 0.35, 1.4); // shared, flat & low
-    this._geometries.push(geom);
-    // Shared little tote box that rides on an AGV while it hauls a load. Created
-    // once per AGV (never per frame); toggled visible by carry state each frame.
-    const toteGeom = new THREE.BoxGeometry(0.7, 0.5, 0.95);
-    // Status dome: a small hemisphere beacon on top, emissive in the action
-    // colour (idle gray → travel blue → pickup green → dropoff amber → charge
-    // purple), so an AGV's job reads at a glance like a real warehouse robot.
-    const domeGeom = new THREE.SphereGeometry(0.16, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
-    this._geometries.push(toteGeom, domeGeom);
+    const A = this._agentAssets();
     for (const a of agvs) {
-      // Cyan emissive baked in but starting dark; pulsed up while the AGV works.
+      // The chassis IS the root mesh, so `rec.mesh.material` stays the chassis
+      // material (the colour the action-lerp drives) exactly as before.
       const mat = new THREE.MeshStandardMaterial({
-        color: AGV_COLOR.idle, roughness: 0.35, metalness: 0.55,
+        color: AGV_COLOR.idle, roughness: 0.38, metalness: 0.5,
         emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
       });
-      const mesh = new THREE.Mesh(geom, mat);
-      mesh.position.set(0, AGV_Y, 0);
-      mesh.castShadow = true;
-      this.scene.add(mesh);
       this._materials.push(mat);
-      // Carried tote: a child of the AGV mesh so it follows position + needs no
-      // separate per-frame placement. Lightly cyan-emissive cardboard.
+      const mesh = new THREE.Mesh(A.gAgvShell, mat);
+      mesh.position.set(0, AGV_Y, 0);
+      this.scene.add(mesh);
+
+      const deck = new THREE.Mesh(A.gAgvDeck, A.mAgvDeck);
+      mesh.add(deck);
+      // Emissive skirt + strip + pods share ONE per-AGV material so the whole
+      // light signature changes colour with the action in a single lerp.
+      const ledMat = new THREE.MeshStandardMaterial({
+        color: AGV_COLOR.idle, roughness: 0.35, metalness: 0.1,
+        emissive: new THREE.Color(AGV_COLOR.idle), emissiveIntensity: 0.7,
+      });
+      this._materials.push(ledMat);
+      const band = new THREE.Mesh(A.gAgvBand, ledMat);
+      band.userData.noShadow = true;
+      mesh.add(band);
+      const strip = new THREE.Mesh(A.gAgvStrip, ledMat);
+      strip.userData.noShadow = true;
+      mesh.add(strip);
+      const dome = new THREE.Mesh(A.gAgvLeds, ledMat);
+      dome.userData.noShadow = true;
+      mesh.add(dome);
+      const casters = new THREE.Mesh(A.gAgvCasters, A.mTyre);
+      mesh.add(casters);
+      // Two driven wheels roll with distance travelled.
+      const wheels = [];
+      for (const sx of [-1, 1]) {
+        const w = new THREE.Mesh(A.gWheelSm, A.mTyre);
+        w.position.set(sx * 0.475, A.agvBase + AGV_WHEEL_R, 0);
+        mesh.add(w);
+        wheels.push(w);
+      }
+      // Carried tote: a child of the chassis so it follows position for free.
       const toteMat = new THREE.MeshStandardMaterial({
         color: 0xc9a36b, roughness: 0.85, metalness: 0.05,
         emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
       });
       this._materials.push(toteMat);
-      const tote = new THREE.Mesh(toteGeom, toteMat);
-      tote.position.set(0, 0.42, 0); // sits on top of the flat AGV body
-      tote.castShadow = true;
+      const tote = new THREE.Mesh(A.gAgvTote, toteMat);
+      tote.position.set(0, A.agvBase + 0.61, 0);
       tote.visible = false;
       mesh.add(tote);
-      // Status beacon dome (action-coloured, emissive). Sits at a back corner so
-      // it stays visible even when a tote rides the body.
-      const domeMat = new THREE.MeshStandardMaterial({
-        color: AGV_COLOR.idle, roughness: 0.4, metalness: 0.1,
-        emissive: new THREE.Color(AGV_COLOR.idle), emissiveIntensity: 0.6,
-      });
-      this._materials.push(domeMat);
-      const dome = new THREE.Mesh(domeGeom, domeMat);
-      dome.position.set(0, 0.2, -0.5);
-      mesh.add(dome);
-      const rec = { mesh, keyframes: a.keyframes || [], mat, tote, dome, domeMat, glow: 0, kind: 'agv', idx: this._agvs.length };
+
+      this._shadeAgent(mesh);
+      const idx = this._agvs.length;
+      const rec = {
+        mesh, keyframes: a.keyframes || [], mat, tote, dome, domeMat: ledMat,
+        ledMat, band, strip, wheels, glow: 0, kind: 'agv', idx,
+        speed: 0, phase: 0, yaw: 0, bob: 0, pitch: 0,
+        seed: (idx * 0.7548776662) % 1,
+      };
       mesh.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
       this._agvs.push(rec);
     }
   },
 
-  // Moving forklifts: each is a forklift composite (adapted from the static
-  // placed model) interpolated with the SAME sampleKeyframes() helper as
-  // workers/AGVs, and yawed to face its direction of travel. The local model
-  // faces +Z (its forks point +Z), so yaw = atan2(vx, vz). Missing/empty -> ok.
+  // Moving forklifts: a real counterbalance-truck silhouette — chassis +
+  // counterweight, ROPS overhead guard, seat + SEATED DRIVER, steering wheel,
+  // a two-rail MAST that tilts, a fork CARRIAGE that rides up the mast (to the
+  // pick height when the keyframe carries one), four wheels that roll with real
+  // distance (the rear pair steers), an amber rotating beacon and reverse lamps.
+  // The local model faces +Z (forks point +Z), so yaw = atan2(vx, vz).
   _buildForklifts() {
     const forklifts = this.replay.forklifts || [];
     if (forklifts.length === 0) return;
-    // Shared geometries/materials across all moving forklifts (perf).
-    const bodyGeom = new THREE.BoxGeometry(1.0, 0.7, 1.6);
-    const cabGeom = new THREE.BoxGeometry(0.85, 0.7, 0.7);
-    const mastGeom = new THREE.BoxGeometry(0.8, 1.8, 0.12);
-    const prongGeom = new THREE.BoxGeometry(0.12, 0.08, 1.0);
-    this._geometries.push(bodyGeom, cabGeom, mastGeom, prongGeom);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xf57c00, roughness: 0.42, metalness: 0.5,
-    });
-    const cabMat = new THREE.MeshStandardMaterial({
-      color: 0x2b2f33, roughness: 0.5, metalness: 0.4,
-    });
-    const forkMat = new THREE.MeshStandardMaterial({
-      color: 0xb0b6bd, roughness: 0.35, metalness: 0.7,
-    });
-    this._materials.push(bodyMat, cabMat, forkMat);
-    // A pallet load that rides the forks while carrying. Shared geometry/material.
-    const loadGeom = new THREE.BoxGeometry(0.9, 0.7, 1.0);
-    this._geometries.push(loadGeom);
-    const loadMat = new THREE.MeshStandardMaterial({
-      color: 0xc9a36b, roughness: 0.85, metalness: 0.04,
-    });
-    this._materials.push(loadMat);
+    const A = this._agentAssets();
     for (const f of forklifts) {
       const g = new THREE.Group();
-      const body = new THREE.Mesh(bodyGeom, bodyMat);
-      body.position.set(0, 0.55, 0);
-      g.add(body);
-      const cab = new THREE.Mesh(cabGeom, cabMat);
-      cab.position.set(0, 1.0, -0.4);
-      g.add(cab);
-      const mastMesh = new THREE.Mesh(mastGeom, forkMat);
-      mastMesh.position.set(0, 1.0, 0.9);
-      g.add(mastMesh);
-      // Forks + load ride a small carriage group so they RAISE together when the
-      // forklift is carrying (driven in _updateForklifts off the carry state).
-      const carriage = new THREE.Group();
-      for (const dx of [-0.25, 0.25]) {
-        const p = new THREE.Mesh(prongGeom, forkMat);
-        p.position.set(dx, 0, 1.4);
-        carriage.add(p);
+      // Body group: takes the pitch/squat under acceleration so the wheels (which
+      // are its children) stay planted relative to the chassis.
+      const chassis = new THREE.Mesh(A.gFkChassis, A.mFkBody);
+      g.add(chassis);
+      const guard = new THREE.Mesh(A.gFkGuard, A.mFkDark);
+      g.add(guard);
+      const seat = new THREE.Mesh(A.gFkSeat, A.mFkDark);
+      g.add(seat);
+      // Seated driver.
+      const driverVest = new THREE.MeshStandardMaterial({
+        color: 0xf0a500, roughness: 0.55, metalness: 0.05,
+      });
+      this._materials.push(driverVest);
+      const dBody = new THREE.Mesh(A.gDriverBody, driverVest);
+      const dLegs = new THREE.Mesh(A.gDriverLegs, A.mTrouser);
+      const dBands = new THREE.Mesh(A.gDriverBands, A.mBand);
+      dBands.userData.noShadow = true;
+      const dHead = new THREE.Mesh(A.gHead, A.mSkin);
+      dHead.position.set(0, 1.68, -0.67);
+      const dCap = new THREE.Mesh(A.gCap, A.mCap);
+      dCap.position.set(0, 1.70, -0.67);
+      const driver = new THREE.Group();
+      driver.add(dBody); driver.add(dLegs); driver.add(dBands);
+      driver.add(dHead); driver.add(dCap);
+      g.add(driver);
+      const steer = new THREE.Mesh(A.gSteering, A.mFkDark);
+      steer.position.set(0, 1.27, -0.30);
+      // Euler XYZ composes as RX·RY·RZ, so the local Z spin (the wheel turning on
+      // its column) is applied BEFORE the rake — exactly what we want.
+      steer.rotation.x = 1.15;
+      g.add(steer);
+
+      // Wheels: front pair drives, rear pair steers (each on its own pivot).
+      const wheelsF = [];
+      const steerPivots = [];
+      const wheelsR = [];
+      for (const sx of [-1, 1]) {
+        const w = new THREE.Mesh(A.gFkWheelF, A.mTyre);
+        w.position.set(sx * 0.46, FK_WHEEL_R, 0.30);
+        g.add(w);
+        wheelsF.push(w);
+        const piv = new THREE.Group();
+        piv.position.set(sx * 0.40, 0.19, -0.86);
+        const rw = new THREE.Mesh(A.gFkWheelR, A.mTyre);
+        piv.add(rw);
+        g.add(piv);
+        steerPivots.push(piv);
+        wheelsR.push(rw);
       }
-      const load = new THREE.Mesh(loadGeom, loadMat);
-      load.position.set(0, 0.4, 1.35);
+
+      // Mast (tilts) → carriage (rides up) → forks + pallet load.
+      const mast = new THREE.Group();
+      mast.position.set(0, 0, 0.34);
+      const mastMesh = new THREE.Mesh(A.gFkMast, A.mFkSteel);
+      mast.add(mastMesh);
+      const carriage = new THREE.Group();
+      const carriageMesh = new THREE.Mesh(A.gFkCarriage, A.mFkSteel);
+      carriage.add(carriageMesh);
+      const pallet = new THREE.Mesh(A.gPallet, A.mPallet);
+      pallet.position.set(0, 0.045, 0.60);
+      pallet.visible = false;
+      carriage.add(pallet);
+      const load = new THREE.Mesh(A.gLoad, A.mCarton);
+      load.position.set(0, 0.182, 0.60); // stack base = pallet top
       load.visible = false;
       carriage.add(load);
-      carriage.position.y = 0.1; // resting fork height
-      g.add(carriage);
-      _enableShadows(g);
+      carriage.position.y = 0.06; // resting fork height
+      mast.add(carriage);
+      g.add(mast);
+
+      // Amber rotating beacon on the guard + rear reverse lamps.
+      const beaconMat = new THREE.MeshStandardMaterial({
+        color: 0xffb300, roughness: 0.3, metalness: 0.1,
+        emissive: new THREE.Color(0xffb300), emissiveIntensity: 0.6,
+      });
+      this._materials.push(beaconMat);
+      const beacon = new THREE.Mesh(A.gDome, beaconMat);
+      beacon.position.set(0, 2.12, -0.55);
+      beacon.scale.set(0.85, 0.8, 0.85);
+      beacon.userData.noShadow = true;
+      g.add(beacon);
+      const lampMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff, roughness: 0.3, metalness: 0.1,
+        emissive: new THREE.Color(0xffffff), emissiveIntensity: 0.0,
+      });
+      this._materials.push(lampMat);
+      const lamps = new THREE.Group();
+      for (const sx of [-1, 1]) {
+        const lg = new THREE.Mesh(A.gDome, lampMat);
+        lg.position.set(sx * 0.32, 0.72, -1.10);
+        lg.rotation.x = -Math.PI / 2;
+        lg.scale.set(0.55, 0.5, 0.55);
+        lg.userData.noShadow = true;
+        lamps.add(lg);
+      }
+      g.add(lamps);
+
+      this._shadeAgent(g);
       this.scene.add(g);
+      const idx = this._forklifts.length;
       const rec = {
-        group: g, keyframes: f.keyframes || [], yaw: 0, carriage, load, lift: 0,
-        kind: 'forklift', idx: this._forklifts.length,
+        group: g, keyframes: f.keyframes || [], yaw: 0, carriage, load, pallet,
+        mast, chassis, driver, steer, wheelsF, wheelsR, steerPivots,
+        beacon, beaconMat, lampMat,
+        lift: 0, glow: 0, speed: 0, spin: 0, steerAng: 0, tilt: 0, revLamp: 0,
+        phase: 0, seed: (idx * 0.7548776662) % 1,
+        kind: 'forklift', idx,
       };
       g.userData.agentRef = rec; // raycaster hit → agent record (see _pickAgent)
       this._forklifts.push(rec);
@@ -364,40 +825,42 @@ export const agentMethods = {
   },
 
   // -- Soft contact shadows --------------------------------------------------
-  // A faint radial-gradient blob sprite under each moving agent (worker / AGV /
-  // forklift). Cheaper & softer than per-object cast shadows for fast movers,
-  // and always grounds them visually. Sprites are tracked for dispose. Each
-  // `follow` holds the agent ref + a getter for its current (x, z) and a y/scale.
+  // A soft radial blob laid FLAT on the floor under every mover. Two upgrades
+  // over a billboarded sprite: (a) it is a real ground decal, so it stays a
+  // shadow when the camera drops to eye level instead of standing up like a
+  // card, and (b) all of them live in ONE InstancedMesh = one draw call for the
+  // whole crowd. This is the cheapest possible groundedness cue and is what lets
+  // dozens of agents look planted without a second shadow-map pass.
   _buildContactShadows() {
     this._shadowSprites = [];
+    this._shadowRefs = [];
     const tex = this._makeBlobTexture();
     this._shadowTex = tex;
-    const mkSprite = (size) => {
-      const mat = new THREE.SpriteMaterial({
-        map: tex, color: 0x000000, transparent: true, opacity: 0.32,
-        depthWrite: false,
-      });
-      this._materials.push(mat);
-      const sp = new THREE.Sprite(mat);
-      sp.scale.set(size, size, 1);
-      sp.position.y = 0.04;
-      sp.center.set(0.5, 0.5);
-      // Keep flat on the floor: sprites face the camera by default, but a small
-      // contact blob reads fine billboarded; we instead lock it flat via a tiny
-      // rotation trick is not available on Sprite, so we keep it billboarded —
-      // it stays near the floor and is visually a soft contact patch.
-      this.scene.add(sp);
-      return sp;
-    };
-    for (const w of this._workers) {
-      this._shadowSprites.push({ sprite: mkSprite(1.4), kind: 'worker', ref: w });
-    }
-    for (const a of this._agvs) {
-      this._shadowSprites.push({ sprite: mkSprite(1.8), kind: 'agv', ref: a });
-    }
-    for (const f of this._forklifts) {
-      this._shadowSprites.push({ sprite: mkSprite(2.2), kind: 'forklift', ref: f });
-    }
+    const n = this._workers.length + this._agvs.length + this._forklifts.length;
+    if (n === 0) return;
+    const geom = new THREE.PlaneGeometry(1, 1);
+    geom.rotateX(-Math.PI / 2); // lie flat on the floor
+    this._geometries.push(geom);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, color: 0x000000, transparent: true, opacity: 0.46,
+      depthWrite: false, depthTest: true,
+    });
+    this._materials.push(mat);
+    const inst = new THREE.InstancedMesh(geom, mat, n);
+    inst.frustumCulled = false;
+    inst.renderOrder = 3;       // over the floor/zones/heat, under the agents
+    inst.castShadow = false;
+    inst.receiveShadow = false;
+    this.scene.add(inst);
+    // InstancedMesh.dispose() frees its instance buffers; parking it in the
+    // tracked-geometry list means Scene3D.dispose() calls it with everything else.
+    this._geometries.push(inst);
+    for (const w of this._workers) this._shadowRefs.push({ ref: w, kind: 'worker', size: 1.25 });
+    for (const a of this._agvs) this._shadowRefs.push({ ref: a, kind: 'agv', size: 1.75 });
+    for (const f of this._forklifts) this._shadowRefs.push({ ref: f, kind: 'forklift', size: 2.5 });
+    this._shadowInst = inst;
+    // dispose() walks _shadowSprites and scene.remove()s each `.sprite`.
+    this._shadowSprites.push({ sprite: inst, kind: 'instanced' });
   },
 
   // Radial soft-alpha blob used by contact shadows. Cached as a CanvasTexture.
@@ -407,8 +870,9 @@ export const agentMethods = {
     canvas.width = S; canvas.height = S;
     const ctx = canvas.getContext('2d');
     const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    g.addColorStop(0, 'rgba(0,0,0,0.85)');
-    g.addColorStop(0.6, 'rgba(0,0,0,0.35)');
+    g.addColorStop(0, 'rgba(0,0,0,0.92)');
+    g.addColorStop(0.45, 'rgba(0,0,0,0.55)');
+    g.addColorStop(0.75, 'rgba(0,0,0,0.18)');
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, S, S);
@@ -423,9 +887,9 @@ export const agentMethods = {
   // shared CanvasTexture + AdditiveBlending makes overlapping active machines
   // "bleed" light, reading like a glow without any post-processing pass (none is
   // vendored). It rides the SAME activity ramp as the existing emissive pulse
-  // (worker.glow / agv.glow + a new forklift glow), so it appears only while the
-  // agent works/moves and fully vanishes when idle. depthWrite:false keeps it
-  // from occluding; depthTest stays true so it tucks naturally behind geometry.
+  // (worker.glow / agv.glow / forklift.glow), so it appears only while the agent
+  // works/moves and fully vanishes when idle. depthWrite:false keeps it from
+  // occluding; depthTest stays true so it tucks naturally behind geometry.
   _buildGlowHalos() {
     this._glowSprites = [];
     const tex = this._makeGlowTexture();
@@ -455,7 +919,6 @@ export const agentMethods = {
       this._glowSprites.push({ ...s, kind: 'agv', ref: a, base: 2.6 });
     }
     for (const f of this._forklifts) {
-      // Forklifts have no glow ramp of their own yet; seed one for the halo.
       if (f.glow === undefined) f.glow = 0;
       const s = mkSprite(3.0, 0.9);
       this._glowSprites.push({ ...s, kind: 'forklift', ref: f, base: 3.0 });
@@ -486,7 +949,7 @@ export const agentMethods = {
   // When a worker's keyframe carries a `hit` ({run_id, along, sku, qty}) — the
   // best-effort nearest authored shelf cell it is reaching into (set in
   // render/replay.py) — we (a) PULSE-GLOW a small marker on the target cell and
-  // (b) draw a thin connector from the picker's hand to that cell. This is the
+  // (b) draw a thin connector from the picker's HAND to that cell. This is the
   // "ピッカーが実 SKU ヒット箇所に歩いて取る" money shot. Markers/lines are POOLED
   // (one per worker, reused every frame — no per-frame allocation), reduced-motion
   // aware (no pulse, steady marker), and dropped entirely under fps pressure
@@ -562,7 +1025,8 @@ export const agentMethods = {
   // Per-frame per-worker: drive the pick-event marker + connector for a worker's
   // current sample. Hidden unless the worker is picking AND carries a resolvable
   // hit. Pulses the marker opacity/scale (steady under reduced-motion) and points
-  // the connector from the worker's hand to the target cell. Pooled + gated.
+  // the connector from the worker's REAL hand (the animated forearm tip) to the
+  // target cell. Pooled + gated.
   _updatePickEvent(w, s, t) {
     const fx = this._pickFx && this._pickFx[w.idx];
     if (!fx) return;
@@ -572,6 +1036,7 @@ export const agentMethods = {
       return;
     }
     if (!fx._p) fx._p = new THREE.Vector3();
+    if (!fx._h) fx._h = new THREE.Vector3();
     const p = this._hitWorld(s.hit, fx._p);
     if (!p) {
       if (fx.marker.visible) { fx.marker.visible = false; fx.line.visible = false; }
@@ -588,13 +1053,22 @@ export const agentMethods = {
     fx.markerMat.opacity = pulse * 0.9;
     const ms = 0.55 + 0.25 * pulse;
     fx.marker.scale.set(ms, ms, 1);
-    // Connector: worker hand (approx shoulder + forward) → target cell.
+    // Connector: start at the picker's actual hand. The arm is articulated now,
+    // so read the reaching elbow's world position (refreshed for this one agent
+    // only, and only while it is picking — negligible cost).
     fx.line.visible = true;
-    const wp = w.mesh.position;
-    const hy = 1.2 + (w.lift || 0); // hand height, raised with the order-picker deck
-    // Hand a touch in front of the body along its facing.
-    const hx = wp.x + Math.sin(w.faceYaw) * 0.3;
-    const hz = wp.z + Math.cos(w.faceYaw) * 0.3;
+    const hand = w.elbows && w.elbows[1];
+    let hx, hy, hz;
+    if (hand) {
+      hand.updateWorldMatrix(true, false);
+      fx._h.set(0, -0.36, 0.02).applyMatrix4(hand.matrixWorld);
+      hx = fx._h.x; hy = fx._h.y; hz = fx._h.z;
+    } else {
+      const wp = w.mesh.position;
+      hy = 1.2 + (w.lift || 0);
+      hx = wp.x + Math.sin(w.faceYaw) * 0.3;
+      hz = wp.z + Math.cos(w.faceYaw) * 0.3;
+    }
     const arr = fx.lineGeom.attributes.position.array;
     arr[0] = hx; arr[1] = hy; arr[2] = hz;
     arr[3] = p.x; arr[4] = p.y; arr[5] = p.z;
@@ -620,24 +1094,16 @@ export const agentMethods = {
   _updateGlowHalos() {
     if (!this._glowSprites || this._glowSprites.length === 0) return;
     if (!this._glowEnabled) return;
-    // Reduced-motion holds glow steady-off (workers/AGVs already skip ramping),
-    // so halos naturally stay hidden; nothing extra to do here.
     for (const h of this._glowSprites) {
       const ref = h.ref;
       const g = ref.glow || 0;
       const sp = h.sprite;
       if (g <= 0.01) { if (sp.visible) sp.visible = false; continue; }
       sp.visible = true;
-      // Follow the agent's current ground position.
       const p = (h.kind === 'forklift') ? ref.group.position : ref.mesh.position;
       sp.position.x = p.x;
       sp.position.z = p.z;
-      // Ramp opacity with a gentle gamma so low activity still reads as a glow
-      // (linear g felt dim); peak a touch brighter to sell the pseudo-bloom.
       h.mat.opacity = Math.pow(g, 0.7) * 0.75;
-      // Scale breathes with activity, plus a subtle organic time-based sine so a
-      // steadily-working machine still feels alive. Reduced-motion (belts frozen)
-      // drops the breathing for a fully static halo.
       let breath = 0;
       if (this._beltSpeed !== 0) {
         breath = Math.sin(this._clock.elapsedTime * 2.4 + h.base) * 0.05 * g;
@@ -647,33 +1113,47 @@ export const agentMethods = {
     }
   },
 
-  // Per-frame: keep contact-shadow blobs under their agents.
+  // Per-frame: rewrite the contact-shadow instance matrices so every blob tracks
+  // its agent. One InstancedMesh → one buffer upload, no per-agent draw call.
+  // A raised order-picker deck spreads + softens its blob (bigger, lower contrast
+  // by area), which is what a real diffuse shadow does as the caster lifts.
   _updateContactShadows() {
-    if (!this._shadowSprites || this._shadowSprites.length === 0) return;
-    for (const s of this._shadowSprites) {
-      const sp = s.sprite;
-      if (s.kind === 'forklift') {
-        const p = s.ref.group.position;
-        sp.position.set(p.x, 0.04, p.z);
-      } else {
-        const p = s.ref.mesh.position;
-        sp.position.set(p.x, 0.04, p.z);
-      }
+    const inst = this._shadowInst;
+    if (!inst || !this._shadowRefs) return;
+    if (!this._shMat) { this._shMat = new THREE.Matrix4(); this._shPos = new THREE.Vector3(); }
+    const m = this._shMat;
+    const refs = this._shadowRefs;
+    for (let i = 0; i < refs.length; i++) {
+      const s = refs[i];
+      const ref = s.ref;
+      const p = (s.kind === 'forklift') ? ref.group.position : ref.mesh.position;
+      // Lift spreads the blob; carried loads widen the forklift's.
+      let k = s.size;
+      if (s.kind === 'worker') k *= 1 + (ref.lift || 0) * 0.28;
+      else if (s.kind === 'forklift') k *= 1 + (ref.lift || 0) * 0.10;
+      m.makeScale(k, 1, k * (s.kind === 'forklift' ? 1.25 : 1));
+      m.setPosition(p.x, 0.035, p.z);
+      inst.setMatrixAt(i, m);
     }
+    inst.instanceMatrix.needsUpdate = true;
   },
 
-  // Per-frame: interpolate each worker (a human figure) — floor position, vest
-  // state colour, working-glow ramp, the arm REACH on pick, the carried tote, a
-  // facing yaw toward travel, and (if the frame carries a `hit`) the pick-event
-  // viz on the reached shelf cell.
+  // Per-frame: interpolate + ANIMATE each worker. Position/state/glow/vest colour
+  // and the pick-event viz are as before; the new part is the rig:
+  //   • locomotion phase advanced by real ground covered (no foot-sliding),
+  //   • a gait blend so idle↔walk eases instead of popping,
+  //   • counter-swinging arms, knee flex, torso bob/lean/twist, roll into turns,
+  //   • an idle stance with a slow breathing/weight-shift,
+  //   • a reach pose aimed at the ACTUAL pick height (meta.h) on pick frames.
   _updateWorkers(t, dt) {
     const glowOn = this._beltSpeed !== 0; // reduced-motion → hold glow steady-off
+    const now = this._clock.elapsedTime;
     for (const w of this._workers) {
       const s = sampleKeyframes(w.keyframes, t);
       w.mesh.position.set(s.x, 0, s.y); // group anchored at floor (legs reach down)
+
+      // --- state colour + activity glow -------------------------------------
       const color = STATE_COLOR[s.state] !== undefined ? STATE_COLOR[s.state] : STATE_COLOR.idle;
-      // Ease state→state color over ~100ms (frame-rate-independent) so idle→travel
-      // transitions don't pop. Target color cached on the entry (no per-frame new).
       if (!w._target) w._target = new THREE.Color();
       w._target.set(color);
       w.vestMat.color.lerp(w._target, 1 - Math.exp(-dt * 12));
@@ -681,49 +1161,118 @@ export const agentMethods = {
       w.glow = approach(w.glow, active, dt, 4);
       w.vestMat.emissiveIntensity = w.glow * 0.30;
 
-      // Face the direction of travel (look-ahead sample), so the body + reaching
-      // arm orient naturally. Hold the last yaw when essentially stationary.
-      const ahead = sampleKeyframes(w.keyframes, t + 0.3);
-      let vx = ahead.x - s.x, vz = ahead.y - s.y;
-      if (vx * vx + vz * vz > 1e-5) w.faceYaw = Math.atan2(vx, vz);
+      // --- motion: real displacement drives speed + walk phase ---------------
+      _stepMotion(w, s.x, s.y, dt);
+      // Face the direction of travel. Real displacement is the truthful signal;
+      // a look-ahead sample covers the frames where playback is paused/slow.
+      let vx = w._vx, vz = w._vz;
+      if (vx * vx + vz * vz < 1e-8) {
+        const ahead = sampleKeyframes(w.keyframes, t + 0.3);
+        vx = ahead.x - s.x; vz = ahead.y - s.y;
+      }
+      if (vx * vx + vz * vz > 1e-7) w.faceYaw = Math.atan2(vx, vz);
       if (!w._qT) { w._qT = new THREE.Quaternion(); w._eT = new THREE.Euler(); }
       w._eT.set(0, w.faceYaw, 0);
       w._qT.setFromEuler(w._eT);
-      w.mesh.quaternion.slerp(w._qT, 1 - Math.exp(-dt * 10));
+      w.mesh.quaternion.slerp(w._qT, 1 - Math.exp(-dt * 9));
 
-      // Arm reach: ramp toward 1 while picking (swing the forearm up/forward),
-      // back to rest otherwise. The pivot rotates about local X so the hand lifts.
-      const reaching = (s.state === 'pick') ? 1 : 0;
-      w.reach = approach(w.reach, reaching, dt, 6);
+      // Lean INTO the turn: yaw rate × speed, smoothed so it never snaps. The
+      // figure faces +Z with +X to its right, so a positive yaw rate is a turn to
+      // the right and must roll the torso toward +X ⇒ a NEGATIVE z-rotation.
+      const dyaw = _angDelta(w.faceYaw, w._yawPrev === undefined ? w.faceYaw : w._yawPrev);
+      w._yawPrev = w.faceYaw;
+      const turn = dt > 0 ? _clamp(-(dyaw / dt) * Math.min(w.speed, 2) * 0.05, -0.20, 0.20) : 0;
+      w.roll = approach(w.roll, turn, dt, 6);
 
-      // --- Vertical pick motion (upper 段) --------------------------------------
-      // The 5th keyframe element (`hit`) on a pick MERGES the engine's level meta
-      // {lv, by, h} with the derived cell {run_id, along, …}. lv>1 means the SKU
-      // sits on an upper level; how we reach it depends on `by`:
-      //   manual   → extend the arm UP toward h (reach/ladder), figure stays grounded
+      // --- gait blend (0 = standing, 1 = full stride) ------------------------
+      const wantGait = (s.state === 'pick' || s.state === 'pack') ? 0
+        : _smooth(w.speed / WALK_SPEED_FULL);
+      w.gait = approach(w.gait, wantGait, dt, 7);
+      const gait = w.gait;
+
+      // --- reach / carry poses ----------------------------------------------
+      w.reach = approach(w.reach, (s.state === 'pick') ? 1 : 0, dt, 6);
+      w.carry = approach(w.carry, (s.state === 'carry' || s.state === 'pack') ? 1 : 0, dt, 5);
+
+      // --- vertical pick motion (upper 段) -----------------------------------
+      // The 5th keyframe element merges the engine's level meta {lv, by, h} with
+      // the derived cell {run_id, along, …}. lv>1 means the SKU sits on an upper
+      // level; how we reach it depends on `by`:
+      //   manual   → the ARM extends up toward h (reach/ladder), figure grounded
       //   forklift → RAISE the whole figure on an order-picker deck up to h
-      //   crane    → AS/RS: marker does the work, figure barely moves (fast auto)
-      // The lift EASES up over the dwell, HOLDS, EASES down (see _dwellEnv). lv1 /
-      // no-meta picks have env 0 and `by` undefined → byte-identical legacy look.
+      //   crane    → AS/RS: the marker does the work, the figure barely moves
       const meta = s.hit;
       const upper = !!(meta && meta.lv > 1 && meta.h);
       const by = upper ? (meta.by || 'manual') : null;
-      const env = upper ? _dwellEnv(w.keyframes, t) : 0; // 0→1→0 across the pick dwell
-      // Target lift HEIGHT in metres for the deck (forklift only), capped sanely.
-      // Manual keeps the body grounded (the ARM reaches); crane stays put (the
-      // marker carries the height). The deck rises so the hand (~1.2 m up the body)
-      // lines up with the pick-face height h.
+      const env = upper ? _dwellEnv(w.keyframes, t) : 0; // 0→1→0 across the dwell
       const liftH = (by === 'forklift') ? Math.max(0, meta.h - 1.2) * env : 0;
       w.lift = approach(w.lift, liftH, dt, 6);
-      if (w.lifter) w.lifter.position.y = w.lift;
-      // Manual upper-段 reach: bias the arm further UP (beyond the forward swing)
-      // proportional to how high the pick face is, so a ladder/over-head reach reads.
-      let armUp = w.reach * 1.15; // base forward swing (legacy)
-      if (by === 'manual') {
-        const overhead = Math.min(1, Math.max(0, (meta.h - 1.3) / 1.0)); // 0 at chest → 1 by ~2.3 m
-        armUp = w.reach * (1.15 + overhead * 1.0 * env); // swing higher overhead
+      w.lifter.position.y = w.lift;
+
+      // --- the rig ------------------------------------------------------------
+      const p = w.phase;
+      const cosP = Math.cos(p), sinP = Math.sin(p);
+      // Legs. Contact (leg forward, knee straight) at p = 0; toe-off at p = π.
+      // Forward swing is a NEGATIVE hip rotation (the figure faces +Z).
+      const thighA = 0.52 * gait;   // ±30° hip swing = a brisk warehouse walk
+      const kneeA = 1.10 * gait;
+      const hipR = w.hips[1], hipL = w.hips[0];
+      hipR.rotation.x = -thighA * cosP;
+      hipL.rotation.x = thighA * cosP;
+      // Knees only fold backwards. `max(0, -sin(p + 0.35))` is exactly the SWING
+      // half of the cycle (p≈π→2π, peaking mid-swing) and is 0 at heel strike, so
+      // the leg is straight when it lands; the small sin(p) term is the stance
+      // flex that keeps the body from looking stilted.
+      w.knees[1].rotation.x = kneeA * Math.max(0, -Math.sin(p + 0.35))
+        + 0.06 + 0.10 * gait * Math.max(0, sinP);
+      w.knees[0].rotation.x = kneeA * Math.max(0, -Math.sin(p + Math.PI + 0.35))
+        + 0.06 + 0.10 * gait * Math.max(0, -sinP);
+
+      // Torso: 2 rises per cycle (highest at each mid-stance, so the planted foot
+      // never punches through the floor) + a slow breath while standing.
+      const breath = Math.sin(now * 1.15 + w.seed * 6.28);
+      w.body.position.y = 0.028 * gait * (0.5 - 0.5 * Math.cos(2 * p))
+        + 0.007 * (1 - gait) * breath;
+      // Lean forward with speed, and dip further while reaching low.
+      const reachTargetY = (meta && meta.h) ? meta.h : 1.05;
+      const lowReach = _clamp((1.15 - reachTargetY) / 0.9, 0, 1); // 1 = floor level
+      const wantLean = 0.10 * gait * _clamp(w.speed / 1.4, 0, 1)
+        + w.reach * (0.10 + 0.30 * lowReach)
+        + (1 - gait) * (1 - w.reach) * 0.012 * breath;
+      w.lean = approach(w.lean, wantLean, dt, 8);
+      w.spine.rotation.x = w.lean;
+      w.spine.rotation.z = w.roll + (1 - gait) * 0.022 * Math.sin(now * 0.37 + w.seed * 5);
+      w.spine.rotation.y = 0.10 * gait * cosP; // shoulders counter-rotate to the hips
+
+      // Arms: counter-swing to the same-side leg, blended with the reach/carry.
+      const armA = 0.46 * gait;
+      const swingR = armA * cosP;
+      const swingL = -armA * cosP;
+      const elbowBase = 0.30 + 0.22 * gait * (0.5 + 0.5 * cosP);
+      // Reach: aim the right arm at the real pick-face height. Hand offset is
+      // (forward 0.52 m, dy = target − shoulder world height); the shoulder pitch
+      // that points a downward-hanging arm at (dy, d) is atan2(−d, −dy).
+      const shoulderWorldY = HIP_Y + SHOULDER_SY + w.lift;
+      const dy = _clamp(reachTargetY - shoulderWorldY, -1.15, 1.15);
+      const reachPitch = Math.atan2(-0.52, -dy);
+      // Carry: both forearms up, holding the tote against the chest.
+      const carryShoulder = -0.75, carryElbow = -1.05;
+      const rw = w.reach, cw2 = w.carry * (1 - w.reach);
+      const base = 1 - rw - cw2;
+      w.shoulders[1].rotation.x = base * swingR + rw * reachPitch + cw2 * carryShoulder;
+      w.shoulders[0].rotation.x = base * swingL + rw * (swingL * 0.3 - 0.15) + cw2 * carryShoulder;
+      w.elbows[1].rotation.x = base * -elbowBase + rw * -0.10 + cw2 * carryElbow;
+      w.elbows[0].rotation.x = base * -elbowBase + rw * -elbowBase * 0.6 + cw2 * carryElbow;
+      // Manual upper-段 picks: swing a little wider so an overhead reach reads.
+      if (by === 'manual' && env > 0) {
+        w.shoulders[1].rotation.x -= 0.25 * env * rw;
       }
-      if (w.armPivot) w.armPivot.rotation.x = -armUp;
+
+      // Held items: a carton appears in the hand at the top of a reach; the tote
+      // is held against the chest while hauling/packing.
+      if (w.carton) w.carton.visible = w.reach > 0.55;
+      if (w.tote) w.tote.visible = w.carry > 0.35;
+
       // Order-picker platform: show the deck + telescoping mast only while the
       // forklift lift is meaningfully raised; ride the deck up with the worker and
       // scale the mast to the current height. Hidden (deck gone) otherwise.
@@ -731,91 +1280,185 @@ export const agentMethods = {
         const show = (by === 'forklift') && w.lift > 0.05;
         if (w.platform.visible !== show) w.platform.visible = show;
         if (show) {
-          if (w.platDeck) w.platDeck.position.y = 0.03 + w.lift; // deck under the raised feet
-          if (w.platMast) {
-            const my = Math.max(0.1, w.lift + 0.05);
-            w.platMast.scale.y = my;          // box base height is 1.0 m → scale = metres
-            w.platMast.position.y = my / 2;   // grow from the floor up
-          }
+          w.platDeck.position.y = 0.03 + w.lift;
+          const my = Math.max(0.1, w.lift + 0.05);
+          w.platMast.scale.y = my;          // box base height is 1.0 m → scale = metres
+          w.platMast.position.y = my / 2;   // grow from the floor up
         }
       }
-
-      // Carried tote: visible while carrying (種まき/搬送) — picks the held box.
-      if (w.tote) w.tote.visible = (s.state === 'carry' || s.state === 'pack');
 
       // Pick-event viz: pulse the reached cell + draw a connector from the hand.
       this._updatePickEvent(w, s, t);
     }
   },
 
-  // Per-frame: interpolate each AGV's position + action color (same sampler),
-  // ramp its cyan working-glow up/down, and show the carried tote while hauling.
+  // Per-frame: interpolate each AGV's position + action colour, ramp its cyan
+  // working-glow, roll its wheels by real distance, bob/pitch it on its
+  // suspension, pulse the light skirt + direction bar, and show the carried tote.
   _updateAgvs(t, dt) {
+    const now = this._clock.elapsedTime;
+    const motion = this._beltSpeed !== 0;
     for (const a of this._agvs) {
       const s = sampleKeyframes(a.keyframes, t);
-      a.mesh.position.set(s.x, AGV_Y, s.y);
+      const dist = _stepMotion(a, s.x, s.y, dt);
+
+      // Face travel (AMRs drive nose-first). Hold the last yaw when stopped.
+      let vx = a._vx, vz = a._vz;
+      if (vx * vx + vz * vz < 1e-8) {
+        const ahead = sampleKeyframes(a.keyframes, t + 0.3);
+        vx = ahead.x - s.x; vz = ahead.y - s.y;
+      }
+      if (vx * vx + vz * vz > 1e-7) a.yaw = Math.atan2(vx, vz);
+
+      // Suspension: a small bob while rolling + a pitch that leans into
+      // acceleration (nose down on the go, nose up on the stop).
+      const accel = dt > 0 ? (a.speed - (a._sPrev || 0)) / dt : 0;
+      a._sPrev = a.speed;
+      const bobT = motion ? 0.012 * Math.sin(now * 9 + a.seed * 6.28) * Math.min(1, a.speed) : 0;
+      a.bob = approach(a.bob, bobT, dt, 12);
+      a.pitch = approach(a.pitch, _clamp(-accel * 0.012, -0.05, 0.05), dt, 8);
+      a.mesh.position.set(s.x, AGV_Y + a.bob, s.y);
+      // 'YXZ' = heading then pitch, so the suspension tilt happens about the
+      // robot's OWN lateral axis whatever direction it is driving in.
+      if (!a._qT) { a._qT = new THREE.Quaternion(); a._eT = new THREE.Euler(0, 0, 0, 'YXZ'); }
+      a._eT.set(a.pitch, a.yaw, 0, 'YXZ');
+      a._qT.setFromEuler(a._eT);
+      a.mesh.quaternion.slerp(a._qT, 1 - Math.exp(-dt * 9));
+
+      // Wheels roll exactly as far as the robot moved.
+      if (a.wheels) {
+        const spin = dist / AGV_WHEEL_R;
+        for (const w of a.wheels) w.rotation.x -= spin;
+      }
+
+      // Action colour on the chassis AND the whole light signature.
       const color = AGV_COLOR[s.state] !== undefined ? AGV_COLOR[s.state] : AGV_COLOR.idle;
-      // Ease action→action color over ~100ms (frame-rate-independent), matching
-      // the worker transition. Target color cached on the entry (no per-frame new).
       if (!a._target) a._target = new THREE.Color();
       a._target.set(color);
-      a.mesh.material.color.lerp(a._target, 1 - Math.exp(-dt * 12));
-      const active = ACTIVE_AGV[s.state] ? 1 : 0;
-      a.glow = approach(a.glow, active, dt, 4);
-      a.mat.emissiveIntensity = a.glow * 0.55;
-      // Status dome tracks the action colour (always lit, so idle reads gray).
-      if (a.domeMat) {
-        if (!a._dT) a._dT = new THREE.Color();
-        a._dT.set(color);
-        a.domeMat.color.lerp(a._dT, 1 - Math.exp(-dt * 12));
-        a.domeMat.emissive.copy(a.domeMat.color);
-        a.domeMat.emissiveIntensity = 0.5 + a.glow * 0.4;
+      const k = 1 - Math.exp(-dt * 12);
+      a.mesh.material.color.lerp(a._target, k);
+      const activeState = ACTIVE_AGV[s.state] ? 1 : 0;
+      a.glow = approach(a.glow, (motion ? activeState : 0), dt, 4);
+      a.mat.emissiveIntensity = a.glow * 0.45;
+      if (a.ledMat) {
+        a.ledMat.color.lerp(a._target, k);
+        a.ledMat.emissive.copy(a.ledMat.color);
+        // Working robots breathe their light band; idle ones sit at a dim steady.
+        const pulse = motion ? (0.5 + 0.5 * Math.sin(now * 3.2 + a.seed * 6.28)) : 0.5;
+        a.ledMat.emissiveIntensity = 0.35 + a.glow * (0.55 + 0.45 * pulse);
       }
       if (a.tote) {
         a.tote.visible = !!CARRY_AGV[s.state];
-        a.tote.material.emissiveIntensity = a.glow * 0.35;
+        // Keep the carried tote reading as CARDBOARD — a full glow ramp on it
+        // washes the box out to the same cyan as the robot it rides on.
+        a.tote.material.emissiveIntensity = a.glow * 0.18;
+        // Load settles on its own tiny spring as the robot starts/stops.
+        a.tote.position.y = this._aa.agvBase + 0.61 + a.bob * 0.4;
       }
     }
   },
 
-  // Per-frame: interpolate each moving forklift's position (same sampler) and
-  // yaw it toward its direction of travel using a small look-ahead sample.
+  // Per-frame: drive each moving forklift — position + travel yaw, wheels rolling
+  // at the real ground speed with the rear pair STEERING into the turn, a mast
+  // that tilts with acceleration, a fork carriage that rides up (to the keyframe's
+  // pick height when one is carried), a pallet load that appears on the forks, a
+  // blinking amber beacon, and reverse lamps when it backs up.
   _updateForklifts(t, dt) {
-    const glowOn = this._beltSpeed !== 0; // reduced-motion → hold glow off
+    const motion = this._beltSpeed !== 0;
+    const now = this._clock.elapsedTime;
     for (const f of this._forklifts) {
       const s = sampleKeyframes(f.keyframes, t);
       f.group.position.set(s.x, 0, s.y);
-      // Estimate velocity by sampling slightly ahead; fall back to behind.
-      let ahead = sampleKeyframes(f.keyframes, t + 0.25);
-      let vx = ahead.x - s.x;
-      let vz = ahead.y - s.y;
-      if (vx * vx + vz * vz < 1e-6) {
-        const behind = sampleKeyframes(f.keyframes, t - 0.25);
-        vx = s.x - behind.x;
-        vz = s.y - behind.y;
+      const dist = _stepMotion(f, s.x, s.y, dt);
+
+      // Travel direction: prefer real displacement, else a look-ahead/behind.
+      let vx = f._vx, vz = f._vz;
+      if (vx * vx + vz * vz < 1e-8) {
+        const ahead = sampleKeyframes(f.keyframes, t + 0.25);
+        vx = ahead.x - s.x; vz = ahead.y - s.y;
+        if (vx * vx + vz * vz < 1e-8) {
+          const behind = sampleKeyframes(f.keyframes, t - 0.25);
+          vx = s.x - behind.x; vz = s.y - behind.y;
+        }
       }
-      const moving = vx * vx + vz * vz > 1e-6;
+      const moving = vx * vx + vz * vz > 1e-7;
       if (moving) {
-        // Model's forks face +Z, so yaw rotates +Z onto (vx, vz). Only update the
-        // target while actually moving (velocity ~0 → keep previous yaw, no NaN).
-        f.yaw = Math.atan2(vx, vz);
+        // A real forklift does not pirouette to leave a rack face — it BACKS OUT
+        // and only then swings round. So when the travel direction flips more
+        // than ~115° away from where the truck is pointing, hold the facing (=
+        // reverse) and let the yaw creep round over about a second.
+        const dirYaw = Math.atan2(vx, vz);
+        const diff = _angDelta(dirYaw, f.yaw);
+        if (Math.abs(diff) > 2.0) {
+          f.yaw += diff * Math.min(1, dt * 0.8);
+          f.reverse = true;
+        } else {
+          f.yaw = dirYaw;
+          f.reverse = false;
+        }
       }
-      // Slerp the group toward the target yaw over ~150–200ms instead of snapping.
-      // Cache scratch quaternions on the entry so there is no per-frame alloc.
       if (!f._qTarget) { f._qTarget = new THREE.Quaternion(); f._eTarget = new THREE.Euler(); }
       f._eTarget.set(0, f.yaw, 0);
       f._qTarget.setFromEuler(f._eTarget);
-      f.group.quaternion.slerp(f._qTarget, 1 - Math.exp(-dt * 8));
-      // Drive the activity halo (forklifts have no emissive ramp of their own).
-      const active = (glowOn && moving) ? 1 : 0;
-      f.glow = approach(f.glow || 0, active, dt, 4);
+      f.group.quaternion.slerp(f._qTarget, 1 - Math.exp(-dt * 7));
 
-      // Carry: raise the fork carriage + reveal its pallet load while hauling
-      // (pickup/dropoff/travel/carry states). The lift ramps so forks glide up.
-      const carrying = (CARRY_AGV[s.state] || s.state === 'carry') ? 1 : 0;
-      f.lift = approach(f.lift || 0, carrying, dt, 5);
-      if (f.carriage) f.carriage.position.y = 0.1 + f.lift * 1.0; // up to ~1.1m
-      if (f.load) f.load.visible = f.lift > 0.15;
+      // Wheels roll by the real ground distance (backwards while reversing); the
+      // rear pair steers into the turn — a counterbalance truck steers from the
+      // back, and that rear swing is its signature move.
+      const dirSign = f.reverse ? -1 : 1;
+      const spin = (dist / FK_WHEEL_R) * dirSign;
+      if (f.wheelsF) for (const w of f.wheelsF) w.rotation.x -= spin;
+      if (f.wheelsR) for (const w of f.wheelsR) w.rotation.x -= (dist / 0.19) * dirSign;
+      const dyaw = _angDelta(f.yaw, f._yawPrev === undefined ? f.yaw : f._yawPrev);
+      f._yawPrev = f.yaw;
+      const wantSteer = dt > 0 ? _clamp(-(dyaw / dt) * 0.55, -0.85, 0.85) : 0;
+      f.steerAng = approach(f.steerAng, wantSteer, dt, 5);
+      if (f.steerPivots) for (const p of f.steerPivots) p.rotation.y = f.steerAng;
+      if (f.steer) f.steer.rotation.z = -f.steerAng * 2.2; // driver's wheel follows
+
+      // Mast tilt: back under acceleration, forward as it sets a load down.
+      const accel = dt > 0 ? (f.speed - (f._sPrev || 0)) / dt : 0;
+      f._sPrev = f.speed;
+      const wantTilt = _clamp(-0.05 - accel * 0.02, -0.14, 0.02);
+      f.tilt = approach(f.tilt, wantTilt, dt, 6);
+      if (f.mast) f.mast.rotation.x = f.tilt;
+      if (f.driver) f.driver.rotation.x = -f.tilt * 0.35; // driver braces against it
+
+      // Activity halo ramp (forklifts have no emissive body ramp of their own).
+      f.glow = approach(f.glow || 0, (motion && moving) ? 1 : 0, dt, 4);
+
+      // Fork height. A keyframe that carries a pick-height meta wins (that IS the
+      // level it is servicing); otherwise the carry state raises it to travel
+      // height. Both ease, so the forks glide rather than snap.
+      const meta = s.hit;
+      let wantLift;
+      if (meta && meta.h) {
+        wantLift = _clamp(meta.h, 0.06, 5.0) * _dwellEnv(f.keyframes, t);
+      } else {
+        const carrying = (CARRY_AGV[s.state] || s.state === 'carry'
+          || s.state === 'putaway' || s.state === 'replen') ? 1 : 0;
+        wantLift = carrying * 0.95;
+      }
+      f.lift = approach(f.lift || 0, wantLift, dt, 3.5);
+      if (f.carriage) f.carriage.position.y = 0.06 + f.lift;
+      const showLoad = f.lift > 0.12;
+      if (f.load) f.load.visible = showLoad;
+      if (f.pallet) f.pallet.visible = showLoad;
+
+      // Beacon: an amber rotating lamp — sweeps round and pulses. Reverse lamps
+      // light when the truck is travelling backwards relative to its facing.
+      if (f.beaconMat) {
+        const on = motion ? (0.35 + 0.65 * Math.abs(Math.sin(now * 4.5 + f.seed * 6.28))) : 0.5;
+        f.beaconMat.emissiveIntensity = 0.25 + on * (0.5 + 0.9 * f.glow);
+        if (f.beacon && motion) f.beacon.rotation.y = now * 5.0;
+      }
+      if (f.lampMat) {
+        // Reverse lamps: on (and blinking, like the reversing alarm) exactly
+        // while the truck is backing up.
+        const blink = motion ? (Math.sin(now * 9) > 0 ? 1 : 0.15) : 1;
+        f.revLamp = approach(f.revLamp || 0, (moving && f.reverse) ? blink : 0, dt, 14);
+        f.lampMat.emissiveIntensity = f.revLamp * 1.6;
+      }
     }
   },
 
