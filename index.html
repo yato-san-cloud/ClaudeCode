@@ -670,168 +670,663 @@ function applySteerRate(car, target, dt){
 function driveReset(){ LAT.slip=0; LAT.scrub=0; LAT.steerRate=0; DTstate.rpm = DT.idle; DTstate.gearNum = 1; DTstate.shiftTimer = 0; DTstate.load = 0; DTstate.slip = 0; }
 
 /* ============================================================================
-   SimAudio — 手続き生成サウンドエンジン（Web Audio API のみ・音声ファイル不使用）
-   4気筒ガソリン車の吸排気を加算合成で再現。RPM/負荷/スリップに実時間追従。
-   モバイルの自動再生制限に対応（初回タップで unlock）。AudioContext 不可なら無音動作。
+   SimAudio v2 — 手続き生成サウンドエンジン（Web Audio API のみ／音声ファイル不使用）
+   ---------------------------------------------------------------------------
+   ・CSP厳格環境でも動く：AudioWorklet/blob URL/外部ファイルを一切使わない。
+     使用ノードは Oscillator(PeriodicWave) / BufferSource / Biquad / WaveShaper /
+     Gain / StereoPanner / Convolver(JS生成IR) / DynamicsCompressor のみ。
+   ・4気筒ガソリン車の吸排気を「点火次数の加算合成＋排気パルスAM＋負荷で開く共鳴LPF
+     ＋ソフトクリップ」で再現。オルガン的にならないよう倍音は位相分散した PeriodicWave
+     を1本の発振器にまとめ、位相ロックさせている（実車の質感の要）。
+   ・全パラメータは setTargetAtTime で補間（ジッパーノイズ皆無）。差分が小さい時は
+     呼び出し自体をスキップして電話でも軽い。
+   ・AudioContext 不可／初期化失敗時は全APIが安全な no-op になる。
+   ---------------------------------------------------------------------------
+   公開API
+     init() start() resume() suspend() reset()
+     setEnabled(on) isEnabled() setMasterVolume(v) setBus(name,v) setQuality(q)
+     setAmbience('off'|'yard'|'street') setDuck(x) setRedline(rpm)
+     update(state)                      ← 毎フレーム1回
+     indicator('L'|'R'|null)  railBell(on)  belt(on)
+     engine.start() engine.stop() engine.rpm engine.state
+     sfx.{gear,handbrake,curb,scrape,crash,brakeSqueal,chime,ok,ng,blip,
+          door,seatbelt,horn,reject,winker}
+   update(state) が受け取るもの（すべて省略可）
+     speed[m/s, 符号付き] rpm load[0..1] slip[0..1] gearNum[AT段数]
+     throttle[0..1] brake[0..1] scrub[0..1] gear['P'|'R'|'N'|'D']
+     handbrake[bool] surface[string] engineOn[bool] wind[0..1]
+   ・rpm 省略時は速度とスロットルから AT 相当の回転を内部推定するので、駆動系が
+     未実装でも成立する。gearNum を渡せば変速ショック音とトルク抜けが付く。
    ========================================================================== */
 const SimAudio = (()=>{
-  let ctx=null, master=null, ready=false, enabled=true, started=false;
-  const N={};                                  // ノード置き場
+  "use strict";
 
-  // ---- ホワイトノイズのバッファ（1度だけ生成して使い回す） ----
-  let noiseBuf=null;
-  function makeNoise(){ if(noiseBuf)return noiseBuf;
-    const len=Math.floor(ctx.sampleRate*2), b=ctx.createBuffer(1,len,ctx.sampleRate), d=b.getChannelData(0);
-    for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
-    noiseBuf=b; return b; }
-  function noiseSrc(){ const s=ctx.createBufferSource(); s.buffer=makeNoise(); s.loop=true; return s; }
-  const now=()=>ctx.currentTime;
-  // パラメータは必ずランプで動かす（ジッパーノイズ防止）
-  function ramp(p,v,t=0.05){ try{ p.setTargetAtTime(v, now(), Math.max(0.005,t/3)); }catch(_){ try{p.value=v;}catch(__){}} }
+  /* ---------------- 内部状態 ---------------- */
+  let AX=null, ready=false, enabled=true, started=false, quality='high';
+  let master=null, comp=null, cabinSend=null;
+  let vol=0.85, duck=1, ambience='yard';
+  const BUS={};                       // engine / road / wind / world / ui / ambient
+  const E={}, R={}, WD={}, AM={};     // 各サブシステムのノード置き場
+  let nzA=null, nzB=null, nzBrown=null;
+  let voices=0; const MAXV=18;
+  const now=()=>AX.currentTime;
+  const fin=v=>(typeof v==='number'&&isFinite(v))?v:0;
+  const cl=(v,a,b)=>v<a?a:v>b?b:v;
 
-  /* ---------------- 初期化（初回ユーザー操作で呼ぶ） ---------------- */
+  /* パラメータ補間：差分が無視できるほど小さければ何もしない（毎フレームの節約） */
+  function ramp(p,v,tau){
+    if(!p) return; v=fin(v);
+    const l=p._lv;
+    if(l!==undefined && Math.abs(l-v) <= Math.abs(v)*0.004+1e-4) return;
+    p._lv=v;
+    try{ p.setTargetAtTime(v, AX.currentTime, tau>0.004?tau:0.004); }
+    catch(_){ try{ p.value=v; }catch(__){} }
+  }
+
+  /* ---------------- 素材生成（すべてJS） ---------------- */
+  function whiteBuf(sec,seed){
+    const n=Math.floor(AX.sampleRate*sec), b=AX.createBuffer(1,n,AX.sampleRate), d=b.getChannelData(0);
+    let s=seed||12345;
+    for(let i=0;i<n;i++){ s=(s*1664525+1013904223)|0; d[i]=(s/2147483648); }
+    return b;
+  }
+  function brownBuf(sec){
+    const n=Math.floor(AX.sampleRate*sec), b=AX.createBuffer(1,n,AX.sampleRate), d=b.getChannelData(0);
+    let s=99117, last=0;
+    for(let i=0;i<n;i++){ s=(s*1103515245+12345)|0; const w=s/2147483648;
+      last=(last+0.021*w)/1.021; d[i]=last*7.2; }
+    // ループ継ぎ目のクリック防止（末尾をクロスフェード）
+    const f=Math.floor(AX.sampleRate*0.05);
+    for(let i=0;i<f;i++){ const k=i/f; d[n-f+i]=d[n-f+i]*(1-k)+d[i]*k; }
+    return b;
+  }
+  function loopSrc(buf,rate){
+    const s=AX.createBufferSource(); s.buffer=buf; s.loop=true;
+    if(rate) s.playbackRate.value=rate;
+    return s;
+  }
+  function makeIR(){ // 車室の短い残響（220ms）＋初期反射。畳み込み1本で"車内にいる"感じを出す
+    const sr=AX.sampleRate, n=Math.floor(sr*0.22), b=AX.createBuffer(2,n,sr);
+    for(let ch=0;ch<2;ch++){
+      const d=b.getChannelData(ch); let s=7717+ch*931;
+      for(let i=0;i<n;i++){ s=(s*1664525+1013904223)|0; const t=i/n;
+        d[i]=(s/2147483648)*Math.pow(1-t,3.4)*0.5; }
+      for(const er of [[2.9,0.55],[5.3,0.4],[8.9,0.27],[13.1,0.19],[19.7,0.11]]){
+        const k=Math.floor(sr*er[0]/1000)+ch*11; if(k<n) d[k]+=er[1]*(ch?-1:1);
+      }
+    }
+    return b;
+  }
+  /* ソフトクリップ。左右非対称にしてあるのが肝：完全対称な tanh は偶数次倍音を打ち消して
+     しまい、4気筒特有の2次（点火の倍）成分が消えて“合成くさい”音になる。実際の排気圧も
+     片側に偏った波形なので、バイアスを与えて偶数次を残す（生じるDCは後段のHPFで除去）。 */
+  function softCurve(k){
+    const n=1024, c=new Float32Array(n), b=0.18, d=Math.tanh(k*(1+b));
+    for(let i=0;i<n;i++){ const x=i*2/(n-1)-1; c[i]=(Math.tanh(k*(x+b))-Math.tanh(k*b))/d; }
+    return c;
+  }
+  /* 位相を分散させた倍音列＝1本の発振器で"録音した機械音"の質感を出す */
+  function pWave(n,amp){
+    const re=new Float32Array(n+1), im=new Float32Array(n+1);
+    for(let i=1;i<=n;i++){ const a=amp(i), ph=(i*i*0.73+i*1.37)%(Math.PI*2);
+      re[i]=a*Math.cos(ph); im[i]=a*Math.sin(ph); }
+    try{ return AX.createPeriodicWave(re,im,{disableNormalization:false}); }
+    catch(_){ return AX.createPeriodicWave(re,im); }
+  }
+  function panner(){ // 旧Safari対策
+    if(AX.createStereoPanner) return AX.createStereoPanner();
+    const g=AX.createGain(); g.pan={value:0,setTargetAtTime(){},linearRampToValueAtTime(){},setValueAtTime(){}}; return g;
+  }
+
+  /* ---------------- 初期化 ---------------- */
+  function autoQuality(){
+    const ua=(navigator.userAgent||''), mob=/Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    const cores=navigator.hardwareConcurrency||4;
+    return (mob&&cores<=4)?'low':'high';
+  }
   function init(){
-    if(ready||!enabled) return ready;
-    const AC = window.AudioContext||window.webkitAudioContext;
-    if(!AC) { enabled=false; return false; }                 // 非対応環境は静かに無効化
-    try{ ctx=new AC(); }catch(_){ enabled=false; return false; }
-    master=ctx.createGain(); master.gain.value=0.0; master.connect(ctx.destination);
+    if(ready) return true;
+    if(!enabled) return false;
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC){ enabled=false; return false; }
+    try{ AX=new AC({latencyHint:'interactive'}); }
+    catch(_){ try{ AX=new AC(); }catch(__){ enabled=false; return false; } }
+    try{
+      quality=autoQuality();
+      // iOS：ジェスチャ内で無音バッファを1発鳴らしてアンロック
+      try{ const s=AX.createBufferSource(); s.buffer=AX.createBuffer(1,1,AX.sampleRate); s.connect(AX.destination); s.start(0); }catch(_){}
 
-    /* === エンジン === 4気筒＝2次の点火。基音＋倍音を加算し、負荷でローパスを開く。
-       rpm→周波数: f = rpm/60 * (気筒数/2) = rpm/60*2 */
-    const eg=ctx.createGain(); eg.gain.value=0;              // エンジン全体
-    const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700; lp.Q.value=0.7;
-    eg.connect(lp); lp.connect(master);
-    // 倍音列（次数, 音量, 波形）— 実車の粗さを出すため奇数次と1.5次(不等間隔感)を混ぜる
-    const HARM=[[0.5,0.55,'sine'],[1,1.0,'sawtooth'],[1.5,0.28,'square'],[2,0.5,'sawtooth'],[3,0.22,'square'],[4,0.12,'sawtooth']];
-    N.osc=HARM.map(([mult,amp,type])=>{
-      const o=ctx.createOscillator(); o.type=type;
-      const g=ctx.createGain(); g.gain.value=amp;
-      const d=ctx.createOscillator(); d.type='sine'; d.frequency.value=0.6+Math.random()*1.4;  // 微小デチューン＝機械的な揺らぎ
-      const dg=ctx.createGain(); dg.gain.value=1.2; d.connect(dg); dg.connect(o.detune); d.start();
-      o.connect(g); g.connect(eg); o.start();
-      return {o,g,mult,amp};
-    });
-    // 排気のバルブノイズ（負荷が高いほど混ざる）
-    const en=noiseSrc(), enf=ctx.createBiquadFilter(); enf.type='bandpass'; enf.frequency.value=180; enf.Q.value=1.1;
-    const eng=ctx.createGain(); eng.gain.value=0; en.connect(enf); enf.connect(eng); eng.connect(eg); en.start();
-    N.engine={eg,lp,eng,enf};
+      master=AX.createGain(); master.gain.value=0.0001;
+      comp=AX.createDynamicsCompressor();
+      comp.threshold.value=-8; comp.knee.value=8; comp.ratio.value=9;
+      comp.attack.value=0.004; comp.release.value=0.13;
+      comp.connect(master); master.connect(AX.destination);
 
-    /* === タイヤ（転がり）=== 速度でバンドパスとゲインが上がる */
-    const tn=noiseSrc(), tf=ctx.createBiquadFilter(); tf.type='bandpass'; tf.frequency.value=420; tf.Q.value=0.8;
-    const tg=ctx.createGain(); tg.gain.value=0; tn.connect(tf); tf.connect(tg); tg.connect(master); tn.start();
-    N.tyre={tg,tf};
+      if(quality!=='low'){
+        const cv=AX.createConvolver(); cv.buffer=makeIR(); cv.normalize=true;
+        cabinSend=AX.createGain(); cabinSend.gain.value=0.16;
+        cabinSend.connect(cv); cv.connect(comp);
+      }
+      for(const k of ['engine','road','wind','world','ui','ambient']){
+        const g=AX.createGain(); g.gain.value=1; g.connect(comp);
+        if(cabinSend && (k==='engine'||k==='road'||k==='world')) g.connect(cabinSend);
+        BUS[k]=g;
+      }
+      BUS.ambient.gain.value=0.9;
 
-    /* === スキール（スリップ）=== 高めのピークで擦れ音 */
-    const sn=noiseSrc(), sf=ctx.createBiquadFilter(); sf.type='bandpass'; sf.frequency.value=1500; sf.Q.value=6;
-    const sg=ctx.createGain(); sg.gain.value=0; sn.connect(sf); sf.connect(sg); sg.connect(master); sn.start();
-    N.slip={sg,sf};
+      nzA=whiteBuf(2.0,20250725); nzB=whiteBuf(2.3,777001); nzBrown=brownBuf(3.0);
+      buildEngine(); buildRoad(); buildWind(); buildAmbient();
 
-    /* === 風切り === 速度で開くハイパス */
-    const wn=noiseSrc(), wf=ctx.createBiquadFilter(); wf.type='highpass'; wf.frequency.value=600;
-    const wg=ctx.createGain(); wg.gain.value=0; wn.connect(wf); wf.connect(wg); wg.connect(master); wn.start();
-    N.wind={wg,wf};
-
-    /* === 環境音（遠くの交通＋小鳥）=== 常時薄く鳴らして"屋外"の空気感 */
-    const an=noiseSrc(), af=ctx.createBiquadFilter(); af.type='lowpass'; af.frequency.value=350;
-    const ag=ctx.createGain(); ag.gain.value=0.012; an.connect(af); af.connect(ag); ag.connect(master); an.start();
-    N.amb={ag};
-    scheduleBird();
-
-    ready=true;
-    ramp(master.gain, 0.9, 0.4);
-    return true;
+      ready=true;
+      ramp(master.gain, vol*duck, 0.25);
+      bindLifecycle();
+      return true;
+    }catch(err){
+      try{ AX.close(); }catch(_){}
+      AX=null; ready=false; enabled=false; return false;
+    }
   }
-  // 起動シーケンス（セル→アイドル）
-  function start(){ if(!ready||started)return; started=true; crank(); }
+  function bindLifecycle(){
+    try{
+      document.addEventListener('visibilitychange',()=>{
+        if(!ready) return;
+        if(document.hidden){ try{AX.suspend();}catch(_){} }
+        else if(enabled){ try{AX.resume();}catch(_){} }
+      });
+    }catch(_){}
+  }
 
-  /* ---------------- 単発音（すべて合成） ---------------- */
-  function ping(freq,dur,type,vol,sweepTo){
-    if(!ready)return; const o=ctx.createOscillator(), g=ctx.createGain();
-    o.type=type||'sine'; o.frequency.setValueAtTime(freq, now());
-    if(sweepTo) o.frequency.exponentialRampToValueAtTime(Math.max(20,sweepTo), now()+dur);
-    g.gain.setValueAtTime(0.0001, now());
-    g.gain.exponentialRampToValueAtTime(vol||0.2, now()+Math.min(0.02,dur*0.2));
-    g.gain.exponentialRampToValueAtTime(0.0001, now()+dur);
-    o.connect(g); g.connect(master); o.start(); o.stop(now()+dur+0.02);
+  /* ============================================================
+     エンジン
+     f0（点火周波数）= rpm/60 * (気筒数/2) = rpm/30   ※4気筒4サイクル
+     層1 低次(f0/2)  : クランク1次のうねり＝アイドルのドコドコ
+     層2 本体(f0)    : 排気の主成分（穏やか）
+     層3 荒れ(f0)    : 高負荷/高回転で混ぜる歪んだ倍音
+     層4 排気ノイズ  : バンドパスノイズを点火パルスでAM＝"ボボボ"の粒立ち
+     層5 メカ音      : ギヤ/補機のうなり（Rでは強調＝実車のATの逆転音）
+     出力段          : プリゲイン(負荷)→ソフトクリップ→共鳴LPF→胴鳴りピーク
+     ============================================================ */
+  function buildEngine(){
+    const mix=AX.createGain(); mix.gain.value=1;
+    const drive=AX.createGain(); drive.gain.value=1;
+    const sh=AX.createWaveShaper(); sh.curve=softCurve(2.1); sh.oversample=(quality==='low')?'none':'2x';
+    const lp=AX.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=480; lp.Q.value=1.0;
+    const bp=AX.createBiquadFilter(); bp.type='peaking'; bp.frequency.value=140; bp.Q.value=1.1; bp.gain.value=6;
+    const hp=AX.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=42;
+    const out=AX.createGain(); out.gain.value=0.0001;
+    mix.connect(drive); drive.connect(sh); sh.connect(lp); lp.connect(bp); bp.connect(hp); hp.connect(out); out.connect(BUS.engine);
+
+    const WLOW =pWave(12,i=>(i%2?1:0.42)/Math.pow(i,1.15));
+    const WMID =pWave(20,i=>(1/Math.pow(i,0.95))*(i===2?1.30:i===3?0.60:i===4?0.92:1));
+    const WHAR =pWave(26,i=>(1/Math.pow(i,0.60))*(i%2?1:0.78));
+    const WPUL =pWave(10,i=>1/Math.pow(i,0.28));
+
+    const mk=(w,g0)=>{ const o=AX.createOscillator(); o.setPeriodicWave(w); o.frequency.value=24;
+                       const g=AX.createGain(); g.gain.value=g0; o.connect(g); g.connect(mix); o.start(); return {o,g}; };
+    const low=mk(WLOW,0.5), mid=mk(WMID,0.5), har=mk(WHAR,0.0);
+
+    // 機械的な揺らぎ（アイドルの不安定さ）— 非整数比の2本で"ランダムに聞こえる"周期
+    const w1=AX.createOscillator(); w1.type='sine'; w1.frequency.value=5.7;
+    const w2=AX.createOscillator(); w2.type='sine'; w2.frequency.value=1.31;
+    const wg=AX.createGain(); wg.gain.value=6;
+    w1.connect(wg); w2.connect(wg);
+    wg.connect(low.o.detune); wg.connect(mid.o.detune); wg.connect(har.o.detune);
+    w1.start(); w2.start();
+
+    // 排気ノイズ（点火パルスでAM）
+    const en=loopSrc(nzB,1), ef=AX.createBiquadFilter(); ef.type='bandpass'; ef.frequency.value=200; ef.Q.value=0.9;
+    const eg=AX.createGain(); eg.gain.value=0.05;
+    en.connect(ef); ef.connect(eg); eg.connect(mix); en.start();
+    const pul=AX.createOscillator(); pul.setPeriodicWave(WPUL); pul.frequency.value=24;
+    const pd=AX.createGain(); pd.gain.value=0.05; pul.connect(pd); pd.connect(eg.gain);
+    const pd2=AX.createGain(); pd2.gain.value=0.10; pul.connect(pd2); pd2.connect(mid.g.gain); // 本体にもチャフ感
+    pul.start();
+
+    // メカ音（ギヤうなり）
+    const wh=AX.createOscillator(); wh.type='triangle'; wh.frequency.value=300;
+    const whf=AX.createBiquadFilter(); whf.type='bandpass'; whf.frequency.value=900; whf.Q.value=3.5;
+    const whg=AX.createGain(); whg.gain.value=0.0001;
+    wh.connect(whf); whf.connect(whg); whg.connect(mix); wh.start();
+
+    Object.assign(E,{mix,drive,sh,lp,bp,out,low,mid,har,ef,eg,pul,pd,pd2,wh,whg,wg,
+      state:'off', tState:0});
   }
-  function burst(dur,vol,f,q,type){
-    if(!ready)return; const s=noiseSrc(), b=ctx.createBiquadFilter(), g=ctx.createGain();
-    b.type=type||'bandpass'; b.frequency.value=f||800; b.Q.value=q||1;
-    g.gain.setValueAtTime(vol||0.3, now());
-    g.gain.exponentialRampToValueAtTime(0.0001, now()+dur);
-    s.connect(b); b.connect(g); g.connect(master); s.start(); s.stop(now()+dur+0.02);
+
+  /* 始動：セルモーター（うなり＋圧縮の脈動）→初爆→ファーストアイドル */
+  function engineStart(){
+    if(!ready||E.state==='cranking'||E.state==='run') return;
+    E.state='cranking'; E.tState=now(); started=true;
+    const t=now(), dur=0.95;
+    // セルのうなり
+    const o=AX.createOscillator(); o.type='sawtooth';
+    o.frequency.setValueAtTime(1250,t); o.frequency.linearRampToValueAtTime(1520,t+0.5); o.frequency.linearRampToValueAtTime(1180,t+dur);
+    const bf=AX.createBiquadFilter(); bf.type='bandpass'; bf.frequency.value=1400; bf.Q.value=5;
+    const g=AX.createGain(); g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(0.05,t+0.06); g.gain.setTargetAtTime(0.0001,t+dur-0.12,0.05);
+    o.connect(bf); bf.connect(g); g.connect(BUS.engine); o.start(t); o.stop(t+dur+0.1);
+    // 圧縮の脈動（クランキング＝約250rpm→8.3Hz）
+    const n=loopSrc(nzA,1), nf=AX.createBiquadFilter(); nf.type='lowpass'; nf.frequency.value=420;
+    const ng2=AX.createGain(); ng2.gain.setValueAtTime(0.06,t);
+    const lfo=AX.createOscillator(); lfo.type='sine'; lfo.frequency.value=8.3;
+    const ld=AX.createGain(); ld.gain.value=0.055; lfo.connect(ld); ld.connect(ng2.gain);
+    n.connect(nf); nf.connect(ng2); ng2.connect(BUS.engine);
+    ng2.gain.setTargetAtTime(0.0001,t+dur-0.2,0.06);
+    n.start(t); lfo.start(t); n.stop(t+dur+0.1); lfo.stop(t+dur+0.1);
+    // 状態遷移は必ず「音声クロック」で進める。setTimeout はタブが非アクティブだと
+    // 間引かれ、セルが回りっぱなしで始動しない事故になる。
   }
-  function crank(){ // セルモーター→初爆
-    if(!ready)return; const o=ctx.createOscillator(), g=ctx.createGain();
-    o.type='square'; o.frequency.setValueAtTime(38, now());
-    g.gain.setValueAtTime(0.12, now()); g.gain.setTargetAtTime(0.0001, now()+0.75, 0.12);
-    o.connect(g); g.connect(master); o.start(); o.stop(now()+1.1);
-    burst(0.25,0.25,300,0.8);                                  // 初爆
+  function engineStop(){
+    if(!ready||E.state==='off'||E.state==='stopping') return;
+    E.state='stopping'; E.tState=now(); started=false;
+    noiseHit(0.09,0.10,'lowpass',260,0.7,BUS.engine,0.62);   // 停止時のカタン
   }
-  const S={
-    winker(){ ping(1650,0.035,'square',0.10); setTimeout(()=>ping(1150,0.05,'square',0.075),55); }, // リレーのカチッ
-    gear(){ burst(0.07,0.22,190,2.0); ping(95,0.09,'sine',0.09); },                                  // シフトのゴトッ
-    handbrake(){ for(let i=0;i<7;i++) setTimeout(()=>burst(0.02,0.14,1250,4),i*42); },                // ラチェット
-    curb(){ burst(0.16,0.55,260,0.7); ping(70,0.16,'sawtooth',0.22,45); },                            // 脱輪・縁石ヒット
-    crash(){ burst(0.42,0.8,180,0.4,'lowpass'); ping(58,0.4,'sawtooth',0.32,30); },                   // 衝突
-    brakeSqueal(){ ping(2300,0.35,'sine',0.045,2050); },                                              // 低速時の鳴き
-    chime(){ ping(880,0.16,'sine',0.14); setTimeout(()=>ping(660,0.22,'sine',0.12),190); },           // 警告チャイム
-    ok(){ ping(880,0.1,'sine',0.13); setTimeout(()=>ping(1320,0.16,'sine',0.12),110); },              // 成功
-    ng(){ ping(320,0.18,'square',0.13); setTimeout(()=>ping(200,0.3,'square',0.12),150); },           // 失敗
+
+  /* ============================================================
+     路面（タイヤ）
+     ============================================================ */
+  const SURF={
+    asphalt :{roll:1.00,f:1.00,grit:0.00,sq:1.00},
+    concrete:{roll:1.12,f:1.18,grit:0.06,sq:1.15},
+    crossing:{roll:1.20,f:1.10,grit:0.10,sq:0.9 },
+    rail    :{roll:1.35,f:0.95,grit:0.18,sq:0.7 },
+    gravel  :{roll:1.55,f:1.30,grit:1.00,sq:0.35},
+    grass   :{roll:0.85,f:0.55,grit:0.55,sq:0.20},
+    wet     :{roll:1.30,f:1.45,grit:0.12,sq:0.55}
   };
-  function scheduleBird(){ // 環境：たまに鳥の声（屋外らしさ）
-    if(!ready&&!ctx) return;
-    const t=4000+Math.random()*11000;
-    setTimeout(()=>{ if(ready&&enabled&&ctx.state==='running'){
-        const f=2300+Math.random()*900;
-        ping(f,0.07,'sine',0.035,f*1.35);
-        setTimeout(()=>ping(f*1.1,0.06,'sine',0.028,f*0.85),95);
-      } scheduleBird(); }, t);
+  function buildRoad(){
+    // 転がり音：速度でバンドパスが上がり、トレッドブロックのAMで粒立ちを出す
+    const rn=loopSrc(nzA,1);
+    const rf=AX.createBiquadFilter(); rf.type='bandpass'; rf.frequency.value=260; rf.Q.value=0.7;
+    const rl=AX.createBiquadFilter(); rl.type='lowpass';  rl.frequency.value=1400;
+    const rg=AX.createGain(); rg.gain.value=0.0001;
+    rn.connect(rf); rf.connect(rl); rl.connect(rg); rg.connect(BUS.road); rn.start();
+    const tre=AX.createOscillator(); tre.type='sine'; tre.frequency.value=4;
+    const trd=AX.createGain(); trd.gain.value=0.0001; tre.connect(trd); trd.connect(rg.gain); tre.start();
+    // 砂利・草
+    const gn=loopSrc(nzB,0.85);
+    const gf=AX.createBiquadFilter(); gf.type='highpass'; gf.frequency.value=1800;
+    const gg=AX.createGain(); gg.gain.value=0.0001;
+    gn.connect(gf); gf.connect(gg); gg.connect(BUS.road); gn.start();
+    // 据え切り（スクラブ）：低くザリッとした擦れ
+    const sn=loopSrc(nzB,1.07);
+    const sf=AX.createBiquadFilter(); sf.type='bandpass'; sf.frequency.value=320; sf.Q.value=2.4;
+    const sg=AX.createGain(); sg.gain.value=0.0001;
+    sn.connect(sf); sf.connect(sg); sg.connect(BUS.road); sn.start();
+    // スキール：高Qノイズ＋ビブラート付き倍音（純ノイズだけでは"鳴き"にならない）
+    const qn=loopSrc(nzA,1.19);
+    const q1=AX.createBiquadFilter(); q1.type='bandpass'; q1.frequency.value=1250; q1.Q.value=13;
+    const q2=AX.createBiquadFilter(); q2.type='bandpass'; q2.frequency.value=2600; q2.Q.value=9;
+    const qg=AX.createGain(); qg.gain.value=0.0001;
+    qn.connect(q1); q1.connect(q2); q2.connect(qg); qg.connect(BUS.road); qn.start();
+    const qo=AX.createOscillator(); qo.type='sawtooth'; qo.frequency.value=1100;
+    const qog=AX.createGain(); qog.gain.value=0.16; qo.connect(qog); qog.connect(q1); qo.start();
+    const vib=AX.createOscillator(); vib.type='sine'; vib.frequency.value=7.3;
+    const vibg=AX.createGain(); vibg.gain.value=45; vib.connect(vibg); vibg.connect(qo.frequency); vib.start();
+    // ブレーキ鳴き（低速時に薄く出入りする常設層）
+    const bn=loopSrc(nzB,0.93);
+    const bf2=AX.createBiquadFilter(); bf2.type='bandpass'; bf2.frequency.value=3000; bf2.Q.value=20;
+    const bg=AX.createGain(); bg.gain.value=0.0001;
+    bn.connect(bf2); bf2.connect(bg); bg.connect(BUS.road); bn.start();
+    Object.assign(R,{rf,rl,rg,tre,trd,gg,gf,sf,sg,q1,qg,qo,bf2,bg,squealSeed:0});
   }
 
-  /* ---------------- 毎フレーム更新（60fps・軽量） ---------------- */
-  let prevGear=null, lastSqueal=0;
+  /* 風切り＋バフェット */
+  function buildWind(){
+    const n=loopSrc(nzBrown,1);
+    const hp=AX.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=500;
+    const pk=AX.createBiquadFilter(); pk.type='peaking'; pk.frequency.value=1200; pk.Q.value=0.8; pk.gain.value=4;
+    const g=AX.createGain(); g.gain.value=0.0001;
+    n.connect(hp); hp.connect(pk); pk.connect(g); g.connect(BUS.wind); n.start();
+    const b=loopSrc(nzBrown,0.61);
+    const bl=AX.createBiquadFilter(); bl.type='lowpass'; bl.frequency.value=190;
+    const bg=AX.createGain(); bg.gain.value=0.0001;
+    b.connect(bl); bl.connect(bg); bg.connect(BUS.wind); b.start();
+    const lfo=AX.createOscillator(); lfo.type='sine'; lfo.frequency.value=0.37;
+    const ld=AX.createGain(); ld.gain.value=0.004; lfo.connect(ld); ld.connect(bg.gain); lfo.start();
+    Object.assign(WD,{hp,g,bg});
+  }
+
+  /* 環境音：遠くの交通のベッド＋小鳥＋通過車（音声クロックでスケジュール） */
+  function buildAmbient(){
+    const n=loopSrc(nzBrown,0.5);
+    const lp=AX.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=320;
+    const g=AX.createGain(); g.gain.value=0.0001;
+    n.connect(lp); lp.connect(g); g.connect(BUS.ambient); n.start();
+    const lfo=AX.createOscillator(); lfo.type='sine'; lfo.frequency.value=0.055;
+    const ld=AX.createGain(); ld.gain.value=0.006; lfo.connect(ld); ld.connect(g.gain); lfo.start();
+    Object.assign(AM,{g,lp,birdAt:0,carAt:0});
+  }
+
+  /* ---------------- 単発音プリミティブ（発声数を上限で保護） ---------------- */
+  function voice(){ if(voices>=MAXV) return false; voices++; return true; }
+  function freeV(){ voices--; }
+  function tone(f,dur,type,v,to,dest,at){
+    if(!ready||!voice()) return;
+    const t=now()+(at||0), o=AX.createOscillator(), g=AX.createGain();
+    o.type=type||'sine'; f=cl(fin(f),8,18000);
+    o.frequency.setValueAtTime(f,t);
+    if(to) o.frequency.exponentialRampToValueAtTime(cl(fin(to),8,18000),t+dur);
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002,v||0.2),t+Math.min(0.015,dur*0.25));
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(dest||BUS.ui); o.start(t); o.stop(t+dur+0.03);
+    o.onended=freeV;
+  }
+  function noiseHit(dur,v,type,f,q,dest,at,sweepTo){
+    if(!ready||!voice()) return;
+    const t=now()+(at||0), s=AX.createBufferSource(); s.buffer=(Math.random()<0.5?nzA:nzB);
+    s.playbackRate.value=0.8+Math.random()*0.4;
+    const b=AX.createBiquadFilter(); b.type=type||'bandpass';
+    b.frequency.setValueAtTime(cl(fin(f)||800,20,18000),t);
+    if(sweepTo) b.frequency.exponentialRampToValueAtTime(cl(fin(sweepTo),20,18000),t+dur);
+    b.Q.value=q||1;
+    const g=AX.createGain();
+    g.gain.setValueAtTime(0.0001,t);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002,v||0.3),t+Math.min(0.008,dur*0.2));
+    g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    s.connect(b); b.connect(g); g.connect(dest||BUS.world);
+    const off=Math.random()*1.5;
+    try{ s.start(t,off,dur+0.05); }catch(_){ s.start(t); s.stop(t+dur+0.05); }
+    s.onended=freeV;
+  }
+
+  /* ---------------- 効果音ライブラリ ---------------- */
+  function relayClick(on){                      // ウインカーのリレー
+    if(on){ noiseHit(0.012,0.16,'bandpass',2600,1.4,BUS.ui); tone(1780,0.022,'square',0.055,1500,BUS.ui,0.004); }
+    else  { noiseHit(0.010,0.11,'bandpass',1750,1.6,BUS.ui); tone(1180,0.020,'square',0.038,980,BUS.ui,0.004); }
+  }
+  function gearClunk(from,to){                  // セレクターのゴトッ（P入れはパーキングポールのラチェット付き）
+    noiseHit(0.055,0.20,'lowpass',360,0.8,BUS.world);
+    tone(88,0.10,'sine',0.10,62,BUS.world);
+    noiseHit(0.008,0.10,'bandpass',2300,2.2,BUS.world,0.012);
+    if(to==='P'){ for(let i=0;i<3;i++) noiseHit(0.012,0.09,'bandpass',1500+i*140,3,BUS.world,0.05+i*0.035); }
+    if(from==='P'&&to==='R') noiseHit(0.05,0.09,'lowpass',300,0.7,BUS.world,0.05);
+  }
+  function ratchet(set){                        // サイドブレーキ
+    if(set){
+      for(let i=0;i<7;i++) noiseHit(0.016,0.13,'bandpass',1180+i*55,4.5,BUS.world,i*0.043);
+      noiseHit(0.16,0.05,'bandpass',420,1.2,BUS.world,0.02,760);      // レバーの軋み
+    }else{
+      noiseHit(0.018,0.14,'bandpass',1450,4,BUS.world);
+      noiseHit(0.22,0.07,'highpass',900,0.7,BUS.world,0.03,2400);     // ケーブルが戻る音
+      tone(120,0.09,'sine',0.05,80,BUS.world,0.02);
+    }
+  }
+  function curbHit(I){                          // 脱輪・縁石ヒット
+    I=cl(fin(I)||1,0.2,1.5);
+    tone(78,0.16,'sine',0.20*I,40,BUS.world);
+    noiseHit(0.10,0.34*I,'lowpass',320,0.8,BUS.world);
+    noiseHit(0.055,0.16*I,'bandpass',1100,1.6,BUS.world,0.01);
+    if(I>0.7) noiseHit(0.26,0.10*I,'bandpass',900,2.6,BUS.world,0.05,520);
+  }
+  function scrape(I){ noiseHit(0.30,0.10*cl(fin(I)||1,0.2,1.4),'bandpass',760,3.2,BUS.world,0,1250); }
+  function crash(sev){                          // 衝突
+    sev=cl(fin(sev)||1,0.25,1.5);
+    noiseHit(0.42,0.42*sev,'lowpass',240,0.5,BUS.world);
+    tone(58,0.40,'sawtooth',0.26*sev,28,BUS.world);
+    for(let i=0;i<3;i++) noiseHit(0.11+Math.random()*0.1,0.20*sev,'bandpass',600+Math.random()*1900,2.4,BUS.world,Math.random()*0.07);
+    if(sev>0.6) for(let i=0;i<5;i++) tone(2600+Math.random()*2600,0.06,'sine',0.035*sev,undefined,BUS.world,0.05+Math.random()*0.25);
+  }
+  function shiftJolt(up){                        // ATの変速ショック（セレクター音より軽い）
+    noiseHit(0.045,0.09,'lowpass',230,0.7,BUS.world);
+    tone(64,0.07,'sine',0.045,46,BUS.world);
+    if(!up) noiseHit(0.03,0.045,'bandpass',700,1.6,BUS.world,0.012);
+  }
+  function chime2(){ tone(880,0.20,'sine',0.11,undefined,BUS.ui); tone(660,0.28,'sine',0.10,undefined,BUS.ui,0.19); }
+  function horn(dur){
+    dur=dur||0.5;
+    const mk=f=>{ if(!voice())return; const t=now(), o=AX.createOscillator(), g=AX.createGain();
+      o.type='sawtooth'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.075,t+0.018);
+      g.gain.setValueAtTime(0.075,t+dur-0.05); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+      const b=AX.createBiquadFilter(); b.type='lowpass'; b.frequency.value=2400;
+      o.connect(b); b.connect(g); g.connect(BUS.world); o.start(t); o.stop(t+dur+0.03); o.onended=freeV; };
+    mk(440); mk(554.4);
+  }
+  function bellStrike(hi){                       // 踏切の警報機
+    const f=hi?1180:980;
+    for(const m of [1,2.76,5.4]) tone(f*m,0.42/m,'sine',(hi?0.075:0.07)/m,undefined,BUS.world);
+    noiseHit(0.02,0.05,'bandpass',f*2,3,BUS.world);
+  }
+  const SFX={
+    winker(){ relayClick(true); },
+    gear(from,to){ gearClunk(from,to); },
+    handbrake(set){ ratchet(set===undefined?true:!!set); },
+    reject(){ noiseHit(0.07,0.16,'lowpass',180,0.6,BUS.world); tone(70,0.09,'sine',0.07,50,BUS.world); },
+    curb(I){ curbHit(I); },
+    scrape,
+    crash,
+    brakeSqueal(){ tone(2600,0.32,'sine',0.035,2150,BUS.road); },
+    chime:chime2,
+    door(open){ noiseHit(0.05,0.22,'bandpass',900,1.2,BUS.world); tone(110,0.12,'sine',0.10,70,BUS.world,0.01);
+                if(!open) noiseHit(0.09,0.12,'lowpass',260,0.7,BUS.world,0.03); },
+    seatbelt(){ noiseHit(0.10,0.10,'highpass',1800,0.8,BUS.world,0,3200); noiseHit(0.02,0.20,'bandpass',2100,2.4,BUS.world,0.13); },
+    horn,
+    blip(){ tone(1320,0.05,'sine',0.07,undefined,BUS.ui); },
+    ok(){ tone(880,0.10,'sine',0.11,undefined,BUS.ui); tone(1320,0.17,'sine',0.10,undefined,BUS.ui,0.10); },
+    ng(){ tone(320,0.18,'square',0.11,undefined,BUS.ui); tone(200,0.30,'square',0.10,undefined,BUS.ui,0.15); }
+  };
+
+  /* ---------------- 反復音（音声クロックでスケジュール） ---------------- */
+  let indSide=null, indNext=0, indOn=false, onIndTick=null;
+  let bellOn=false, bellNext=0, bellHi=false;
+  let beltOn=false, beltNext=0;
+  function indicator(side){
+    side=side||null;
+    if(side===indSide) return;
+    indSide=side; indOn=false;
+    if(ready&&side){ indNext=now(); }
+  }
+  function railBell(on){ bellOn=!!on; if(ready&&on) bellNext=now(); }
+  function belt(on){ beltOn=!!on; if(ready&&on) beltNext=now(); }
+  function pumpTimers(){
+    const t=now();
+    if(indSide){
+      if(indNext<t-1.5) indNext=t;
+      while(indNext<=t){ indOn=!indOn; relayClick(indOn); if(onIndTick) try{onIndTick(indOn);}catch(_){}
+        indNext+=indOn?0.36:0.34; }
+    }
+    if(bellOn){ if(bellNext<t-1.5) bellNext=t;
+      while(bellNext<=t){ bellHi=!bellHi; bellStrike(bellHi); bellNext+=0.29; } }
+    if(beltOn){ if(beltNext<t-3) beltNext=t;
+      while(beltNext<=t){ tone(1046,0.12,'sine',0.075,undefined,BUS.ui); beltNext+=0.85; } }
+  }
+
+  /* ---------------- 環境音のスケジュール ---------------- */
+  function pumpAmbient(){
+    if(ambience==='off') return;
+    const t=now();
+    if(t>AM.birdAt){
+      AM.birdAt=t+(ambience==='yard'?4+Math.random()*10:9+Math.random()*18);
+      const f=2200+Math.random()*1100, n=2+((Math.random()*3)|0);
+      for(let i=0;i<n;i++){
+        const ff=f*(0.9+Math.random()*0.3);
+        tone(ff,0.055+Math.random()*0.04,'sine',0.028,ff*(Math.random()<0.5?1.4:0.72),BUS.ambient,i*0.11);
+      }
+    }
+    if(ambience==='street'&&t>AM.carAt){
+      AM.carAt=t+5+Math.random()*11;
+      if(!voice()) return;
+      const s=loopSrc(nzBrown,0.8+Math.random()*0.5);
+      const b=AX.createBiquadFilter(); b.type='bandpass'; b.frequency.value=300; b.Q.value=0.9;
+      const g=AX.createGain(), p=panner();
+      const d=1.6+Math.random()*0.8, dir=Math.random()<0.5?1:-1;
+      g.gain.setValueAtTime(0.0001,t);
+      g.gain.exponentialRampToValueAtTime(0.035,t+d*0.45);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+      b.frequency.setValueAtTime(240,t); b.frequency.linearRampToValueAtTime(620,t+d*0.5); b.frequency.linearRampToValueAtTime(200,t+d);
+      try{ p.pan.setValueAtTime(-dir,t); p.pan.linearRampToValueAtTime(dir,t+d); }catch(_){}
+      s.connect(b); b.connect(g); g.connect(p); p.connect(BUS.ambient);
+      s.start(t); s.stop(t+d+0.05); s.onended=freeV;
+    }
+  }
+
+  /* ============================================================
+     毎フレーム更新
+     ============================================================ */
+  let prevGear=null, prevGearNum=null, frame=0, lastT=0, rpmS=700, burbleAt=0, cutUntil=0, REDLINE=6500;
+  function fakeRpm(st){
+    // パワートレイン未実装時の暫定AT：トルコンの滑り（停止付近で回転が先に上がる）を模す
+    const sp=Math.abs(fin(st.speed)), thr=cl(fin(st.throttle),0,1), drive=(st.gear==='D'||st.gear==='R');
+    if(!drive) return 720+thr*3400;
+    const stall=sp<3?(1-sp/3):0;                       // 0..1（低速ほど滑る）
+    return 720+thr*(1150+2500*stall)+sp*(st.gear==='R'?260:150);
+  }
   function update(st){
-    if(!ready||!enabled||ctx.state!=='running') return;
-    const rpm=clampN(st.rpm||750,500,7000), speed=Math.abs(st.speed||0),
-          load=clampN(st.load||0,0,1), slip=clampN(st.slip||0,0,1);
-    // エンジン：基本周波数＝rpm/60*2（4気筒2次）
-    const f0=rpm/60*2;
-    for(const h of N.osc){ ramp(h.o.frequency, f0*h.mult, 0.045); }
-    // 音量：アイドルでも存在感、負荷/回転で増加
-    const evol=0.055+0.16*load+0.055*Math.min(1,(rpm-600)/5200);
-    ramp(N.engine.eg.gain, evol, 0.07);
-    // ローパス：負荷と回転で開く＝「踏むと抜けの良い音」
-    ramp(N.engine.lp.frequency, 380+2100*load+rpm*0.12, 0.07);
-    ramp(N.engine.eng.gain, 0.02+0.075*load, 0.09);            // 排気ノイズ
-    ramp(N.engine.enf.frequency, 120+f0*0.7, 0.09);
-    // タイヤ：速度に比例（停止時は無音）
-    ramp(N.tyre.tg.gain, Math.min(0.1, speed*0.011), 0.09);
-    ramp(N.tyre.tf.frequency, 300+speed*22, 0.09);
-    // スリップ：擦れ/鳴き
-    ramp(N.slip.sg.gain, slip>0.12? Math.min(0.09, slip*0.14):0, 0.05);
-    ramp(N.slip.sf.frequency, 1150+slip*1500, 0.05);
-    // 風切り：速度の2乗的に
-    ramp(N.wind.wg.gain, Math.min(0.06, speed*speed*0.0016), 0.12);
-    ramp(N.wind.wf.frequency, 500+speed*45, 0.12);
-    // シフト操作音
-    if(st.gear && st.gear!==prevGear){ if(prevGear!==null) S.gear(); prevGear=st.gear; }
-    // 低速でブレーキ→たまに鳴き
-    if(st.braking && speed>0.15 && speed<1.6){ const t=Date.now();
-      if(t-lastSqueal>1400){ lastSqueal=t; S.brakeSqueal(); } }
+    if(!ready||!enabled) return;
+    if(AX.state!=='running'){ if(AX.state==='suspended'&&!document.hidden){ try{AX.resume();}catch(_){} } return; }
+    st=st||{};
+    frame++;
+    const t=now(), dt=cl(t-lastT,0,0.1)||0.016; lastT=t;
+
+    const sp    = Math.abs(fin(st.speed));
+    const gear  = st.gear||'P';
+    // スロットルが渡されなければ負荷で代用（駆動系側が load しか出さない場合に対応）
+    const thr   = st.throttle!==undefined ? cl(fin(st.throttle),0,1) : cl(fin(st.load),0,1);
+    const brk   = cl(fin(st.brake),0,1);
+    const slip  = cl(fin(st.slip),0,1);
+    const scrub = cl(fin(st.scrub),0,1);
+    const surf  = SURF[st.surface]||SURF.asphalt;
+    const engOn = st.engineOn===undefined?true:!!st.engineOn;
+
+    /* --- RPM：始動/停止シーケンス中は内部モデルを優先し、その後実RPMへ滑らかに戻る --- */
+    let rpmIn = (st.rpm!==undefined&&st.rpm!==null)?fin(st.rpm):fakeRpm(st);
+    if(E.state==='cranking'){
+      rpmIn=250+Math.sin(t*22)*40;
+      if(t-E.tState>0.88){ E.state='catch'; E.tState=t; }
+    } else if(E.state==='catch'){
+      const k=cl((t-E.tState)/0.75,0,1);
+      // 初爆で1350rpmまで吹け上がり、そこからアイドルへ落ち着く（ファーストアイドル）
+      rpmIn=Math.max(rpmIn, 250+1100*Math.min(1,k*3.2)-(k>0.32?(k-0.32)*1250:0));
+      if(k>=1) E.state='run';
+    } else if(E.state==='stopping'){
+      const k=cl((t-E.tState)/0.65,0,1);
+      rpmIn=720*(1-k)*(1+0.10*Math.sin(t*30));         // ディーゼリング風の揺れ
+      if(k>=1) E.state='off';
+    } else if(E.state==='off'){
+      if(!engOn) rpmIn=0;
+      else E.state='run';                               // 始動音なしで動かす場合の保険
+    }
+
+    rpmS += (cl(rpmIn,0,7600)-rpmS)*Math.min(1,dt*14);  // 表示RPMの平滑化
+    const rpm=rpmS, on=(rpm>60);
+    const f0 = rpm/30;                                   // 4気筒の点火周波数[Hz]
+    const revN = cl((rpm-700)/5300,0,1);
+    // 負荷：与えられていればそれ、無ければスロットル＋ストール分から推定
+    const load = st.load!==undefined ? cl(fin(st.load),0,1)
+               : cl(thr*0.85 + (gear!=='P'&&gear!=='N'&&sp<1.0?0.12:0) + revN*0.1, 0, 1);
+
+    /* --- エンジン --- */
+    ramp(E.low.o.frequency, cl(f0*0.5,4,4000), 0.03);
+    ramp(E.mid.o.frequency, cl(f0,8,8000),     0.03);
+    ramp(E.har.o.frequency, cl(f0,8,8000),     0.03);
+    ramp(E.pul.frequency,   cl(f0,4,4000),     0.03);
+    ramp(E.wh.frequency,    cl(rpm/60*7,20,9000), 0.05);
+    ramp(E.low.g.gain, on?(0.55-0.22*load)*(1-0.35*revN):0, 0.06);
+    const midG = on?(0.42+0.22*load):0;
+    ramp(E.mid.g.gain, midG, 0.05);
+    ramp(E.har.g.gain, on?(0.10+0.55*load*load+0.30*revN*revN):0, 0.06);
+    const exG = on?(0.035+0.10*load+0.03*revN):0;
+    ramp(E.eg.gain, exG, 0.05);
+    ramp(E.pd.gain, exG*(1.15-0.5*revN), 0.05);          // 低回転ほど粒立ちを強く
+    ramp(E.pd2.gain, midG*(0.42-0.30*revN), 0.05);
+    ramp(E.ef.frequency, cl(140+f0*2.2,80,3400), 0.05);
+    ramp(E.ef.Q, 0.7+load*1.2, 0.08);
+    ramp(E.drive.gain, 1+2.4*load+0.9*revN, 0.06);
+    ramp(E.lp.frequency, cl(300+2500*load+rpm*0.30, 220, 9000), 0.05);
+    ramp(E.lp.Q, 0.9+1.3*load, 0.08);
+    ramp(E.bp.frequency, cl(f0*1.5,80,340), 0.06);
+    ramp(E.wg.gain, 3+22*Math.max(0,1-revN*3)*(1-load*0.7), 0.12);   // アイドルの揺らぎ
+    ramp(E.whg.gain, on?(0.006+0.012*revN)*(gear==='R'?2.6:1):0, 0.08);
+    // 出力：レブリミッターは音声時計に同期した断続で表現。変速中はトルク抜けで一瞬痩せる
+    let egOut = on?(0.075+0.33*load+0.24*revN):0;
+    if(rpm>REDLINE-150&&thr>0.5){ egOut *= ((t*13)%1>0.42?1:0.22); }
+    if(t<cutUntil) egOut *= 0.55;
+    ramp(E.out.gain, egOut, 0.045);
+    // オーバーラン時のアフターファイア（パンパン）
+    if(on&&thr<0.06&&rpm>2600&&t>burbleAt){
+      burbleAt=t+0.05+Math.random()*0.16;
+      if(Math.random()<0.55){ noiseHit(0.045,0.05+0.05*revN,'bandpass',380+Math.random()*500,1.4,BUS.engine); }
+    }
+
+    /* --- タイヤ・路面（30Hzで十分） --- */
+    if(frame&1){
+      const roll=Math.min(0.15, sp*0.026)*surf.roll;
+      ramp(R.rg.gain, roll, 0.07);
+      ramp(R.rf.frequency, (200+sp*24)*surf.f, 0.07);
+      ramp(R.rl.frequency, cl(700+sp*260,600,6000), 0.09);
+      ramp(R.tre.frequency, cl(sp/1.95*6, 1.5, 140), 0.07);   // タイヤ1回転あたり6ブロック
+      ramp(R.trd.gain, roll*0.38*Math.min(1,sp/2), 0.07);
+      ramp(R.gg.gain, Math.min(0.09, sp*0.02)*surf.grit, 0.08);
+      ramp(R.gf.frequency, 1500+sp*90, 0.1);
+      // 据え切り＝低速で速く回すほど強い
+      ramp(R.sg.gain, scrub*0.055, 0.05);
+      ramp(R.sf.frequency, 250+scrub*300, 0.06);
+      // スキール（滑り）：ある程度速度がないと鳴かない
+      const sq=Math.max(0,slip-0.12)*Math.min(1,sp/2.5)*surf.sq;
+      ramp(R.qg.gain, sq*0.14, 0.04);
+      ramp(R.qo.frequency, 900+slip*820+sp*7, 0.05);
+      ramp(R.q1.frequency, 1150+slip*900, 0.05);
+      // ブレーキ鳴き：低速＋踏力＋ランダムな出入り
+      if(frame%64===0) R.squealSeed=Math.random();
+      const squeal=(brk>0.25&&sp>0.15&&sp<2.2&&R.squealSeed<0.45)?(0.02+0.02*brk):0;
+      ramp(R.bg.gain, squeal, 0.12);
+      ramp(R.bf2.frequency, 2500+R.squealSeed*1400, 0.2);
+      /* --- 風 --- */
+      const w=cl(fin(st.wind),0,1);
+      ramp(WD.g.gain, Math.min(0.085, sp*sp*0.0012+w*0.02), 0.12);
+      ramp(WD.hp.frequency, 420+sp*34, 0.12);
+      ramp(WD.bg.gain, Math.min(0.03, sp*sp*0.0004), 0.15);
+    }
+
+    /* --- 環境・反復音（毎フレームだが分岐だけで基本ノーコスト） --- */
+    pumpTimers();
+    if((frame&7)===0) pumpAmbient();
+
+    /* --- シフト操作音：セレクター(P/R/N/D)と AT の変速(1..5)を別音で --- */
+    if(st.gear&&st.gear!==prevGear){ if(prevGear!==null) gearClunk(prevGear,st.gear); prevGear=st.gear; }
+    if(st.gearNum!==undefined&&st.gearNum!==prevGearNum){
+      if(prevGearNum!==null&&on){ shiftJolt(st.gearNum>prevGearNum); cutUntil=t+0.22; }
+      prevGearNum=st.gearNum;
+    }
   }
-  function clampN(v,a,b){ return v<a?a:v>b?b:v; }
 
-  function setEnabled(on){ enabled=on;
-    if(ready) ramp(master.gain, on?0.9:0.0, 0.15);
-    if(on&&ctx&&ctx.state==='suspended') ctx.resume();
-    return enabled; }
-  function isEnabled(){ return enabled; }
-  function resume(){ if(ctx&&ctx.state==='suspended') ctx.resume(); }
+  /* ---------------- 制御API ---------------- */
+  function setEnabled(on){
+    enabled=!!on;
+    if(ready){ ramp(master.gain, enabled?vol*duck:0.0001, 0.12);
+      if(enabled){ try{AX.resume();}catch(_){} } }
+    if(!enabled){ indicator(null); railBell(false); belt(false); }
+    return enabled;
+  }
+  function setMasterVolume(v){ vol=cl(fin(v),0,1); if(ready&&enabled) ramp(master.gain, vol*duck, 0.1); }
+  function setDuck(x){ duck=cl(fin(x)||0,0.05,1); if(ready&&enabled) ramp(master.gain, vol*duck, 0.12); }
+  function setBus(name,v){ if(ready&&BUS[name]) ramp(BUS[name].gain, cl(fin(v),0,2), 0.08); }
+  function setQuality(q){ quality=q; if(ready&&E.sh) E.sh.oversample=(q==='low')?'none':'2x'; }
+  function setRedline(v){ REDLINE=cl(fin(v)||6500,2000,9000); }   // 駆動系の DT.redline に合わせる
+  function setAmbience(k){ ambience=k||'off';
+    if(!ready) return;
+    ramp(AM.g.gain, ambience==='off'?0.0001:(ambience==='street'?0.030:0.012), 0.5);
+    ramp(AM.lp.frequency, ambience==='street'?460:300, 0.5);
+  }
+  function reset(){                                  // シナリオ切替時：反復音を止め、状態を初期化
+    indicator(null); railBell(false); belt(false);
+    prevGear=null; prevGearNum=null; rpmS=700; burbleAt=0; cutUntil=0;
+    if(ready&&E.state!=='off'&&E.state!=='run') E.state='run';
+  }
+  function resume(){ if(AX&&AX.state==='suspended'){ try{AX.resume();}catch(_){} } }
+  function suspend(){ if(AX&&AX.state==='running'){ try{AX.suspend();}catch(_){} } }
+  function start(){ if(!ready||started) return; engineStart(); setAmbience(ambience); }
 
-  return { init, start, update, sfx:S, setEnabled, isEnabled, resume,
-           get ready(){return ready;}, get ctx(){return ctx;} };
+  return {
+    init, start, resume, suspend, reset, update,
+    setEnabled, isEnabled:()=>enabled, setMasterVolume, setBus, setQuality, setAmbience, setDuck, setRedline,
+    indicator, railBell, belt,
+    engine:{ start:engineStart, stop:engineStop, get rpm(){ return rpmS; }, get state(){ return E.state; } },
+    sfx:SFX,
+    set onIndicatorTick(f){ onIndTick=f; }, get onIndicatorTick(){ return onIndTick; },
+    get ready(){ return ready; }, get ctx(){ return AX; }, get quality(){ return quality; }
+  };
 })();
 
 /* ==================== 更新ループ ==================== */
