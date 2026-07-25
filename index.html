@@ -440,22 +440,23 @@ canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; 
 .note p { font-size: 11.5px; line-height: 1.85; opacity: 0.72; margin: 9px 0 0; }
 .note b { color: var(--gold); }
 
+/* ギャラリー下部の「本編」への導線。ゲーム一覧とは別物だと分かる見た目にする */
+.storyline { padding: 2px 14px 10px; }
+.storyline .lbl {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.14em;
+  opacity: 0.45; margin: 6px 0 7px;
+}
+.adcard.story {
+  background: linear-gradient(100deg, #2a2f3f, #1b1f2c 62%);
+  border-style: dashed;
+}
+.adcard.story .pg { color: var(--gold); font-size: 15px; }
+
 </style>
 </head>
 <body>
 <div id="shell">
   <button id="mute" title="音">🔊</button>
-
-  <!-- 起動画面。音を鳴らすためにユーザー操作を 1 回はさむ -->
-  <section class="screen on" id="boot">
-    <div style="font-size:56px">📱</div>
-    <h1>広告詐欺ゲーム<br><span style="font-size:15px;opacity:.7">— あの広告のゲーム、やってみます？ —</span></h1>
-    <div class="sub">
-      YouTube でよく流れてくる、あの<br>「実際に落とすと全然ちがうゲーム」の再現です。
-    </div>
-    <button class="btn cta" id="boot-start">▶ 広告を見る</button>
-    <div class="tiny">音が出ます。ミュートは右上から</div>
-  </section>
 
   <!-- 1. 広告 -->
   <section class="screen" id="ad">
@@ -582,7 +583,7 @@ canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; 
 
 
   <!-- 6b. 広告ギャラリー -->
-  <section class="screen" id="gallery">
+  <section class="screen on" id="gallery">
     <div class="realhead">
       <span class="grow">広告で見たやつ</span>
       <span class="tiny" id="gallery-sub"></span>
@@ -596,6 +597,19 @@ canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; 
         <div class="t">🏆 全部クリア</div>
         <div class="tiny" style="opacity:.8">広告に偽りはありませんでした（このゲームに限り）</div>
       </div>
+      <div class="storyline">
+        <div class="lbl">おまけ</div>
+        <button class="adcard story" id="story-start">
+          <span class="ic">📺</span>
+          <span class="tx">
+            <span class="nm">広告からはじめる</span>
+            <div class="hk">広告 → ストア → インストール → 実物 → 返金</div>
+            <div class="rl">上の9本が「広告にしか無かった」件を、ひととおり体験する</div>
+          </span>
+          <span class="pg">▶</span>
+        </button>
+      </div>
+
       <details class="note">
         <summary>これ、実際にあった話です</summary>
         <p>
@@ -6875,7 +6889,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- 画面 ---------- */
 
-let current = 'boot';
+let current = 'gallery';
 function go(name) {
   for (const s of document.querySelectorAll('.screen')) s.classList.toggle('on', s.id === name);
   current = name;
@@ -7362,13 +7376,18 @@ function finishRealLevel(won) {
 
 /* ---------- 配線 ---------- */
 
+/** 本編（広告 → ストア → インストール → 実物 → 返金）を最初から流す。 */
+function startStory() {
+  go('ad');
+  armSkip();
+  playDemo();
+}
+
 function wire() {
-  $('#boot-start').onclick = () => {
-    sfx.init();
-    go('ad');
-    armSkip();
-    playDemo();
-  };
+  // 音声は最初のタップで初期化する（ブラウザが操作前の再生を許さないため）
+  document.addEventListener('pointerdown', () => sfx.init(), { once: true });
+
+  $('#story-start').onclick = startStory;
 
   $('#mute').onclick = () => {
     sfx.muted = !sfx.muted;

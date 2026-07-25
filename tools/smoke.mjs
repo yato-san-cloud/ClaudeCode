@@ -36,11 +36,13 @@ const settle = (which) =>
 
 await page.goto(url);
 await page.waitForFunction(() => typeof adView !== 'undefined');
-step('起動画面');
-await shot('01-boot');
-
-await tapCta('#boot-start');
+step('起動直後（広告ギャラリーが開く）');
+await shot('01-start');
 await page.evaluate(() => { sfx.muted = true; });
+
+step('本編を最初から');
+await page.click('#story-start');
+await page.waitForSelector('#ad.on');
 
 step('広告のデモ（下手なプレイヤーが失敗する）');
 await page.waitForFunction(() => adView.state === 'lost', null, { timeout: 20000 });

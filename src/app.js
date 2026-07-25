@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------- 画面 ---------- */
 
-let current = 'boot';
+let current = 'gallery';
 function go(name) {
   for (const s of document.querySelectorAll('.screen')) s.classList.toggle('on', s.id === name);
   current = name;
@@ -507,13 +507,18 @@ function finishRealLevel(won) {
 
 /* ---------- 配線 ---------- */
 
+/** 本編（広告 → ストア → インストール → 実物 → 返金）を最初から流す。 */
+function startStory() {
+  go('ad');
+  armSkip();
+  playDemo();
+}
+
 function wire() {
-  $('#boot-start').onclick = () => {
-    sfx.init();
-    go('ad');
-    armSkip();
-    playDemo();
-  };
+  // 音声は最初のタップで初期化する（ブラウザが操作前の再生を許さないため）
+  document.addEventListener('pointerdown', () => sfx.init(), { once: true });
+
+  $('#story-start').onclick = startStory;
 
   $('#mute').onclick = () => {
     sfx.muted = !sfx.muted;
