@@ -13,6 +13,11 @@ def test_conveyor_jam_backs_up_and_limits_throughput():
     m.resources.conveyors = [Conveyor(id="c1", points=[[12, 15], [40, 15]], speed_mps=0.5)]
     m.resources.stations[0].count = 1
     m.process.pack_time_s = 120  # deliberately slow pack -> jam
+    # Declare the design intent the belt implies: goods reach packing on the
+    # conveyor. Drawing a belt alone no longer routes work onto it (flowgraph.py).
+    for _st in m.process.stages:
+        if _st.id == "pack":
+            _st.method = "conveyor"
 
     res = run_once(m)
     arrived = sum(1 for e in res.events if e["event"] == "order_arrive")

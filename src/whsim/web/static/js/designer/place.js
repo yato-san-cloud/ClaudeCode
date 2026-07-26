@@ -224,7 +224,22 @@ export const placeMethods = {
     if (this.conveyorDraft && this.conveyorDraft.length >= 2) {
       this._pushUndo();
       const cv = { id: uid('cv'), points: this.conveyorDraft.slice(), speed_mps: 0.5 };
+      const first = !(this.model.resources.conveyors || []).length;
       this.model.resources.conveyors.push(cv);
+      // Drawing a belt is a physical fact; whether goods TRAVEL on it is a design
+      // decision the flow owns (see whsim/flowgraph.py) — the engine no longer
+      // routes work onto a belt nobody declares. Record the obvious intent the
+      // FIRST time one is drawn so the user is never left with a belt that does
+      // nothing; after that the flow tab is authoritative and we don't override it.
+      if (first) {
+        const pack = (this.model.process.stages || []).find((st) => st.id === 'pack');
+        if (pack && pack.method === 'manual') {
+          pack.method = 'conveyor';
+          if (pack.work) pack.work.transport = 'conveyor';
+          document.dispatchEvent(new CustomEvent('whsim:flow-changed',
+            { detail: { reason: 'conveyor-drawn', stage: 'pack' } }));
+        }
+      }
     }
     this.conveyorDraft = null;
     this._renderSide(); this._drawCanvas();

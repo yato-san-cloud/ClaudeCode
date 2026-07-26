@@ -42,7 +42,8 @@ def process_master(model=None) -> list[dict]:
     shape as GENERIC_PROCESSES (id/section/driver/prod/unit) plus 'depends'."""
     wp = getattr(getattr(model, "process", None), "work_processes", None)
     if not wp:
-        return [{**p, "depends": list(_FLOW_DEPS.get(p["id"], []))} for p in GENERIC_PROCESSES]
+        return [{**p, "depends": list(_FLOW_DEPS.get(p["id"], [])),
+                 "role": "", "zone": ""} for p in GENERIC_PROCESSES]
     out: list[dict] = []
     for p in wp:
         d = p.model_dump() if hasattr(p, "model_dump") else dict(p)
@@ -53,6 +54,11 @@ def process_master(model=None) -> list[dict]:
             "prod": float(d.get("prod", 60.0) or 60.0),
             "unit": str(d.get("unit", "行/h")),
             "depends": [str(u) for u in (d.get("depends") or [])],
+            # Bindings that make this master the ONE flow graph (see flowgraph.py):
+            # `role` maps a freely-named process onto engine behaviour, `zone` pins
+            # it to the floor. Passed through verbatim so a caller can rely on them.
+            "role": str(d.get("role", "") or ""),
+            "zone": str(d.get("zone", "") or ""),
         })
     return out
 
@@ -211,7 +217,10 @@ def flow_seed(model=None) -> list[dict]:
     return [
         {"id": p["id"], "section": p["section"], "unit": p["unit"],
          "productivity": p["prod"], "driver": p["driver"],
-         "depends": list(p["depends"])}
+         "depends": list(p["depends"]),
+         # The flow-graph bindings travel with the seed so the authoring screen
+         # can round-trip them without a second fetch (see flowgraph.py).
+         "role": p.get("role", ""), "zone": p.get("zone", "")}
         for p in process_master(model)
     ]
 

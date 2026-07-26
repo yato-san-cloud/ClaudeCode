@@ -35,6 +35,14 @@ def _model(sku_xs, conveyors, *, rate=60.0, duration=1800.0, pickers=1,
     m.resources.workers = [WorkerGroup(id="pickers", role="picker", count=pickers)]
     m.resources.stations = [Station(id="pack", x=55.0, y=10.0, count=stations)]
     m.resources.conveyors = conveyors
+    # A drawn belt is a physical fact; whether goods TRAVEL on it is a design
+    # decision (see whsim/flowgraph.py). These tests are about conveyor
+    # mechanics, so the design declares that packing is fed by the belt —
+    # otherwise the engine correctly runs no conveyor at all.
+    if conveyors:
+        for st in m.process.stages:
+            if st.id == "pack":
+                st.method = "conveyor"
     m.orders.profile = OrderProfile(rate_per_hr=rate, lines_per_order_mean=1.0)
     m.process.pack_time_s = pack_time
     m.simulation.duration_s = duration
@@ -325,6 +333,11 @@ def test_legacy_conveyor_jam_scenario_still_backs_up():
     m.resources.conveyors = [Conveyor(id="c1", points=[[12, 15], [40, 15]], speed_mps=0.5)]
     m.resources.stations[0].count = 1
     m.process.pack_time_s = 120
+    # Declare the design intent the belt implies: goods reach packing on the
+    # conveyor. Drawing a belt alone no longer routes work onto it (flowgraph.py).
+    for _st in m.process.stages:
+        if _st.id == "pack":
+            _st.method = "conveyor"
     res = run_once(m)
     on_belt = sum(1 for e in res.events if e["event"] == "conveyor_on")
     arrived = sum(1 for e in res.events if e["event"] == "order_arrive")

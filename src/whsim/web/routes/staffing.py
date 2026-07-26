@@ -133,6 +133,8 @@ def api_work_processes_save(name: str, payload: dict | None = None):
                 prod=prod if prod > 0 else 60.0,
                 unit=str(r.get("unit") or "行/h"),
                 depends=[str(u) for u in (r.get("depends") or [])],
+                role=str(r.get("role") or ""),
+                zone=str(r.get("zone") or ""),
             ))
         ids = {w.id for w in wps}
         for w in wps:  # prune dangling / self edges → valid DAG
@@ -217,3 +219,77 @@ def api_timetable_compare(name: str, start_hour: int = 9, end_hour: int = 18,
             continue
         rows.append(kpis_for(m, hdr.get("label", hdr["id"]), hdr["id"]))
     return {"available": avail, "rows": rows}
+
+
+# ---- 業務フロー・設備接続 (the ONE flow graph; see whsim/flowgraph.py) --------
+
+@router.get("/api/projects/{name}/flow")
+def api_flow_get(name: str):
+    """The resolved flow graph + what it can be wired to.
+
+    One payload for both flow surfaces (③設計フロー / ②マテリアルフロー): the nodes,
+    the edges (authored or derived from `depends`), the physical objects an edge
+    may reference, and the diagnostics. never-blocks: a bare project answers with
+    an empty graph rather than an error."""
+    from whsim import flowgraph
+    proj = _open(name)
+    model = proj.load_model()
+    g = flowgraph.resolve(model)
+    return {
+        "nodes": [{"id": n.id, "role": n.role, "zone": n.zone, "section": n.section,
+                   "simulated": n.simulated} for n in g.nodes],
+        "edges": [{"src": e.src, "dst": e.dst, "transport": e.transport,
+                   "equipment_ref": e.equipment_ref, "share": e.share,
+                   "derived": e.derived} for e in g.edges],
+        # everything an edge may bind to, with the label the UI should show
+        "equipment": (
+            [{"id": str(c.id), "kind": "conveyor", "label": f"コンベア {c.id}",
+              "speed_mps": float(c.speed_mps),
+              "points": [[float(x), float(y)] for x, y in
+                         ((p[0], p[1]) for p in c.points if len(p) >= 2)]}
+             for c in (model.resources.conveyors or [])]
+            + [{"id": str(e.id), "kind": e.type, "label": f"{e.type} {e.id}",
+                "count": int(e.count), "x": float(e.x), "y": float(e.y)}
+               for e in (model.resources.equipment or [])]
+        ),
+        "roles": sorted(flowgraph.ENGINE_ROLES),
+        "authored": bool(model.process.flow_edges),
+        "diagnostics": flowgraph.diagnose(model),
+    }
+
+
+@router.post("/api/projects/{name}/flow")
+def api_flow_save(name: str, payload: dict | None = None):
+    """Persist authored flow edges. Body: {edges: [{src,dst,transport,
+    equipment_ref,share}]}. Empty/absent ⇒ clear back to the DERIVED graph, so a
+    user can always get back to "just follow the process order". Tolerant: edges
+    naming unknown processes are dropped, unknown transports coerce to 人手."""
+    from whsim import flowgraph
+    from whsim.schema.model import FlowEdge
+    proj = _open(name)
+    model = proj.load_model()
+    known = {n.id for n in flowgraph.resolve(model).nodes}
+    means = {"manual", "conveyor", "agv", "forklift", "asrs"}
+
+    edges: list[FlowEdge] = []
+    rows = (payload or {}).get("edges")
+    if isinstance(rows, list):
+        for i, r in enumerate(rows):
+            if not isinstance(r, dict):
+                continue
+            src, dst = str(r.get("src") or ""), str(r.get("dst") or "")
+            if (src and src not in known) or (dst and dst not in known) or not dst:
+                continue
+            t = str(r.get("transport") or "manual")
+            try:
+                share = float(r.get("share", 1.0))
+            except (TypeError, ValueError):
+                share = 1.0
+            edges.append(FlowEdge(
+                id=str(r.get("id") or f"e{i}"), src=src, dst=dst,
+                transport=t if t in means else "manual",
+                equipment_ref=str(r.get("equipment_ref") or ""),
+                share=min(max(share, 0.0), 1.0)))
+    model.process.flow_edges = edges
+    proj.save_model(model)
+    return {"saved": len(edges), "diagnostics": flowgraph.diagnose(model)}

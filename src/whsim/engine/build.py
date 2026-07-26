@@ -446,8 +446,21 @@ def build(
     # end. Degenerate entries (<2 points, or every point coincident) are skipped
     # entirely — they are not physical transport (never blocks, never divides by
     # zero); a non-positive speed falls back to the schema default.
+    # WHICH belts the design actually commits to. `None` = no leg of the flow
+    # says 「コンベアで受け取る」, so no belt runs at all -- drawing a conveyor is no
+    # longer enough to make every picker use it. An empty SET = "conveyor, but no
+    # specific machine named", which keeps every drawn belt available (the
+    # behaviour before flow edges existed). See flowgraph.conveyor_ids_in_use.
+    from whsim import flowgraph
+    try:
+        designed = flowgraph.conveyor_ids_in_use(model)
+    except Exception:      # noqa: BLE001 — a broken flow must not break the run
+        designed = set()
+
     conveyor_lines: list[ConveyorLine] = []
-    for cv in model.resources.conveyors:
+    for cv in (model.resources.conveyors if designed is not None else []):
+        if designed and str(cv.id) not in designed:
+            continue          # a belt the design does not route through
         pts = [(float(p[0]), float(p[1])) for p in cv.points if len(p) >= 2]
         seglens = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
         total = sum(seglens)

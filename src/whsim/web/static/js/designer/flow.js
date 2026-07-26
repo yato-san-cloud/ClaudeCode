@@ -3,14 +3,20 @@
 // panel (5-axis work method), and the work-method recommendation. Mixed into
 // Designer.prototype by core.js (pure structural move).
 //
+// The 設備配線 half of the tool (設備ゴースト / エッジの直接操作 / エッジ・
+// インスペクタ / 診断 / 物量ラベル) lives in ./flowwire.js and is spread into the
+// same method bag below, so core.js's single Object.assign still mounts everything.
+//
 // SYNTHESIS: core.js does `Object.assign(Designer.prototype, flowMethods)`.
 
 import {
   DEFAULT_WORK, METHOD_COLOR, METHOD_OPTS, PICK_STRATS, STAGE_ZONE_TYPES, WORK_AXES, ZONE_DEFAULT_COLOR, ZONE_JP,
 } from './constants.js';
 import { clone, hexA, snap, uid } from './geometry.js';
+import { flowWireMethods } from './flowwire.js';
 
 export const flowMethods = {
+  ...flowWireMethods,
   // ---- flow tool: spatial flow on the floor plan + workflow strip ----------
   // The flow is bound to zone ids (process.stages[].zone) and ordered by
   // process.flow (stage ids). The floor canvas and the DOM strip are two views
@@ -54,6 +60,11 @@ export const flowMethods = {
     wrap.appendChild(this.canvas);
     this._flowCanvasHost = wrap;
     left.appendChild(wrap);
+    // 配線の注意 (flow-graph diagnostics) live directly under the canvas: they are
+    // warnings, so they get their own non-growing strip rather than a modal.
+    this._fwDiagHost = document.createElement('div');
+    this._fwDiagHost.style.cssText = 'flex:0 0 auto;max-height:120px;overflow-y:auto;';
+    left.appendChild(this._fwDiagHost);
     this.body.appendChild(left);
 
     // right column: the workflow strip + pick strategy + (in-context) method panel
@@ -65,6 +76,8 @@ export const flowMethods = {
     this.ctx = this.canvas.getContext('2d');
     this._bindCanvas();
     this._fitCanvas();
+    this._fwEnsure();          // flow-graph wiring layer (loads once per mount)
+    this._fwRenderDiagnostics();
     this._renderFlowSide();
     this._drawFlowCanvas();
   },
@@ -84,7 +97,11 @@ export const flowMethods = {
   },
   _flowStatusText() {
     if (!this.flowMode) {
-      return 'ゾーンをクリックすると、その工程の作業方法を設定できます。「床図でフロー配置」で工程→ゾーンの割当を引けます。';
+      // While a flow edge is selected the canvas is in wiring mode; say so.
+      const wiring = this._fwStatusText();
+      if (wiring) return wiring;
+      return 'ゾーンをクリックすると作業方法、工程間の矢印をクリックすると搬送設備を設定できます。'
+        + '「床図でフロー配置」で工程→ゾーンの割当を引けます。';
     }
     const order = this._orderedStages();
     const st = order[this.flowCursor];
@@ -106,6 +123,10 @@ export const flowMethods = {
     // floor outline
     ctx.strokeStyle = P.shell; ctx.lineWidth = 1.5;
     ctx.strokeRect(this._X(0), this._Y(b.depth), b.width * sc, b.depth * sc);
+
+    // 設備ゴースト: the placed conveyors/equipment, muted, UNDER the zone+arrow
+    // layer — you cannot wire a flow to a belt you cannot see.
+    this._fwDrawEquipment();
 
     const order = this._orderedStages();
     const cursorStage = this.flowMode ? order[this.flowCursor] : null;
@@ -144,13 +165,17 @@ export const flowMethods = {
       }
     }
 
-    // directed flow ribbons along the process order, between consecutive bound
-    // zones (curved + glowing so the chain reads as a material flow).
-    for (let i = 0; i < order.length - 1; i++) {
-      const za = this._zoneById(order[i].zone), zb = this._zoneById(order[i + 1].zone);
-      if (!za || !zb || za.id === zb.id) continue;
-      const [ax, ay] = this._zoneCenter(za), [bx, by] = this._zoneCenter(zb);
-      this._drawArrow(this._X(ax), this._Y(ay), this._X(bx), this._Y(by), P.accent);
+    // directed flow ribbons. The wiring layer draws them first, coloured by the
+    // transport that carries each leg (+ a tie-line to the bound belt); if it has
+    // no drawable edge yet, we fall back to the historical accent ribbons between
+    // consecutive bound zones — so the diagram is never empty.
+    if (!this._fwDrawEdges()) {
+      for (let i = 0; i < order.length - 1; i++) {
+        const za = this._zoneById(order[i].zone), zb = this._zoneById(order[i + 1].zone);
+        if (!za || !zb || za.id === zb.id) continue;
+        const [ax, ay] = this._zoneCenter(za), [bx, by] = this._zoneCenter(zb);
+        this._drawArrow(this._X(ax), this._Y(ay), this._X(bx), this._Y(by), P.accent);
+      }
     }
 
     // numbered step badges on each bound stage's zone, tinted by the zone hue so
@@ -175,6 +200,8 @@ export const flowMethods = {
     // legend line: name the diagram so the numbered badges + ribbons read at a
     // glance as the material flow (入荷→…→出荷), not a debug overlay.
     this._flowLegend();
+    // …plus a transport key, so the newly-coloured ribbons are readable.
+    this._fwLegend();
 
     if (this._flowStatus) this._flowStatus.textContent = this._flowStatusText();
     if (!this.model.layout.zones.length) {
@@ -247,6 +274,10 @@ export const flowMethods = {
   },
   // --- flow canvas click: place flow (assign zone) OR open the method popover ---
   _flowDown(px, py) {
+    // Wiring layer first (not while laying the flow — that mode owns the clicks):
+    // select an edge / bind it to the clicked equipment / unbind it. Returns true
+    // only when it consumed the click, so the zone behaviour below is untouched.
+    if (!this.flowMode && this._fwDown(px, py)) return;
     const mx = this._mx(px), my = this._my(py);
     const zs = this.model.layout.zones;
     let hit = null;
@@ -336,6 +367,10 @@ export const flowMethods = {
   },
   // Snapshot the process flow (id/label/zone+zone-type/method) and dispatch it
   // for any live listener (マテリアルフロー). Deduped: only emits on change.
+  //
+  // The payload now also carries the 設備配線 (edges/equipment). `stages` stays
+  // first-class and always present — the existing consumer reads it — so this is
+  // purely additive for anyone already on the bus.
   _emitFlowChanged() {
     const order = this._orderedStages();
     const stages = order.map((st) => {
@@ -347,10 +382,14 @@ export const flowMethods = {
         area_ok: area.ok, area_warn: area.warn,
       };
     });
-    const snap = JSON.stringify(stages);
-    if (snap === this._flowSnap) return;
+    const wiring = this._fwEmitPayload();
+    const snap = JSON.stringify([stages, wiring]);
+    if (snap === this._flowSnap && !this._fwForceEmit) return;
     this._flowSnap = snap;
-    document.dispatchEvent(new CustomEvent('whsim:flow-changed', { detail: { stages } }));
+    const detail = { stages };
+    if (wiring) { detail.edges = wiring.edges; detail.equipment = wiring.equipment; detail.authored = wiring.authored; }
+    document.dispatchEvent(new CustomEvent('whsim:flow-changed',
+      { detail: { ...detail, source: 'designer' } }));
   },
   // ---- flow side panel: the workflow strip (synced) + method panel ---------
   // Area-chain status for one stage: is it bound to a zone whose TYPE can host
@@ -410,6 +449,10 @@ export const flowMethods = {
         arrow.textContent = '↓';
       }
     });
+
+    // エッジ・インスペクタ: the precise/keyboard path for the selected flow edge
+    // (the canvas click is the fast path; both write the same edge).
+    this._fwRenderInspector(s);
 
     // in-context method panel for the open stage
     const open = this.flowMethodStage

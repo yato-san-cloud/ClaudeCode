@@ -223,6 +223,13 @@ def _default_stages() -> list["Stage"]:
     ]
 
 
+#: How goods move along a flow edge. A SUPERSET of ``StageMethod``: the DES
+#: currently changes its behaviour for ``conveyor`` and ``agv`` only, while
+#: ``forklift``/``asrs`` are recorded, drawn and diagnosed but leave the run
+#: unchanged (an explicit extension point, not a silent no-op).
+TransportMeans = Literal["manual", "conveyor", "agv", "forklift", "asrs"]
+
+
 class WorkProcess(BaseModel):
     """An editable work-process row driving the 人員タイムチャート / 原価 / 生産性 stack.
 
@@ -239,6 +246,43 @@ class WorkProcess(BaseModel):
     prod: float = 60.0                   # engine-default productivity (units/person/hour)
     unit: str = "行/h"
     depends: list[str] = Field(default_factory=list)  # upstream process ids
+    # --- bindings that let this master be the ONE flow graph ------------------
+    # `role` maps a (freely named) business process onto the engine's simulated
+    # behaviour; "" = infer from the id, "none" = staffing/cost only, never
+    # simulated. `zone` pins it to the floor, mirroring Stage.zone.
+    role: str = ""
+    zone: str = ""
+
+
+class FlowEdge(BaseModel):
+    """ONE 物の流れ between two work processes — the connection layer.
+
+    whsim used to describe the same warehouse three times over: the process DAG
+    (``WorkProcess.depends``, ②マテリアルフロー), the spatial stage list
+    (``Process.stages``, ③フロー) and the physical objects (``Resources``), with
+    NO shared identity between them. So "this packing step is fed by THAT belt"
+    had nowhere to live, and the engine fell back to picking the geometrically
+    nearest conveyor — which is why switching a stage to 人手 did not stop the
+    belt from being used.
+
+    An edge is where that decision now lives:
+
+    * ``transport``     — how goods move on this leg (人手/コンベア/AGV/…).
+    * ``equipment_ref`` — WHICH physical instance carries it (a ``Conveyor.id``
+      or ``Equipment.id``). Empty = "any of that type", the pre-edge behaviour.
+    * ``share``         — split ratio when a step feeds several downstreams.
+
+    Every field defaulted, and an empty ``Process.flow_edges`` resolves to the
+    graph implied by the existing ``depends`` — so a project that never touches
+    this is unchanged (never-blocks).
+    """
+
+    id: str = "edge"
+    src: str = ""            # upstream work-process id ("" = 外部からの入荷)
+    dst: str = ""            # downstream work-process id ("" = 外部への出荷)
+    transport: TransportMeans = "manual"
+    equipment_ref: str = ""  # Conveyor.id / Equipment.id ("" = unbound)
+    share: float = 1.0       # 分岐率 (volume/staffing apportioning; not DES routing)
 
 
 class Process(BaseModel):
@@ -249,6 +293,9 @@ class Process(BaseModel):
     # Editable work-process master for staffing/cost/productivity. Empty = engine
     # default (staffing.GENERIC_PROCESSES); resolve via staffing.process_master(model).
     work_processes: list[WorkProcess] = Field(default_factory=list)
+    # The connection layer between work processes (see FlowEdge). Empty ⇒ derived
+    # from `work_processes[].depends`; resolve via `flowgraph.resolve(model)`.
+    flow_edges: list[FlowEdge] = Field(default_factory=list)
     pick_strategy: PickStrategy = "discrete"
     routing_policy: RoutingPolicy = "nearest"
     batch_size: int = 1

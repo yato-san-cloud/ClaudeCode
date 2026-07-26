@@ -106,6 +106,7 @@ export class Designer {
     this._bindWindow();
     this._bindKeys();
     this._bindTheme();
+    this._bindFlowBus();
     this._selectTool('place');
     // M3: pull the live storage-equipment catalog (/api/racktypes) so the palette
     // tracks the backend presets; falls back silently to the seed RACK_TYPES.
@@ -148,6 +149,25 @@ export class Designer {
       // repaint so the library cards reflect the live catalog.
       if (this.tool === 'place') this._renderTool();
     } catch (_e) { /* offline / not-served: keep the seed catalog */ }
+  }
+
+  // ②マテリアルフロー and ③設計フロー are two views of ONE graph (flowgraph.py), so
+  // an edit in either must show in the other. materialflow.js already listened to
+  // this bus; the designer only ever DISPATCHED on it, which made the sync
+  // one-way. Ignore our own events so a save here cannot loop back into a redraw.
+  _bindFlowBus() {
+    this._on(document, 'whsim:flow-changed', (e) => {
+      const src = (e && e.detail && e.detail.source) || '';
+      if (src === 'designer') return;
+      if (this.tool !== 'flow') return;      // re-read happens on next entry
+      if (this.handlers && this.handlers.reloadModel) {
+        Promise.resolve(this.handlers.reloadModel()).then((m) => {
+          if (m) this.setModel(m); else this._renderFlow();
+        }).catch(() => this._renderFlow());
+      } else {
+        this._renderFlow();
+      }
+    });
   }
 
   // Re-resolve the canvas palette and repaint when the app toggles light/dark.

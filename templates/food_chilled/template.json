@@ -3055,7 +3055,7 @@
       {
         "id": "pack",
         "label": "梱包",
-        "method": "manual",
+        "method": "conveyor",
         "zone": "packing"
       },
       {

@@ -89,6 +89,18 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   ③設計「原価試算」 (`js/cost.js`, GET /cost). Same 3-tier in `analysis/staffing.py`
   `resolve_productivity` so the 人員タイムチャート honours it too. ピッキングの既定層は
   作業方式連動 (pickrate の動作時間モデルから導出; override/benchmark があれば不変).
+- `flowgraph.py` — **業務フロー・設備接続・マテリアルフローを1つのグラフに**する解決器.
+  ノード=工程(`role`=エンジン挙動への写像/`zone`), エッジ=`process.flow_edges`
+  (`transport`＋`equipment_ref`＝どの実機で運ぶか＋`share`). 以前は同じ倉庫を3回
+  別々に記述していて①工程DAGと②stagesで共有IDがゼロ・どちらも③設備を指せず、
+  エンジンは最寄りベルトを幾何で拾っていた(=フローで人手にしてもベルトが止まらない).
+  **エッジ未作成⇒depends が含意していたグラフに解決**(既存不変), **部分配線が正常系**
+  (1本配線しても残りは派生を保つ). エンジンは `conveyor_ids_in_use()` でゲート
+  (`None`=誰もコンベアで受けない⇒ベルト停止). 描いただけの設備は物理的事実であって
+  設計の意思ではなく、齟齬は `diagnose()` が警告で出す(never-blocks). GET/POST
+  `/api/projects/{n}/flow`. UI は ③設計フロー(矢印クリック→設備クリックで配線・
+  `designer/flowwire.js`) と ②マテリアルフロー(シミュ挙動/搬送手段列・サンキーの色)
+  の2レンズで、`whsim:flow-changed` で相互ライブ反映.
 - `analysis/staffing.py` — 人員タイムチャートの解析ソルバー。工程は編集可能マスタ
   `process_master(model)` 経由 (完全フリー工程; GENERIC_PROCESSES を直接 import しない),
   バッチ投入ゲート (`settings.batch_schedule`, 窓外は窓内クランプ=never-blocks), 入荷の
