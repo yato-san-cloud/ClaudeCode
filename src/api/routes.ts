@@ -32,10 +32,10 @@ import {
   toSnapshot,
 } from '../domain/catalog';
 import { suggestItems, usualItems } from '../domain/suggest';
-import { categoryLabel } from '../domain/categories';
-import { categorize } from '../domain/categories';
+import { loadRoute } from '../domain/routeStore';
+import { categoryLabel, categorize } from '../domain/categories';
 import type { ParsedItem } from '../parser';
-import type { ListItemRow } from '../types';
+import type { ListItemWithRoute } from '../types';
 
 type Variables = { userId: string; displayName: string | null };
 
@@ -59,7 +59,7 @@ async function authorizeHousehold(
   return ok ? householdId : null;
 }
 
-function serializeItem(item: ListItemRow) {
+function serializeItem(item: ListItemWithRoute) {
   return {
     id: item.id,
     name: item.name,
@@ -92,11 +92,14 @@ api.get('/lists/active', async (c) => {
   const householdId = await authorizeHousehold(c, c.req.query('householdId'));
   if (!householdId) return c.json({ error: 'forbidden' }, 403);
 
+  const route = await loadRoute(c.env.DB, householdId);
   const list = await getActiveList(c.env.DB, householdId);
-  if (!list) return c.json({ list: null, groups: [], remaining: 0, done: 0 });
+  if (!list) {
+    return c.json({ list: null, groups: [], remaining: 0, done: 0, route: route.progress });
+  }
 
   const items = await getItems(c.env.DB, list.id);
-  const groups = groupByCategory(items).map((group) => ({
+  const groups = groupByCategory(items, route.counts).map((group) => ({
     category: group.category,
     label: categoryLabel(group.category),
     items: group.items.map(serializeItem),
@@ -105,6 +108,8 @@ api.get('/lists/active', async (c) => {
   return c.json({
     list: { id: list.id, createdAt: list.created_at },
     groups,
+    // 「消し込むほど並びが良くなる」ことを画面に出すための材料
+    route: route.progress,
     remaining: items.filter((item) => item.checked === 0).length,
     done: items.filter((item) => item.checked === 1).length,
     // クライアントは updatedAt を見て、相手の変更が来ているかを判定する
@@ -207,9 +212,16 @@ api.post('/lists/:id/complete', async (c) => {
   if (!(await authorizeHousehold(c, list.household_id))) return c.json({ error: 'forbidden' }, 403);
 
   const result = await completeList(c.env.DB, list.household_id, list);
+  // 完了処理の中で観測回数が進むので、進捗はここで読み直す
+  const route = await loadRoute(c.env.DB, list.household_id);
   return c.json({
     purchased: result.purchased.length,
     carriedOver: result.carriedOver.map((item) => item.name),
+    promoted: result.promoted.map((item) => ({
+      name: item.name,
+      label: categoryLabel(item.category),
+    })),
+    route: route.progress,
   });
 });
 

@@ -27,6 +27,7 @@ const el = {
   refresh: document.getElementById('refresh'),
   progressBar: document.querySelector('#progress-bar > span'),
   progressText: document.getElementById('progress-text'),
+  routeHint: document.getElementById('route-hint'),
   list: document.getElementById('list'),
   empty: document.getElementById('empty'),
   suggestPanel: document.getElementById('suggest-panel'),
@@ -147,6 +148,24 @@ function updateProgress(done, total) {
     total === 0 ? 'リストは空です' : `残り ${total - done} 件 / 全 ${total} 件`;
 }
 
+/**
+ * 順路の学習状況。消し込んだ順番が次回の並びになる、という因果を見せる。
+ * ここが見えないと「買い物を終える」を押す動機が生まれず、学習も進まない。
+ */
+function updateRouteHint(route) {
+  if (!route) {
+    el.routeHint.hidden = true;
+    return;
+  }
+  el.routeHint.hidden = false;
+  el.routeHint.classList.toggle('learned', route.learned);
+  el.routeHint.textContent = route.learned
+    ? 'あなたの回り方に合わせて並べています'
+    : route.trips === 0
+      ? '消し込んだ順番から売り場の並びを覚えます'
+      : `売り場の並びを学習中（あと ${route.remaining} 回）`;
+}
+
 function renderSuggestions(data) {
   el.suggestions.textContent = '';
   const entries = [
@@ -259,12 +278,17 @@ async function completeShopping() {
 
   try {
     const result = await api(`/lists/${state.listId}/complete`, { method: 'POST' });
-    const carried = result.carriedOver.length;
-    toast(
-      carried > 0
-        ? `${result.purchased}件を記録。${carried}件を次に持ち越しました`
-        : `${result.purchased}件を記録しました。お疲れさま`,
-    );
+
+    // 学習が何を得たかを一言返す。押した甲斐があったと分かるように。
+    const parts = [`${result.purchased}件を記録`];
+    if (result.carriedOver.length > 0) parts.push(`${result.carriedOver.length}件を次に持ち越し`);
+    if (result.promoted?.length > 0) {
+      parts.push(result.promoted.map((p) => `${p.name}→${p.label}`).join('、'));
+    } else if (result.route && !result.route.learned) {
+      parts.push(`順路はあと${result.route.remaining}回`);
+    }
+    toast(parts.join(' / '));
+
     await loadList();
     await loadSuggestions();
   } catch (error) {
@@ -280,6 +304,7 @@ async function loadList() {
   state.groups = data.groups;
   state.updatedAt = data.updatedAt ?? 0;
   renderList();
+  updateRouteHint(data.route);
 }
 
 async function loadSuggestions() {

@@ -15,7 +15,7 @@ See `README.md` for the product-level description and the full LINE/Cloudflare s
 ```bash
 npm install
 npm run dev                # wrangler dev (needs .dev.vars — copy .dev.vars.example)
-npm test                   # vitest, 118 unit tests
+npm test                   # vitest, 159 unit tests
 npm test -- parser         # single file: matches test/parser.test.ts
 npm test -- -t '長音符'     # single test by name
 npm run typecheck          # tsc --noEmit
@@ -87,12 +87,37 @@ both.
 
 ### Learning
 
-`domain/suggest.ts` is pure (no DB) so cycle prediction can be tested with a fixed
-clock. Purchase intervals use an EMA (α = 0.3) with outlier guards; intervals under 12
-hours or over 120 days are discarded rather than averaged in.
+`domain/suggest.ts` and `domain/route.ts` are pure (no DB) so prediction can be tested
+with a fixed clock; `domain/routeStore.ts` holds the D1 access for route data.
 
 Learning advances **only** on list completion (`completeList`), not on checking items
-off. That writes `purchase_events`, updates the EMA, and re-infers the shopping day.
+off. One call writes `purchase_events`, updates the purchase-interval EMA (α = 0.3,
+with outlier guards discarding intervals under 12 hours or over 120 days), re-infers
+the shopping day, records the aisle ordering, and votes on `other`-item categories.
+
+**Route learning** turns check-off order into the store's aisle order. Three invariants
+hold it together, each with a regression test:
+
+- **Rank only the categories currently on the list**, never all of them. Copeland
+  scores aggregate over every pair, so ranking the full set gives categories near the
+  front of the built-in order a structural advantage that real observations cannot
+  overcome. `rankCategories` takes the subject set for this reason — passing
+  `DEFAULT_ROUTE` is only correct in tests.
+- **Normalize each pair to a preference in [-1, +1]**, not raw counts. Summing raw
+  counts lets a frequently co-bought pair dominate the whole ordering.
+- **Precedence counts, not averaged positions.** A trip covering only two aisles pins
+  one at 0.0 and the other at 1.0 regardless of where they actually sit; pairwise
+  precedence is immune to that. Normalized position is still used, but only for
+  ordering *within* one aisle, where the bias is low-stakes.
+
+The built-in order enters as a prior worth `PRIOR_STRENGTH` observations in the same
+denominator, so there is no learned/unlearned branch: zero observations reproduce the
+default exactly, and roughly four consistent trips flip a pair.
+
+`other` is excluded from ranking and pinned last — it is a grab bag whose average
+position is meaningless. Its members escape via `inferCategoryFromNeighbors` +
+Boyer-Moore majority voting (`PROMOTE_VOTES` consistent observations promote an item
+to a real aisle).
 
 ## Conventions
 

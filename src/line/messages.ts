@@ -8,7 +8,8 @@
 
 import { categoryLabel } from '../domain/categories';
 import { groupByCategory } from '../domain/lists';
-import type { ListItemRow } from '../types';
+import { CONFIDENT_TRIPS, type PrecedenceCount, type RouteProgress } from '../domain/route';
+import type { ListItemRow, ListItemWithRoute } from '../types';
 import type { Suggestion } from '../domain/suggest';
 import type { LineMessage } from './client';
 
@@ -42,11 +43,18 @@ export function formatItemLine(item: ListItemRow): string {
  */
 const MAX_LINES = 12;
 
+export interface ListCardOptions {
+  heading?: string;
+  /** 学習した売り場の前後関係。省略すると組み込みの既定順路で並ぶ。 */
+  precedence?: readonly PrecedenceCount[];
+}
+
 export function listCard(
-  items: readonly ListItemRow[],
+  items: readonly ListItemWithRoute[],
   liffId: string,
-  heading = '買い物リスト',
+  options: ListCardOptions = {},
 ): LineMessage {
+  const { heading = '買い物リスト', precedence } = options;
   const remaining = items.filter((item) => item.checked === 0);
   const done = items.length - remaining.length;
 
@@ -61,7 +69,7 @@ export function listCard(
   let printed = 0;
   let omitted = 0;
 
-  for (const group of groupByCategory(remaining)) {
+  for (const group of groupByCategory(remaining, precedence)) {
     if (printed >= MAX_LINES) {
       omitted += group.items.length;
       continue;
@@ -160,6 +168,44 @@ export function addedSummary(
       : '買うものは見つかりませんでした。';
   }
   return parts.join('\n');
+}
+
+/**
+ * 買い物完了の返信。学習が何を得たかをここで一言だけ伝える。
+ *
+ * 「消し込むと次回が楽になる」という手応えが無いと、完了ボタンを押す動機が
+ * 生まれない。押さなければ学習も進まないので、ここは黙らない。
+ */
+export function completionSummary(
+  purchasedCount: number,
+  carriedOver: readonly ListItemRow[],
+  promoted: ReadonlyArray<{ name: string; category: string }>,
+  route: RouteProgress,
+): string {
+  const lines = [`お疲れさま。${purchasedCount}件を記録しました。`];
+
+  if (carriedOver.length > 0) {
+    lines.push(
+      `買えなかった ${carriedOver.length} 件は次のリストに残しています: ` +
+        carriedOver.map((item) => item.name).join('、'),
+    );
+  }
+
+  if (promoted.length > 0) {
+    lines.push(
+      promoted
+        .map((item) => `「${item.name}」を ${categoryLabel(item.category)} に移しました。`)
+        .join('\n'),
+    );
+  }
+
+  if (route.trips === CONFIDENT_TRIPS) {
+    lines.push('回った順番を覚えました。次からはこの並びで出します。');
+  } else if (route.trips > 0 && route.trips < CONFIDENT_TRIPS) {
+    lines.push(`順路を学習中です（あと ${route.remaining} 回でなじみます）。`);
+  }
+
+  return lines.join('\n');
 }
 
 /** 提案カード。ワンタップで追加できるようポストバックを付ける。 */

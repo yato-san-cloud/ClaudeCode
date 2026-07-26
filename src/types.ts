@@ -26,6 +26,8 @@ export interface HouseholdRow {
   display_name: string | null;
   shopping_dow: number | null;
   last_draft_on: string | null;
+  /** 順路を観測した買い物回数 */
+  route_trips: number;
   created_at: number;
   updated_at: number;
 }
@@ -42,6 +44,12 @@ export interface CatalogRow {
   last_purchased_at: number | null;
   mean_interval_days: number | null;
   interval_samples: number;
+  /** 順路上の位置 (0=入口側, 1=レジ側) のEMA。同じ売り場の中での並びに使う。 */
+  route_position: number | null;
+  route_samples: number;
+  /** 「その他」の品物について、消し込み位置から推定中の売り場 */
+  inferred_category: string | null;
+  inferred_votes: number;
   created_at: number;
   updated_at: number;
 }
@@ -74,4 +82,10 @@ export interface ListItemRow {
   position: number;
   created_at: number;
   updated_at: number;
+}
+
+/** list_items に catalog_items の学習済み順路位置を結合したもの */
+export interface ListItemWithRoute extends ListItemRow {
+  /** 未学習なら null */
+  route_position: number | null;
 }

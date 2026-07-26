@@ -12,10 +12,11 @@ import { formatQuantity, formatItemLine, addedSummary } from '../src/line/messag
 import { verifyLineSignature, timingSafeEqual } from '../src/line/signature';
 import { DAY_MS, daysBetween, humanizeDaysAgo, jstDateString, jstDayOfWeek } from '../src/util/time';
 import { newId } from '../src/util/id';
-import type { ListItemRow } from '../src/types';
+import type { ListItemWithRoute } from '../src/types';
 
-function listItem(overrides: Partial<ListItemRow> = {}): ListItemRow {
+function listItem(overrides: Partial<ListItemWithRoute> = {}): ListItemWithRoute {
   return {
+    route_position: null,
     id: 'li_1',
     list_id: 'sl_1',
     catalog_item_id: 'ci_1',
@@ -99,6 +100,41 @@ describe('groupByCategory', () => {
     const groups = groupByCategory(items);
     expect(groups).toHaveLength(1);
     expect(groups[0]!.items).toHaveLength(2);
+  });
+
+  it('学習した前後関係が渡されればそちらに従う', () => {
+    const items = [
+      listItem({ id: 'a', category: 'produce' }),
+      listItem({ id: 'b', category: 'household' }),
+      listItem({ id: 'c', category: 'dairy' }),
+    ];
+    // この店は日用品が入口すぐ、野菜が最後、という観測を8回ぶん
+    const precedence = [
+      { before: 'household', after: 'dairy', count: 8 },
+      { before: 'household', after: 'produce', count: 8 },
+      { before: 'dairy', after: 'produce', count: 8 },
+    ];
+    expect(groupByCategory(items, precedence).map((g) => g.category)).toEqual([
+      'household',
+      'dairy',
+      'produce',
+    ]);
+  });
+
+  it('売り場の中も学習済みの位置順に並べる', () => {
+    const items = [
+      listItem({ id: 'late', category: 'produce', position: 1, route_position: 0.8 }),
+      listItem({ id: 'early', category: 'produce', position: 2, route_position: 0.1 }),
+    ];
+    expect(groupByCategory(items)[0]!.items.map((i) => i.id)).toEqual(['early', 'late']);
+  });
+
+  it('未学習の品物は売り場の末尾に置く', () => {
+    const items = [
+      listItem({ id: 'unknown', category: 'produce', position: 1, route_position: null }),
+      listItem({ id: 'known', category: 'produce', position: 2, route_position: 0.5 }),
+    ];
+    expect(groupByCategory(items)[0]!.items.map((i) => i.id)).toEqual(['known', 'unknown']);
   });
 });
 

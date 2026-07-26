@@ -27,6 +27,7 @@ export async function ensureHousehold(
     display_name: null,
     shopping_dow: null,
     last_draft_on: null,
+    route_trips: 0,
     created_at: now,
     updated_at: now,
   };

@@ -14,6 +14,7 @@ import {
 } from './domain/lists';
 import { appearanceCounts, listCatalog, toSnapshot } from './domain/catalog';
 import { suggestItems, usualItems } from './domain/suggest';
+import { loadRoute } from './domain/routeStore';
 import { DOW_LABELS, jstDateString, jstDayOfWeek } from './util/time';
 import type { ParsedItem } from './parser';
 
@@ -104,13 +105,14 @@ async function createWeeklyDrafts(env: Env, now: number): Promise<void> {
       await markDraftCreated(env.DB, household.id, today);
 
       const items = await getItems(env.DB, list.id);
+      const route = await loadRoute(env.DB, household.id);
       const dowLabel = DOW_LABELS[household.shopping_dow] ?? '';
       await push(env.LINE_CHANNEL_ACCESS_TOKEN, household.line_source_id, [
         text(
           `明日（${dowLabel}）は買い物の日ですね。履歴から下書きを作っておきました。\n` +
             `要らないものは「削除 ○○」、足すものはそのまま送ってください。`,
         ),
-        listCard(items, env.LIFF_ID, '下書き'),
+        listCard(items, env.LIFF_ID, { heading: '下書き', precedence: route.counts }),
       ]);
     } catch (error) {
       console.error(`[cron] household ${household.id} failed:`, error);

@@ -7,6 +7,7 @@ import { newId } from '../util/id';
 import { matchKey } from '../parser/normalize';
 import { categorize } from './categories';
 import { updateInterval, type CatalogSnapshot } from './suggest';
+import { PROMOTE_VOTES, updateCategoryVote, updateRoutePosition } from './route';
 import { jstDayOfWeek } from '../util/time';
 import type { CatalogRow } from '../types';
 
@@ -93,6 +94,10 @@ export async function upsertItem(
     last_purchased_at: null,
     mean_interval_days: null,
     interval_samples: 0,
+    route_position: null,
+    route_samples: 0,
+    inferred_category: null,
+    inferred_votes: 0,
     created_at: now,
     updated_at: now,
   };
@@ -132,14 +137,22 @@ export async function recordAlias(
 }
 
 /**
- * 購入を記録し、周期と回数を更新する。ここが学習の本体。
+ * 購入を記録し、周期・回数・順路上の位置を更新する。ここが学習の本体。
  * 買い物完了 (= チェック済み品の確定) のときだけ呼ぶ。
+ *
+ * `routePosition` は、その買い物での消し込み順を 0..1 に正規化したもの。
+ * 同じ売り場の中での並び替えに使う。
  */
 export async function recordPurchase(
   db: D1Database,
   householdId: string,
   item: CatalogRow,
-  options: { quantity?: number | null; unit?: string | null; listId?: string },
+  options: {
+    quantity?: number | null;
+    unit?: string | null;
+    listId?: string;
+    routePosition?: number | null;
+  },
   now: number = Date.now(),
 ): Promise<void> {
   const { mean, samples } = updateInterval(
@@ -149,6 +162,12 @@ export async function recordPurchase(
     now,
   );
 
+  const routePosition = options.routePosition ?? null;
+  const route =
+    routePosition === null
+      ? { position: item.route_position, samples: item.route_samples }
+      : updateRoutePosition(item.route_position, item.route_samples, routePosition);
+
   await db.batch([
     db
       .prepare(
@@ -157,17 +176,22 @@ export async function recordPurchase(
              last_purchased_at = ?,
              mean_interval_days = ?,
              interval_samples = ?,
+             route_position = ?,
+             route_samples = ?,
              default_unit = COALESCE(?, default_unit),
              default_quantity = COALESCE(?, default_quantity),
              updated_at = ?
          WHERE id = ?`,
       )
-      .bind(now, mean, samples, options.unit ?? null, options.quantity ?? null, now, item.id),
+      .bind(
+        now, mean, samples, route.position, route.samples,
+        options.unit ?? null, options.quantity ?? null, now, item.id,
+      ),
     db
       .prepare(
         `INSERT INTO purchase_events
-           (id, household_id, catalog_item_id, list_id, quantity, unit, purchased_at, dow)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, household_id, catalog_item_id, list_id, quantity, unit, purchased_at, dow, route_position)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         newId('pe', now),
@@ -178,8 +202,57 @@ export async function recordPurchase(
         options.unit ?? null,
         now,
         jstDayOfWeek(now),
+        routePosition,
       ),
   ]);
+}
+
+/**
+ * 「その他」の品物の売り場推定を1票ぶん進め、票が閾値に達したら昇格させる。
+ * @returns 昇格した場合の新しい売り場。まだなら null。
+ */
+export async function voteCategory(
+  db: D1Database,
+  item: CatalogRow,
+  candidate: string,
+  now: number = Date.now(),
+): Promise<string | null> {
+  const vote = updateCategoryVote(item.inferred_category, item.inferred_votes, candidate);
+  const promote = vote.votes >= PROMOTE_VOTES;
+
+  await db
+    .prepare(
+      `UPDATE catalog_items
+       SET inferred_category = ?, inferred_votes = ?, category = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      vote.category,
+      promote ? 0 : vote.votes,
+      promote ? vote.category : item.category,
+      now,
+      item.id,
+    )
+    .run();
+
+  return promote ? vote.category : null;
+}
+
+/** IDでまとめて引く。買い物完了時に品物ぶんの往復を避けるため。 */
+export async function findByIds(
+  db: D1Database,
+  ids: readonly string[],
+): Promise<Map<string, CatalogRow>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+
+  const placeholders = unique.map(() => '?').join(',');
+  const { results } = await db
+    .prepare(`SELECT * FROM catalog_items WHERE id IN (${placeholders})`)
+    .bind(...unique)
+    .all<CatalogRow>();
+
+  return new Map((results ?? []).map((row) => [row.id, row]));
 }
 
 /** 直近 n 回の買い物における、商品ごとの登場回数。「いつもの」判定に使う。 */

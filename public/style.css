@@ -118,6 +118,15 @@ body { padding-bottom: env(safe-area-inset-bottom); }
   color: var(--muted);
 }
 
+/* 「消し込むほど並びが良くなる」ことを伝える一行 */
+.route-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.85;
+}
+.route-hint.learned::before { content: "✓ "; color: var(--accent); }
+
 /* --- リスト --- */
 .list { padding: 8px 12px 0; }
 

@@ -23,12 +23,14 @@ import {
   toSnapshot,
 } from '../domain/catalog';
 import { suggestItems, usualItems } from '../domain/suggest';
+import { loadRoute } from '../domain/routeStore';
 import { parseCommand } from './commands';
 import { reply } from './client';
 import {
   HELP_TEXT,
   WELCOME_TEXT,
   addedSummary,
+  completionSummary,
   formatItemLine,
   listCard,
   suggestionCard,
@@ -133,21 +135,26 @@ async function handleTextMessage(
     case 'show': {
       const list = await getActiveList(env.DB, householdId);
       const items = list ? await getItems(env.DB, list.id) : [];
-      return [listCard(items, env.LIFF_ID)];
+      const route = await loadRoute(env.DB, householdId);
+      return [listCard(items, env.LIFF_ID, { precedence: route.counts })];
     }
 
     case 'complete': {
       const list = await getActiveList(env.DB, householdId);
       if (!list) return [text('いま進行中のリストはありません。')];
       const result = await completeList(env.DB, householdId, list, now);
-      const lines = [`お疲れさま。${result.purchased.length}件を記録しました。`];
-      if (result.carriedOver.length > 0) {
-        lines.push(
-          `買えなかった ${result.carriedOver.length} 件は次のリストに残しています: ` +
-            result.carriedOver.map((item) => item.name).join('、'),
-        );
-      }
-      return [text(lines.join('\n'))];
+      // 完了処理の中で観測回数が進むので、進捗はここで読み直す
+      const route = await loadRoute(env.DB, householdId);
+      return [
+        text(
+          completionSummary(
+            result.purchased.length,
+            result.carriedOver,
+            result.promoted,
+            route.progress,
+          ),
+        ),
+      ];
     }
 
     case 'usual': {
@@ -169,9 +176,10 @@ async function handleTextMessage(
       }));
       const result = await addParsedItems(env.DB, householdId, list, parsed, 'suggestion', now);
       const items = await getItems(env.DB, list.id);
+      const route = await loadRoute(env.DB, householdId);
       return [
         text(`いつもの ${result.added.length} 件を追加しました。`),
-        listCard(items, env.LIFF_ID),
+        listCard(items, env.LIFF_ID, { precedence: route.counts }),
       ];
     }
 
@@ -223,9 +231,10 @@ async function handleTextMessage(
       const list = await ensureActiveList(env.DB, householdId, userId, now);
       const added = await addParsedItems(env.DB, householdId, list, result.items, 'line', now);
       const items = await getItems(env.DB, list.id);
+      const route = await loadRoute(env.DB, householdId);
       return [
         text(addedSummary(added.added, added.updated, result.ignored.length)),
-        listCard(items, env.LIFF_ID),
+        listCard(items, env.LIFF_ID, { precedence: route.counts }),
       ];
     }
   }
