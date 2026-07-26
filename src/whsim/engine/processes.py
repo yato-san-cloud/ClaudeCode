@@ -300,6 +300,33 @@ def _agv_seg_key(a, b) -> tuple[int, int, bool]:
     return (round(midx / 3.0), round(midy / 3.0), horizontal)
 
 
+def _route_keyframes(world: World, frm, to, t0: float, total_t: float):
+    """Interior corners of the real route frm→to, each with the time it is reached.
+
+    Yields ``(t, (x, y))`` for the corners BETWEEN the endpoints, spaced by arc
+    length so the drawn agent moves at a constant speed along the route and
+    arrives exactly at ``t0 + total_t``. The caller emits the endpoints itself,
+    so an empty yield degrades to the straight two-keyframe track.
+
+    Pure viz: it reads the graph but never touches the SimPy clock, so a caller
+    can add real waypoints to a move without perturbing its timing.
+    """
+    if total_t <= 0.0:
+        return
+    pts = world.path(frm, to)
+    if len(pts) < 3:
+        return
+    seglens = [((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2) ** 0.5
+               for i in range(1, len(pts))]
+    pathlen = sum(seglens)
+    if pathlen <= 1e-9:
+        return
+    acc = 0.0
+    for i in range(1, len(pts) - 1):
+        acc += seglens[i - 1]
+        yield t0 + total_t * acc / pathlen, pts[i]
+
+
 def _agv_travel(world: World, a: Worker, frm, to, depart_state: str, arrive_state: str):
     """One AGV travel move frm→to. Returns the travel distance.
 
@@ -320,17 +347,24 @@ def _agv_travel(world: World, a: Worker, frm, to, depart_state: str, arrive_stat
     total_t = (d / speed) if speed > 0 else 0.0
 
     if world.aisle_locks is None:
-        # Legacy path (byte-identical): one departure kf, one arrival kf.
-        # NOTE: travel DISTANCE/time already routes around the racking (world.dist
-        # goes through the aisle graph); only the two-keyframe replay track is a
-        # straight line here, so an AGV is drawn crossing racks it did not walk
-        # through. Interference ON (below) draws the real waypoints. Left as-is
-        # deliberately: this branch is contract-frozen byte-identical.
+        # Interference OFF: ONE timeout for the whole move, exactly as before, so
+        # the event log, the KPIs and every downstream RNG draw are unchanged.
+        # Only the replay TRACK is different: we emit the aisle route's corners
+        # with back-dated timestamps, so the drawn AGV follows the aisles it was
+        # actually charged for. Emitting two keyframes drew a straight line
+        # through the racking (100% of legs in ecommerce_xl) at ~1/7 the real
+        # speed, because world.dist had already charged the routed distance.
+        # Timestamps are computed, not waited on -- kf() takes an explicit t.
+        t0 = env.now
         if world.recording():
-            a.kf(env.now, frm[0], frm[1], depart_state)
+            start = world.stand(frm)
+            a.kf(t0, start[0], start[1], depart_state)
         yield env.timeout(total_t)
         if world.recording():
-            a.kf(env.now, to[0], to[1], arrive_state)
+            for t_i, p in _route_keyframes(world, frm, to, t0, total_t):
+                a.kf(t_i, p[0], p[1], "travel")
+            end = world.stand(to)
+            a.kf(env.now, end[0], end[1], arrive_state)
         return d
 
     # --- interference ON: walk waypoints under per-segment mutexes ------------
@@ -339,11 +373,17 @@ def _agv_travel(world: World, a: Worker, frm, to, depart_state: str, arrive_stat
                for i in range(1, len(pts))]
     pathlen = sum(seglens)
     if world.recording():
-        a.kf(env.now, pts[0][0], pts[0][1], depart_state)
+        # Endpoints are drawn at the aisle FACE (World.stand), not on the rack
+        # centre-line a slot is addressed at -- otherwise the last metre of the
+        # move is drawn straight into the racking. Only the DRAWN position moves;
+        # ``pts`` still drives the segment mutexes and the timing below.
+        start = world.stand(frm)
+        a.kf(env.now, start[0], start[1], depart_state)
     if pathlen <= 1e-9 or total_t <= 0.0:
         yield env.timeout(total_t)
         if world.recording():
-            a.kf(env.now, to[0], to[1], arrive_state)
+            end = world.stand(to)
+            a.kf(env.now, end[0], end[1], arrive_state)
         return d
     for i in range(1, len(pts)):
         p0, p1 = pts[i - 1], pts[i]
@@ -369,8 +409,10 @@ def _agv_travel(world: World, a: Worker, frm, to, depart_state: str, arrive_stat
         if acquired:
             lock.release(req)
         if world.recording():
-            state = arrive_state if i == len(pts) - 1 else "travel"
-            a.kf(env.now, p1[0], p1[1], state)
+            last = i == len(pts) - 1
+            state = arrive_state if last else "travel"
+            at = world.stand(to) if last else p1
+            a.kf(env.now, at[0], at[1], state)
     return d
 
 

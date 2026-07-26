@@ -57,9 +57,13 @@ def _inside(rects, x, y):
 
 
 def _tracks(res):
-    """Every agent whose trajectory the replay draws."""
+    """Every agent whose trajectory the replay draws.
+
+    ``agvs`` belongs here as much as ``workers``: leaving it out is how a 100%
+    penetration rate hid in ``ecommerce_xl`` (see the AGV test below).
+    """
     tracks = list(res.workers)
-    for attr in ("helpers", "packers", "inspectors", "forklifts"):
+    for attr in ("helpers", "packers", "inspectors", "forklifts", "agvs"):
         tracks += [w for w in getattr(res, attr, []) or [] if w.keyframes]
     return tracks
 
@@ -204,3 +208,72 @@ def test_workers_stand_in_the_aisle_to_pick():
     picks = [kf for w in res.workers for kf in w.keyframes if kf[3] == "pick"]
     assert picks, "the run must contain picks"
     assert not [kf for kf in picks if _inside(rects, kf[1], kf[2])]
+
+
+# --- AGVs -------------------------------------------------------------------
+# ``ecommerce_xl`` ships AGV picking (pick stage method="agv", 20 units), so this
+# is a defect in a bundled template, not a hypothetical.
+
+@pytest.mark.parametrize("interference", [False, True])
+def test_agvs_never_drive_through_the_racking(interference):
+    """Measured before the fix: 335/335 legs (100%) penetrated, with interference
+    OFF. That branch emitted exactly two keyframes per move — a straight line —
+    while ``world.dist`` had already charged the aisle-routed distance (6.9x the
+    straight line here). So the AGV was drawn crossing solid racking at roughly a
+    seventh of its real speed.
+    """
+    model = templates.load_template_model("ecommerce_xl")
+    model.process.agv_interference = interference
+    graph = AisleGraph.from_model(model)
+    res = run_once(model, replay_window_s=model.simulation.duration_s, graph=graph)
+
+    agvs = [a for a in res.agvs if a.keyframes]
+    assert agvs, "the template must actually run AGVs"
+    rects = _shrunk_rects(model)
+    legs = pen = 0
+    for a in agvs:
+        for p, q in zip(a.keyframes, a.keyframes[1:]):
+            ax, ay, bx, by = p[1], p[2], q[1], q[2]
+            length = hypot(bx - ax, by - ay)
+            if length < 1e-9:
+                continue
+            legs += 1
+            n = max(int(length / STEP_M), 1)
+            if any(_inside(rects, ax + (bx - ax) * i / n, ay + (by - ay) * i / n)
+                   for i in range(n + 1)):
+                pen += 1
+    assert legs > 100, "the run must actually have moved AGVs around"
+    assert pen == 0, f"{pen}/{legs} AGV legs penetrate the racking"
+
+
+def test_agv_replay_track_is_viz_only():
+    """Drawing the real route must not move a single number.
+
+    The fix deliberately keeps ONE ``env.timeout`` for the whole move and
+    back-dates the corner keyframes, so SimPy scheduling, the event log and every
+    downstream RNG draw are untouched. Pin that: the drawn path length grows to
+    the routed distance while the KPIs stay put.
+    """
+    from whsim import kpis
+    from whsim.engine.routing import manhattan
+
+    model = templates.load_template_model("ecommerce_xl")
+    graph = AisleGraph.from_model(model)
+    res = run_once(model, replay_window_s=1800.0, graph=graph, seed=3)
+
+    drawn = straight = 0.0
+    for a in res.agvs:
+        kf = [k for k in a.keyframes]
+        for p, q in zip(kf, kf[1:]):
+            drawn += hypot(q[1] - p[1], q[2] - p[2])
+        # endpoints of each travel..arrive span, as the straight line used to be
+        for p, q in zip(kf, kf[1:]):
+            if p[3] in ("travel", "dropoff") and q[3] in ("pickup", "idle"):
+                straight += manhattan((p[1], p[2]), (q[1], q[2]))
+    assert drawn > 0
+    # The drawn track is now a real aisle route, so it is materially longer than
+    # the straight hops it replaced.
+    assert drawn > straight * 1.2
+
+    k = kpis.compute([res], model)
+    assert k["throughput_per_hr"] > 0 and k["orders_completed"] > 0
