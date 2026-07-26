@@ -22,6 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Exported manuals embed their data once in `<script type="application/json" id="__manualdata">`; the viewer JS assigns `img[data-p]` sources from that JSON at load, and `parseImport()` reads it back for round-trip editing (photos re-imported are the annotated/baked versions; `photoOrig`/`marks` are intentionally not embedded to keep file size down). The embed also carries `ext` (approval checklist + effect metrics) and per-step `edu` (education fields) — this is the frozen data contract for RPA ingestion, documented in `docs/rk-interface-spec.md`.
 - Inside `buildDoc()` every closing script tag must be written `<\/script>`, and the `VIEWER_JS` template literal must not contain backticks, `${`, or single backslashes (write `\\n` etc.) — it is embedded verbatim into generated HTML.
 - Storage: IndexedDB `genba_tool`/`manuals`; on any IDB failure the app flips to a localStorage fallback (`genba_manuals_ls`). v1 single-manual data (`genba_manual_v1`) is migrated once at startup.
+- Import also accepts work-instruction sheets (.md/.txt) from the Copilot "作業指示書ジェネレーター" agent: `parseShotBlocks()` reads 【撮影】 blocks (対象/合格条件/ファイル名/No.) into a skeleton manual — the label words are a frozen contract too (rk-interface-spec.md §7).
 
 ## Git Workflow
 

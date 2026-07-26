@@ -217,7 +217,7 @@
     <tr><td>効果測定・台帳出力</td><td>改善効果（従来分/回→利用後分/回×月間回数＝削減h/月）を記録・効果メモコピー。台帳JSON/CSV（UTF-8 BOM付き）を出力し kintone / Teams Lists / RK-01 へ接続（<code>docs/rk-interface-spec.md</code>）</td></tr>
     <tr><td>教育・引継ぎ</td><td>手順ごとに目安時間・完了条件・よくあるミス・報告基準を記録（任意）。書き出しHTML・現場モードに表示され、再取り込みでも保持</td></tr>
     <tr><td>保存</td><td>端末内 IndexedDB（失敗時 localStorage フォールバック）。自動保存。写真は横1280pxへ自動縮小</td></tr>
-    <tr><td>入出力</td><td>書き出し：単一HTML／全データバックアップ(.json)。取り込み：書き出しHTML・バックアップJSON（ラウンドトリップ改訂）。書き出し後の編集は一覧に「✎ 未提出の変更」表示（提出忘れ検知＝RK-01運用の穴を塞ぐ）</td></tr>
+    <tr><td>入出力</td><td>書き出し：単一HTML／全データバックアップ(.json)。取り込み：書き出しHTML・バックアップJSON（ラウンドトリップ改訂）・作業指示書.md/.txt（Copilot「作業指示書ジェネレーター」の【撮影】ブロック→手順骨格を自動生成、<code>docs/rk-interface-spec.md</code> §7）。書き出し後の編集は一覧に「✎ 未提出の変更」表示（提出忘れ検知＝RK-01運用の穴を塞ぐ）</td></tr>
     <tr><td>テスト</td><td>Playwright E2E（<code>tests/smoke.js</code>・33項目）</td></tr>
   </table></div>
 

@@ -165,6 +165,30 @@ function check(name, ok, detail) {
   check("月間削減見込みの自動計算", savedVal === "6.7 h/月", savedVal);
   const csvHead = await page.evaluate(() => ledgerCsv(cur).slice(0, 200));
   check("台帳CSV（BOM+品質列）", csvHead.charCodeAt(0) === 0xFEFF && csvHead.includes("qualityScore"), csvHead.slice(0, 60));
+
+  // 作業指示書（Copilotジェネレーター）の【撮影】ブロック取込
+  const shotTxt = [
+    "# 返品エリア 環境整備",
+    "今日やること：返品エリアの棚を整備し、写真で記録する",
+    "1. □ 棚Bの床の物をカゴに移す（5分）",
+    "【撮影】No.02 ／ 対象：棚Bの全景 ／ ファイル名：02_棚B.jpg",
+    "　　　　合格条件：床に物が置かれていない状態",
+    "2. □ 棚Aのラベルを手前に向ける（10分）",
+    "【撮影】No.01 ／ 対象：棚Aのラベル ／ ファイル名：01_ラベル.jpg",
+    "合格条件：ラベルの文字が読めること",
+  ].join("\n");
+  const shot = await page.evaluate(t => {
+    const a = parseImport(t, "shiji.md");
+    if (a.length !== 1) return null;
+    const m = a[0];
+    return { n: m.steps.length, title: m.title,
+      t1: m.steps[0].title, d1: m.steps[0].edu && m.steps[0].edu.done, f1: m.steps[0].desc };
+  }, shotTxt);
+  check("作業指示書の撮影ブロック取込（No順・合格条件→完了条件）",
+    !!shot && shot.n === 2 && shot.t1 === "棚Aのラベル"
+    && shot.d1 === "ラベルの文字が読めること" && shot.f1.includes("01_ラベル.jpg")
+    && shot.title.includes("返品エリア"),
+    JSON.stringify(shot));
   await page.click(".step details.edu summary");
   await page.fill('.step [data-edu="done"]', "ランプが緑点灯した状態");
   await page.waitForTimeout(700);

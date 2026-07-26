@@ -300,7 +300,7 @@
 <div class="toast" id="toast"></div>
 <input type="file" id="filepick" accept="image/*" capture="environment" style="display:none">
 <input type="file" id="filepick2" accept="image/*" style="display:none">
-<input type="file" id="importpick" accept=".html,.json,text/html,application/json" style="display:none">
+<input type="file" id="importpick" accept=".html,.json,.md,.txt,text/html,application/json,text/plain,text/markdown" style="display:none">
 
 <script>
 "use strict";
@@ -1277,7 +1277,55 @@ function normalizeManual(x){
     }))
   };
 }
-function parseImport(text){
+/* ---- 作業指示書ジェネレーター連携：【撮影】ブロック取込 ----
+   形式: 【撮影】No.03 ／ 対象：棚Aのラベル貼付位置 ／ ファイル名：03_ラベル位置.jpg
+   　　　　合格条件：ラベルの文字が読めること
+   対象→手順タイトル / 合格条件→完了条件(edu.done) / ファイル名→説明欄に記載 */
+const zen2han=s=>String(s).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
+function parseShotBlocks(text){
+  if(!text.includes("【撮影】")) return null;
+  const blocks=[];
+  let b=null;
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.trim();
+    if(line.includes("【撮影】")){
+      if(b) blocks.push(b);
+      b={no:null, target:"", file:"", pass:"", _i:blocks.length};
+      const mNo=line.match(/No[.．]?\s*([0-9０-９]+)/i);
+      if(mNo) b.no=parseInt(zen2han(mNo[1]),10);
+      const mT=line.match(/対象[：:]\s*(.+?)(?:\s*[／\/]|$)/);
+      if(mT) b.target=mT[1].trim();
+      const mF=line.match(/ファイル名[：:]\s*([^\s／\/]+)/);
+      if(mF) b.file=mF[1].trim();
+    }
+    if(b){
+      const mP=line.match(/合格条件[：:]\s*(.+)/);
+      if(mP) b.pass=mP[1].trim();
+    }
+  }
+  if(b) blocks.push(b);
+  if(!blocks.length) return null;
+  blocks.sort((a,c)=>((a.no!=null?a.no:1e6+a._i)-(c.no!=null?c.no:1e6+c._i)));
+  return blocks;
+}
+function manualFromShotList(text, fname){
+  const blocks=parseShotBlocks(text);
+  if(!blocks) return null;
+  const m=blankManual();
+  const mToday=text.match(/今日やること[：:]?\s*(.+)/);
+  const mHead=text.match(/^#\s*(.+)$/m);
+  m.title=(mToday?mToday[1]:mHead?mHead[1]:String(fname||"").replace(/\.(md|txt)$/i,"")||"作業指示書から作成").trim().slice(0,60);
+  m.note="作業指示書の撮影ブロックから自動生成";
+  m.steps=blocks.map(bl=>({
+    id:uid(), type:"step",
+    title:bl.target||(bl.no!=null?"撮影 No."+bl.no:"撮影対象"),
+    desc:bl.file?("指定ファイル名："+bl.file):"",
+    photo:null, photoOrig:null, marks:null,
+    edu: bl.pass?{time:"",done:bl.pass,mistake:"",escalate:""}:null
+  }));
+  return m;
+}
+function parseImport(text, fname){
   text=String(text||"").trim();
   let data=null;
   if(text.startsWith("{")||text.startsWith("[")){
@@ -1286,13 +1334,16 @@ function parseImport(text){
     const mm=text.match(/<script type="application\/json" id="__manualdata">([\s\S]*?)<\/script>/);
     if(mm){ try{ data=JSON.parse(mm[1]); }catch(e){ return []; } }
   }
-  if(!data) return [];
+  if(!data){
+    const shot=manualFromShotList(text, fname);   // 作業指示書（.md/.txt）→骨格マニュアル
+    return shot?[shot]:[];
+  }
   const arr=Array.isArray(data)?data:(Array.isArray(data.manuals)?data.manuals:[data]);
   return arr.filter(x=>x&&Array.isArray(x.steps)).map(normalizeManual);
 }
 async function importFile(file){
   const text=await file.text();
-  const arr=parseImport(text);
+  const arr=parseImport(text, file.name);
   if(!arr.length){ toast("⚠ 取り込めるデータが見つかりません"); return; }
   for(const m of arr){
     const exists=manuals.find(x=>x.id===m.id);
