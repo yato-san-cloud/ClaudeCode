@@ -81,27 +81,6 @@ function ask(query, { hidden = false } = {}) {
   });
 }
 
-/**
- * 案内した URL は本文にも出してあるので、開けなくても止めない。
- * spawn の ENOENT は同期例外ではなく error イベントで来る。listener を
- * 付けないと未処理例外になってプロセスごと落ちる(xdg-open が無い環境など)。
- */
-function openBrowser(url) {
-  const [cmd, args] =
-    process.platform === 'win32'
-      ? ['cmd', ['/c', 'start', '', url]]
-      : process.platform === 'darwin'
-        ? ['open', [url]]
-        : ['xdg-open', [url]];
-  try {
-    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    /* 無視 */
-  }
-}
-
 // ---------- wrangler ----------
 
 /**
@@ -252,28 +231,30 @@ async function tryDeploy() {
 
 let deploy = await tryDeploy();
 
-// workers.dev のサブドメインはアカウントに一度だけ登録が要る。
-// stdout を捕まえている都合で wrangler が「非対話」と判断し、登録するかの
-// 確認に勝手に no と答えてしまう。捕捉をやめると URL が拾えなくなるので、
-// 失敗を検出してこちらから案内する。
-for (let attempt = 0; deploy.code !== 0 && attempt < 3; attempt += 1) {
-  if (!/workers\.dev subdomain/i.test(deploy.out)) break;
-
-  const onboarding =
-    deploy.out.match(/https:\/\/dash\.cloudflare\.com\/[^\s]*?\/workers\/onboarding/)?.[0] ??
-    'https://dash.cloudflare.com/?to=/:account/workers/onboarding';
-
+// workers.dev のサブドメインはアカウントごとに一度だけ登録が要る。
+// wrangler は自分で訊いて登録までしてくれるのだが、こちらが URL 目当てで
+// stdout を捕まえていると「非対話」と判断して勝手に no と答えてしまう。
+// この失敗のときだけ捕捉をやめ、wrangler 自身に訊かせる。
+// (ここより前で ask() を呼んでいないので stdin は空いている)
+if (deploy.code !== 0 && /workers\.dev subdomain/i.test(deploy.out)) {
   console.log('');
   warn('workers.dev のサブドメインが未登録です(アカウントごとに初回だけ必要)。');
-  info('開いたページで好きな名前を1つ登録してください。あとで変えにくいので短めが無難です。');
-  info(onboarding);
-  openBrowser(onboarding);
-  await ask('\n  登録し終えたら Enter を押してください: ');
-  deploy = await tryDeploy();
+  info('このあと wrangler が登録するか訊いてきます。y と答えて、好きな名前を1つ決めてください。');
+  info('あとで変えにくいので短めが無難です。URL は https://line-shopping-list.<名前>.workers.dev になります。');
+  console.log('');
+
+  await wrangler(['deploy']); // 完全対話。ここで登録とデプロイが済む
+  deploy = await tryDeploy(); // URL を拾い直す
 }
 
 if (deploy.code !== 0) {
   console.error(deploy.out);
+  const onboarding = deploy.out.match(
+    /https:\/\/dash\.cloudflare\.com\/[^\s]*?\/workers\/onboarding/,
+  )?.[0];
+  if (onboarding) {
+    info(`サブドメインは次のページからも登録できます: ${onboarding}`);
+  }
   die('デプロイに失敗しました。');
 }
 
