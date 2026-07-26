@@ -22,8 +22,15 @@
 2. **全フィールドにデフォルト＝"never blocks"**。どのモデルも常に valid・実行可能。新フィールドは**必ず default を持つ**。新エンドポイントは欠損/部分データで **500 を返さない**。
 3. **取込は寛容**。壊れた/非JSONファイルはスキップ（致命的にしない）、部分取込OK。importer 系ルートは parse を `try/except … noqa: BLE001` で包み、フレンドリーな 400 を返す（`web/app.py`）。
 4. **provenance は第一級**。各 subtree の出所（imported/interview/provisional/generated）を追跡し「実データN%」として表示（`provenance.py`）。モデル書込み時に飛ばさない。
-5. **距離の解決順**：`World.dist` = 実測override(`distances.py`) > グラフDijkstra(`engine/graph.py`) > Manhattan。**解析側も同じ通路を歩く**：`analytic.py` は `rackgeom.aisle_detour`（描かれたラック矩形からの閉形式=通路離脱の期待距離 ℓ/3・2d(ℓ-d)/ℓ）で移動距離を通路経由に補正し、`workmethod.orders_per_trip`（＝エンジンと同一のバッチ規則）で1巡に按分する。**解析とDESが構造的に食い違ってはいけない**（「解析で当てる→DESで裏取り」）。グラフ探索は使わない＝爆速（ドラッグ中の再計算に耐える）。ラック無し＝補正なし＝従来のManhattan。
+5. **距離の解決順**：`World.dist` = 実測override(`distances.py`) > グラフDijkstra(`engine/graph.py`) > Manhattan。**解析側も同じ通路を歩く**：`analytic.py` は `rackgeom.aisle_detour`（描かれたラック矩形からの閉形式=通路離脱の期待距離 ℓ/3・2d(ℓ-d)/ℓ; 1点分は `aisle_escape_m`）で移動距離を通路経由に補正し、`workmethod.orders_per_trip`（＝エンジンと同一のバッチ規則）で1巡に按分する。**解析とDESが構造的に食い違ってはいけない**（「解析で当てる→DESで裏取り」）。グラフ探索は使わない＝爆速（ドラッグ中の再計算に耐える）。ラック無し＝補正なし＝従来のManhattan。
+   一致は **全テンプレート** で測る（`tests/test_analytic_aisle_travel.py`：各 |Δ稼働率| < 0.08 ＋ カタログ平均 < 0.04）。2テンプレートだけ見ていた時、未検査の6つに構造的な穴が隠れていた（GTP +0.808 / ゾーン -0.153 / ウェーブ +0.140 / コンベア +0.090）。**作業方式を足したら、解析側にもその機構を入れる**：
+   - **GTP(AGV)** — ピッカーは歩かない（歩行0・inline pack）。台車群は独立のM/M/cで、飽和すると ready_store が枯れてピッカーへの到着率を絞る。`agv_utilization`/`bottleneck` は additive（手動モデルでは `None`）。
+   - **バッチ数** — 時間平均 Lq ではない。最初の1件を待たされた＝在庫は空だったので1件しか掃けない。`C(c,a)·rho(1-rho^(cap-1))/(1-rho)`。
+   - **ウェーブ窓** — 他のピッカーも重なった窓で同じ到着を取り合うので自己制限的：`B = λ·W`。ゲート待ちは**エンジン側でも** picker busy（オーダーを掴んで拘束されている）。
+   - **ゾーン** — 蛇行掃引は入った通路を端まで走るので、通路変更の追加は ℓ/3 ではなく走長 ℓ。
+   - **コンベア** — トリップの2脚が非対称（往路=前回の払い出し点から／復路=最寄りベルトまで）。境界点ごとに通路脱出を計上。
 6. **replay/render は層状契約（V1/V2/V3）**。keyframe・`shelves`・`navnet` の形は **2Dキャンバス(`app.js` `interp`)と3D(`view3d.js`)の両方**が消費する。コメント「**must match the 3D view**」は厳守。新フィールドは additive＋guard（無ければ legacy 描画にフォールバック）、**古い replay を壊さない**。
+   **移動する agent は必ず実経路のキーフレームを出す**。2点だけ出すと viewer が線形補間して棚を突き抜ける——距離と時間が正しく通路経由で計算されていても、絵だけが嘘をつく。この穴は同じ形で4回出た（routing graph / navnet / 動線タブ / AGV）。タイミングを変えずに直せる：`kf()` は時刻を引数で取るので、`processes._route_keyframes` のように**角を後付けの時刻で流し込む**（`env.timeout` は1本のまま＝イベントログも乱数列も不変）。端点は `World.stand` の通路面に置く（ロケーションは棚の芯で採番されるため）。回帰は `tests/test_no_rack_penetration.py`（**ラックを描く全テンプレート**×全 agent 種別＝`workers/helpers/packers/inspectors/forklifts/agvs`）。
 7. **ビルドレス / npm 無し / vendored**。フロントは素の ES modules（`<script type="module">` ＋ importmap）。three.js と ECharts は `static/vendor/`（importmap で `three`/`echarts`）。**バンドラや `package.json` を導入しない**。
 8. **日本語＝ユーザー向け文字列、英語＝コード/識別子/コメント**。
 9. **journey→view 規約**。パネルは `<div id="x" class="panel" role="tabpanel">`、ナビは `journey.js` が描く `.jn-sub[role="tab"]`、`switchView`(`app.js`) がステッパーとパネルを同期。**フラット `.tab` マークアップを復活させない**（CSSは削除済）。
@@ -42,7 +49,7 @@
 ### 取込 / ETL（寛容）
 - `importer.py` — ZIP→subtree deep-merge。`mapcsv.py` / `rmpm.py`（MapMaker地図CSV / ネイティブ.rmpm.json）/ `tabular.py`（汎用CSV/Excel）/ `cad.py`（DXF）。各々 `/api/.../import-*` ルート。
 - `distances.py` — 実測 棚間距離行列（最大級ファイル；`engine/graph.py` と距離で概念重複）。
-- `rackgeom.py` — **描かれたラック＝ジオメトリの唯一の真実**。`rack_rects`（描画と routing 障害物の共通元）＋`aisle_block`/`aisle_detour`（通路travel の閉形式＝解析側の補正; `analytic.py` が消費）。
+- `rackgeom.py` — **描かれたラック＝ジオメトリの唯一の真実**。`rack_rects`（描画と routing 障害物の共通元; `(x,y,w,h)` であって `(x0,y0,x1,y1)` ではない）＋`aisle_block`/`aisle_detour`/`aisle_escape_m`（通路travel の閉形式＝解析側の補正; `analytic.py` が消費。`aisle_escape_m` は1点分だけを再利用するための切り出し＝ベルト境界点ごとの評価に使う）。
 - `provenance.py` — 出所追跡。
 
 ### エンジン（SimPy DES）

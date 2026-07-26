@@ -52,8 +52,18 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   aisle-changing hop, 2d(ℓ-d)/ℓ per depot leg — no graph search, so it stays 爆速
   for drag-time re-estimation), and the trip is amortised over
   `workmethod.orders_per_trip` (the engine's own batch rule). No racking ⇒ the
-  historical Manhattan behaviour (never-blocks). 解析↔DES agreement is pinned by
-  `tests/test_analytic_aisle_travel.py` on both templates.
+  historical Manhattan behaviour (never-blocks). Every work method the engine has
+  must have its mechanism here too, or the oracle silently tells a rosier story:
+  **GTP(AGV)** (picker walks 0, the fleet is its own M/M/c and throttles the
+  picker's arrival rate — `agv_utilization`/`bottleneck`, `None` when manual),
+  **batch** (orders on a trip = what is standing in the store, `C·ρ(1-ρ^(cap-1))/(1-ρ)`
+  — NOT the time-average `Lq`), **wave** (the window scoop is self-limiting,
+  `B = λ·W`; the gate hold is picker-busy on both sides), **zone** (a serpentine
+  runs each aisle end to end ⇒ ℓ, not ℓ/3) and **conveyor** (asymmetric legs:
+  out from the last hand-off, back only to the nearest belt). 解析↔DES agreement
+  is pinned by `tests/test_analytic_aisle_travel.py` on **every** template
+  (|Δutil| < 0.08 each, catalogue mean < 0.04) — it used to check two, and the
+  six unchecked ones hid residuals up to 0.81.
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict. Multi-rep runs
   add `kpis.ci` (95% t-CI per headline metric + n_recommended for a ±5% target);
   the KPI view shows 「±X (95%CI, n=N)」 and an honest n=1 disclosure.
@@ -134,6 +144,11 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   (`switchView` keeps it in sync), `js/overview.js` is the ①取込 landing dashboard
   (readiness checklist + next-step), and `js/phasehint.js` is the per-phase goal/CTA
   banner; Cody and 知見 (notes) are cross-cutting across all phases.
+  `cody.py` picks a template by SCORING every manifest's own vocabulary (id/name/
+  description, same-script runs, catalogue-wide df cut for boilerplate) — never a
+  table keyed by template id, so dropping in `templates/<id>/` makes it reachable
+  in chat with no code change (invariant 10). The default template carries a
+  head-start so a specialist must clearly win, not merely win.
   The editor saves via `POST /design`; the engine honours per-stage method (manual vs AGV).
 
 ### Commands

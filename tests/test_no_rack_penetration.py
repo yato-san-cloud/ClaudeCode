@@ -36,7 +36,17 @@ SHRINK_M = 0.15
 # A leg may not penetrate by more than this. Zero legs are expected to reach it.
 MAX_LEG_PENETRATION_M = 0.3
 
+# The graph-property guards run on the two templates this defect was measured on
+# (they are about the GRAPH, and a second layout shape is enough to pin it).
 TEMPLATES = ["retail_dc", "ecommerce_small"]
+
+# The penetration measurement itself runs on EVERY template that draws racking.
+# Checking two is how a 100% AGV penetration rate in ecommerce_xl went unseen;
+# a layout the guard never looks at is a layout the guard does not cover.
+PENETRATION_TEMPLATES = [
+    t["template_id"] for t in templates.list_templates()
+    if rack_rects(templates.load_template_model(t["template_id"]))
+]
 
 
 def _shrunk_rects(model):
@@ -96,7 +106,7 @@ def _penetration(model, res):
     return legs, pen_legs, worst, pen_m, total_m
 
 
-@pytest.mark.parametrize("template_id", TEMPLATES)
+@pytest.mark.parametrize("template_id", PENETRATION_TEMPLATES)
 def test_agents_never_walk_through_the_racking(template_id):
     model = templates.load_template_model(template_id)
     graph = AisleGraph.from_model(model)
