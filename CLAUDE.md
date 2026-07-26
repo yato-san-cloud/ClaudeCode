@@ -89,9 +89,24 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   ③設計「原価試算」 (`js/cost.js`, GET /cost). Same 3-tier in `analysis/staffing.py`
   `resolve_productivity` so the 人員タイムチャート honours it too. ピッキングの既定層は
   作業方式連動 (pickrate の動作時間モデルから導出; override/benchmark があれば不変).
+- `loadunit.py` — **荷姿 (容器・台車) カタログと換算**. `capacity` は連鎖表現
+  (オリコン={piece:30}, カゴ台車={orikon:14, case:14, tray:14}), 混載は**占有率の和**
+  `Σ(count/capacity)` で積む. 種類ごとに積載数が違う台車 (カゴ車=折コン12 or ケース20)
+  を表現でき、かつ seed 値では既存の平坦式「(OC＋ケース)÷14」と**完全一致**するので
+  ②基礎物量の数字は1つも動かない (テストで固定). SLC型の「資材マスタを先に全部埋めろ」
+  の逆で、**既定カタログ同梱＋使う辺でその場編集**. `catalog(model)` 経由で解決
+  (process_master と同じ単一源規約). GET/POST `/api/projects/{n}/loadunits`,
+  GET `…/loadunits/convert` (`chain` に式を明示; JS側で式を再実装しない).
+- `wipcurve.py` — **滞留 (累積フロー図)**. `WIP(t)=max(0, Σ上流out − Σ下流out)` を
+  人員ソルバーの `headcount_by_hour × productivity` から解析で算出 (no DES, 爆速).
+  上下流は単位が違う (行/h vs 件/h) ので**日量に対する進捗比**に正規化してから辺の
+  荷姿へ換算する — 行−件 は無意味なので. ピーク台数→`footprint_m2 × AISLE_FACTOR`
+  で仮置き坪. **台車は共有プール**なので保有台数は各辺ピークの和ではなく**和のピーク**.
+  荷姿未指定の辺はピースで滞留を出すが「保有する物」ではないので fleet には出さない.
+  GET `/api/projects/{n}/wip`.
 - `flowgraph.py` — **業務フロー・設備接続・マテリアルフローを1つのグラフに**する解決器.
   ノード=工程(`role`=エンジン挙動への写像/`zone`), エッジ=`process.flow_edges`
-  (`transport`＋`equipment_ref`＝どの実機で運ぶか＋`share`). 以前は同じ倉庫を3回
+  (`transport`＋`equipment_ref`＝どの実機で運ぶか＋`share`＋`container_ref`/`carrier_ref`＝荷姿). 以前は同じ倉庫を3回
   別々に記述していて①工程DAGと②stagesで共有IDがゼロ・どちらも③設備を指せず、
   エンジンは最寄りベルトを幾何で拾っていた(=フローで人手にしてもベルトが止まらない).
   **エッジ未作成⇒depends が含意していたグラフに解決**(既存不変), **部分配線が正常系**

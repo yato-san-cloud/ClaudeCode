@@ -231,7 +231,7 @@ def api_flow_get(name: str):
     the edges (authored or derived from `depends`), the physical objects an edge
     may reference, and the diagnostics. never-blocks: a bare project answers with
     an empty graph rather than an error."""
-    from whsim import flowgraph
+    from whsim import flowgraph, loadunit
     proj = _open(name)
     model = proj.load_model()
     g = flowgraph.resolve(model)
@@ -240,7 +240,11 @@ def api_flow_get(name: str):
                    "simulated": n.simulated} for n in g.nodes],
         "edges": [{"src": e.src, "dst": e.dst, "transport": e.transport,
                    "equipment_ref": e.equipment_ref, "share": e.share,
-                   "derived": e.derived} for e in g.edges],
+                   "derived": e.derived, "container_ref": e.container_ref,
+                   "carrier_ref": e.carrier_ref} for e in g.edges],
+        # 荷姿カタログ (資材マスタ). Always present, always defaulted — the screen
+        # never has to ask the user to build one before it can draw.
+        "load_units": loadunit.catalog(model),
         # everything an edge may bind to, with the label the UI should show
         "equipment": (
             [{"id": str(c.id), "kind": "conveyor", "label": f"コンベア {c.id}",
@@ -289,7 +293,116 @@ def api_flow_save(name: str, payload: dict | None = None):
                 id=str(r.get("id") or f"e{i}"), src=src, dst=dst,
                 transport=t if t in means else "manual",
                 equipment_ref=str(r.get("equipment_ref") or ""),
-                share=min(max(share, 0.0), 1.0)))
+                share=min(max(share, 0.0), 1.0),
+                container_ref=str(r.get("container_ref") or ""),
+                carrier_ref=str(r.get("carrier_ref") or "")))
     model.process.flow_edges = edges
     proj.save_model(model)
     return {"saved": len(edges), "diagnostics": flowgraph.diagnose(model)}
+
+
+@router.get("/api/projects/{name}/loadunits")
+def api_loadunits_get(name: str):
+    """荷姿カタログ (資材マスタ) + which ones the design references.
+
+    Always answers with a full catalogue — the engine default when the project
+    has never edited one — so the flow screen can offer 折コン/カゴ車 from the
+    first click instead of demanding a materials master first."""
+    from whsim import flowgraph, loadunit
+    proj = _open(name)
+    model = proj.load_model()
+    return {
+        "units": loadunit.catalog(model),
+        "in_use": sorted(flowgraph.loadunits_in_use(model)),
+        "default": loadunit.DEFAULT_UNITS,
+        "base_units": sorted(loadunit.BASE_UNITS),
+        "customised": bool(model.load_units),
+    }
+
+
+@router.post("/api/projects/{name}/loadunits")
+def api_loadunits_save(name: str, payload: dict | None = None):
+    """Persist an edited 荷姿カタログ. Body: {units:[{id,name,kind,capacity,
+    footprint_m2}]}. Empty/absent ⇒ reset to the engine default. Tolerant:
+    blank/duplicate ids dropped, non-positive capacities dropped."""
+    from whsim import loadunit
+    from whsim.schema.model import LoadUnit
+    proj = _open(name)
+    model = proj.load_model()
+    kinds = {"container", "carrier", "pallet", "base"}
+    rows = (payload or {}).get("units")
+    out: list[LoadUnit] = []
+    if isinstance(rows, list):
+        seen: set[str] = set()
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            uid = str(r.get("id") or "").strip()
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            cap: dict[str, float] = {}
+            for k, v in (r.get("capacity") or {}).items():
+                try:
+                    f = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if f > 0:
+                    cap[str(k)] = f
+            try:
+                foot = max(float(r.get("footprint_m2") or 0.0), 0.0)
+            except (TypeError, ValueError):
+                foot = 0.0
+            kind = str(r.get("kind") or "container")
+            out.append(LoadUnit(id=uid, name=str(r.get("name") or uid),
+                                kind=kind if kind in kinds else "container",
+                                capacity=cap, footprint_m2=foot,
+                                provisional=bool(r.get("provisional", True))))
+    model.load_units = out
+    proj.save_model(model)
+    return {"units": loadunit.catalog(model), "saved": len(out)}
+
+
+@router.get("/api/projects/{name}/loadunits/convert")
+def api_loadunits_convert(name: str, pieces: float = 0.0, cases: float = 0.0,
+                          container: str = "", carrier: str = ""):
+    """バラ/ケース → 容器 → 台車, with the arithmetic shown (`chain`).
+
+    Lets the flow screen echo 「バラ2,500点 ÷30 = 84オリコン → 15カゴ台車」 the
+    instant a 荷姿 is picked, without duplicating the formula in JS."""
+    from whsim import loadunit
+    model = _open(name).load_model()
+    return loadunit.convert(model, pieces=pieces, cases=cases,
+                            container_ref=container, carrier_ref=carrier)
+
+
+@router.get("/api/projects/{name}/wip")
+def api_wip(name: str, start_hour: int = 9, end_hour: int = 18,
+            cap: int = 0, placement: str = "level"):
+    """滞留カーブ: how much piles up between each pair of processes, in that leg's
+    own 荷姿, plus the 台車 fleet and 仮置き坪 the day needs.
+
+    Analytic (no DES), so a 荷姿 change re-costs the whole day instantly. Answers
+    「検品前にカゴ車は最大何台溜まるか / 仮置きに何坪要るか / 台車を何台持てばいいか」.
+    never-blocks: no volume ⇒ {available:false} rather than an error."""
+    from whsim import wipcurve
+    from whsim.analysis import staffing
+    proj = _open(name)
+    model = proj.load_model()
+    vols = staffing.project_volumes(proj)
+    if not vols or not any(float(v or 0) > 0 for v in vols.values()):
+        return {"available": False, "reason": "物量が未取込です", "edges": [], "fleet": []}
+    solved = staffing.solve_staffing(
+        vols, model=model, start_hour=start_hour, end_hour=end_hour,
+        cap=(int(cap) or None), placement=placement,
+        batches=(model.settings.batch_schedule or None
+                 if hasattr(model.settings, "batch_schedule") else None))
+    base = {}
+    try:
+        from whsim import bi
+        base = bi.base_volumes(model) or {}
+    except Exception:      # noqa: BLE001 — no DuckDB/no data is not an error here
+        base = {}
+    out = wipcurve.all_edges(model, solved, base)
+    out["window"] = {"start_hour": start_hour, "end_hour": end_hour}
+    return out

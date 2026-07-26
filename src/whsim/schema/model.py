@@ -254,6 +254,38 @@ class WorkProcess(BaseModel):
     zone: str = ""
 
 
+class LoadUnit(BaseModel):
+    """One 荷姿 — a container or a carrier goods ride in on their way through.
+
+    The thing SLC makes you fill in a giant materials table for, before anything
+    runs. Here the catalogue ships with sane defaults (see ``loadunit.py``) so a
+    project that never opens it behaves exactly as it did, and a salesperson
+    edits an 入数 in place on the flow edge that uses it.
+
+    ``capacity`` is a CHAIN, keyed by the id of what it holds::
+
+        オリコン  capacity={"piece": 30}          # 30 points fit in one 折コン
+        カゴ台車  capacity={"orikon": 14, "case": 14}
+        パレット  capacity={"case": 40}
+
+    A carrier that accepts several kinds is filled by OCCUPANCY (Σ count/cap),
+    so a mixed load of 折コン and cases lands on the same number of cages the
+    old flat 「(OC+ケース)÷14」 approximation gave — that formula is this one
+    with both capacities equal.
+
+    ``footprint_m2`` is the floor a single unit occupies while it waits; it is
+    what turns a 滞留 count into 仮置き坪数.
+    """
+
+    id: str = "unit"
+    name: str = ""                       # 表示名 ("" ⇒ fall back to id)
+    kind: Literal["container", "carrier", "pallet", "base"] = "container"
+    capacity: dict[str, float] = Field(default_factory=dict)
+    footprint_m2: float = 0.0
+    #: Editable 入数 are assumptions, not measurements — surfaced as 仮値 in the UI.
+    provisional: bool = True
+
+
 class FlowEdge(BaseModel):
     """ONE 物の流れ between two work processes — the connection layer.
 
@@ -283,6 +315,12 @@ class FlowEdge(BaseModel):
     transport: TransportMeans = "manual"
     equipment_ref: str = ""  # Conveyor.id / Equipment.id ("" = unbound)
     share: float = 1.0       # 分岐率 (volume/staffing apportioning; not DES routing)
+    # --- 荷姿: what goods are IN, and what they ride ON, over this leg --------
+    # Both name a LoadUnit.id ("" = unspecified, which keeps the historical
+    # project-wide 仮値 behaviour). A 人手 leg typically carries a carrier
+    # (カゴ台車 / 6輪カート); a conveyor leg usually has a container only.
+    container_ref: str = ""
+    carrier_ref: str = ""
 
 
 class Process(BaseModel):
@@ -551,6 +589,9 @@ class WarehouseModel(BaseModel):
     locations: list[Location] = Field(default_factory=list)
     items: list[Item] = Field(default_factory=list)
     process: Process = Field(default_factory=Process)
+    # 荷姿カタログ (資材マスタ). Empty ⇒ the engine default (loadunit.DEFAULT_UNITS);
+    # resolve through `loadunit.catalog(model)`, never read this list directly.
+    load_units: list[LoadUnit] = Field(default_factory=list)
     resources: Resources = Field(default_factory=Resources)
     orders: Orders = Field(default_factory=Orders)
     simulation: Simulation = Field(default_factory=Simulation)

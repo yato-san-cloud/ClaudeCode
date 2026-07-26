@@ -69,6 +69,8 @@ class Edge:
     transport: str
     equipment_ref: str
     share: float
+    container_ref: str = ""    # LoadUnit.id goods are IN over this leg
+    carrier_ref: str = ""      # LoadUnit.id goods ride ON (人手区間で効く)
     #: True when this edge was inferred (from ``depends``) rather than authored.
     derived: bool = False
 
@@ -139,7 +141,9 @@ def resolve(model) -> FlowGraph:
         edges.append(Edge(src=src, dst=dst,
                           transport=str(d.get("transport") or "manual"),
                           equipment_ref=str(d.get("equipment_ref") or ""),
-                          share=share, derived=False))
+                          share=share, derived=False,
+                          container_ref=str(d.get("container_ref") or ""),
+                          carrier_ref=str(d.get("carrier_ref") or "")))
         if dst:
             wired.add(dst)
 
@@ -263,6 +267,26 @@ def diagnose(model) -> list[dict]:
              "（このままでは搬送に使われません）",
              conveyors=sorted(conveyor_ids))
 
+    # 4b. 荷姿 that does not exist, or a carrier that cannot hold what is on it
+    from whsim import loadunit
+    units = loadunit.by_id(model)
+    for e in g.edges:
+        for ref, what in ((e.container_ref, "容器"), (e.carrier_ref, "台車")):
+            if ref and ref not in units:
+                warn("missing_loadunit",
+                     f"「{e.dst or '出荷'}」への搬送が{what}「{ref}」を指していますが、"
+                     "荷姿カタログにありません",
+                     edge=f"{e.src}→{e.dst}", unit=ref)
+        if e.container_ref and e.carrier_ref:
+            carrier = units.get(e.carrier_ref)
+            if carrier and loadunit.capacity_for(carrier, e.container_ref) <= 0:
+                warn("incompatible_loadunit",
+                     f"「{loadunit.label(e.carrier_ref, units)}」に"
+                     f"「{loadunit.label(e.container_ref, units)}」の積載数が"
+                     "設定されていません（積めない組み合わせです）",
+                     edge=f"{e.src}→{e.dst}",
+                     carrier=e.carrier_ref, container=e.container_ref)
+
     # 5. split ratios that do not add up
     by_src: dict[str, float] = {}
     for e in g.edges:
@@ -279,3 +303,22 @@ def diagnose(model) -> list[dict]:
         if i and n.id not in fed:
             warn("unconnected", f"工程「{n.id}」に前工程からの流れがありません", process=n.id)
     return out
+
+
+def loadunits_in_use(model) -> set[str]:
+    """Every 荷姿 the design actually references (for "unused" reporting)."""
+    refs: set[str] = set()
+    for e in resolve(model).edges:
+        if e.container_ref:
+            refs.add(e.container_ref)
+        if e.carrier_ref:
+            refs.add(e.carrier_ref)
+    return refs
+
+
+def edge_loadunits(model, src: str, dst: str) -> tuple[str, str]:
+    """``(container_ref, carrier_ref)`` for one leg ("" when unspecified)."""
+    for e in resolve(model).edges:
+        if e.src == src and e.dst == dst:
+            return e.container_ref, e.carrier_ref
+    return "", ""
