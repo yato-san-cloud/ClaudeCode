@@ -203,6 +203,25 @@
             <div id="importLog" class="log"></div>
           </div>
         </div>
+        <!-- ダッシュボード: the single "how is this warehouse doing" screen.
+             Four self-contained modules fill these hosts (js/dashboard/*.js);
+             the shell only owns the grid. -->
+        <div id="dashboard" class="panel" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0" hidden>
+          <div class="dash">
+            <div class="dash-top" id="dashTop"></div>
+            <div class="dash-kpis" id="dashKpis"></div>
+            <div class="dash-main">
+              <div class="dash-stage" id="dashStage">
+                <div class="dash-stage-3d" id="dashStage3d"></div>
+                <div class="dash-ov dash-ov-l" id="dashOvLeft"></div>
+                <div class="dash-ov dash-ov-r" id="dashOvRight"></div>
+                <div class="dash-pins" id="dashPins" aria-hidden="true"></div>
+              </div>
+              <div class="dash-rail" id="dashRail"></div>
+            </div>
+            <div class="dash-bottom" id="dashBottom"></div>
+          </div>
+        </div>
         <div id="bi" class="panel" role="tabpanel" tabindex="0" hidden></div>
         <div id="bianalytics" class="panel" role="tabpanel" tabindex="0" hidden></div>
         <div id="chat" class="panel" role="tabpanel" aria-labelledby="tab-chat" tabindex="0" hidden></div>

@@ -10,6 +10,7 @@ import { mountSettings } from './js/settings.js';
 import { mountOnboarding } from './js/onboarding.js';
 import { mountJourney, viewDesc } from './js/journey.js';
 import { mountOverview } from './js/overview.js';
+import { mountDashboard } from './js/dashboard.js';
 import { mountBI } from './js/bi.js';
 import { mountBIAnalytics } from './js/bianalytics.js';
 import { mountPhaseHint } from './js/phasehint.js';
@@ -320,6 +321,7 @@ async function doRun() {
     renderProposalStory();
     if (S.export) S.export.refresh();
     if (S.view === 'analysis') mountAnalysis($('analysis'), S.project);
+    if (S.view === 'dashboard') mountDashboardView();
     refreshScorecard();  // run done → the rail can now show 解析 vs DES deltas
     return r;
   } finally {
@@ -646,6 +648,63 @@ function setBtnBusy(btn, on, busyLabel) {
 }
 
 // ---- view switching (shared by the tab bar and the Cody chat) -------------
+// ④検証「ダッシュボード」: the monitoring screen. It owns its OWN Scene3D on
+// #dashStage3d — a second WebGL context would be wasteful, so it is created on
+// entry and disposed the moment the view is left (see switchView).
+// The dashboard floor follows the APP theme: a daylight warehouse under the
+// light theme, the brand's dark hall under the dark one. (The dedicated ④検証
+// 3D view keeps the user's own 3D表現 choice — this is the dashboard's own look.)
+function dashPreset() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  return dark ? 'brand' : 'natural';
+}
+
+function mountDash3d() {
+  const el = $('dashStage3d');
+  if (!el || !S.replay) return;
+  if (S.dashScene) { S.dashScene.dispose(); S.dashScene = null; }
+  try {
+    S.dashScene = new Scene3D(el, S.replay, () => S.t);
+    if (S.dashScene.setPreset) S.dashScene.setPreset(dashPreset());
+    const bk = S.kpis;
+    if (bk && bk.bottleneck_jp && S.dashScene.setBottleneck) {
+      S.dashScene.setBottleneck(JP_TO_TYPE[bk.bottleneck_jp] || null);
+    }
+    S.dashScene.resize();
+  } catch (e) {  // WebGL unavailable — the rest of the dashboard still works.
+    S.dashScene = null;
+  }
+  if (S.dashboard) S.dashboard.ctx.scene3d = S.dashScene;
+}
+
+function mountDashboardView() {
+  if (!S.dashboard) {
+    S.dashboard = mountDashboard({
+      getProjectName: () => S.project,
+      getReplay: () => S.replay,
+      getTime: () => S.t,
+      getPlaying: () => S.playing,
+      onSeek: (t) => { S.t = t; },
+      onSelectView: (v) => switchView(v),
+      onRun: () => { runSim(); },
+      setPlaying: (on) => {
+        // Drive the SHELL transport so the dashboard strip and the 2D/3D
+        // transport can never disagree about whether the replay is running.
+        S.playing = !!on;
+        const b = $('playBtn');
+        if (b) b.textContent = S.playing ? '⏸' : '▶';
+      },
+    });
+  }
+  if (!S.dashboard) return;
+  if (S.project && !S.replay) {
+    loadReplay().then(() => { mountDash3d(); S.dashboard.refresh(); }).catch(() => {});
+  } else {
+    mountDash3d();
+  }
+  S.dashboard.refresh();
+}
+
 function switchView(view) {
   if (!view || !$(view)) return;
   S.view = view;
@@ -663,7 +722,7 @@ function switchView(view) {
   // the designer needs the full canvas height, so the KPI bar hides there too.
   const kpiBar = $('kpiBar');
   kpiBar.style.display =
-    (view === 'analysis' || view === 'dataanalysis' || view === 'materialflow'
+    (view === 'analysis' || view === 'dashboard' || view === 'dataanalysis' || view === 'materialflow'
       || view === 'notes' || view === 'chat' || view === 'timetable' || view === 'overview'
       || view === 'bi' || view === 'bianalytics' || view === 'design'
       || view === 'storage' || view === 'cost' || view === 'pickrate' || view === 'workcompare'
@@ -718,6 +777,8 @@ function switchView(view) {
   if (view === 'pickseq') mountPickseqView();
   if (view === 'workcompare') mountWorkCompareView();
   if (view === 'overview') mountOverviewView();
+  if (view === 'dashboard') mountDashboardView();
+  else if (S.dashScene) { S.dashScene.dispose(); S.dashScene = null; }
   if (view === 'bi') mountBIView();
   if (view === 'bianalytics') mountBIAnalyticsView();
   if (view === 'chat' && S.chat) S.chat.focus();
@@ -733,7 +794,9 @@ function switchView(view) {
   // right side). setPhase refetches the scorecard when entering a rail phase.
   if (S.scorecard) {
     S.scorecard.setView(view);
-    S.scorecard.setPhase(VIEW_PHASE[view] || null);
+    // ダッシュボード carries its OWN right rail, so the persistent 採点表 dock
+    // would put two columns side by side. Park it while that view is open.
+    S.scorecard.setPhase(view === 'dashboard' ? null : (VIEW_PHASE[view] || null));
   }
 }
 
@@ -1060,6 +1123,7 @@ document.addEventListener('whsim:load-timetable', (e) => {
 // for the static (paused / no-replay) case so the canvas repaints immediately.
 document.addEventListener('themechange', () => {
   refreshPalette();
+  if (S.dashScene && S.dashScene.setPreset) S.dashScene.setPreset(dashPreset());
   S._needs2d = true;  // re-read PALETTE on the next frame even while paused
   if (S.view === 'view2d') draw2d();
 });
@@ -1095,6 +1159,8 @@ function clearProjectState() {
   refreshReadiness();
   if (S.settings && S.settings.clear) S.settings.clear();
   if (S.scene3d) { S.scene3d.dispose(); S.scene3d = null; }
+  if (S.dashScene) { S.dashScene.dispose(); S.dashScene = null; }
+  if (S.dashboard) { S.dashboard.dispose(); S.dashboard = null; }
   $('projectSelect').value = '';
   $('runBtn').disabled = true;
   $('playBtn').disabled = true; $('scrub').disabled = true;
@@ -1133,6 +1199,8 @@ function initSidebar() {
     setTimeout(() => {
       fitCanvas();
       if (S.scene3d) S.scene3d.resize();
+      if (S.dashScene) S.dashScene.resize();
+      if (S.dashboard) S.dashboard.resize();
       if (S.designer) S.designer.resize();
     }, 280);
   };
@@ -1271,6 +1339,8 @@ function initUI() {
       _resizeRaf = 0;
       fitCanvas();
       if (S.scene3d) S.scene3d.resize();
+      if (S.dashScene) S.dashScene.resize();
+      if (S.dashboard) S.dashboard.resize();
       if (S.designer) S.designer.resize();
     });
   });

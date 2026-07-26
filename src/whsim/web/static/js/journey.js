@@ -23,7 +23,7 @@ const PHASES = [
   { id: 'design', no: '③', title: '設計', goal: 'レイアウト・工程・人員を組み立てる', views: ['design', 'pickrate', 'timetable'] },
   // ④検証 = DESで裏取りするレーン。原価は「判定」内、ピック順序は「作業方法比較」内、
   // 2Dと3Dは1つの「ビュー」内トグルに集約（in-view toggle, app.js が #viewToggle で描画）。
-  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確かめる', views: ['analysis', 'view2d', 'workcompare'] },
+  { id: 'validate', no: '④', title: '検証', goal: '捌けるかをKPIと動きで確かめる', views: ['dashboard', 'analysis', 'view2d', 'workcompare'] },
   { id: 'propose', no: '⑤', title: '提案', goal: '提案書とシナリオ比較で見せる', views: ['viewpng', 'compare', 'export'] },
 ];
 
@@ -35,7 +35,7 @@ const CROSS = [
 
 // Display labels for every view id (sub-tab buttons + landing targets).
 const VIEW_LABEL = {
-  overview: '概要', dataanalysis: '物量サマリ', bianalytics: '対話分析', bi: '基礎物量', design: 'レイアウト',
+  overview: '概要', dashboard: 'ダッシュボード', dataanalysis: '物量サマリ', bianalytics: '対話分析', bi: '基礎物量', design: 'レイアウト',
   storage: '保管設計', materialflow: 'マテリアルフロー', timetable: '人員タイムチャート', analysis: 'KPI・判定',
   pickrate: '生産性試算', slotting: '棚割り', pickseq: 'ピック順序', view2d: '2D/3Dビュー', view3d: '3Dビュー', viewpng: '提案PNG', cost: '原価試算', workcompare: '作業方法比較', compare: 'シナリオ比較',
   export: 'エクスポート', chat: 'OCTA', notes: '知見',
@@ -45,6 +45,7 @@ const VIEW_LABEL = {
 // now-many views are recognisable without clicking (recognition over recall).
 const VIEW_DESC = {
   overview: '案件の概要と準備状況を確認し、次の一手を決める（→②分析）',
+  dashboard: 'KPI・稼働・イベント・3Dフロアを1画面で監視する',
   dataanalysis: '取込データのKPI・チャートで物量の全体像をつかむ',
   bianalytics: '言葉で問う：ABC・曜日×時間・SKU構成を深掘り',
   bi: '仮値で荷姿変換して基礎物量を作る（→人員タイムチャート）',

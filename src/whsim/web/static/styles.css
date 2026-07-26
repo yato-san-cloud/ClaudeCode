@@ -1271,6 +1271,10 @@ html[data-theme="dark"] {
     --bg-panel:      #161D29;
     --bg-hover:      #1A2230;
     --bg-active:     #202B3B;
+    /* Translucent surface for panels floating over a canvas/3D stage. It was
+       only ever defined in :root (a LIGHT value), so every dark-mode consumer
+       got a washed-out light card on a dark scene. */
+    --bg-overlay:    rgba(18,24,35,0.78);
 
     --ink-primary:   #E6EDF4;
     --ink-secondary: rgba(230,237,244,0.66);
@@ -2451,3 +2455,56 @@ button.primary:disabled,
   color: var(--bad-ink);
   opacity: 1;
 }
+
+/* ── ダッシュボード shell ─────────────────────────────────────────────────
+   Only the GRID lives here. Every card, chart and overlay is drawn by a
+   self-contained module under js/dashboard/ that injects its own <style>, so
+   the four content areas can be replaced independently. */
+.dash{display:flex;flex-direction:column;gap:var(--sp-3);width:100%;min-width:0;padding-bottom:var(--sp-6)}
+.dash-top{min-width:0}
+/* The KPI module owns its OWN grid (it decides how many cards it can source),
+   so the shell must not impose a second one on top — a 6-column grid around a
+   single child squeezed every card into 1/6 of the width. */
+.dash-kpis{min-width:0}
+/* The stage row is CAPPED rather than left to grow with the rail: the dashboard
+   is meant to read in one screen (stage + bottom row above the fold), and an
+   uncapped row let four rail cards push the floor plan to ~800px. The rail
+   scrolls inside its own column when it needs more than the cap. */
+.dash-main{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:var(--sp-3);min-width:0;
+  align-items:stretch;height:clamp(380px,48vh,640px)}
+.dash-stage{position:relative;min-width:0;min-height:460px;border-radius:var(--r-lg);
+  overflow:hidden;border:1px solid var(--line-hair);background:var(--bg-sunken)}
+.dash-stage-3d{position:absolute;inset:0}
+.dash-stage-3d canvas{display:block;width:100%;height:100%}
+/* Floating overlays sit ABOVE the WebGL surface but must not eat its pointer
+   events except on their own chrome (children re-enable it). */
+.dash-ov{position:absolute;top:var(--sp-3);z-index:3;pointer-events:none;max-width:46%}
+.dash-ov>*{pointer-events:auto}
+.dash-ov-l{left:var(--sp-3)}
+.dash-ov-r{right:var(--sp-3)}
+/* Area/rack name pins projected from 3D space each frame. */
+.dash-pins{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.dash-rail{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0;
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.dash-bottom{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) minmax(0,0.7fr);
+  gap:var(--sp-3);min-width:0}
+
+/* Narrow: the rail drops under the stage, the bottom row stacks. */
+@media (max-width:1400px){
+  .dash-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .dash-main{grid-template-columns:minmax(0,1fr);height:auto}
+  .dash-stage{height:clamp(340px,42vh,560px)}
+  .dash-rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible}
+  .dash-bottom{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:900px){
+  .dash-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dash-rail{grid-template-columns:minmax(0,1fr)}
+  .dash-stage{min-height:340px}
+}
+
+/* ダッシュボード supplies its own floating panels, so Scene3D's built-in scene
+   legend and live-productivity HUD must stand down inside this stage (they are
+   still shown in the dedicated ④検証 3D view, which has no other overlays). */
+.dash-stage-3d > .whsim-info3d,
+.dash-stage-3d > .whsim-hud3d{display:none !important}
