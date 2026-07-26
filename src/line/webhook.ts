@@ -152,6 +152,7 @@ async function handleTextMessage(
             result.carriedOver,
             result.promoted,
             route.progress,
+            result.race,
           ),
         ),
       ];

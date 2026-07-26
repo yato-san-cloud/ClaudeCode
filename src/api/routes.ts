@@ -22,9 +22,11 @@ import {
   getItems,
   groupByCategory,
   householdOfItem,
+  loadTripRecords,
   removeItem,
   setChecked,
 } from '../domain/lists';
+import { summarizePace } from '../domain/race';
 import {
   appearanceCounts,
   listCatalog,
@@ -93,9 +95,17 @@ api.get('/lists/active', async (c) => {
   if (!householdId) return c.json({ error: 'forbidden' }, 403);
 
   const route = await loadRoute(c.env.DB, householdId);
+  const pace = summarizePace(await loadTripRecords(c.env.DB, householdId));
   const list = await getActiveList(c.env.DB, householdId);
   if (!list) {
-    return c.json({ list: null, groups: [], remaining: 0, done: 0, route: route.progress });
+    return c.json({
+      list: null,
+      groups: [],
+      remaining: 0,
+      done: 0,
+      route: route.progress,
+      race: { startedAt: null, elapsedMs: 0, pace },
+    });
   }
 
   const items = await getItems(c.env.DB, list.id);
@@ -110,6 +120,13 @@ api.get('/lists/active', async (c) => {
     groups,
     // 「消し込むほど並びが良くなる」ことを画面に出すための材料
     route: route.progress,
+    // タイムアタック。elapsedMs はサーバ時刻基準で返し、クライアントは
+    // これを錨にして進める (端末とサーバの時計のズレを持ち込まないため)。
+    race: {
+      startedAt: list.started_at,
+      elapsedMs: list.started_at === null ? 0 : Math.max(0, Date.now() - list.started_at),
+      pace,
+    },
     remaining: items.filter((item) => item.checked === 0).length,
     done: items.filter((item) => item.checked === 1).length,
     // クライアントは updatedAt を見て、相手の変更が来ているかを判定する
@@ -188,8 +205,10 @@ api.patch('/items/:id', async (c) => {
   const body = await c.req.json<{ checked?: boolean }>();
   if (typeof body.checked !== 'boolean') return c.json({ error: 'checked is required' }, 400);
 
-  await setChecked(c.env.DB, itemId, body.checked, c.get('userId'));
-  return c.json({ ok: true });
+  // startedAt を返すことで、最初の1件でクライアントが即座にタイマーを回せる。
+  // 次のポーリングを待たせない。
+  const { startedAt } = await setChecked(c.env.DB, itemId, body.checked, c.get('userId'));
+  return c.json({ ok: true, startedAt });
 });
 
 api.delete('/items/:id', async (c) => {
@@ -222,6 +241,7 @@ api.post('/lists/:id/complete', async (c) => {
       label: categoryLabel(item.category),
     })),
     route: route.progress,
+    race: result.race,
   });
 });
 

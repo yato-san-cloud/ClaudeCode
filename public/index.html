@@ -19,11 +19,20 @@
       <header class="topbar">
         <div class="topbar-row">
           <select id="household" class="household-select" aria-label="リストを選ぶ"></select>
+          <output id="timer" class="timer" hidden aria-label="経過時間">0:00</output>
           <button id="refresh" class="icon-button" type="button" aria-label="更新">↻</button>
         </div>
+
         <div class="progress">
-          <div id="progress-bar" class="progress-bar"><span></span></div>
-          <p id="progress-text" class="progress-text">—</p>
+          <div id="progress-bar" class="progress-bar">
+            <span id="progress-fill"></span>
+            <!-- 自己ベストのペースなら今どこにいるか -->
+            <i id="ghost" class="ghost" hidden aria-hidden="true"></i>
+          </div>
+          <div class="progress-meta">
+            <p id="progress-text" class="progress-text">—</p>
+            <p id="race-hint" class="race-hint" hidden></p>
+          </div>
           <p id="route-hint" class="route-hint" hidden></p>
         </div>
       </header>
@@ -69,18 +78,25 @@
       </footer>
     </main>
 
+    <div id="combo" class="combo" hidden aria-hidden="true"></div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
     <template id="group-template">
       <section class="group">
-        <h2 class="group-title"></h2>
-        <ul class="items"></ul>
+        <button class="group-title" type="button" aria-expanded="true">
+          <span class="group-name"></span>
+          <span class="group-count"></span>
+          <span class="group-caret" aria-hidden="true"></span>
+        </button>
+        <div class="group-body">
+          <ul class="items"></ul>
+        </div>
       </section>
     </template>
 
     <template id="item-template">
       <li class="item">
-        <button class="item-main" type="button">
+        <button class="item-main" type="button" aria-pressed="false">
           <span class="checkbox" aria-hidden="true"></span>
           <span class="item-body">
             <span class="item-name"></span>

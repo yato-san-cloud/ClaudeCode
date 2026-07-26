@@ -15,7 +15,7 @@ See `README.md` for the product-level description and the full LINE/Cloudflare s
 ```bash
 npm install
 npm run dev                # wrangler dev (needs .dev.vars — copy .dev.vars.example)
-npm test                   # vitest, 159 unit tests
+npm test                   # vitest, 185 unit tests
 npm test -- parser         # single file: matches test/parser.test.ts
 npm test -- -t '長音符'     # single test by name
 npm run typecheck          # tsc --noEmit
@@ -118,6 +118,43 @@ default exactly, and roughly four consistent trips flip a pair.
 position is meaningless. Its members escape via `inferCategoryFromNeighbors` +
 Boyer-Moore majority voting (`PROMOTE_VOTES` consistent observations promote an item
 to a real aisle).
+
+**Race records** (`domain/race.ts`) turn a trip into a time trial. Two rules:
+timing starts at the *first check-off*, not list creation (a list is often created
+days before the trip); and records are stored as **seconds per item**, so a 5-item
+trip and a 25-item trip are comparable — raw duration would make big trips
+permanently worse than the personal best. Trips under `MIN_ITEMS_FOR_RECORD` items or
+over `MAX_TRIP_MS` are excluded from records rather than allowed to set a bogus best.
+`raceResult` receives history that excludes the current trip, so a trip cannot fail to
+beat itself.
+
+## Front end (`public/`)
+
+Plain HTML/CSS/JS, no bundler — it is served directly by the Workers assets binding.
+The perceived-speed work is load-bearing, not decoration; three things hold it up:
+
+- **Optimistic check-off.** The strike-through lands before the request goes out.
+  `state.pending` holds the optimistic value and is cleared only when a poll returns
+  the matching server value (`reconcilePending`) — clearing it on response would let
+  a stale poll undo the user's tap.
+- **Keyed diff rendering.** `renderList` reconciles against `itemNodes` / `groupNodes`
+  instead of rebuilding. A full rebuild every 4s kills in-flight animations and drops
+  scroll position. `setText` writes only on change; `placeAfter` moves a node only
+  when it is out of order.
+- **Server-anchored timer.** The API returns `elapsedMs`; the client derives
+  `anchor = Date.now() - elapsedMs` so a skewed device clock never shows a wrong time.
+  The anchor is only re-set when it drifts more than a second, otherwise the display
+  jitters.
+
+Two CSS traps already paid for, both caught by the browser check:
+
+- A class rule that sets `display` beats the UA's `[hidden] { display: none }`. The
+  global `[hidden] { display: none !important }` at the top of `style.css` exists
+  because `.boot { display: grid }` kept the splash occupying a screen of layout after
+  it was hidden.
+- Flex children stretch by default. `.item-body` needs `align-items: flex-start` or
+  `.item-name` fills the row and the strike-through pseudo-element runs several times
+  past the end of the text.
 
 ## Conventions
 

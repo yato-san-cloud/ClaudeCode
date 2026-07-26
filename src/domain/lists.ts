@@ -24,6 +24,7 @@ import {
   type PrecedenceCount,
 } from './route';
 import { recordCheckoffOrder } from './routeStore';
+import { raceResult, type RaceResult, type TripRecord } from './race';
 import { setShoppingDow } from './households';
 import type { ParsedItem } from '../parser';
 import type { ListItemRow, ListItemWithRoute, ListRow } from '../types';
@@ -59,6 +60,9 @@ export async function ensureActiveList(
     created_by: createdBy,
     created_at: now,
     completed_at: null,
+    started_at: null,
+    duration_ms: null,
+    item_count: 0,
   };
   await db
     .prepare(
@@ -211,19 +215,67 @@ function mergeNotes(a: string | null, b: string | null): string | null {
   return `${a} / ${b}`;
 }
 
+/**
+ * チェックの付け外し。
+ *
+ * 最初の1件が付いた瞬間にストップウォッチを回し始める (= 店に着いて動き出した
+ * 時刻)。リストを作った時刻は買い物の何日も前のことがあるので使えない。
+ *
+ * @returns 計測の起点。まだ始まっていなければ null。
+ */
 export async function setChecked(
   db: D1Database,
   itemId: string,
   checked: boolean,
   byUserId: string | null,
   now: number = Date.now(),
-): Promise<void> {
+): Promise<{ startedAt: number | null }> {
   await db
     .prepare(
       `UPDATE list_items SET checked = ?, checked_at = ?, checked_by = ?, updated_at = ? WHERE id = ?`,
     )
     .bind(checked ? 1 : 0, checked ? now : null, checked ? byUserId : null, now, itemId)
     .run();
+
+  if (checked) {
+    await db
+      .prepare(
+        `UPDATE shopping_lists SET started_at = ?
+         WHERE id = (SELECT list_id FROM list_items WHERE id = ?) AND started_at IS NULL`,
+      )
+      .bind(now, itemId)
+      .run();
+  }
+
+  const row = await db
+    .prepare(
+      `SELECT l.started_at AS started_at FROM list_items i
+       JOIN shopping_lists l ON l.id = i.list_id
+       WHERE i.id = ?`,
+    )
+    .bind(itemId)
+    .first<{ started_at: number | null }>();
+
+  return { startedAt: row?.started_at ?? null };
+}
+
+/** 完了済みの買い物を新しい順に。自己ベストと前回記録の算出に使う。 */
+export async function loadTripRecords(
+  db: D1Database,
+  householdId: string,
+  limit = 40,
+): Promise<TripRecord[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id AS listId, duration_ms AS durationMs, item_count AS itemCount,
+              completed_at AS completedAt
+       FROM shopping_lists
+       WHERE household_id = ? AND status = 'done' AND duration_ms IS NOT NULL
+       ORDER BY completed_at DESC LIMIT ?`,
+    )
+    .bind(householdId, limit)
+    .all<TripRecord>();
+  return results ?? [];
 }
 
 export async function removeItem(db: D1Database, itemId: string): Promise<void> {
@@ -256,6 +308,8 @@ export interface CompleteResult {
   promoted: Array<{ name: string; category: string }>;
   /** 順路の学習が進んだか (品数が少ない買い物では進まない) */
   routeLearned: boolean;
+  /** タイム結果。1件も消し込まずに完了した場合は null。 */
+  race: RaceResult | null;
 }
 
 /**
@@ -335,9 +389,20 @@ export async function completeList(
     }
   }
 
+  // --- タイム記録 ---
+  // 過去の記録は「今回を含まない」状態で読む。自己ベスト判定に自分が混ざらない。
+  const history = await loadTripRecords(db, householdId);
+  const durationMs = list.started_at === null ? 0 : Math.max(0, now - list.started_at);
+  const race =
+    purchased.length > 0 ? raceResult(durationMs, purchased.length, history) : null;
+
   await db
-    .prepare(`UPDATE shopping_lists SET status = 'done', completed_at = ? WHERE id = ?`)
-    .bind(now, list.id)
+    .prepare(
+      `UPDATE shopping_lists
+       SET status = 'done', completed_at = ?, duration_ms = ?, item_count = ?
+       WHERE id = ?`,
+    )
+    .bind(now, race ? durationMs : null, purchased.length, list.id)
     .run();
 
   let nextListId: string | null = null;
@@ -367,7 +432,7 @@ export async function completeList(
   const dows = await recentPurchaseDows(db, householdId);
   await setShoppingDow(db, householdId, inferShoppingDow(dows));
 
-  return { purchased, carriedOver, nextListId, promoted, routeLearned };
+  return { purchased, carriedOver, nextListId, promoted, routeLearned, race };
 }
 
 export interface GroupedItems {

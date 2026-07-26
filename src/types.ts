@@ -62,6 +62,11 @@ export interface ListRow {
   created_by: string | null;
   created_at: number;
   completed_at: number | null;
+  /** 最初の1件を消し込んだ時刻。タイム計測の起点。 */
+  started_at: number | null;
+  /** 完了時に確定する所要時間と品数 (記録照会用に非正規化) */
+  duration_ms: number | null;
+  item_count: number;
 }
 
 export interface ListItemRow {

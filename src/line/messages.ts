@@ -9,6 +9,7 @@
 import { categoryLabel } from '../domain/categories';
 import { groupByCategory } from '../domain/lists';
 import { CONFIDENT_TRIPS, type PrecedenceCount, type RouteProgress } from '../domain/route';
+import { formatDuration, type RaceResult } from '../domain/race';
 import type { ListItemRow, ListItemWithRoute } from '../types';
 import type { Suggestion } from '../domain/suggest';
 import type { LineMessage } from './client';
@@ -181,8 +182,13 @@ export function completionSummary(
   carriedOver: readonly ListItemRow[],
   promoted: ReadonlyArray<{ name: string; category: string }>,
   route: RouteProgress,
+  race: RaceResult | null,
 ): string {
   const lines = [`お疲れさま。${purchasedCount}件を記録しました。`];
+
+  if (race && race.durationMs > 0) {
+    lines.push(raceLine(race));
+  }
 
   if (carriedOver.length > 0) {
     lines.push(
@@ -206,6 +212,19 @@ export function completionSummary(
   }
 
   return lines.join('\n');
+}
+
+/** タイム結果の1行。「速かったのか遅かったのか」がすぐ分かる形にする。 */
+function raceLine(race: RaceResult): string {
+  const time = formatDuration(race.durationMs);
+  if (!race.counted) return `⏱ ${time}（${race.itemCount}件・記録対象外）`;
+
+  const pace = `${Math.round(race.secondsPerItem ?? 0)}秒/件`;
+  if (race.isPersonalBest) return `🏆 ${time}（${pace}）自己ベスト更新!`;
+
+  const delta = race.deltaVsBest;
+  if (delta === null) return `⏱ ${time}（${pace}）`;
+  return `⏱ ${time}（${pace}）自己ベストまで あと${Math.abs(Math.round(delta))}秒/件`;
 }
 
 /** 提案カード。ワンタップで追加できるようポストバックを付ける。 */
