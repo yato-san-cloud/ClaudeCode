@@ -385,6 +385,73 @@ body { padding-bottom: env(safe-area-inset-bottom); }
   100% { opacity: 0; transform: translate(-50%, -85%) scale(0.95); }
 }
 
+/* --- 買い忘れ検知 --- */
+.companions {
+  margin: 4px 12px 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--gold) 9%, var(--surface));
+}
+/* 終盤 (残りわずか) になったら存在感を上げる */
+.companions.urgent {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 22%, transparent);
+}
+
+.companions-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text);
+}
+.companions-title::before { content: "🤔 "; }
+
+.companion-list { display: flex; flex-direction: column; gap: 8px; }
+
+.companion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.companion-add {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.companion-add .companion-reason {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.companion-dismiss {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+
 /* --- 空 / 提案 --- */
 .empty { padding: 40px 24px; text-align: center; color: var(--muted); }
 .empty-title { font-size: 16px; font-weight: 700; color: var(--text); margin: 0 0 8px; }

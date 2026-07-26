@@ -15,7 +15,7 @@ See `README.md` for the product-level description and the full LINE/Cloudflare s
 ```bash
 npm install
 npm run dev                # wrangler dev (needs .dev.vars — copy .dev.vars.example)
-npm test                   # vitest, 185 unit tests
+npm test                   # vitest, 198 unit tests
 npm test -- parser         # single file: matches test/parser.test.ts
 npm test -- -t '長音符'     # single test by name
 npm run typecheck          # tsc --noEmit
@@ -128,6 +128,24 @@ over `MAX_TRIP_MS` are excluded from records rather than allowed to set a bogus 
 `raceResult` receives history that excludes the current trip, so a trip cannot fail to
 beat itself.
 
+**Co-purchase detection** (`domain/basket.ts`, pure; `domain/companions.ts` for the D1
+side) is the differentiating feature — the product gap identified in the competitive
+survey (see README). Purchase history is grouped into baskets by `list_id` and mined for
+association rules: for a trigger already on the list, surface items usually bought with
+it that are missing today.
+
+- **Lift is not optional.** Confidence alone promotes staples — milk appears in every
+  basket, so `confidence(curry → milk)` is 1.0 without any real association. The
+  `MIN_LIFT` filter is what makes this a *conditional* signal rather than a second
+  frequency ranking; `suggest.ts` already owns frequency and cycle. Dropping the lift
+  check collapses the two features into one.
+- Thresholds (`MIN_BASKETS`, `MIN_TOGETHER`, `MIN_CONFIDENCE`, `MIN_LIFT`) are tuned for
+  silence over recall. A false "did you forget X?" is nagging, and a nagging bot in a
+  group chat gets muted.
+- In LINE the hint is attached **only when the trigger was just added in that message**
+  (`webhook.ts` intersects companions with the items from this parse). Repeating it on
+  every message is the same nagging failure.
+
 ## Front end (`public/`)
 
 Plain HTML/CSS/JS, no bundler — it is served directly by the Workers assets binding.
@@ -145,6 +163,13 @@ The perceived-speed work is load-bearing, not decoration; three things hold it u
   `anchor = Date.now() - elapsedMs` so a skewed device clock never shows a wrong time.
   The anchor is only re-set when it drifts more than a second, otherwise the display
   jitters.
+
+Anything that reacts to check-off state must be driven from `renderList`, not from
+`loadList`. `toggleItem` deliberately does not re-fetch, so a state derived in
+`loadList` only updates on the next 4-second poll. `updateCompanionUrgency` is split out
+of `renderCompanions` for exactly this reason: the highlight has to land with the tap
+(it fires at ≥60% done and ≤3 remaining — the moment before leaving the store), while
+the card's DOM is rebuilt only when the companion data itself changes.
 
 Two CSS traps already paid for, both caught by the browser check:
 

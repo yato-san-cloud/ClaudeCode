@@ -8,6 +8,7 @@ import { matchKey } from '../parser/normalize';
 import { categorize } from './categories';
 import { updateInterval, type CatalogSnapshot } from './suggest';
 import { PROMOTE_VOTES, updateCategoryVote, updateRoutePosition } from './route';
+import { groupIntoBaskets, type Basket } from './basket';
 import { jstDayOfWeek } from '../util/time';
 import type { CatalogRow } from '../types';
 
@@ -287,6 +288,32 @@ export async function appearanceCounts(
   const counts = new Map<string, number>();
   for (const row of results ?? []) counts.set(row.catalog_item_id, row.appearances);
   return { counts, trips: tripIds.length };
+}
+
+/**
+ * 直近の買い物を「カゴ」として読み出す。併買学習の入力。
+ * purchase_events を list_id で束ねたものが、そのまま1回ぶんのカゴになる。
+ */
+export async function loadBaskets(
+  db: D1Database,
+  householdId: string,
+  trips = 60,
+): Promise<Basket[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT e.list_id AS listId, e.catalog_item_id AS itemId
+       FROM purchase_events e
+       JOIN (
+         SELECT id FROM shopping_lists
+         WHERE household_id = ? AND status = 'done'
+         ORDER BY completed_at DESC LIMIT ?
+       ) l ON l.id = e.list_id
+       WHERE e.household_id = ?`,
+    )
+    .bind(householdId, trips, householdId)
+    .all<{ listId: string; itemId: string }>();
+
+  return groupIntoBaskets(results ?? []);
 }
 
 /** 買い物曜日の推定に使う、直近の購入曜日 */

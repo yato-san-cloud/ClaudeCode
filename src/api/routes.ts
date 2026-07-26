@@ -27,6 +27,7 @@ import {
   setChecked,
 } from '../domain/lists';
 import { summarizePace } from '../domain/race';
+import { missingCompanions } from '../domain/companions';
 import {
   appearanceCounts,
   listCatalog,
@@ -279,6 +280,18 @@ api.get('/suggestions', async (c) => {
       categoryLabel: categoryLabel(item.category),
     })),
   });
+});
+
+/**
+ * 買い忘れ検知。いまリストにあるものを条件に、いつも一緒に買っているのに
+ * 今日は入っていないものを返す。「よく買うもの」とは別の信号なので
+ * /suggestions とは分けてある。
+ */
+api.get('/companions', async (c) => {
+  const householdId = await authorizeHousehold(c, c.req.query('householdId'));
+  if (!householdId) return c.json({ error: 'forbidden' }, 403);
+
+  return c.json({ companions: await missingCompanions(c.env.DB, householdId) });
 });
 
 /** 入力補完 & 履歴からの呼び出し */

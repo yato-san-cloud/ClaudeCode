@@ -24,6 +24,7 @@ import {
 } from '../domain/catalog';
 import { suggestItems, usualItems } from '../domain/suggest';
 import { loadRoute } from '../domain/routeStore';
+import { missingCompanions } from '../domain/companions';
 import { parseCommand } from './commands';
 import { reply } from './client';
 import {
@@ -233,8 +234,21 @@ async function handleTextMessage(
       const added = await addParsedItems(env.DB, householdId, list, result.items, 'line', now);
       const items = await getItems(env.DB, list.id);
       const route = await loadRoute(env.DB, householdId);
+
+      // 書いた直後が、書き漏れに気づける唯一のタイミング。
+      // ただし「いま書いたものが引き金になっている」場合だけにする。
+      // 毎回同じ問いかけを返すと、ただの小言になる。
+      const justAdded = new Set(
+        [...added.added, ...added.updated].map((item) => item.name),
+      );
+      const companions = await missingCompanions(env.DB, householdId, { limit: 3 });
+      const hint = companions.find((companion) => justAdded.has(companion.trigger));
+
       return [
-        text(addedSummary(added.added, added.updated, result.ignored.length)),
+        text(
+          addedSummary(added.added, added.updated, result.ignored.length) +
+            (hint ? `\n\n${hint.trigger} を買うなら、${hint.name} は大丈夫ですか?` : ''),
+        ),
         listCard(items, env.LIFF_ID, { precedence: route.counts }),
       ];
     }

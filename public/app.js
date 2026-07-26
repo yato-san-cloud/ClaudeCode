@@ -33,6 +33,9 @@ const state = {
   combo: 0,
   lastCheckAt: 0,
   wasComplete: false,
+  /** 買い忘れ提案のうち、利用者が「いらない」と言ったもの */
+  dismissed: new Set(),
+  companions: [],
 };
 
 const el = {
@@ -55,6 +58,8 @@ const el = {
   addInput: document.getElementById('add-input'),
   catalogList: document.getElementById('catalog-suggestions'),
   complete: document.getElementById('complete'),
+  companions: document.getElementById('companions'),
+  companionList: document.getElementById('companion-list'),
   combo: document.getElementById('combo'),
   toast: document.getElementById('toast'),
   groupTemplate: document.getElementById('group-template'),
@@ -195,6 +200,7 @@ function renderList() {
     el.complete.classList.remove('ready');
     setComplete(false);
     updateProgress(0, 0);
+    updateCompanionUrgency(0, 0);
     return;
   }
   el.empty.hidden = true;
@@ -261,6 +267,9 @@ function renderList() {
   el.complete.disabled = done === 0;
   updateProgress(done, total);
   setComplete(done === total);
+  // 強調はチェックと同じ間に切り替わってほしい。次のポーリングまで待つと、
+  // いちばん効くはずの「店を出る直前」を数秒とりこぼす。
+  updateCompanionUrgency(done, total);
 }
 
 function setComplete(complete) {
@@ -512,7 +521,9 @@ async function completeShopping() {
     state.anchor = null;
     state.combo = 0;
     state.expanded.clear();
+    state.dismissed.clear();
     await loadList();
+    await loadCompanions();
     await loadSuggestions();
   } catch (error) {
     toast(error.message);
@@ -541,6 +552,90 @@ async function loadList() {
   }
   renderList();
   updateRouteHint(data.route);
+  renderCompanions(); // 残り件数が変わると強調の出しどころも変わる
+}
+
+/**
+ * 買い忘れカードを強調するかどうか。
+ *
+ * 店を出る直前がいちばん効く。残り件数だけで見ると、2件しかないリストが
+ * 開いた瞬間から強調されてしまうので、進捗率と併せて判定する。
+ * チェックのたびに呼ばれるので、DOMは組み直さずクラスだけ切り替える。
+ */
+function updateCompanionUrgency(done, total) {
+  const nearlyDone = total > 0 && done / total >= 0.6 && total - done <= 3;
+  el.companions.classList.toggle('urgent', nearlyDone);
+}
+
+/**
+ * 買い忘れ検知の描画。
+ *
+ * 出しどころが命の機能なので、残りが少なくなったら強調する。
+ * 「いらない」と言われたものは、そのリストの間ずっと黙る。
+ */
+function renderCompanions() {
+  const visible = state.companions.filter((c) => !state.dismissed.has(c.id));
+  el.companions.hidden = visible.length === 0;
+  if (visible.length === 0) return;
+
+  const total = state.groups.reduce((sum, group) => sum + group.items.length, 0);
+  const done = state.groups.flatMap((group) => group.items).filter(isChecked).length;
+  updateCompanionUrgency(done, total);
+
+  el.companionList.textContent = '';
+  for (const companion of visible) {
+    const row = document.createElement('div');
+    row.className = 'companion';
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'companion-add';
+    const name = document.createElement('span');
+    name.textContent = `＋ ${companion.name}`;
+    const reason = document.createElement('span');
+    reason.className = 'companion-reason';
+    reason.textContent = companion.reason;
+    add.append(name, reason);
+    add.addEventListener('click', async () => {
+      add.disabled = true;
+      buzz(10);
+      try {
+        await api('/lists/items/bulk', {
+          method: 'POST',
+          body: JSON.stringify({ householdId: state.householdId, catalogItemIds: [companion.id] }),
+        });
+        toast(`${companion.name} を追加しました`);
+        await loadList();
+        await loadCompanions();
+      } catch (error) {
+        add.disabled = false;
+        toast(error.message);
+      }
+    });
+
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'companion-dismiss';
+    dismiss.setAttribute('aria-label', `${companion.name} の提案を閉じる`);
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => {
+      state.dismissed.add(companion.id);
+      renderCompanions();
+    });
+
+    row.append(add, dismiss);
+    el.companionList.appendChild(row);
+  }
+}
+
+async function loadCompanions() {
+  try {
+    const data = await api(`/companions?householdId=${encodeURIComponent(state.householdId)}`);
+    state.companions = data.companions ?? [];
+    renderCompanions();
+  } catch {
+    // 買い忘れ検知は補助。落ちても買い物は続けられる。
+  }
 }
 
 async function loadSuggestions() {
@@ -554,12 +649,14 @@ async function loadSuggestions() {
 
 function renderSuggestions(data) {
   el.suggestions.textContent = '';
+  // 買い忘れカードに出ているものは、こちらでは繰り返さない
+  const alreadyShown = new Set(state.companions.map((c) => c.id));
   const entries = [
     ...data.suggestions.map((item) => ({ ...item, kind: 'suggest' })),
     ...data.usual
       .filter((usual) => !data.suggestions.some((s) => s.id === usual.id))
       .map((item) => ({ ...item, kind: 'usual', reason: 'いつも買っています' })),
-  ];
+  ].filter((entry) => !alreadyShown.has(entry.id));
 
   el.suggestCount.hidden = entries.length === 0;
   el.suggestCount.textContent = String(entries.length);
@@ -649,8 +746,12 @@ async function switchHousehold(householdId) {
   state.pending.clear();
   state.expanded.clear();
   state.anchor = null;
+  state.dismissed.clear();
+  state.companions = [];
   localStorage.setItem('householdId', householdId);
   await loadList();
+  // 提案パネルは買い忘れカードとの重複を避けるため、companions を先に読む
+  await loadCompanions();
   await Promise.all([loadSuggestions(), loadCatalog()]);
 }
 
@@ -717,8 +818,10 @@ el.household.addEventListener('change', (event) => {
 });
 
 el.refresh.addEventListener('click', () => {
-  loadList().catch((error) => toast(error.message));
-  loadSuggestions();
+  loadList()
+    .then(loadCompanions)
+    .then(loadSuggestions)
+    .catch((error) => toast(error.message));
 });
 
 el.addForm.addEventListener('submit', (event) => {
