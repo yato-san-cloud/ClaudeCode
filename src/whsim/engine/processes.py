@@ -755,7 +755,8 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             # to the belt and is free again. So its busy time ends here (pick +
             # carry), logged now; packing happens downstream on its own process.
             world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
-                      busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
+                      busy=picker_busy, dist=total_dist, lines=len(points),
+                      resource="picker", worker=w.id)
             line, _board_xy, arc = board
             ride_m = line.remaining(arc)
             transit = ride_m / line.speed
@@ -788,7 +789,8 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
         if world.staging is not None and not agv_mode:
             # picker busy = pick + carry only (packing is the packer's time now).
             world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
-                      busy=picker_busy, dist=total_dist, resource="picker", worker=w.id)
+                      busy=picker_busy, dist=total_dist, lines=len(points),
+                      resource="picker", worker=w.id)
             for o, arr in zip(orders, arrivals):
                 tote = {"order": o, "arrival": arr, "ready_at": env.now,
                         "dist": dist_per_order}
@@ -831,7 +833,7 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                       cycle=env.now - arr, dist=dist_per_order, due=o.due_s)
         # Picker was occupied (pick/handle + carry + pack) for this whole interval.
         world.log(t=env.now, event="pick_done", order_id=orders[0].order_id,
-                  busy=env.now - busy_start, dist=total_dist,
+                  busy=env.now - busy_start, dist=total_dist, lines=len(points),
                   resource="picker", worker=w.id)
         if world.recording():
             w.kf(env.now, pos[0], pos[1], "idle")

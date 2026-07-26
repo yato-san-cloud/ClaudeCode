@@ -373,10 +373,25 @@ def _measured_productivity(res: RunResult, model: WarehouseModel | None,
         pick_id, pack_id = "ピッキング", "梱包"
 
     out: dict[str, float] = {}
-    orders = (model.orders.outbound if model else []) or []
-    avg_lines = (sum(len(o.lines) for o in orders) / len(orders)) if orders else 1.0
-    if picker_busy > 0 and completed > 0:
+    # Lines actually picked, as counted by the engine (``pick_done.lines``). This
+    # used to be re-derived from ``model.orders.outbound`` and fell back to ONE
+    # line per order when there were none -- but every bundled template is
+    # profile-driven, so the fallback fired every time and understated 実測
+    # productivity by the whole lines-per-order factor (35x on retail_dc). That
+    # number feeds 「実測を採用」 -> productivity_overrides -> cost/timetable, so a
+    # salesperson adopting it poisoned the cost model.
+    events = getattr(res, "events", None) or ()
+    lines_picked = sum(e.get("lines", 0) for e in events if e["event"] == "pick_done")
+    if not lines_picked and completed > 0:
+        # Legacy run (no ``lines`` on the event): fall back to the demand shape
+        # the engine samples from, NOT to 1.
+        orders = (model.orders.outbound if model else []) or []
+        if orders:
+            avg_lines = sum(len(o.lines) for o in orders) / len(orders)
+        else:
+            avg_lines = max(model.orders.profile.lines_per_order_mean, 1.0) if model else 1.0
         lines_picked = completed * avg_lines
+    if picker_busy > 0 and completed > 0:
         out[pick_id] = round(lines_picked / (picker_busy / 3600.0), 1)  # 行/h
     if packer_busy > 0 and completed > 0:
         out[pack_id] = round(completed / (packer_busy / 3600.0), 1)     # 件/h

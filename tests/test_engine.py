@@ -76,3 +76,46 @@ def test_multiday_imported_demand_is_simulated():
 
     k = kpis.compute(run_replications(m)[0])
     assert k["orders_arrived"] > 0 and k["orders_completed"] > 0
+
+
+def test_measured_productivity_counts_the_lines_the_engine_really_picked():
+    """実測生産性 must not assume one line per order.
+
+    It used to re-derive the line count from ``model.orders.outbound`` and fall
+    back to 1.0 when there were none — but EVERY bundled template is
+    profile-driven, so the fallback fired every time. On ``retail_dc`` (35
+    lines/order) that understated measured picking productivity 35x, and the
+    number feeds 「実測を採用」 → productivity_overrides → cost/timetable.
+    """
+    from whsim import kpis as _kpis
+    from whsim import templates as _t
+    from whsim.engine.run import run_once
+
+    m = _t.load_template_model("retail_dc")
+    assert not m.orders.outbound, "fixture must exercise the profile path"
+    assert m.orders.profile.lines_per_order_mean > 10
+
+    res = run_once(m, seed=3)
+    # the engine now reports the real count per trip
+    picked = [e for e in res.events if e["event"] == "pick_done"]
+    assert picked and all("lines" in e for e in picked)
+    completed = sum(1 for e in res.events if e["event"] == "order_complete")
+    assert sum(e["lines"] for e in picked) > completed * 5, "many lines per order"
+
+    rate = _kpis.compute([res], m)["measured_productivity"]["ピッキング"]
+    # a real DC picks tens of lines per picker-hour, not single digits
+    assert rate > 20.0, f"implausible measured productivity {rate} 行/h"
+
+
+def test_measured_productivity_falls_back_to_the_demand_shape():
+    """A legacy run with no ``lines`` on the event must not fall back to 1/order."""
+    from whsim import kpis as _kpis
+    from whsim import templates as _t
+    from whsim.engine.run import run_once
+
+    m = _t.load_template_model("retail_dc")
+    res = run_once(m, seed=3)
+    for e in res.events:                       # simulate a pre-feature run
+        e.pop("lines", None)
+    rate = _kpis.compute([res], m)["measured_productivity"]["ピッキング"]
+    assert rate > 20.0, f"legacy fallback still assumes 1 line/order ({rate})"
