@@ -12,15 +12,24 @@
 //      selected, clicking a belt/AGV/自動倉庫 BINDS it (transport from the
 //      equipment kind, equipment_ref = its id). Clicking bare floor unbinds.
 //   3. エッジ・インスペクタ — the same edge, edited precisely (搬送手段 / 使用設備
-//      / 分岐率) from the keyboard.
+//      / 荷姿(容器・台車) / 分岐率) from the keyboard.
+//
+// 荷姿 (load units): a leg also says WHAT THE GOODS ARE IN (容器 = 折コン/トレー)
+// and WHAT THEY RIDE ON (台車 = カゴ台車/6輪カート/平台車). Both come from the
+// project's 荷姿カタログ (`whsim/loadunit.py`) — the same catalogue the ②分析
+// 基礎物量 screen edits — so 入数 has ONE source. The 換算 shown under the selects
+// is the SERVER's own string (GET /loadunits/convert), never a formula re-written
+// here; with no measured 物量 we show nothing rather than invent one.
 //
 // Data contract (GET/POST /api/projects/{name}/flow):
 //   nodes[]     {id, role, zone, section, simulated}
-//   edges[]     {src, dst, transport, equipment_ref, share, derived}
+//   edges[]     {src, dst, transport, equipment_ref, share, derived,
+//                container_ref, carrier_ref}
 //   equipment[] {id, kind, label, speed_mps?, points?, count?, x?, y?}
+//   load_units[]{id, name, kind, capacity, footprint_m2, provisional}
 //   roles[], authored, diagnostics[] {kind, message, ...}
-// POST body is {edges:[{src,dst,transport,equipment_ref,share}]}; an empty array
-// resets to the derived graph.
+// POST body is {edges:[{src,dst,transport,equipment_ref,share,container_ref,
+// carrier_ref}]}; an empty array resets to the derived graph.
 //
 // NEVER-BLOCKS: the endpoint may be absent (older server), the project may not be
 // open, the graph may be empty and equipment may not exist. Every one of those
@@ -131,9 +140,24 @@ export const flowWireMethods = {
     // Re-key on the project so a setModel() into a different workspace cannot
     // keep showing the previous project's wiring.
     if (this._fwState && this._fwState.project === name) return;
-    this._fwState = { project: name, graph: null, sel: null, note: '', saveMsg: '', reachable: null };
+    this._fwState = { project: name, graph: null, sel: null, note: '', saveMsg: '',
+      reachable: null, units: [], base: null, chains: {} };
     this._fwLoad();
+    this._fwLoadUnits();
     this._fwLoadVolumes();
+    this._fwBusOnce();
+  },
+  // The 荷姿カタログ can be edited on ②分析「基礎物量」; re-read it when it changes
+  // so the two screens never offer different 入数. Bound once (cleaned by dispose).
+  _fwBusOnce() {
+    if (this._fwBus) return;
+    this._fwBus = true;
+    this._on(document, 'whsim:loadunits-changed', (ev) => {
+      if (ev && ev.detail && ev.detail.source === 'flow') return;
+      const st = this._fwState; if (!st) return;
+      st.chains = {};
+      this._fwLoadUnits(true);
+    });
   },
   // Scoped cosmetic rules for the diagnostics list (hover/tone only). Follows the
   // app's injectStyle() convention; every colour is a design token.
@@ -178,6 +202,10 @@ export const flowWireMethods = {
       st.graph = (g && typeof g === 'object') ? g : null;
       st.reachable = true;
       st.note = '';
+      // /flow already carries the catalogue — take it and skip the extra call.
+      if (g && Array.isArray(g.load_units) && g.load_units.length) {
+        st.units = g.load_units.filter((u) => u && u.id);
+      }
     } catch (_e) {
       if (!this._fwAlive() || this._fwState !== st) return;
       // Older server / offline: keep working on a locally derived graph so the
@@ -188,9 +216,32 @@ export const flowWireMethods = {
     }
     this._fwRefresh();
   },
+  // 荷姿カタログ (資材マスタ). /flow usually carries it; this is the fallback (and
+  // the refresh path when ②基礎物量 edits it). A 404 / offline server simply leaves
+  // the list empty — the inspector then omits the 容器/台車 controls entirely.
+  async _fwLoadUnits(force) {
+    const st = this._fwState; if (!st) return;
+    if (!force && Array.isArray(st.units) && st.units.length) return;
+    const name = this._fwProject(); if (!name) return;
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/loadunits`,
+        { headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error(String(r.status));
+      const d = await r.json();
+      if (!this._fwAlive() || this._fwState !== st) return;
+      if (d && Array.isArray(d.units)) st.units = d.units.filter((u) => u && u.id);
+    } catch (_e) {
+      if (!this._fwAlive() || this._fwState !== st) return;
+      if (!Array.isArray(st.units)) st.units = [];   // 旧サーバ: 荷姿の欄を出さない
+      return;
+    }
+    this._fwRefresh();
+  },
   // Optional 物量: the BI→タイムチャート bridge (already persisted for this
   // project) plus the 工程マスタ for units. Both are best-effort — if neither is
   // reachable we simply DON'T label the edges. We never invent a volume.
+  // `/bi/volumes` is pulled too: it is the only source of バラ点数/ケース数, which
+  // is what a 荷姿 conversion needs (the per-工程 volumes above are 行/件).
   async _fwLoadVolumes() {
     const st = this._fwState; if (!st) return;
     const name = this._fwProject(); if (!name) return;
@@ -200,17 +251,20 @@ export const flowWireMethods = {
       if (!r.ok) throw new Error(String(r.status));
       return r.json();
     };
-    const [bi, master] = await Promise.all([
+    const [bi, master, base] = await Promise.all([
       get('/timetable/from-bi').catch(() => null),
       get('/work-processes').catch(() => null),
+      get('/bi/volumes').catch(() => null),
     ]);
     if (!this._fwAlive() || this._fwState !== st) return;
+    if (base && typeof base === 'object') st.base = base;
     const vols = (bi && bi.available && bi.volumes && typeof bi.volumes === 'object') ? bi.volumes : null;
-    if (!vols) return;                       // no measured volume → no labels
-    const units = {};
-    const procs = (master && Array.isArray(master.processes)) ? master.processes : [];
-    for (const p of procs) { if (p && p.id) units[p.id] = p.unit || ''; }
-    st.vol = { volumes: vols, units };
+    if (vols) {
+      const units = {};
+      const procs = (master && Array.isArray(master.processes)) ? master.processes : [];
+      for (const p of procs) { if (p && p.id) units[p.id] = p.unit || ''; }
+      st.vol = { volumes: vols, units };
+    }
     this._fwRefresh();
   },
   // Repaint everything this module owns (canvas + side + diagnostics).
@@ -237,6 +291,8 @@ export const flowWireMethods = {
     const edges = this._fwEdges().map((e) => ({
       src: e.src, dst: e.dst, transport: e.transport || 'manual',
       equipment_ref: e.equipment_ref || null, share: num(e.share, 1),
+      // 荷姿: 何に入れて (容器) 何に載せて (台車) 運ぶか。'' = 指定なし。
+      container_ref: e.container_ref || '', carrier_ref: e.carrier_ref || '',
     }));
     try {
       const r = await fetch(`/api/projects/${encodeURIComponent(name)}/flow`, {
@@ -302,6 +358,7 @@ export const flowWireMethods = {
         src: order[i].id, dst: order[i + 1].id,
         transport: order[i].method || 'manual',
         equipment_ref: null, share: 1, derived: true,
+        container_ref: '', carrier_ref: '',
       });
     }
     return out;
@@ -542,6 +599,73 @@ export const flowWireMethods = {
     return { value, unit, text: `${fmt(value)}${unit}/日${pct}` };
   },
 
+  // ---- 荷姿 (容器/台車) — 入数は荷姿カタログが持つ唯一の値 --------------------
+  // The catalogue comes from the server (loadunit.catalog): resolved, defaulted,
+  // and shared with ②分析「基礎物量」. Empty ⇒ this module shows no 荷姿 controls.
+  _fwUnits(kinds) {
+    const st = this._fwState;
+    const list = (st && Array.isArray(st.units)) ? st.units : [];
+    return kinds ? list.filter((u) => u && kinds.includes(u.kind)) : list;
+  },
+  _fwUnitName(id) {
+    if (!id) return '';
+    const u = this._fwUnits().find((q) => q.id === id);
+    return (u && u.name) || String(id);
+  },
+  // Options for one 荷姿 slot. An unknown ref stays visible rather than being
+  // silently dropped (the same rule 使用設備 follows for a deleted machine).
+  _fwUnitOpts(kinds, cur) {
+    const opts = [{ value: '', label: '指定なし' }]
+      .concat(this._fwUnits(kinds).map((u) => ({ value: u.id, label: u.name || u.id })));
+    if (cur && !opts.some((o) => o.value === cur)) {
+      opts.push({ value: cur, label: `${this._fwUnitName(cur)}（カタログに無い荷姿）` });
+    }
+    return opts;
+  },
+  // バラ点数/ケース数 flowing through this leg. The source 工程's section picks
+  // 入荷 vs 出荷 and the user's 分岐率 scales it. null when nothing was measured —
+  // we would rather show no 換算 than a fabricated one.
+  _fwLegAmounts(e) {
+    const st = this._fwState;
+    const b = st && st.base;
+    if (!b || !e) return null;
+    const n = this._fwNode(e.src);
+    const inbound = !!(n && n.section === '入荷');
+    const pieces = Math.max(num(inbound ? b.in_pieces : b.out_pieces, 0), 0);
+    const cases = Math.max(num(inbound ? b.in_cases : b.out_cases, 0), 0);
+    if (pieces <= 0 && cases <= 0) return null;
+    const share = Math.max(0, Math.min(1, num(e.share, 1)));
+    return { pieces: Math.round(pieces * share), cases: Math.round(cases * share) };
+  },
+  // The SERVER's own 換算 line for this leg (GET /loadunits/convert), cached by its
+  // inputs so a repaint never re-requests. Returns null until it is known; an
+  // absent/failed endpoint stays null, i.e. the inspector shows nothing.
+  _fwChain(e) {
+    const st = this._fwState; if (!st || !e) return null;
+    if (!st.chains) st.chains = {};
+    const container = e.container_ref || '', carrier = e.carrier_ref || '';
+    if (!container && !carrier) return null;
+    const amt = this._fwLegAmounts(e); if (!amt) return null;
+    const key = `${container}\0${carrier}\0${amt.pieces}\0${amt.cases}`;
+    if (st.chains[key] !== undefined) return st.chains[key] || null;
+    const name = this._fwProject(); if (!name) return null;
+    st.chains[key] = '';        // in flight — one request per input set
+    const q = `pieces=${amt.pieces}&cases=${amt.cases}`
+      + `&container=${encodeURIComponent(container)}&carrier=${encodeURIComponent(carrier)}`;
+    fetch(`/api/projects/${encodeURIComponent(name)}/loadunits/convert?${q}`,
+      { headers: { Accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!this._fwAlive() || this._fwState !== st) return;
+        const chain = (d && typeof d.chain === 'string') ? d.chain : '';
+        if (!chain) return;
+        st.chains[key] = chain;
+        this._fwRefresh();
+      })
+      .catch(() => { /* 旧サーバ/未接続: 換算は出さない */ });
+    return null;
+  },
+
   // ---- canvas interaction ---------------------------------------------------
   // Returns true when the click was consumed by the wiring layer. Priority:
   //   1) an edge is open + you clicked equipment → BIND it
@@ -679,8 +803,13 @@ export const flowWireMethods = {
         src: e.src, dst: e.dst, src_label: this._fwNodeLabel(e.src),
         dst_label: this._fwNodeLabel(e.dst), transport: e.transport || 'manual',
         equipment_ref: e.equipment_ref || null, share: num(e.share, 1),
+        // additive: ②マテリアルフロー can show 何で運ぶか alongside 搬送手段.
+        container_ref: e.container_ref || '', carrier_ref: e.carrier_ref || '',
+        container_label: this._fwUnitName(e.container_ref),
+        carrier_label: this._fwUnitName(e.carrier_ref),
       })),
       equipment: this._fwEquipment().map((e) => ({ id: e.id, kind: e.kind, label: e.label })),
+      load_units: (st.units || []).map((u) => ({ id: u.id, name: u.name, kind: u.kind })),
       authored: !!(st.graph && st.graph.authored),
     };
   },
@@ -749,6 +878,37 @@ export const flowWireMethods = {
       });
       if (!matches.length) {
         this._note(s, 'この搬送手段に使える設備が図面にありません。「配置」タブで設備を置いてください。');
+      }
+    }
+
+    // 荷姿 — 何に入れて (容器) 何に載せて (台車) 運ぶか。選択肢も入数も 荷姿カタログ
+    // (②分析「基礎物量」で編集するのと同じもの) から来る。人手の区間は台車が、
+    // ベルト/自動倉庫の区間は容器が効くので、効くほうを先に置く。
+    if (this._fwUnits().length) {
+      const beltish = (edge.transport === 'conveyor' || edge.transport === 'asrs');
+      const packField = (label, kinds, prop) => this._field(s, label, () => {
+        const sel = this._select(null, this._fwUnitOpts(kinds, edge[prop] || ''), edge[prop] || '');
+        this._on(sel, 'change', () => {
+          edge[prop] = sel.value || '';
+          edge.derived = false;
+          st.note = '';
+          this._fwTouch();
+        });
+        return sel;
+      });
+      const container = () => packField('容器（何に入れて運ぶか）', ['container'], 'container_ref');
+      const carrier = () => packField('台車（何に載せて運ぶか）', ['carrier', 'pallet'], 'carrier_ref');
+      this._h(s, '荷姿');
+      if (beltish) { container(); carrier(); } else { carrier(); container(); }
+      const hint = this._div(s, 'font-size:11px;color:var(--ink-tertiary);margin:-2px 0 6px;line-height:1.5;');
+      hint.textContent = beltish
+        ? 'ベルトを流れるのは容器です（オリコンが流れる）。'
+        : '人が運ぶ区間は台車が効きます（カゴ台車で運ぶ）。';
+      // 換算のこだま: サーバの計算式をそのまま出す。物量が分からなければ何も出さない。
+      const chain = this._fwChain(edge);
+      if (chain) {
+        const c = this._div(s, 'font-size:11px;color:var(--ink-tertiary);margin:0 0 8px;line-height:1.5;');
+        c.textContent = `換算: ${chain}`;
       }
     }
 

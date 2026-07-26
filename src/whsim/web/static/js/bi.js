@@ -5,6 +5,17 @@
 // toggle). The pallet derivation is client-side so it feels instant; derived values
 // are badged 推計. Comments EN; UI JA. Theme-aware (rebuilt on themechange);
 // responsive (resize); reduced-motion safe.
+//
+// 荷姿 (load units): the 容器/台車 入数 used here are NOT this screen's private
+// constants — they are a VIEW of the project's 荷姿カタログ (`whsim/loadunit.py`,
+// GET/POST /api/projects/{n}/loadunits). The two sliders read the selected
+// 容器/台車's capacity and write edits back, so the flow screen, the engine and
+// the cost stack all see the same 入数 (ARCHITECTURE: mirrored constants must
+// have ONE source). The catalogue's seeded defaults are オリコン30点 / カゴ台車14個,
+// which is exactly what this screen hardcoded before — so nothing moves for a
+// project that has never edited the catalogue. never-blocks: an older server
+// (404), a failed fetch or no open project simply leaves the catalogue empty and
+// the screen keeps the historical fixed values.
 import { esc } from './util.js';
 import * as echarts from 'echarts';
 
@@ -112,6 +123,9 @@ function injectStyle() {
   .bi-row{display:flex;align-items:center;gap:10px;margin:9px 0}
   .bi-row label{font-size:11px;color:var(--ink-secondary);flex:0 0 138px}
   .bi-row input[type=range]{flex:1;accent-color:var(--accent)}
+  .bi-row select{flex:1;min-width:0;padding:5px 7px;border:1px solid var(--line-soft);
+    border-radius:var(--r-sm);background:var(--bg-app);color:var(--ink-primary);font:inherit;font-size:12px}
+  .bi-row select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .bi-row .rv{font-family:var(--font-mono);font-size:12px;color:var(--ink-primary);flex:0 0 92px;text-align:right}
   .bi-out{display:flex;align-items:baseline;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)}
   .bi-out .big{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:700;color:var(--accent-ink)}
@@ -203,9 +217,83 @@ export function mountBI(el, opts = {}) {
   let linesPerOrder = 0;// 仮値: lines per order (受注→出荷ライン); 0 = seed from data
   let peak = 1.0;       // 仮値: peak-day factor (日量→ピーク係数)
   let showPeak = false; // right pane: 平常 vs ピーク toggle
-  let piecesPerOrikon = 30; // 仮値: オリコン入数 (点/OC) — バラ出荷の荷姿変換
-  let unitsPerCage = 14;    // 仮値: カゴ台車積載 ((OC+ケース)/台)
+  // 荷姿の 入数. Seeded with the catalogue's own defaults so the screen shows the
+  // historical numbers even before /loadunits answers (or when it never does).
+  let piecesPerOrikon = 30; // 仮値: 容器の入数 (点/容器) — 選択中の容器の capacity.piece
+  let unitsPerCage = 14;    // 仮値: 台車の積載 (容器/台) — 選択中の台車の capacity[容器]
   const nonworking = new Set(); // 非稼働日 weekday indices (0=月 … 6=日)
+
+  // ---- 荷姿カタログ (ONE source: whsim/loadunit.py) -----------------------
+  let units = [];           // [{id,name,kind,capacity,footprint_m2,provisional}]; [] = 未取得
+  let containerRef = '';    // 選択中の容器 id ('' = カタログ未取得)
+  let carrierRef = '';      // 選択中の台車 id ('' = カタログ未取得)
+  let caseCap = 0;          // 選択台車のケース積載 (0 = 容器と同じ積載数とみなす)
+  let carrierCapSet = true; // 台車にこの容器の積載数があるか (無い＝積めない、サーバと同じ扱い)
+  let unitsNote = '';       // カタログ由来の注記 (入数/積載数が未設定 など)
+  let serverConv = null;    // GET /loadunits/convert の応答 (chain を借りるため)
+
+  const unitById = (id) => units.find((u) => u && u.id === id) || null;
+  const unitName = (id) => { const u = unitById(id); return (u && u.name) || String(id || ''); };
+  const capOf = (u, held) => {
+    const v = u && u.capacity ? Number(u.capacity[held]) : 0;
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  };
+  const containerOpts = () => units.filter((u) => u && u.kind === 'container');
+  // 台車: カゴ台車/6輪カート/平台車. カタログに台車が1つも無ければパレットで代替する。
+  const carrierOpts = () => {
+    const c = units.filter((u) => u && u.kind === 'carrier');
+    return c.length ? c : units.filter((u) => u && u.kind === 'pallet');
+  };
+  // The catalogue is usable only when it actually offers a 容器 AND a 台車;
+  // otherwise the view stays on its historical fixed values.
+  const hasCatalog = () => !!(units.length && containerRef && carrierRef);
+  // Short unit label for the chain/readouts. オリコン keeps its historical 「OC」.
+  const ocLabel = () => (hasCatalog() && containerRef !== 'orikon' ? unitName(containerRef) : 'OC');
+
+  // Resolve the selected 容器/台車 out of the catalogue and mirror their 入数 onto
+  // the two sliders. Defaults land on オリコン/カゴ台車 (capacity 30 / 14), so the
+  // displayed numbers are the ones this screen has always shown.
+  function syncFromCatalog() {
+    unitsNote = '';
+    carrierCapSet = true;
+    if (!units.length) { containerRef = ''; carrierRef = ''; caseCap = 0; return; }
+    const cs = containerOpts(), ks = carrierOpts();
+    if (!cs.some((u) => u.id === containerRef)) containerRef = ((cs.find((u) => u.id === 'orikon') || cs[0] || {}).id) || '';
+    if (!ks.some((u) => u.id === carrierRef)) carrierRef = ((ks.find((u) => u.id === 'cage') || ks[0] || {}).id) || '';
+    const c = unitById(containerRef);
+    if (c) {
+      const v = capOf(c, 'piece');
+      if (v > 0) piecesPerOrikon = v;
+      else unitsNote = `「${c.name}」の入数が未設定です。スライダーを動かすと設定できます。`;
+    }
+    const k = unitById(carrierRef);
+    caseCap = k ? capOf(k, 'case') : 0;
+    if (k) {
+      const v = capOf(k, containerRef);
+      if (v > 0) unitsPerCage = v;
+      else {
+        carrierCapSet = false;
+        unitsNote = `「${k.name}」に「${unitName(containerRef)}」の積載数が未設定です。スライダーを動かすと設定できます。`;
+      }
+    }
+  }
+
+  // 台車の台数. 容器とケースの積載数が同じときは従来どおり「(容器＋ケース)÷積載数」で、
+  // 違うときはサーバ (loadunit.pack) と同じ「積載率の合計」で満杯を判定する。
+  // 既定 (14/14) は前者に落ちるので、これまでの台数と1台も動かない。
+  function cagesFor(containers, cases) {
+    const capC = (carrierCapSet && unitsPerCage > 0) ? unitsPerCage : 0;
+    const capK = caseCap > 0 ? caseCap : capC;
+    if (capC <= 0 && capK <= 0) return 0;
+    if (capC === capK) {
+      const load = (containers || 0) + (cases || 0);
+      return load > 0 ? Math.ceil(load / capC) : 0;
+    }
+    let occ = 0;
+    if (capC > 0 && containers > 0) occ += containers / capC;
+    if (capK > 0 && cases > 0) occ += cases / capK;
+    return occ > 0 ? Math.ceil(occ - 1e-9) : 0;
+  }
 
   // Seed 仮値 from server volumes once, so sliders open near the real numbers.
   function seedRecipes() {
@@ -238,7 +326,7 @@ export function mountBI(el, opts = {}) {
     const effPieces = piecesActual > 0 ? piecesActual : piecesFromLines;
     const outOrikon = piecesPerOrikon > 0 ? Math.ceil(effPieces / piecesPerOrikon) : 0;
     const cageLoad = outOrikon + outCases;
-    const outCages = unitsPerCage > 0 ? Math.ceil(cageLoad / unitsPerCage) : 0;
+    const outCages = cagesFor(outOrikon, outCases);
     return {
       inPallets, putawayMh: palletProd > 0 ? inPallets / palletProd : 0,
       piecesFromLines, piecesActual, linesFromOrders, piecesFromCases,
@@ -265,6 +353,115 @@ export function mountBI(el, opts = {}) {
       const mhPeak = mh * peak;
       return { ...p, volume: v, prod, man_hours: mh, man_hours_peak: mhPeak };
     });
+  }
+
+  // 換算式の1行. サーバ (GET /loadunits/convert) が返す `chain` を優先し、式を
+  // JS で二重実装しない。サーバの台数がこの画面の台数と食い違うとき（保存前の
+  // スライダー操作中など）は、数字がちぐはぐに見えないよう従来の式に戻す。
+  function chainText(d) {
+    const outCases = (vol && vol.out_cases) || 0;
+    if (serverConv && serverConv.chain
+        && Math.round(Number(serverConv.containers) || 0) === Math.round(d.outOrikon)
+        && Math.round(Number(serverConv.carriers) || 0) === Math.round(d.outCages)) {
+      return serverConv.chain;
+    }
+    const capC = (carrierCapSet && unitsPerCage > 0) ? unitsPerCage : 0;
+    const capK = caseCap > 0 ? caseCap : capC;
+    const oc = ocLabel();
+    const head = `バラ ${fmt(d.effPieces)} 点 ÷ ${piecesPerOrikon} = ${fmt(d.outOrikon)} ${oc}`;
+    if (capC === capK) {
+      return `${head} →（＋ケース ${fmt(outCases)}）÷ ${unitsPerCage} = ${fmt(d.outCages)} 台`;
+    }
+    const parts = [];
+    if (capC > 0) parts.push(`${oc} ${fmt(d.outOrikon)}（積載${capC}）`);
+    if (capK > 0) parts.push(`ケース ${fmt(outCases)}（積載${capK}）`);
+    return `${head} → ${parts.join(' ＋ ')} = ${fmt(d.outCages)} 台`;
+  }
+
+  // Repaint the 容器/台車 outputs (+ the right pane) from a derived() snapshot.
+  const refreshCageOut = (d) => {
+    setHTML('#bi-oc', `${fmt(d.outOrikon)}<span class="u">${esc(ocLabel())}</span>`);
+    setHTML('#bi-cage', `${fmt(d.outCages)}<span class="u">台</span>`);
+    setText('#bi-cage-chain', chainText(d));
+    repaintRight();
+  };
+
+  // Read the 荷姿カタログ. A 404 (older server), a failed fetch or no open project
+  // leaves it empty — the screen then keeps its historical fixed 入数 (never blocks).
+  async function loadUnits() {
+    const name = getProject();
+    if (!name) { units = []; syncFromCatalog(); return; }
+    try {
+      const r = await fetch(`/api/projects/${encodeURIComponent(name)}/loadunits`);
+      if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+      const data = await r.json();
+      units = Array.isArray(data && data.units) ? data.units.filter((u) => u && u.id) : [];
+    } catch (_e) {
+      units = [];   // 旧サーバ/未接続: 従来の固定値のまま
+    }
+    syncFromCatalog();
+  }
+
+  // Write the slider values back into the catalogue and persist them, so the 入数
+  // the rest of the app uses IS the one shown here. Debounced (a drag emits many
+  // events); a failed POST is swallowed — the view keeps working, unsaved.
+  let saveTimer = 0;
+  function saveCatalog() {
+    const name = getProject();
+    if (!name || !hasCatalog()) return;
+    const c = unitById(containerRef);
+    if (c) c.capacity = { ...(c.capacity || {}), piece: piecesPerOrikon };
+    // Only write the 台車's 積載数 once it is actually set (the slider sets it):
+    // a 容器入数 edit must not invent an 積載数 the catalogue never had.
+    const k = unitById(carrierRef);
+    if (k && carrierCapSet) k.capacity = { ...(k.capacity || {}), [containerRef]: unitsPerCage };
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      saveTimer = 0;
+      try {
+        const r = await fetch(`/api/projects/${encodeURIComponent(name)}/loadunits`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ units }),
+        });
+        if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+        const data = await r.json();
+        if (data && Array.isArray(data.units) && data.units.length) {
+          units = data.units.filter((u) => u && u.id);
+          syncFromCatalog();
+        }
+        // ③設計フローなど、同じカタログを見ている画面へ通知する (source で自分の
+        // 変更は無視できるようにする — 操作中に再描画で入力が飛ばないように)。
+        document.dispatchEvent(new CustomEvent('whsim:loadunits-changed', { detail: { source: 'bi' } }));
+        fetchChain();
+      } catch (_e) { /* 未接続: 画面の値はそのまま (保存されないだけ) */ }
+    }, 500);
+  }
+
+  // Borrow the server's own conversion string (so the formula lives in one place).
+  // Debounced; any failure just leaves the locally built chain in place.
+  let chainTimer = 0;
+  function fetchChain() {
+    const name = getProject();
+    serverConv = null;
+    if (!name || !hasCatalog() || !vol) return;
+    if (chainTimer) clearTimeout(chainTimer);
+    chainTimer = setTimeout(async () => {
+      chainTimer = 0;
+      const d = derived();
+      const q = `pieces=${encodeURIComponent(d.effPieces)}`
+        + `&cases=${encodeURIComponent((vol && vol.out_cases) || 0)}`
+        + `&container=${encodeURIComponent(containerRef)}`
+        + `&carrier=${encodeURIComponent(carrierRef)}`;
+      try {
+        const r = await fetch(`/api/projects/${encodeURIComponent(name)}/loadunits/convert?${q}`);
+        if (!r.ok) throw new Error(r.statusText || `HTTP ${r.status}`);
+        const data = await r.json();
+        if (data && typeof data.chain === 'string' && data.chain) {
+          serverConv = data;
+          setText('#bi-cage-chain', chainText(derived()));
+        }
+      } catch (_e) { /* 旧サーバ/未接続: 従来の式のまま */ }
+    }, 350);
   }
 
   // Token-styled error + retry: if a fetch failed, show a recoverable message
@@ -394,28 +591,45 @@ export function mountBI(el, opts = {}) {
         <div class="bi-chain" id="bi-cp-chain">出荷ケース ${fmt(vol.out_cases)} × ${qtyPerCase} 点 = ${fmt(d.piecesFromCases)} 点（実績との差 ${fmt(d.piecesFromCases - d.piecesActual)} 点）</div>
       </div>` : '';
 
-    // ピース → オリコン → カゴ台車: 出荷側の荷姿変換（データに無い前提条件を仮値で
-    // 作る）。物量分析ツールの「梱包形態と入数」「搬送形態」に相当する whsim 版。
+    // ピース → 容器 → 台車: 出荷側の荷姿変換（データに無い前提条件を仮値で作る）。
+    // 物量分析ツールの「梱包形態と入数」「搬送形態」に相当する whsim 版。どの容器/
+    // 台車で見積もるかは 荷姿カタログ から選び、入数はそのカタログの値そのもの。
+    const cat = hasCatalog();
+    const contLabel = cat ? unitName(containerRef) : 'オリコン';
+    const carrLabel = cat ? unitName(carrierRef) : 'カゴ台車';
+    const ocU = ocLabel();
+    const carrCapView = (carrierCapSet && unitsPerCage > 0) ? unitsPerCage : (unitsPerCage || 14);
+    const pickRow = (id, label, opts, cur) => `
+        <div class="bi-row">
+          <label>${esc(label)}</label>
+          <select id="${id}">${opts.map((u) => `<option value="${esc(u.id)}"${u.id === cur ? ' selected' : ''}>${esc(u.name || u.id)}</option>`).join('')}</select>
+        </div>`;
     const cageCard = `
       <div class="bi-derive">
-        <div class="dl">ピース → オリコン → カゴ台車（出荷荷姿の仮値）<span class="bi-est">推計</span></div>
+        <div class="dl">ピース → ${esc(contLabel)} → ${esc(carrLabel)}（出荷荷姿の仮値）<span class="bi-est">推計</span></div>
+        ${cat ? pickRow('bi-cont', '容器（何に入れるか）', containerOpts(), containerRef) : ''}
+        ${cat ? pickRow('bi-carr', '台車（何に載せるか）', carrierOpts(), carrierRef) : ''}
         <div class="bi-row">
-          <label>オリコン入数(仮値)</label>
-          <input type="range" id="bi-ppo" min="5" max="80" step="1" value="${piecesPerOrikon}">
-          <span class="rv" id="bi-ppo-v">${piecesPerOrikon} 点/OC</span>
+          <label>${esc(contLabel)}入数(仮値)</label>
+          <input type="range" id="bi-ppo" min="${Math.min(5, piecesPerOrikon)}" max="${Math.max(80, piecesPerOrikon)}" step="1" value="${piecesPerOrikon}">
+          <span class="rv" id="bi-ppo-v">${piecesPerOrikon} 点/${esc(ocU)}</span>
         </div>
         <div class="bi-row">
-          <label>カゴ台車積載(仮値)</label>
-          <input type="range" id="bi-upc" min="4" max="32" step="1" value="${unitsPerCage}">
-          <span class="rv" id="bi-upc-v">${unitsPerCage} 個/台</span>
+          <label>${esc(carrLabel)}積載(仮値)</label>
+          <input type="range" id="bi-upc" min="${Math.min(4, carrCapView)}" max="${Math.max(32, carrCapView)}" step="1" value="${carrCapView}">
+          <span class="rv" id="bi-upc-v">${carrCapView} 個/台</span>
         </div>
         <div class="bi-out">
-          <div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">オリコン数/日</div>
-            <div class="big" id="bi-oc">${fmt(d.outOrikon)}<span class="u">OC</span></div></div>
-          <div style="margin-left:auto;text-align:right"><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">出荷カゴ台車数/日</div>
+          <div><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">${esc(contLabel)}数/日</div>
+            <div class="big" id="bi-oc">${fmt(d.outOrikon)}<span class="u">${esc(ocU)}</span></div></div>
+          <div style="margin-left:auto;text-align:right"><div class="k" style="font-size:10.5px;color:var(--ink-tertiary)">出荷${esc(carrLabel)}数/日</div>
             <div class="big" id="bi-cage" style="font-size:24px">${fmt(d.outCages)}<span class="u">台</span></div></div>
         </div>
-        <div class="bi-chain" id="bi-cage-chain">バラ ${fmt(d.effPieces)} 点 ÷ ${piecesPerOrikon} = ${fmt(d.outOrikon)} OC →（＋ケース ${fmt(vol.out_cases)}）÷ ${unitsPerCage} = ${fmt(d.outCages)} 台</div>
+        <div class="bi-chain" id="bi-cage-chain">${esc(chainText(d))}</div>
+        ${(cat && caseCap > 0 && carrierCapSet && caseCap !== unitsPerCage)
+          ? `<div class="bi-chain">ケースは1台あたり ${caseCap} 個で積みます（${esc(carrLabel)}の積載数）。</div>` : ''}
+        ${unitsNote ? `<div class="bi-chain">${esc(unitsNote)}</div>` : ''}
+        ${cat ? '<div class="bi-chain">入数はプロジェクトの荷姿カタログの値です。ここでの変更は設計フローや原価にも反映されます。</div>' : ''}
       </div>`;
 
     // 日量 → ピーク係数: scales the right-pane man-hours to a peak-day assumption.
@@ -647,15 +861,6 @@ export function mountBI(el, opts = {}) {
     };
     on('#bi-qpc', 'oninput', updateQpc);
 
-    // Shared: repaint the オリコン/カゴ台車 outputs (+ right pane) from a derived().
-    const refreshCageOut = (d) => {
-      setHTML('#bi-oc', `${fmt(d.outOrikon)}<span class="u">OC</span>`);
-      setHTML('#bi-cage', `${fmt(d.outCages)}<span class="u">台</span>`);
-      setText('#bi-cage-chain',
-        `バラ ${fmt(d.effPieces)} 点 ÷ ${piecesPerOrikon} = ${fmt(d.outOrikon)} OC →（＋ケース ${fmt(vol.out_cases)}）÷ ${unitsPerCage} = ${fmt(d.outCages)} 台`);
-      repaintRight();
-    };
-
     // 受注 → 出荷ライン.
     const updateLpo = () => {
       const el = root.querySelector('#bi-lpo');
@@ -669,18 +874,35 @@ export function mountBI(el, opts = {}) {
     };
     on('#bi-lpo', 'oninput', updateLpo);
 
-    // ピース → オリコン → カゴ台車: 荷姿仮値 (梱包/出荷の人時ドライバー → 右も再描画).
+    // ピース → 容器 → 台車: 荷姿の入数 (梱包/出荷の人時ドライバー → 右も再描画)。
+    // スライダーは荷姿カタログの入数そのものなので、動かした値は保存して全画面へ返す。
     const updateCage = () => {
       const ppoEl = root.querySelector('#bi-ppo');
       const upcEl = root.querySelector('#bi-upc');
-      if (ppoEl) piecesPerOrikon = parseInt(ppoEl.value, 10);
-      if (upcEl) unitsPerCage = parseInt(upcEl.value, 10);
-      setText('#bi-ppo-v', `${piecesPerOrikon} 点/OC`);
+      if (ppoEl) { const v = parseFloat(ppoEl.value); if (v > 0) piecesPerOrikon = v; }
+      if (upcEl) { const v = parseFloat(upcEl.value); if (v > 0) { unitsPerCage = v; carrierCapSet = true; } }
+      setText('#bi-ppo-v', `${piecesPerOrikon} 点/${ocLabel()}`);
       setText('#bi-upc-v', `${unitsPerCage} 個/台`);
+      serverConv = null;          // 式は保存後に取り直す（数字の食い違いを見せない）
       refreshCageOut(derived());
+      saveCatalog();
     };
     on('#bi-ppo', 'oninput', updateCage);
     on('#bi-upc', 'oninput', updateCage);
+
+    // どの容器/台車で見積もるかの選択 (カタログの view — 入数はカタログから来る)。
+    const updatePack = () => {
+      const cEl = root.querySelector('#bi-cont');
+      const kEl = root.querySelector('#bi-carr');
+      if (cEl) containerRef = cEl.value;
+      if (kEl) carrierRef = kEl.value;
+      serverConv = null;
+      syncFromCatalog();          // 入数を選択先のカタログ値へ引き直す
+      render();                   // ラベル/レンジごと描き直す
+      fetchChain();
+    };
+    on('#bi-cont', 'onchange', updatePack);
+    on('#bi-carr', 'onchange', updatePack);
 
     // 保存 → タイムチャート: persist the 仮値派生 (bi/apply → bi.json + provenance)
     // then hand the from-bi scenario to the timetable via the shell event.
@@ -754,8 +976,9 @@ export function mountBI(el, opts = {}) {
 
   async function load() {
     const name = getProject();
-    if (!name) { procs = DEFAULT_PROCS.slice(); render(); return; }
+    if (!name) { procs = DEFAULT_PROCS.slice(); units = []; syncFromCatalog(); render(); return; }
     await loadProcs();
+    await loadUnits();      // 荷姿カタログ (失敗しても従来の固定値で続行)
     try {
       const nw = Array.from(nonworking).sort((a, b) => a - b).join(',');
       const r = await fetch(`/api/projects/${encodeURIComponent(name)}/bi/volumes`
@@ -764,8 +987,19 @@ export function mountBI(el, opts = {}) {
       vol = await r.json();
       loadErr = null;
       render();
+      fetchChain();
     } catch (e) { loadErr = e && e.message ? e.message : String(e); render(); toast('基礎物量の読み込みに失敗', 'error'); }
   }
+
+  // The 荷姿 may be edited elsewhere (③設計フロー). Re-read the catalogue so the
+  // two screens never disagree about 入数. Our own edits are skipped (they would
+  // re-render the card mid-drag).
+  function onUnitsChanged(ev) {
+    if (ev && ev.detail && ev.detail.source === 'bi') return;
+    if (!getProject()) return;
+    loadUnits().then(() => { if (vol) { render(); fetchChain(); } }).catch(() => {});
+  }
+  document.addEventListener('whsim:loadunits-changed', onUnitsChanged);
 
   load();
   return {
@@ -775,8 +1009,11 @@ export function mountBI(el, opts = {}) {
     dispose() {
       disposeChart();
       if (ro) { ro.disconnect(); ro = null; }
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0; }
+      if (chainTimer) { clearTimeout(chainTimer); chainTimer = 0; }
       window.removeEventListener('resize', resizeChart);
       document.removeEventListener('themechange', onThemeChange);
+      document.removeEventListener('whsim:loadunits-changed', onUnitsChanged);
       el.innerHTML = '';
     },
   };

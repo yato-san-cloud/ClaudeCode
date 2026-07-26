@@ -17,6 +17,7 @@ import math
 import duckdb
 import pandas as pd
 
+from whsim import loadunit
 from whsim.schema.model import WarehouseModel
 
 
@@ -369,9 +370,15 @@ def derive_volumes(model: WarehouseModel, params: dict) -> dict:
     # バラ出荷ピース (実績、無ければ 行×入数 で補完済みの out_pieces) → オリコン数。
     out_orikon = math.ceil(base["out_pieces"] / pieces_per_orikon) \
         if pieces_per_orikon and base.get("out_pieces") else 0
-    # オリコン + 正梱ケースを同等荷姿としてカゴ台車に積載 (近似; chainで式は明示).
-    cage_load = out_orikon + (base.get("out_cases") or 0)
-    out_cages = math.ceil(cage_load / units_per_cage) if units_per_cage and cage_load else 0
+    # オリコン + 正梱ケース → カゴ台車。積載は OCCUPANCY (Σ count/capacity) で積む
+    # (`loadunit.pack`)。容器積載とケース積載が等しい既定カタログでは、これは従来の
+    # 平坦式「(OC＋ケース)÷積載数」と数学的に同一なので既存の数字は動かない。等しく
+    # ない台車 (カゴ車=折コン12 or ケース20) を選んだ時だけ、画面と保存値が食い違わ
+    # ないようここも正しく積む。
+    carrier = {"capacity": {"orikon": units_per_cage,
+                            "case": _pos(params.get("cases_per_cage"), units_per_cage)}}
+    occ = loadunit.pack({"orikon": out_orikon, "case": base.get("out_cases") or 0}, carrier)
+    out_cages = math.ceil(occ) if occ > 0 else 0
 
     return {
         "inputs": {
@@ -381,6 +388,7 @@ def derive_volumes(model: WarehouseModel, params: dict) -> dict:
             "peak_factor": round(peak_factor, 2),
             "pieces_per_orikon": round(pieces_per_orikon, 1),
             "units_per_cage": round(units_per_cage, 1),
+            "cases_per_cage": round(_pos(params.get("cases_per_cage"), units_per_cage), 1),
         },
         "derived": {
             "in_pallets": round(in_pallets, 1),

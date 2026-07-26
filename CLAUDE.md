@@ -114,8 +114,19 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   (`None`=誰もコンベアで受けない⇒ベルト停止). 描いただけの設備は物理的事実であって
   設計の意思ではなく、齟齬は `diagnose()` が警告で出す(never-blocks). GET/POST
   `/api/projects/{n}/flow`. UI は ③設計フロー(矢印クリック→設備クリックで配線・
-  `designer/flowwire.js`) と ②マテリアルフロー(シミュ挙動/搬送手段列・サンキーの色)
-  の2レンズで、`whsim:flow-changed` で相互ライブ反映.
+  `designer/flowwire.js`) と ②マテリアルフロー(**編集可能なノードキャンバス**;
+  サンキーは廃止) の2レンズで、`whsim:flow-changed` で相互ライブ反映.
+- `web/static/js/materialflow/` — ②のノードキャンバス (`materialflow.js` は
+  オーケストレータ; `canvas.js` 描画・操作 / `layout.js` 純関数の自動整列
+  (最長経路レイヤリング＋重心スイープ、座標はメモリのみでスキーマに書かない) /
+  `popover.js` 矢印＝1本の流れの吹き出し / `loadunits.js` 荷姿カタログのクライアント
+  / `vocab.js` 語彙とCSS). **カードを別カードへドラッグ＝つなぐ** (ポート概念なし)、
+  空白ダブルクリックで工程追加、矢印クリックで運び方と荷姿。矢印の太さ=物量・
+  色=搬送手段・破線=派生/実線=authored。**荷姿の入数は `capacity` が「何を」で
+  引く辞書** ({piece:30} / {orikon:14,case:14}) — スカラーとして読むと 0 になり、
+  書くと同じ台車の他の組が消える。`loadunits.js` の `capacityKey`/`capacityOf`/
+  `withCapacity` が唯一の読み書き口 (台車の入数は其の脚の容器で決まる＝
+  「14 オリコン/カゴ台車」). 換算式はサーバの `chain` をそのまま出す (JS で再実装しない).
 - `analysis/staffing.py` — 人員タイムチャートの解析ソルバー。工程は編集可能マスタ
   `process_master(model)` 経由 (完全フリー工程; GENERIC_PROCESSES を直接 import しない),
   バッチ投入ゲート (`settings.batch_schedule`, 窓外は窓内クランプ=never-blocks), 入荷の

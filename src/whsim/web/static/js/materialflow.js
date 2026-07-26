@@ -1,71 +1,48 @@
-// materialflow.js — マテリアルフロー画面（荷役物量の作成）.
-// 工程フロー(入荷検品→格納→ピッキング→検品→梱包→出荷)に荷役物量を：
-//   ・実データ(サンプル/出荷取込)から自動充填
-//   ・不足は手入力 or 生成(比率推計)で作成
-// → そのまま「タイムチャートで人員配置」へ渡す（whsim.analysis.staffing と同契約）。
+// materialflow.js — ②分析「マテリアルフロー」.
 //
-// 物量の流れは ECharts の sankey 図で可視化（工程間の辺に、人時を太さに）。
-// 入力カードはそのまま編集可能；値を変えると sankey は in-place に更新（入力フォーカス
-// を壊さない）。テーマは CSS 変数を getComputedStyle で参照し themechange で再描画。
+// 画面の主役は **工程キャンバス**（`js/materialflow/canvas.js`）。ホワイトボードに
+// 描く業務フローと同じ「箱と矢印」を、そのまま直接いじれる面にした:
+//   ・工程を作る … 空白をダブルクリック
+//   ・つなぐ     … 工程カードを別のカードへドラッグ
+//   ・1本の流れを設計する … 矢印をクリック → 搬送手段・使用設備・荷姿(容器/台車)・
+//                          入数・分岐率（入数はその場でカタログに保存＝別画面に行かない）
+// これまでの sankey が持っていた情報（リボン幅＝物量）は、矢印の太さとして残っている。
+// 表（工程エディタ）は一括編集用の補助ビューとして「表で編集」から出す。
 //
-// 工程エディタは「順番」だけでなく「どう運ぶか」も持つ（whsim/flowgraph.py の唯一の
-// フローグラフ = GET/POST /api/projects/{name}/flow）:
-//   ・シミュ挙動 (role)   — 自由に名付けた業務工程を、エンジンのどの動きに載せるか
-//   ・搬送手段 (transport) — その工程へ物が届く手段（辺の属性）＋ 使用設備 (equipment_ref)
-// 辺は sankey の色にも反映され、「どれだけ流れるか」に加えて「どう運ぶか」が図で読める。
-import * as echarts from 'echarts';
+// 荷役物量（1日平均）の作成はこれまでどおり:
+//   ・実データ(サンプル/出荷取込/基礎物量)から自動充填
+//   ・不足は手入力 or 生成(比率推計) → そのまま「タイムチャートで人員配置」へ
+//
+// フローの実体は whsim/flowgraph.py の唯一のフローグラフ（GET/POST
+// /api/projects/{name}/flow）。③設計フローとは `whsim:flow-changed` で相互ライブ反映。
+// EN comments / JA UI.
+
+import { esc } from './util.js';
+import {
+  TRANSPORTS, TRANSPORT_JA, ROLE_JA, ROLES_FALLBACK, equipForTransport,
+} from './materialflow/vocab.js';
+import { mountFlowCanvas } from './materialflow/canvas.js';
+import { fetchCatalogue } from './materialflow/loadunits.js';
 
 // Badge tints are HTML inline styles, so theme tokens (CSS vars) resolve fine.
 const SRC = { data: { t: '実データ', c: '#2ee6a0' }, manual: { t: '手入力', c: 'var(--ink-tertiary,#8195a8)' },
               generated: { t: '生成', c: '#f5b05a' }, bi: { t: '基礎物量', c: '#34e3ff' },
               none: { t: '未入力', c: '#8195a8' } };
-// Per-process node colours in the sankey, keyed by 工程セクション.
-const SECTION_HEX = { 入荷: '#5B9BD5', 出荷: '#16C0DE' };
 
-// ── the ONE flow graph の語彙 (whsim/flowgraph.py と対応) ──────────────────
-// transport: how goods reach a process. Values are the server's; labels are 業務用語.
-const TRANSPORTS = ['manual', 'conveyor', 'agv', 'forklift', 'asrs'];
-const TRANSPORT_JA = { manual: '人手', conveyor: 'コンベア', agv: 'AGV',
-                       forklift: 'フォークリフト', asrs: '自動倉庫' };
-// Sankey link colour per 搬送手段 — CSS custom properties injected below, so the
-// palette follows the theme (no hard-coded hex in the drawing code).
-const TRANSPORT_VAR = { manual: '--mf-tr-manual', conveyor: '--mf-tr-conveyor',
-                        agv: '--mf-tr-agv', forklift: '--mf-tr-forklift', asrs: '--mf-tr-asrs' };
-// role: which engine behaviour a freely-named business process drives. The list
-// itself comes from the API (`roles`); this is only the display vocabulary.
-const ROLE_JA = { receive: '入荷', putaway: '格納', pick: 'ピッキング', pack: '梱包',
-                  ship: '出荷', inspect: '検品', none: '計上のみ' };
-const ROLES_FALLBACK = ['receive', 'putaway', 'pick', 'pack', 'ship'];
 const MIXED = '__mixed';   // sentinel: this process is fed by several different means
-
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g,
-  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
-function cssColor(name, fallback) {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
-}
-function hexAlpha(hex, a) {
-  let h = (hex || '').replace('#', '');
-  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
-  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) h = '16C0DE';
-  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${a})`;
-}
 
 function injectStyle() {
   if (document.getElementById('mf-style')) return;
   const s = document.createElement('style');
   s.id = 'mf-style';
   s.textContent = `
-  /* 搬送手段パレット: theme-aware tokens (light default / dark override), read by
-     the sankey through getComputedStyle so a themechange repaints the links. */
-  :root{--mf-tr-manual:#7A8899;--mf-tr-conveyor:#2E7D55;--mf-tr-agv:#1F78B4;
-        --mf-tr-forklift:#B7791F;--mf-tr-asrs:#7A4FBF}
-  html[data-theme="dark"]{--mf-tr-manual:#9AAABC;--mf-tr-conveyor:#2EE6A0;--mf-tr-agv:#5CB8FF;
-        --mf-tr-forklift:#F5B05A;--mf-tr-asrs:#B694FF}
   .mf{display:flex;flex-direction:column;gap:16px;width:100%;padding:4px 2px 24px}
+  /* 5 slots around a STABLE canvas host: 上部/キャンバス/表/読み取り値/物量カード。
+     An empty slot must not leave a gap, and each stacked slot keeps its own rhythm. */
+  .mf>div:empty{display:none}
+  .mf>[data-mf-top]{display:flex;flex-direction:column;gap:12px}
+  .mf>[data-mf-meta]{display:flex;flex-direction:column;gap:12px}
+  .mf>[data-mf-cards]{display:flex;flex-direction:column;gap:6px}
   .mf-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .mf-btn{padding:9px 15px;border-radius:10px;border:1px solid var(--accent,#16C0DE);
     background:color-mix(in srgb,var(--accent,#16C0DE) 14%,transparent);color:var(--accent,#16C0DE);font-weight:600;cursor:pointer;font:inherit}
@@ -86,18 +63,6 @@ function injectStyle() {
   .mf-kpi .l{font-size:10.5px;letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);text-transform:uppercase;margin-bottom:7px}
   .mf-kpi .v{font-size:22px;font-weight:700;color:var(--ink-primary,#16202e)}
   .mf-kpi .v small{font-size:13px;font-weight:500;color:var(--ink-secondary,#52677c)}
-  .mf-sankey-wrap{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
-    border-radius:13px;padding:12px 14px}
-  .mf-sankey-h{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
-  .mf-sankey-h h3{margin:0;font-size:13.5px;font-weight:600;color:var(--ink-primary,#16202e)}
-  .mf-sankey-h .sub{font-size:11px;color:var(--ink-tertiary,#8195a8)}
-  .mf-sankey{width:100%;height:260px}
-  /* 搬送手段の凡例（サンキーのリボン色＝運び方）*/
-  .mf-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:2px 0 6px}
-  .mf-lg{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-secondary,#52677c)}
-  .mf-lg i{width:14px;height:4px;border-radius:2px;display:inline-block}
-  .mf-sankey-empty{display:flex;align-items:center;justify-content:center;height:120px;
-    color:var(--ink-tertiary,#8195a8);font-size:12px}
   .mf-sec{font-family:var(--font-display,inherit);font-weight:700;font-size:12px;letter-spacing:.1em;color:var(--ink-tertiary,#8195a8);margin:6px 0 2px}
   .mf-flow{display:flex;gap:6px;flex-wrap:wrap;align-items:stretch}
   .mf-card{flex:1 1 150px;min-width:150px;background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
@@ -140,15 +105,7 @@ function injectStyle() {
   .mf-carrow{display:flex;align-items:center;color:var(--ink-faint,#aab);font-size:16px;flex:0 0 auto}
   .mf-chain-empty{font-size:12px;color:var(--ink-tertiary,#8195a8);padding:4px 0}
   @media(max-width:900px){.mf-carrow{display:none}}
-  /* 設計の注意（警告のみ。実行は止めない）*/
-  .mf-diag{background:var(--warn-tint,#fbf3e4);border:1px solid var(--warn-line,#efdfbe);
-    border-radius:11px;padding:9px 13px}
-  .mf-diag-h{display:flex;align-items:baseline;gap:8px;font-size:12.5px;font-weight:700;
-    color:var(--warn-ink,#8a5a12)}
-  .mf-diag-sub{font-size:11px;font-weight:500;color:var(--ink-tertiary,#8195a8)}
-  .mf-diag-l{margin:5px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:2px}
-  .mf-diag-l li{font-size:12px;line-height:1.5;color:var(--ink-secondary,#52677c)}
-  /* 工程エディタ (完全フリー工程) */
+  /* 工程エディタ (完全フリー工程 — キャンバスの補助として「表で編集」で開く) */
   .mfe{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
     border-radius:13px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;overflow-x:auto}
   .mfe-head{font-size:13px;font-weight:700;color:var(--ink-primary,#16202e)}
@@ -200,45 +157,40 @@ export function mountMaterialFlow(el, opts = {}) {
   el.innerHTML = '';
   el.appendChild(root);
 
-  let flow = [];                 // [{id, section, unit, productivity, driver, depends}]
+  let flow = [];                 // [{id, section, unit, productivity, driver, depends, role, zone}]
   const vol = {};                // {id: number}
-  const src = {};                // {id: 'data'|'manual'|'generated'|'none'}
+  const src = {};                // {id: 'data'|'manual'|'generated'|'bi'|'none'}
   let drivers = [];              // [{id,label,unit}] volume-source catalogue (from API)
-  let editing = false;           // 工程エディタ open?
+  let editing = false;           // 表で編集 (工程エディタ) open?
   let editFlow = null;           // working copy while editing (cancel restores `flow`)
   // Live 工程→エリア chain from the designer's spatial flow (process.stages).
   // Reflected in real time via the `whsim:flow-changed` bus + an initial fetch.
   let stages = [];               // [{id,label,method,zone_type,area_ok,area_warn}]
   // ── the ONE flow graph (GET/POST …/flow) ────────────────────────────────
-  // `graph` is the resolved graph: nodes (with role), edges (搬送手段/使用設備/分岐率),
-  // the equipment an edge may name, and the diagnostics. Absent/older server ⇒
-  // stays empty and everything falls back to the depends-only behaviour.
+  // `graph` is the resolved graph: nodes (with role), edges (搬送手段/使用設備/
+  // 荷姿/分岐率), the equipment an edge may name, and the diagnostics. Absent or
+  // older server ⇒ stays empty and everything falls back to depends-only.
   let graph = emptyGraph();
-  let editEdges = null;          // working copy of edges while editing
-  let flowDirty = false;         // did the user touch 搬送手段/使用設備 this session?
-  let procMeta = {};             // id → {role, zone} as AUTHORED in the master
-  let metaLoaded = false;
+  let editEdges = null;          // working copy of edges while editing (table view)
+  let flowDirty = false;         // did the user touch 搬送手段/使用設備 in the table?
   let graphSeq = 0;              // drop out-of-order /flow responses
+  let loadUnits = null;          // 荷姿 catalogue {list,key} | null (未対応サーバ)
+  let luProject = null;          // which project the catalogue was read for
+  let canvas = null;             // the node-graph canvas (mounted once)
+  let shell = false;
 
   function emptyGraph() {
     return { nodes: [], edges: [], equipment: [], roles: [], authored: false, diagnostics: [] };
   }
-
-  // ── sankey ECharts instance + theme/resize plumbing ──────────────────
-  let sankey = null;
-  let ro = null;
-  function disposeSankey() {
-    if (sankey) { try { sankey.dispose(); } catch (_) { /* noop */ } sankey = null; }
-  }
-  const resizeSankey = () => { if (sankey) { try { sankey.resize(); } catch (_) { /* noop */ } } };
-  window.addEventListener('resize', resizeSankey);
-  if (typeof ResizeObserver !== 'undefined') ro = new ResizeObserver(() => resizeSankey());
 
   async function getJSON(url, opt) {
     const r = await fetch(url, opt);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     return r.json();
   }
+  const apiBase = () => `/api/projects/${encodeURIComponent(getProject())}`;
+  const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) });
 
   function manHours(p) { return (vol[p.id] || 0) / Math.max(1, p.productivity); }
 
@@ -250,7 +202,7 @@ export function mountMaterialFlow(el, opts = {}) {
     if (!name) { graph = emptyGraph(); return; }
     const seq = ++graphSeq;
     try {
-      const g = await getJSON(`/api/projects/${encodeURIComponent(name)}/flow`);
+      const g = await getJSON(`${apiBase()}/flow`);
       if (seq !== graphSeq) return;
       graph = {
         nodes: Array.isArray(g.nodes) ? g.nodes : [],
@@ -260,34 +212,32 @@ export function mountMaterialFlow(el, opts = {}) {
         authored: !!g.authored,
         diagnostics: Array.isArray(g.diagnostics) ? g.diagnostics : [],
       };
+      // The flow payload mirrors the 荷姿 catalogue so the edge popover needs no
+      // second fetch; an older server simply omits it (→ standalone fetch below).
+      if (Array.isArray(g.load_units) && g.load_units.length) {
+        loadUnits = { list: g.load_units, key: (loadUnits && loadUnits.key) || 'load_units' };
+        luProject = name;
+      }
     } catch (_e) {
       if (seq === graphSeq) graph = emptyGraph();
     }
   }
 
-  // Pull both halves the editor needs: the graph (roles as resolved + edges) and
-  // the master's AUTHORED role/zone (so 未設定 stays 未設定 instead of being frozen
-  // into whatever the name-based guess happened to be).
-  async function ensureFlowData(force) {
-    const jobs = [loadGraph()];
-    if (force || !metaLoaded) jobs.push(loadStagesFromModel());
-    await Promise.all(jobs);
+  // 荷姿カタログ (whsim/loadunit.py). Absent ⇒ the edge popover drops the 荷姿
+  // section entirely — quietly, because an older server is not the user's problem.
+  async function loadLoadUnits() {
+    const name = getProject();
+    if (!name) { loadUnits = null; luProject = null; return; }
+    if (loadUnits && luProject === name) return;
+    loadUnits = await fetchCatalogue(name);
+    luProject = name;
   }
 
   const nodeById = (id) => (graph.nodes || []).find((n) => n.id === id) || null;
   // The role the engine would use today: authored value, else the graph's guess.
   const guessedRole = (id) => { const n = nodeById(id); return n ? (n.role || '') : ''; };
 
-  // Physical objects an edge may name for a given 搬送手段. コンベア legs bind to a
-  // drawn belt; the others bind to placed equipment. 人手 needs no machine.
-  function equipChoices(transport) {
-    const list = graph.equipment || [];
-    if (transport === 'conveyor') return list.filter((e) => e.kind === 'conveyor');
-    if (!transport || transport === 'manual' || transport === MIXED) return [];
-    return list.filter((e) => e.kind !== 'conveyor');
-  }
-
-  // The edges feeding a process, from the working copy (editor) or the graph.
+  // The edges feeding a process, from the working copy (table editor) or the graph.
   const inboundOf = (key) => (editEdges || graph.edges || []).filter((e) => e.dst === key);
   // What the two selects should show for a process: the shared 搬送手段/使用設備 of
   // its inbound legs, or MIXED when its legs disagree (混在, never silently picked).
@@ -313,10 +263,10 @@ export function mountMaterialFlow(el, opts = {}) {
     flowDirty = true;
   }
 
-  // Persist the authored edges. Renames are remapped first (an edge naming a
-  // process that was just renamed would otherwise be dropped server-side), then
+  // Persist the table editor's authored edges. Renames are remapped first (an edge
+  // naming a just-renamed process would otherwise be dropped server-side), then
   // 分岐率 is normalised per 前工程 so a split always adds up to 100%.
-  async function saveEdges(rename) {
+  async function saveEdgesFromTable(rename) {
     const name = getProject();
     if (!name || !editEdges) return;
     const alive = new Set(flow.map((p) => p.id));
@@ -326,14 +276,13 @@ export function mountMaterialFlow(el, opts = {}) {
       transport: e.transport || 'manual',
       equipment_ref: e.equipment_ref || '',
       share: Number(e.share) > 0 ? Number(e.share) : 1,
+      container_ref: e.container_ref || '',
+      carrier_ref: e.carrier_ref || '',
     })).filter((e) => e.dst && alive.has(e.dst) && (!e.src || alive.has(e.src)));
     const bySrc = {};
     rows.forEach((e) => { if (e.src) bySrc[e.src] = (bySrc[e.src] || 0) + e.share; });
-    rows.forEach((e) => { if (e.src && bySrc[e.src] > 0) e.share = e.share / bySrc[e.src]; });
-    await getJSON(`/api/projects/${encodeURIComponent(name)}/flow`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ edges: rows }),
-    });
+    rows.forEach((e) => { if (e.src && bySrc[e.src] > 0) e.share /= bySrc[e.src]; });
+    await getJSON(`${apiBase()}/flow`, jsonPost({ edges: rows }));
   }
 
   // Broadcast so ③設計フロー (and any other flow surface) re-reads the graph.
@@ -341,6 +290,85 @@ export function mountMaterialFlow(el, opts = {}) {
   function announceFlow() {
     document.dispatchEvent(new CustomEvent('whsim:flow-changed',
       { detail: { stages, source: 'materialflow' } }));
+  }
+
+  // ── the node canvas ───────────────────────────────────────────────────────
+  // The canvas owns direct manipulation; persistence goes back through these
+  // callbacks so this module stays the single owner of loading + broadcasting.
+  const canvasCtx = {
+    toast,
+    getProject,
+    openTable: () => (editing ? cancelEdit() : enterEdit()),
+    // Attribute-only save (搬送手段・使用設備・荷姿・分岐率): topology is unchanged,
+    // so only the 診断 come back — the canvas keeps its edge objects, and the open
+    // popover keeps editing the very leg the user clicked.
+    async patchEdges(rows) {
+      const name = getProject();
+      if (!name) throw new Error('プロジェクトが開いていません');
+      await getJSON(`${apiBase()}/flow`, jsonPost({ edges: rows }));
+      // Re-read so the CACHE (which every later render pushes to the canvas) is
+      // honest, but hand the canvas only the fresh 診断 — replacing its edges here
+      // would yank the object the open popover is editing.
+      await loadGraph();
+      if (canvas) canvas.setDiagnostics(graph.diagnostics);
+      announceFlow();
+    },
+    // Topology save. BOTH endpoints rewrite the whole model, so they run in
+    // sequence — 工程マスタ first, because an authored leg naming a brand-new (or
+    // renamed) 工程 is dropped server-side unless that id already exists.
+    async saveFlow({ processes, rename, edges }) {
+      const name = getProject();
+      if (!name) throw new Error('プロジェクトが開いていません');
+      const map = rename || {};
+      if (processes) {
+        const payload = processes.map((p) => ({
+          id: String(p.id || '').trim(), section: p.section || '出荷',
+          driver: p.driver || 'out_lines', prod: p.productivity || 60, unit: p.unit || '行/h',
+          depends: (p.depends || []).map((d) => map[d] || d),
+          role: p.role || '', zone: p.zone || '',
+        })).filter((p) => p.id);
+        const r = await getJSON(`${apiBase()}/work-processes`, jsonPost({ processes: payload }));
+        // A renamed 工程 keeps its 荷役物量 — otherwise a typo fix would zero the day.
+        Object.entries(map).forEach(([o, n]) => {
+          if (vol[o] != null) { vol[n] = vol[o]; src[n] = src[o]; delete vol[o]; delete src[o]; }
+        });
+        flow = r.processes || [];
+        for (const p of flow) { if (vol[p.id] == null) { vol[p.id] = 0; src[p.id] = 'none'; } }
+      }
+      if (edges) {
+        const alive = new Set(flow.map((p) => p.id));
+        const rows = edges.filter((e) => e.dst && alive.has(e.dst) && (!e.src || alive.has(e.src)));
+        await getJSON(`${apiBase()}/flow`, jsonPost({ edges: rows }));
+      }
+      await loadGraph();
+      render();                 // → pushCanvas()
+      loadStagesFromModel();
+      if (processes) {
+        document.dispatchEvent(new CustomEvent('whsim:model-changed',
+          { detail: { reason: 'work-processes' } }));
+      }
+      announceFlow();
+    },
+    async resetEdges() {
+      const name = getProject();
+      if (!name) throw new Error('プロジェクトが開いていません');
+      await getJSON(`${apiBase()}/flow`, jsonPost({ edges: [] }));
+      await loadGraph();
+      editEdges = (graph.edges || []).map((e) => ({ ...e }));
+      flowDirty = false;
+      pushCanvas();
+      announceFlow();
+    },
+  };
+
+  function pushCanvas() {
+    if (!canvas) return;
+    canvas.setTableLabel(editing ? '図に戻る' : '表で編集');
+    canvas.setData({
+      nodes: graph.nodes, edges: graph.edges, equipment: graph.equipment,
+      loadUnits, roles: graph.roles, diagnostics: graph.diagnostics,
+      processes: flow, drivers, volumes: vol,
+    });
   }
 
   // 工程→エリア chain (mirrors the designer's spatial flow). Each node shows the
@@ -356,10 +384,10 @@ export function mountMaterialFlow(el, opts = {}) {
       const mc = METHOD_C[s.method] || '#9aa4b0';
       const area = s.zone_type ? (ZTYPE_T[s.zone_type] || s.zone_type) : '未割当';
       const bad = !s.area_ok;
-      const node = `<div class="mf-cnode${bad ? ' bad' : ''}" title="${bad ? (s.area_warn || '') : ''}">
-        <div class="mf-cn-stage">${s.label}</div>
-        <div class="mf-cn-area">${bad ? '⚠ ' : ''}${area}</div>
-        <span class="mf-cn-method" style="background:${mc}">${METHOD_T[s.method] || s.method}</span>
+      const node = `<div class="mf-cnode${bad ? ' bad' : ''}" title="${esc(bad ? (s.area_warn || '') : '')}">
+        <div class="mf-cn-stage">${esc(s.label)}</div>
+        <div class="mf-cn-area">${bad ? '⚠ ' : ''}${esc(area)}</div>
+        <span class="mf-cn-method" style="background:${mc}">${esc(METHOD_T[s.method] || s.method)}</span>
       </div>`;
       return node + (i < stages.length - 1 ? '<div class="mf-carrow">→</div>' : '');
     }).join('');
@@ -371,7 +399,7 @@ export function mountMaterialFlow(el, opts = {}) {
   }
 
   // Re-render only the chain strip in place (live bus updates shouldn't disturb
-  // the sankey canvas / input focus). Falls back to a full render if absent.
+  // the canvas / input focus). Falls back to a full render if absent.
   function renderChain() {
     const host = root.querySelector('[data-mf-chain]');
     if (host) { host.innerHTML = chainHtml(); return; }
@@ -383,237 +411,98 @@ export function mountMaterialFlow(el, opts = {}) {
     if (pill) pill.classList.toggle('on', !!on);
   }
 
-  const trColor = (t) => cssColor(TRANSPORT_VAR[t] || TRANSPORT_VAR.manual, '#7A8899');
-
-  // The legs to draw: the authored/derived flow graph when we have it, else the
-  // depends-only fallback (no project / older server) with everything as 人手.
-  function flowLegs() {
-    const byId = {}; flow.forEach((f) => { byId[f.id] = f; });
-    const fromGraph = (graph.edges || []).filter((e) => e.dst && byId[e.dst]);
-    if (fromGraph.length) {
-      return fromGraph.map((e) => ({
-        src: e.src && byId[e.src] ? e.src : '', dst: e.dst,
-        transport: TRANSPORT_JA[e.transport] ? e.transport : 'manual',
-        share: Number(e.share) > 0 ? Number(e.share) : 1,
-      }));
-    }
-    const legs = [];
-    flow.forEach((f) => {
-      const ups = (f.depends || []).filter((d) => byId[d]);
-      if (!ups.length) legs.push({ src: '', dst: f.id, transport: 'manual', share: 1 });
-      ups.forEach((d) => legs.push({ src: d, dst: f.id, transport: 'manual', share: 1 }));
-    });
-    return legs;
+  // ── shell: the canvas is mounted ONCE and must survive every re-render, so
+  // the page is four independently rewritten slots around a stable host.
+  //
+  // Order matters: the canvas IS this screen, so only the action bar and its
+  // one-line guidance sit above it. 工程→エリア and the KPI strip are readouts,
+  // not controls — parked above they pushed the 48vh stage 200px down and put
+  // its lower third below the fold, which is the opposite of 主役. ──
+  function ensureShell() {
+    if (shell) return;
+    root.innerHTML = '<div data-mf-top></div><div data-mf-canvas></div>'
+      + '<div data-mf-editor></div><div data-mf-meta></div><div data-mf-cards></div>';
+    canvas = mountFlowCanvas(root.querySelector('[data-mf-canvas]'), canvasCtx);
+    shell = true;
   }
 
-  // Build the sankey option from the current flow + volumes. Nodes are processes
-  // (value = 荷役物量); links follow the flow graph (前工程→この工程), weighted by
-  // the downstream process man-hours × 分岐率 so ribbon thickness reads as "work
-  // passed along the flow", and COLOURED by 搬送手段 so the diagram also shows HOW
-  // the goods move. Legs with no 前工程 get a virtual section entry node.
-  function sankeyOption() {
-    const p = {
-      ink: cssColor('--ink-primary', '#37352F'),
-      ink2: cssColor('--ink-secondary', 'rgba(55,53,47,0.65)'),
-      ink3: cssColor('--ink-tertiary', 'rgba(55,53,47,0.45)'),
-      line: cssColor('--line-hair', 'rgba(55,53,47,0.16)'),
-      panel: cssColor('--bg-app', '#FFFFFF'),
-      lineStrong: cssColor('--line-strong', 'rgba(55,53,47,0.16)'),
-      accent: cssColor('--accent', '#16C0DE'),
-      fontSans: cssColor('--font-sans', 'sans-serif'),
-      fontMono: cssColor('--font-mono', 'monospace'),
-    };
-    const byId = {}; flow.forEach((f) => { byId[f.id] = f; });
-    const nodes = flow.map((f) => ({
-      name: f.id,
-      itemStyle: { color: SECTION_HEX[f.section] || p.accent, borderColor: 'transparent' },
-      label: { color: p.ink, fontFamily: p.fontSans, fontSize: 11 },
-      value: vol[f.id] || 0,
-    }));
-    // links: weight = downstream man-hours × 分岐率 (min 0.5 so a 0-volume leg still
-    // draws a hairline); colour = 搬送手段. Self-loops are dropped (sankey needs a DAG).
-    const links = [];
-    const entries = new Set();
-    flowLegs().forEach((leg) => {
-      const f = byId[leg.dst];
-      if (!f || leg.src === leg.dst) return;
-      let source = leg.src;
-      if (!source) { source = `${f.section}（入口）`; entries.add(source); }
-      const w = Math.max(0.5, manHours(f) * leg.share);
-      links.push({ source, target: leg.dst, value: w,
-        transport: leg.transport, share: leg.share,
-        lineStyle: { color: hexAlpha(trColor(leg.transport), 0.42) } });
-    });
-    // section entry nodes (so 前工程のない工程 still have an inbound ribbon)
-    entries.forEach((name) => nodes.push({
-      name,
-      itemStyle: { color: hexAlpha(SECTION_HEX[name.replace('（入口）', '')] || p.accent, 0.5) },
-      label: { color: p.ink2, fontFamily: p.fontMono, fontSize: 10 },
-    }));
-    return {
-      animation: !reduceMotion(),
-      tooltip: {
-        trigger: 'item',
-        backgroundColor: p.panel, borderColor: p.lineStrong, borderWidth: 1,
-        textStyle: { color: p.ink, fontSize: 12, fontFamily: p.fontSans },
-        extraCssText: 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.16);',
-        formatter: (d) => {
-          if (d.dataType === 'edge') {
-            const t = TRANSPORT_JA[d.data.transport] || TRANSPORT_JA.manual;
-            const sh = d.data.share == null ? 1 : Number(d.data.share);
-            const split = sh < 0.999 ? ` ・ 分岐率 ${(sh * 100).toFixed(0)}%` : '';
-            return `${esc(d.data.source)} → ${esc(d.data.target)}<br>搬送手段 ${esc(t)}${split}`
-              + `<br>人時 ${Number(d.data.value).toFixed(1)}`;
-          }
-          const f = byId[d.name];
-          if (!f) return esc(d.name);
-          const n = nodeById(f.id);
-          const only = n && !n.simulated ? '<br>計上のみ（シミュレーション対象外）' : '';
-          return `<b>${esc(d.name)}</b><br>荷役物量 ${fmt(vol[f.id] || 0)} ${f.unit ? `(${esc(f.unit)})` : ''}`
-            + `<br>人時 ${manHours(f).toFixed(1)}${only}`;
-        },
-      },
-      series: [{
-        type: 'sankey', left: 8, right: 110, top: 12, bottom: 12,
-        nodeWidth: 16, nodeGap: 12, draggable: false,
-        emphasis: { focus: 'adjacency' },
-        data: nodes, links,
-        label: { color: p.ink, fontFamily: p.fontSans, fontSize: 11 },
-        // NOT 'gradient': every ribbon carries its own 搬送手段 colour, and a
-        // source→target blend would wash that encoding out.
-        lineStyle: { curveness: 0.5, opacity: 0.55 },
-        itemStyle: { borderWidth: 0 },
-      }],
-    };
-  }
-
-  // (Re)build or in-place update the sankey. `inPlace` avoids touching surrounding
-  // DOM (preserves input focus) — used on every keystroke; full mount on render.
-  function updateSankey() {
-    const node = root.querySelector('[data-mf-sankey]');
-    if (!node) return;
-    if (!flow.length) { disposeSankey(); return; }
-    if (!sankey) {
-      sankey = echarts.init(node, null, { renderer: 'canvas' });
-      if (ro) ro.observe(node);
-    }
-    sankey.setOption(sankeyOption(), true);
-  }
-
-  // Legend for the ribbon colours — only the 搬送手段 actually used, so a 人手だけ
-  // の倉庫に AGV の凡例が並ぶことはない。
-  function legendHtml() {
-    const used = [...new Set(flowLegs().map((l) => l.transport))];
-    if (!used.length) return '';
-    const items = TRANSPORTS.filter((t) => used.includes(t)).map((t) =>
-      `<span class="mf-lg"><i style="background:var(${TRANSPORT_VAR[t]})"></i>${esc(TRANSPORT_JA[t])}</span>`).join('');
-    return `<span class="mf-lg" style="color:var(--ink-tertiary)">搬送手段</span>${items}`;
-  }
-  function renderLegend() {
-    const host = root.querySelector('[data-mf-legend]');
-    if (host) host.innerHTML = legendHtml();
-  }
-
-  // 設計の注意: warnings from the flow graph (未接続の工程・配置されていない設備・
-  // 分岐率の合計 など). Advisory only — nothing here blocks a run.
-  function diagHtml() {
-    const ds = (graph.diagnostics || []).filter((d) => d && d.message);
-    if (!ds.length) return '';
-    const items = ds.map((d) => `<li>${esc(d.message)}</li>`).join('');
-    return `<div class="mf-diag">
-      <div class="mf-diag-h">⚠ フローの注意 ${ds.length}件
-        <span class="mf-diag-sub">このままでも実行できます（設計を見直す目安です）</span></div>
-      <ul class="mf-diag-l">${items}</ul></div>`;
-  }
-  function renderDiag() {
-    const host = root.querySelector('[data-mf-diag]');
-    if (host) host.innerHTML = diagHtml();
-  }
-
-  // Everything that reads the flow graph, refreshed in place (no innerHTML rebuild
-  // of the page → typing / selects keep focus).
-  function renderGraphBits() {
-    renderDiag();
-    renderLegend();
-    if (root.querySelector('[data-mf-sankey]')) updateSankey();
-  }
-
-  function renderEmpty() {
-    disposeSankey();
-    root.innerHTML =
-      `<div class="mf-bar">
-        <button class="mf-btn primary" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成">📥 取込データから</button>
+  function barHtml(full) {
+    return `<div class="mf-bar">
+        <button class="mf-btn primary" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成（再アップロード不要）">📥 取込データから</button>
+        ${full ? '<button class="mf-btn" data-act="frombi">基礎物量を取込</button>' : ''}
         <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
         <button class="mf-btn" data-act="upload" title="手元の別の出荷CSV/Excelを取り込む">別ファイルを取込</button>
         <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
-       </div>
-       <div class="mf-empty">
-         <div class="mf-empty-title">工程フローがまだありません</div>
-         <div class="mf-empty-body">①取込の出荷実績を取り込むと、工程ごとの荷役物量がここに表示されます。「📥 取込データから」で取込済みデータを反映、まずは試すならサンプルでも始められます。</div>
-         <button class="mf-btn primary" data-act="fromproject">取込データから始める</button>
+        ${full ? '<button class="mf-btn" data-act="generate">不足を生成</button>' : ''}
+        ${full ? `<button class="mf-btn" data-act="editproc">${editing ? '図に戻る' : '表で編集'}</button>` : ''}
+        <span class="mf-recalc" data-mf-recalc aria-live="polite">再計算中…</span>
+        ${full ? '<button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>' : ''}
        </div>`;
-    wire();
   }
 
   function render() {
-    if (!flow.length) { renderEmpty(); return; }
-    disposeSankey();   // about to rebuild the DOM the canvas lives in
+    ensureShell();
+    const top = root.querySelector('[data-mf-top]');
+    const ed = root.querySelector('[data-mf-editor]');
+    const meta = root.querySelector('[data-mf-meta]');
+    const cards = root.querySelector('[data-mf-cards]');
+
+    if (!flow.length) {
+      top.innerHTML = barHtml(false)
+        + `<div class="mf-empty">
+             <div class="mf-empty-title">工程フローがまだありません</div>
+             <div class="mf-empty-body">①取込の出荷実績を取り込むと、工程ごとの荷役物量がここに表示されます。「📥 取込データから」で取込済みデータを反映、まずは試すならサンプルでも始められます。図のキャンバスをダブルクリックすれば、工程を1つずつ手で作ることもできます。</div>
+             <button class="mf-btn primary" data-act="fromproject">取込データから始める</button>
+           </div>`;
+      ed.innerHTML = '';
+      meta.innerHTML = '';
+      cards.innerHTML = '';
+      wire();
+      pushCanvas();
+      return;
+    }
+
     const totalMH = flow.reduce((s, p) => s + manHours(p), 0);
     const filled = flow.filter((p) => (vol[p.id] || 0) > 0).length;
-    const sections = [...new Set(flow.map((p) => p.section))];
-    const flowHtml = sections.map((sec) => {
-      const ps = flow.filter((p) => p.section === sec);
-      const cards = ps.map((p, i) => {
-        const sc = SRC[src[p.id] || 'none'];
-        const card = `<div class="mf-card" data-card="${p.id}">
-          <span class="mf-badge" data-badge="${p.id}" style="background:${sc.c}">${sc.t}</span>
-          <h4>${p.id}</h4>
-          <div class="sub">${p.unit} ・ 生産性 ${p.productivity}</div>
-          <input type="number" min="0" step="1" data-id="${p.id}" value="${vol[p.id] || 0}" aria-label="${p.id}の荷役物量"/>
-          <div class="mf-mh" data-mh="${p.id}">≈ ${manHours(p).toFixed(1)} 人時/日</div>
-        </div>`;
-        return card + (i < ps.length - 1 ? '<div class="mf-arrow">→</div>' : '');
-      }).join('');
-      return `<div class="mf-sec">${sec}</div><div class="mf-flow">${cards}</div>`;
-    }).join('');
-
     const anyVol = flow.some((p) => (vol[p.id] || 0) > 0);
     // ①取込済みの出荷実績から埋めるのが第一導線。まだ物量が無いときは
     // その一手をハイライトし、空の画面で迷わせない。
     const guide = anyVol ? '' :
       `<div class="mf-guide">①取込の出荷実績はまだ反映されていません。<b>「📥 取込データから」</b>`
       + `を押すと、取り込んだデータから工程ごとの荷役物量を自動作成します（再アップロード不要）。</div>`;
-    root.innerHTML =
-      `<div class="mf-bar">
-        <button class="mf-btn primary" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成（再アップロード不要）">📥 取込データから</button>
-        <button class="mf-btn" data-act="frombi">基礎物量を取込</button>
-        <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
-        <button class="mf-btn" data-act="upload" title="手元の別の出荷CSV/Excelを追加で取り込む">別ファイルを取込</button>
-        <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
-        <button class="mf-btn" data-act="generate">不足を生成</button>
-        <button class="mf-btn" data-act="editproc">${editing ? '編集中…' : '工程を編集'}</button>
-        <span class="mf-recalc" data-mf-recalc aria-live="polite">再計算中…</span>
-        <button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>
-       </div>
-       <span class="mf-hint">工程ごとの荷役物量（1日平均）。データから取込・不足は手入力/生成し、人員配置へ。</span>
-       ${guide}
-       ${editorHtml()}
-       <div data-mf-diag>${diagHtml()}</div>
-       <div data-mf-chain>${chainHtml()}</div>
-       <div class="mf-kpis">
-         <div class="mf-kpi"><div class="l">総工数</div><div class="v"><span data-kpi="totalMH">${totalMH.toFixed(1)}</span> <small>人時/日</small></div></div>
-         <div class="mf-kpi"><div class="l">入力済み工程</div><div class="v"><span data-kpi="filled">${filled}</span> <small>/ ${flow.length}</small></div></div>
-         <div class="mf-kpi"><div class="l">工程数</div><div class="v">${flow.length}</div></div>
-       </div>
-       <div class="mf-sankey-wrap">
-         <div class="mf-sankey-h"><h3>マテリアルフロー</h3><span class="sub">工程間の流れ（リボン幅 = 人時 / 色 = 搬送手段）</span></div>
-         <div class="mf-legend" data-mf-legend>${anyVol ? legendHtml() : ''}</div>
-         ${anyVol ? '<div class="mf-sankey" data-mf-sankey></div>'
-           : '<div class="mf-sankey-empty">荷役物量を入力すると、工程間の流れがここに描画されます。</div>'}
-       </div>
-       ${flowHtml}`;
+
+    top.innerHTML = barHtml(true)
+      + `<span class="mf-hint">工程ごとの荷役物量（1日平均）。図で工程と流れを組み、物量を入れて人員配置へ。</span>`
+      + guide;
+
+    meta.innerHTML = `<div data-mf-chain>${chainHtml()}</div>`
+      + `<div class="mf-kpis">
+           <div class="mf-kpi"><div class="l">総工数</div><div class="v"><span data-kpi="totalMH">${totalMH.toFixed(1)}</span> <small>人時/日</small></div></div>
+           <div class="mf-kpi"><div class="l">入力済み工程</div><div class="v"><span data-kpi="filled">${filled}</span> <small>/ ${flow.length}</small></div></div>
+           <div class="mf-kpi"><div class="l">工程数</div><div class="v">${flow.length}</div></div>
+         </div>`;
+
+    ed.innerHTML = editorHtml();
+
+    const sections = [...new Set(flow.map((p) => p.section))];
+    cards.innerHTML = sections.map((sec) => {
+      const ps = flow.filter((p) => p.section === sec);
+      const html = ps.map((p, i) => {
+        const sc = SRC[src[p.id] || 'none'];
+        const card = `<div class="mf-card" data-card="${esc(p.id)}">
+          <span class="mf-badge" data-badge="${esc(p.id)}" style="background:${sc.c}">${sc.t}</span>
+          <h4>${esc(p.id)}</h4>
+          <div class="sub">${esc(p.unit)} ・ 生産性 ${esc(p.productivity)}</div>
+          <input type="number" min="0" step="1" data-id="${esc(p.id)}" value="${vol[p.id] || 0}" aria-label="${esc(p.id)}の荷役物量"/>
+          <div class="mf-mh" data-mh="${esc(p.id)}">≈ ${manHours(p).toFixed(1)} 人時/日</div>
+        </div>`;
+        return card + (i < ps.length - 1 ? '<div class="mf-arrow">→</div>' : '');
+      }).join('');
+      return `<div class="mf-sec">${esc(sec)}</div><div class="mf-flow">${html}</div>`;
+    }).join('');
+
     wire();
-    if (anyVol) updateSankey();
+    pushCanvas();
   }
 
   function setVolumes(map, source) {
@@ -650,7 +539,7 @@ export function mountMaterialFlow(el, opts = {}) {
     root.querySelectorAll('[data-act]').forEach((b) => (b.disabled = true));
     setBusy(true);
     try {
-      const b = await getJSON(`/api/projects/${encodeURIComponent(name)}/analysis/bundle`);
+      const b = await getJSON(`${apiBase()}/analysis/bundle`);
       const procs = (b && b.staffing && b.staffing.processes) || [];
       const map = {};
       let n = 0;
@@ -680,10 +569,7 @@ export function mountMaterialFlow(el, opts = {}) {
     if (!Object.keys(base).length) { toast('元になる物量を1つ以上入力してください。', 'info'); return; }
     setBusy(true);
     try {
-      const r = await getJSON('/api/materialflow/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base }),
-      });
+      const r = await getJSON('/api/materialflow/generate', jsonPost({ base }));
       for (const p of flow) {
         if ((vol[p.id] || 0) <= 0 && r.volumes[p.id] != null) {
           vol[p.id] = Math.round(r.volumes[p.id]); src[p.id] = 'generated';
@@ -698,10 +584,7 @@ export function mountMaterialFlow(el, opts = {}) {
   async function toTimetable() {
     setBusy(true);
     try {
-      const sc = await getJSON('/api/materialflow/scenario', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ volumes: vol }),
-      });
+      const sc = await getJSON('/api/materialflow/scenario', jsonPost({ volumes: vol }));
       document.dispatchEvent(new CustomEvent('whsim:load-timetable', { detail: { scenario: sc } }));
       toast('人員配置へ受け渡しました', 'ok');
     } catch (e) { toast('タイムチャートへの受け渡しに失敗しました: ' + e.message, 'error'); }
@@ -709,20 +592,17 @@ export function mountMaterialFlow(el, opts = {}) {
   }
 
   // In-place update of just the affected card (man-hours + source badge) + KPIs +
-  // the sankey — avoids a full innerHTML rebuild on every keystroke (which would
-  // destroy input focus/caret). If the sankey wasn't present yet (first non-zero
-  // volume), a full render() builds it.
+  // the canvas ribbons — avoids a full rebuild on every keystroke (which would
+  // destroy input focus/caret).
   function updateCard(id) {
     const p = flow.find((q) => q.id === id);
     if (!p) return;
-    const mh = root.querySelector(`[data-mh="${id}"]`);
+    const mh = root.querySelector(`[data-mh="${CSS.escape(id)}"]`);
     if (mh) mh.textContent = `≈ ${manHours(p).toFixed(1)} 人時/日`;
-    const badge = root.querySelector(`[data-badge="${id}"]`);
+    const badge = root.querySelector(`[data-badge="${CSS.escape(id)}"]`);
     if (badge) { const sc = SRC[src[id] || 'none']; badge.textContent = sc.t; badge.style.background = sc.c; }
     updateKpis();
-    const node = root.querySelector('[data-mf-sankey]');
-    if (node) updateSankey();
-    else if (flow.some((q) => (vol[q.id] || 0) > 0)) render();   // first non-zero → draw it
+    if (canvas) canvas.setVolumes(vol);
   }
   function updateKpis() {
     const totalMH = flow.reduce((s, p) => s + manHours(p), 0);
@@ -731,7 +611,7 @@ export function mountMaterialFlow(el, opts = {}) {
     const f = root.querySelector('[data-kpi="filled"]'); if (f) f.textContent = String(filled);
   }
 
-  // ── 工程エディタ (完全フリー工程: add / rename / reorder / depend / delete) ──
+  // ── 工程エディタ（表で編集: 一括で直したいときの補助ビュー） ──────────────
 
   // シミュ挙動: which engine behaviour this freely-named process drives. ""(未設定)
   // keeps the name-based auto-判定 the server does, so the option spells out what
@@ -757,6 +637,9 @@ export function mountMaterialFlow(el, opts = {}) {
     if (cur === MIXED) out.unshift(`<option value="${MIXED}" selected>混在</option>`);
     return out.join('');
   }
+
+  // 混在 (MIXED) names no single means, so it can name no single machine either.
+  const equipChoices = (t) => (t === MIXED ? [] : equipForTransport(graph.equipment, t));
 
   function equipOptions(transport, cur) {
     const choices = equipChoices(transport);
@@ -806,8 +689,8 @@ export function mountMaterialFlow(el, opts = {}) {
       </div>`;
     }).join('');
     return `<div class="mfe">
-      <div class="mfe-head">工程の編集 <span class="mfe-sub">ドライバ＝物量の出所 / 生産性＝既定値（実測・想定が優先）/ 依存＝前工程</span></div>
-      <div class="mfe-help">シミュ挙動＝この工程をシミュレーションのどの動きとして扱うか。「計上のみ」の工程は人員・原価には計上されますが、シミュレーションでは動きません。搬送手段＝前工程からこの工程へ物が届く手段（工程間搬送）で、使用設備まで指定できます。</div>
+      <div class="mfe-head">表で編集 <span class="mfe-sub">一括で直したいとき用。図（キャンバス）と同じ工程・同じ流れです</span></div>
+      <div class="mfe-help">シミュ挙動＝この工程をシミュレーションのどの動きとして扱うか。「計上のみ」の工程は人員・原価には計上されますが、シミュレーションでは動きません。搬送手段＝前工程からこの工程へ物が届く手段（工程間搬送）で、使用設備まで指定できます。荷姿（容器・台車）は図の矢印をクリックして設定します。</div>
       <div class="mfe-row mfe-gh"><span></span><span>工程名</span><span>セクション</span><span>シミュ挙動</span><span>物量ドライバ</span><span>生産性</span><span>前工程（依存）</span><span>搬送手段・使用設備</span><span></span></div>
       ${rows}
       <div class="mfe-foot">
@@ -821,19 +704,18 @@ export function mountMaterialFlow(el, opts = {}) {
     </div>`;
   }
 
-  // Opening the editor pulls the flow graph first (roles + 搬送手段 must be the
+  // Opening the table pulls the flow graph first (roles + 搬送手段 must be the
   // live ones), then builds the working copies. never-blocks: a failed fetch just
-  // means an empty graph, and the editor still opens with 未設定/人手.
+  // means an empty graph, and the table still opens with 未設定/人手.
   async function enterEdit() {
     setBusy(true);
-    try { await ensureFlowData(true); } finally { setBusy(false); }
+    try { await Promise.all([loadGraph(), loadLoadUnits()]); } finally { setBusy(false); }
     editFlow = flow.map((p) => ({
       id: p.id, _origId: p.id, section: p.section || '出荷', driver: p.driver || 'out_lines',
       productivity: p.productivity || 60, unit: p.unit || '行/h',
       depends: [...(p.depends || [])],
       // AUTHORED role/zone (not the name-based guess) so 未設定 stays 未設定
-      role: (procMeta[p.id] || {}).role || '',
-      zone: (procMeta[p.id] || {}).zone || '',
+      role: p.role || '', zone: p.zone || '',
     }));
     editEdges = (graph.edges || []).map((e) => ({ ...e }));
     flowDirty = false;
@@ -876,8 +758,7 @@ export function mountMaterialFlow(el, opts = {}) {
   function setEquipment(i, val) {
     const p = editFlow && editFlow[i];
     if (!p) return;
-    const key = p._origId || p.id;
-    setInbound(key, { equipment_ref: val });
+    setInbound(p._origId || p.id, { equipment_ref: val });
   }
   function refreshEquipCell(i) {
     const p = editFlow && editFlow[i];
@@ -910,6 +791,7 @@ export function mountMaterialFlow(el, opts = {}) {
     }
     p[field] = val;   // id / section (free text) / role (シミュ挙動)
   }
+
   async function saveProcesses() {
     const name = getProject();
     if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
@@ -931,9 +813,9 @@ export function mountMaterialFlow(el, opts = {}) {
     })).filter((p) => p.id);
     setBusy(true);
     try {
-      const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/work-processes`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ processes: payload }),
+      const r = await getJSON(`${apiBase()}/work-processes`, jsonPost({ processes: payload }));
+      Object.entries(rename).forEach(([o, n]) => {
+        if (vol[o] != null) { vol[n] = vol[o]; src[n] = src[o]; delete vol[o]; delete src[o]; }
       });
       flow = r.processes || [];
       // keep volumes for surviving ids; new ids start at 0.
@@ -943,11 +825,10 @@ export function mountMaterialFlow(el, opts = {}) {
       // the graph stays DERIVED, i.e. 「工程の順番どおり」のまま。
       let edgeErr = null;
       if (flowDirty || graph.authored) {
-        try { await saveEdges(rename); } catch (e2) { edgeErr = e2; }
+        try { await saveEdgesFromTable(rename); } catch (e2) { edgeErr = e2; }
       }
       editing = false; editFlow = null; editEdges = null; flowDirty = false;
       await loadGraph();
-      metaLoaded = false;
       render();
       loadStagesFromModel();
       document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: { reason: 'work-processes' } }));
@@ -969,15 +850,8 @@ export function mountMaterialFlow(el, opts = {}) {
     if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
     setBusy(true);
     try {
-      await getJSON(`/api/projects/${encodeURIComponent(name)}/flow`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ edges: [] }),
-      });
-      await loadGraph();
-      editEdges = (graph.edges || []).map((e) => ({ ...e }));
-      flowDirty = false;
+      await canvasCtx.resetEdges();
       render();
-      announceFlow();
       toast('工程間の搬送手段を、工程の順番どおりの既定に戻しました。', 'ok');
     } catch (e) { toast('搬送手段のリセットに失敗: ' + (e && e.message ? e.message : e), 'error'); }
     finally { setBusy(false); }
@@ -987,14 +861,10 @@ export function mountMaterialFlow(el, opts = {}) {
     if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
     setBusy(true);
     try {
-      const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/work-processes`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ processes: [] }),
-      });
+      const r = await getJSON(`${apiBase()}/work-processes`, jsonPost({ processes: [] }));
       flow = r.processes || [];
       // reset clears the master's role/zone too, so the working copy starts blank
       // (未設定 = 工程名からの自動判定) and the edges are re-read from the graph.
-      procMeta = {}; metaLoaded = false;
       editFlow = flow.map((p) => ({ ...p, _origId: p.id, role: '', zone: '',
         depends: [...(p.depends || [])] }));
       await loadGraph();
@@ -1075,7 +945,7 @@ export function mountMaterialFlow(el, opts = {}) {
     const name = getProject();
     if (!name) { toast('先にプロジェクトを選択してください。', 'error'); return; }
     try {
-      const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/timetable/from-bi`);
+      const r = await getJSON(`${apiBase()}/timetable/from-bi`);
       if (!r || !r.available || !r.volumes) {
         toast('基礎物量がまだありません。②分析→基礎物量で「基礎物量を保存」してください。', 'info');
         return;
@@ -1092,11 +962,6 @@ export function mountMaterialFlow(el, opts = {}) {
     }
   }
 
-  // Theme flip: sankey paints are resolved at build time, so rebuild from the
-  // fresh tokens (no refetch). Only when a canvas is actually mounted.
-  const onTheme = () => { if (sankey) updateSankey(); };
-  document.addEventListener('themechange', onTheme);
-
   // Live link: the designer broadcasts its 工程→エリア state on every flow edit.
   function applyStages(next) {
     stages = Array.isArray(next) ? next : [];
@@ -1112,8 +977,8 @@ export function mountMaterialFlow(el, opts = {}) {
     if (d.source === 'materialflow') return;
     clearTimeout(flowBusT);
     flowBusT = setTimeout(() => {
-      if (editing) return;   // don't swap the data under an open editor
-      loadGraph().then(renderGraphBits);
+      if (editing) return;   // don't swap the data under an open table editor
+      loadGraph().then(pushCanvas);
     }, 250);
   };
   document.addEventListener('whsim:flow-changed', onFlow);
@@ -1124,16 +989,9 @@ export function mountMaterialFlow(el, opts = {}) {
     const name = getProject();
     if (!name) return;
     try {
-      const m = await getJSON(`/api/projects/${encodeURIComponent(name)}/full`);
+      const m = await getJSON(`${apiBase()}/full`);
       const mm = m.model || m;
       const proc = (mm && mm.process) || {};
-      // AUTHORED role/zone per work process (the graph's role may be a name-based
-      // guess; the editor must not freeze a guess into an explicit setting).
-      procMeta = {};
-      (proc.work_processes || []).forEach((w) => {
-        if (w && w.id) procMeta[w.id] = { role: w.role || '', zone: w.zone || '' };
-      });
-      metaLoaded = true;
       const byId = {}; (proc.stages || []).forEach((s) => { byId[s.id] = s; });
       const zById = {}; ((mm.layout || {}).zones || []).forEach((z) => { zById[z.id] = z; });
       const order = [];
@@ -1159,7 +1017,7 @@ export function mountMaterialFlow(el, opts = {}) {
     const name = getProject();
     try {
       if (name) {
-        const r = await getJSON(`/api/projects/${encodeURIComponent(name)}/work-processes`);
+        const r = await getJSON(`${apiBase()}/work-processes`);
         flow = r.processes || [];
         drivers = r.drivers || [];
       } else {
@@ -1176,31 +1034,29 @@ export function mountMaterialFlow(el, opts = {}) {
     await loadFlow();
     render();
     loadStagesFromModel();
-    // the graph only decorates (link colours + diagnostics) — fetched after the
-    // first paint and applied in place, so a slow/absent endpoint never delays it.
-    loadGraph().then(() => { if (!editing) renderGraphBits(); });
+    // the graph + 荷姿 only decorate the canvas — fetched after the first paint and
+    // applied in place, so a slow/absent endpoint never delays it.
+    Promise.all([loadGraph(), loadLoadUnits()]).then(() => { if (!editing) pushCanvas(); });
   })();
 
   return {
     dispose() {
-      document.removeEventListener('themechange', onTheme);
       document.removeEventListener('whsim:flow-changed', onFlow);
       clearTimeout(flowBusT);
       graphSeq += 1;            // ignore any /flow response still in flight
-      disposeSankey();
-      if (ro) { ro.disconnect(); ro = null; }
-      window.removeEventListener('resize', resizeSankey);
+      if (canvas) { canvas.dispose(); canvas = null; }
+      shell = false;
       el.innerHTML = '';
     },
     // re-pull the project's work-process master + 工程→エリア (on project change /
     // revisit), so a different project's custom processes show up.
     refresh() {
       if (editing) { loadStagesFromModel(); return; }  // don't clobber an open edit
-      graph = emptyGraph(); procMeta = {}; metaLoaded = false;
+      graph = emptyGraph(); loadUnits = null; luProject = null;
       loadFlow().then(() => {
         render();
         loadStagesFromModel();
-        loadGraph().then(() => { if (!editing) renderGraphBits(); });
+        Promise.all([loadGraph(), loadLoadUnits()]).then(() => { if (!editing) pushCanvas(); });
       });
     },
     setStages: applyStages,

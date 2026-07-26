@@ -14,6 +14,11 @@ client = TestClient(app)
 JS_MODULES = [
     "app.js", "js/journey.js", "js/overview.js", "js/phasehint.js",
     "js/onboarding.js", "js/notes.js", "js/materialflow.js",
+    # ②マテリアルフローの工程キャンバス (箱と矢印の直接操作面) — materialflow.js
+    # imports these, so a missing file is a blank screen with a console error only.
+    "js/materialflow/canvas.js", "js/materialflow/vocab.js",
+    "js/materialflow/layout.js", "js/materialflow/loadunits.js",
+    "js/materialflow/popover.js",
 ]
 
 
