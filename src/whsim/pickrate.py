@@ -8,12 +8,23 @@ motion-time model, before paying for a full discrete-event run.
 Model (per work method, all analytic — no simulation):
 
     tour ≈ 0.75·√(n_picks · pick_area)         # BHH random-tour length in a
-           + 2·depot_dist                        #   W×D area + in/out leg
+           + 2·(depot_dist + depot detour)        #   W×D area + in/out leg
+           + (aisles visited - 1)·hop detour      #   ...routed through AISLES
     t_trip = tour/walk_speed                      # 移動
            + n_picks·handle_s                     # 手扱い (pick)
            + (n_picks·sort_s if 種まき else 0)     # 仕分け (種まき only)
     lines/h  = n_picks  / t_trip · 3600
     orders/h = n_orders / t_trip · 3600
+
+The BHH term alone prices FREE movement inside a rectangle — a picker gliding
+diagonally through the racking. It cannot, so the same closed-form aisle
+corrections the DES-facing oracle uses (``rackgeom.aisle_detour``: ℓ/3 per
+aisle-changing hop, 2d(ℓ-d)/ℓ per depot leg, the FULL run length ℓ for a
+serpentine ゾーン sweep) are charged here too. Without them this module read
+retail_dc's travel at 127 m/order against a measured 945, i.e. it sold a
+productivity the DES could never confirm — and 生産性試算 is adopted straight
+into the productivity stack (③設計 → cost/timetable). No racking ⇒ no
+correction ⇒ the historical open-area behaviour (never-blocks).
 
 where n_orders = orders_per_trip (the method's batch), n_picks =
 n_orders·lines_per_order. Batching amortises the tour over more lines (移動↓);
@@ -29,6 +40,7 @@ from __future__ import annotations
 
 import math
 
+from whsim.rackgeom import aisle_detour
 from whsim.schema.model import WarehouseModel
 from whsim.workmethod import METHOD_PRESETS
 
@@ -44,8 +56,8 @@ DEFAULTS = {
 }
 
 
-def _pick_area_and_depot(model: WarehouseModel) -> tuple[float, float, float, float]:
-    """(pick_area_m2, area_cx, area_cy, depot_dist_m) from the layout.
+def _pick_area_and_depot(model: WarehouseModel):
+    """(pick_area_m2, area_cx, area_cy, depot_dist_m, depot_xy) from the layout.
 
     pick area = union bbox of storage zones (else the whole floor); depot = the
     first 梱包台/station, else the centre of a packing/shipping zone, else the
@@ -75,7 +87,9 @@ def _pick_area_and_depot(model: WarehouseModel) -> tuple[float, float, float, fl
     if depot is None:
         depot = (b.width / 2.0, 0.0)
     depot_dist = math.hypot(cx - depot[0], cy - depot[1])
-    return area, cx, cy, depot_dist
+    # The point itself comes back too: the aisle detour is a function of WHERE the
+    # depot sits against the rack band, and re-deriving it elsewhere would drift.
+    return area, cx, cy, depot_dist, depot
 
 
 def _lines_per_order(model: WarehouseModel) -> float:
@@ -110,7 +124,11 @@ def estimate_pickrate(model: WarehouseModel, params: dict | None = None) -> dict
     rate = max(0.0, float(p["labour_cost_per_hour"]))
     hours = max(1.0, float(p["working_hours_per_day"]))
 
-    area, _cx, _cy, depot = _pick_area_and_depot(model)
+    area, _cx, _cy, depot, depot_xy = _pick_area_and_depot(model)
+    # The aisle network the DES walks, in closed form off the drawn racks.
+    # ``None`` (bare / unlaid-out model) ⇒ the historical open-area behaviour.
+    det = aisle_detour(model, depot_xy)
+    depot_leg = depot + (det["depot_extra_m"] if det else 0.0)
     lpo = float(p["lines_per_order"]) if p["lines_per_order"] else _lines_per_order(model)
     lpo = max(1.0, lpo)
     daily_lines = _daily_pick_lines(model)
@@ -121,8 +139,19 @@ def estimate_pickrate(model: WarehouseModel, params: dict | None = None) -> dict
         opt = max(1, int(work.get("orders_per_trip", 1)))
         is_sort = work.get("consolidation") == "sort"
         n_picks = opt * lpo
-        # tour: random-visit length in the pick area + the in/out depot leg.
-        tour = kk * math.sqrt(max(1.0, n_picks) * area) + 2.0 * depot
+        # tour: random-visit length in the pick area + the in/out depot leg,
+        # both routed through the AISLES rather than straight across the racking.
+        tour = kk * math.sqrt(max(1.0, n_picks) * area) + 2.0 * depot_leg
+        if det is not None:
+            # Only the hops that actually CHANGE aisle pay the detour: a tour
+            # sweeps one aisle before moving to the next, so a trip with many
+            # picks per aisle detours far less per pick than a short one.
+            changes = min(max(n_picks - 1.0, 0.0), max(det["n_aisles"] - 1.0, 0.0))
+            # ゾーン is a serpentine relay: every aisle entered is run end to end
+            # (ℓ), where a nearest-neighbour tour only dips in (ℓ/3).
+            per_change = (det["run_len_m"] if work.get("zoning") == "sequential"
+                          else det["hop_extra_m"])
+            tour += changes * per_change
         travel_s = tour / walk
         handle_total = n_picks * handle
         sort_total = (n_picks * sort_s) if is_sort else 0.0
