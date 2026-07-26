@@ -187,3 +187,141 @@ def test_cody_chat_endpoint_unknown_project_never_blocks(client):
     body = r.json()
     assert body["intent"] == "open_view"
     assert body["project"] == "does_not_exist"
+
+
+# ---- template matching -----------------------------------------------------
+# The matcher mines each template's OWN manifest, so these tests run against the
+# real catalogue: a template that ships must be reachable by describing it.
+
+@pytest.fixture(scope="module")
+def catalogue():
+    from whsim.templates import list_templates
+    return {"templates": list_templates()}
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("食品の定温倉庫を作りたい", "food_chilled"),
+    ("賞味期限のFEFO管理をしたい", "food_chilled"),
+    ("3PLの倉庫を作って", "thirdparty_3pl"),
+    ("多荷主の波動が大きい倉庫", "thirdparty_3pl"),
+    ("アパレルの倉庫を作って", "apparel"),
+    ("返品が多くてゾーンピッキングしたい", "apparel"),
+    ("小売DCを作りたい", "retail_dc"),
+    ("コンビニ向けの常温センター", "retail_dc"),
+    ("AGVを入れた大規模ECを作って", "ecommerce_xl"),
+    ("かんばんの部品供給倉庫を作って", "manufacturing_parts"),
+    ("空の倉庫から自分で棚を引きたい", "blank"),
+    ("コンベアの倉庫を作って", "pick_to_belt"),
+    # Phrasings a salesperson actually types -- vocabulary from the manifest
+    # prose, not just its headline name.
+    ("チルドの食品倉庫", "food_chilled"),
+    ("かんばん方式のライン供給", "manufacturing_parts"),
+    ("小ロット高頻度の部品供給", "manufacturing_parts"),
+    ("波動が大きいのでピーク検証したい", "thirdparty_3pl"),
+    ("GTPのAGV倉庫", "ecommerce_xl"),
+    ("ゾーンピッキングの多SKU倉庫", "apparel"),
+    ("方面別のウェーブピッキング", "retail_dc"),
+    ("フォークで補充する大型センター", "retail_dc"),
+    ("集合コンベアを敷きたい", "pick_to_belt"),
+    ("トートを投入口に載せる運用", "pick_to_belt"),
+    ("MapMakerの地図を取り込みたい", "blank"),
+])
+def test_detect_template_matches_what_the_message_describes(message, expected, catalogue):
+    assert cody._detect_template(message, catalogue) == expected
+
+
+def test_detect_template_is_not_catalogue_order(catalogue):
+    """A hintless message must land on the canonical default, not entry #0.
+
+    The catalogue sorts alphabetically, so the pre-scoring heuristic handed a
+    salesperson アパレル for "新しく作って". Guard the regression directly.
+    """
+    ids = [t["template_id"] for t in catalogue["templates"]]
+    assert ids[0] != cody._FALLBACK_TEMPLATE, "fixture no longer exercises the bug"
+    assert cody._detect_template("新しいプロジェクトを作って", catalogue) == cody._FALLBACK_TEMPLATE
+    assert cody._detect_template("よろしくお願いします", catalogue) == cody._FALLBACK_TEMPLATE
+
+
+def test_detect_template_explicit_id_wins(catalogue):
+    assert cody._detect_template("pick_to_belt で作って", catalogue) == "pick_to_belt"
+    # A longer id is not shadowed by a shorter one sharing its prefix.
+    assert cody._detect_template("ecommerce_xl で", catalogue) == "ecommerce_xl"
+
+
+def test_detect_template_folds_halfwidth_and_fullwidth(catalogue):
+    """半角カナ・全角英数 must match the same as their canonical forms."""
+    assert cody._detect_template("ﾈｯﾄ通販ＥＣでコンベア出荷", catalogue) == "pick_to_belt"
+    assert cody._detect_template("ＡＧＶの大規模ＥＣ", catalogue) == "ecommerce_xl"
+
+
+def test_ec_hint_still_prefers_the_generic_ec_template(catalogue):
+    """A bare EC/通販EC hint ties across the EC templates -> the default wins.
+
+    Regression: a hiragana 2-gram mined from pick_to_belt's description ("載せる
+    だけで" -> けで) used to break that tie by scoring pure grammar as evidence.
+    """
+    assert cody._detect_template("EC向けで作って", catalogue) == "ecommerce_small"
+    assert cody._detect_template("EC通販の倉庫を立ち上げたい", catalogue) == "ecommerce_small"
+
+
+def _flat(text):
+    out = set()
+    for group in cody._terms(text):
+        out |= group
+    return out
+
+
+def test_terms_keeps_content_and_drops_grammar():
+    terms = _flat("載せるだけで梱包ラインまで搬送する")
+    assert "梱包" in terms and "ライン" in terms and "搬送" in terms
+    assert "けで" not in terms                    # hiragana fragment == verb tail
+    assert "ベア" not in _flat("コンベア")          # 2-char katakana cut == noise
+    assert "ピッキング" in _flat("ゾーンピッキング")  # 3+ katakana cut == real concept
+    assert "部品供給" in _flat("製造部品供給")       # kanji cut == real compound
+    assert "通" not in _flat("通路")               # lone kanji only as a whole run
+    assert "棚" in _flat("棚を引く")               # ...and a whole run may be one char
+
+
+def test_terms_group_a_run_with_its_own_fragments():
+    """A run and its fragments are ONE piece of evidence, not several.
+
+    Regression: 通販 scored three times (通販 + 通 + 販) and swamped a template
+    that says the same thing once.
+    """
+    groups = cody._terms("通販")
+    assert len(groups) == 1
+    assert "通販" in groups[0]
+
+
+def test_latin_term_needs_a_word_boundary():
+    """A 2-letter id fragment must not fire from inside a longer word."""
+    assert cody._mentions("ec向け", "ec")
+    assert not cody._mentions("please check the select", "ec")
+
+
+def test_boilerplate_terms_are_dropped_by_the_catalogue_cut(catalogue):
+    """Terms carried by most of the catalogue distinguish nothing."""
+    groups = dict(cody._term_weights(catalogue["templates"]))
+    terms = set()
+    for _w, g in groups["apparel"]:
+        terms |= g
+    assert "倉庫" not in terms
+    assert "アパレル" in terms
+
+
+def test_unknown_template_shape_never_blocks():
+    """Junk / missing manifests must not raise -- Cody always answers."""
+    ctx = {"templates": [{}, {"template_id": None}, {"template_id": "x"}, None]}
+    # Only "x" is on offer, so "x" is the honest answer -- never a template the
+    # catalogue does not carry.
+    assert cody._detect_template("なんでもいい", ctx) == "x"
+    assert cody._detect_template("", {"templates": []}) == cody._FALLBACK_TEMPLATE
+    assert cody._detect_template("test", {}) == cody._FALLBACK_TEMPLATE
+
+
+def test_create_reply_names_the_template_in_japanese(catalogue):
+    """A salesperson cannot check a pick they cannot read."""
+    d = cody.respond("「テスト倉庫」を食品の定温で作って", catalogue)
+    assert d["params"]["template"] == "food_chilled"
+    assert "食品・定温物流 (FEFO)" in d["reply"]
+    assert "food_chilled" not in d["reply"]

@@ -42,8 +42,9 @@ def test_ranking_is_deterministic():
     a = sweep.run_sweep(m, _VOLUMES)
     b = sweep.run_sweep(m, _VOLUMES)
     assert a["available"] and a["rows"]
-    key = lambda res: [(r["rank"], r["method_id"], r["orders_per_trip"], r["pickers"],
-                        r["feasible"], r["monthly_cost"], r["peak"]) for r in res["rows"]]
+    def key(res):
+        return [(r["rank"], r["method_id"], r["orders_per_trip"], r["pickers"],
+                 r["feasible"], r["monthly_cost"], r["peak"]) for r in res["rows"]]
     assert key(a) == key(b)
     # rank is a dense 1..N stamped in objective order
     assert [r["rank"] for r in a["rows"]] == list(range(1, len(a["rows"]) + 1))

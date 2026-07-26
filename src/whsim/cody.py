@@ -44,6 +44,7 @@ The returned dict is EXACTLY shaped:
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # ---------------------------------------------------------------------------
 # Intent -> mood mapping. ``unknown`` and the "can't help" path use ``curious``
@@ -86,46 +87,249 @@ _KW_ESTIMATE = ("概算", "ざっくり", "すぐ", "見積", "速報", "とり�
 _KW_OPENVIEW = ("結果", "分析", "kpi", "どうなった", "レポート", "見せて", "みせて",
                 "ダッシュボード", "成績", "数字を見")
 
-# Template hint keywords -> a matcher run over the available template list.
-_KW_ECOMMERCE = ("ec", "通販", "ecommerce", "e-commerce", "ネット通販", "オンライン")
-
-
 def _contains(message: str, keywords) -> bool:
     return any(k in message for k in keywords)
 
 
-def _pick_template(context: dict) -> str:
-    """Resolve a template id from context, honouring EC/通販 hints.
+# ---------------------------------------------------------------------------
+# Template matching. Data-driven ON PURPOSE: the vocabulary is mined from each
+# template's OWN manifest (id / name / description), never from a table keyed by
+# template id. Dropping a new templates/<id>/manifest.json therefore makes it
+# discoverable in chat with no code change (ARCHITECTURE invariant 10).
+# ---------------------------------------------------------------------------
 
-    Falls back to the first available template, else the canonical default.
+# One run of a single script class. Katakana is tested before hiragana so the
+# shared prolonged-sound mark (ー) attaches to the katakana run.
+_RUN_RE = re.compile(
+    r"[a-z0-9]+"                 # latin / digits (text is NFKC-folded + lowered)
+    r"|[ァ-ヺヽヾー]+"             # katakana
+    r"|[ぁ-ゖゝゞ]+"               # hiragana
+    r"|[一-鿿々〆]+"              # kanji
+)
+
+# Latin function words carry no template signal (they ride in on ids like
+# ``pick_to_belt`` and on English words in a description).
+_LATIN_STOP = frozenset(
+    ("to", "of", "in", "on", "at", "by", "and", "the", "for", "with", "from")
+)
+
+# Where a term was found -> how much a hit is worth. The id is the strongest
+# signal (the user typed the template's own handle), the name next, the prose
+# description last.
+_W_ID, _W_NAME, _W_DESC = 3.0, 2.0, 1.0
+
+# A message must clear this to be treated as a hint at all. One description hit
+# is enough -- boilerplate terms are already removed by the df cut below.
+_MIN_SCORE = 1.0
+
+# Head start for the default template: worth one name-level hit of evidence.
+_W_PRIOR = _W_NAME
+
+
+def _fold(text: str) -> str:
+    """NFKC-fold + lowercase so 半角カナ/全角英数 match their canonical forms."""
+    return unicodedata.normalize("NFKC", text or "").lower()
+
+
+def _terms(text: str) -> list[frozenset[str]]:
+    """Content-bearing terms of ``text``, without a Japanese tokenizer.
+
+    Japanese has no spaces, so we split into same-script runs and keep the ones
+    that carry meaning: hiragana runs are mostly grammar (particles, verb tails)
+    so they need to be longer to qualify. KANJI runs additionally emit their
+    2-grams and characters, so a template compound (製造部品供給) still matches a
+    partial mention (部品供給). Only kanji: splitting hiragana mines verb tails
+    (…載せるだけで → けで) and splitting katakana mines fragments of unrelated
+    loanwords (コンベア → ベア), both of which score as false evidence.
+
+    A lone kanji is kept -- it is a whole word in Japanese (棚 / 空 / 引), and
+    dropping it left 「空き倉庫（自分で棚を引く）」 with nothing but 自分.
+
+    Returns one GROUP per source run. A run and the fragments cut out of it are
+    one piece of evidence, not several: scoring them independently let 通販 count
+    three times (通販 + 通 + 販) and swamp a template that says the same thing
+    once. The caller takes the best match within a group, so a template scores by
+    HOW MUCH of each of its compounds the user actually said.
+    """
+    groups: list[frozenset[str]] = []
+    for run in _RUN_RE.findall(_fold(text)):
+        n = len(run)
+        kanji = "一" <= run[0] <= "鿿"
+        if run[0].isascii():
+            if n >= 2 and run not in _LATIN_STOP:
+                groups.append(frozenset((run,)))
+            continue
+        if "ぁ" <= run[0] <= "ゞ":         # hiragana: whole run, and only if long
+            if n >= 3:                    # shorter == grammar (particles, tails)
+                groups.append(frozenset((run,)))
+            continue
+        if not kanji:
+            # Katakana: the run plus substrings of 3+. Loanwords compound without
+            # a separator (ゾーンピッキング), so without this ピッキング reads as a
+            # different term in every template and the boilerplate cut below can
+            # never see it. 3+ keeps ベア from being cut out of コンベア.
+            if n >= 2:
+                groups.append(frozenset(
+                    (run, *(run[i:j] for i in range(n) for j in range(i + 3, n + 1)))
+                ))
+            continue
+        # Kanji: the run plus every substring of 2+, so a partial mention still
+        # lands (製造部品供給 <- 部品供給) and the longest match scores. A single
+        # kanji counts only as a WHOLE run (棚 / 空 / 引), never as a fragment --
+        # 通 cut out of 通路 otherwise matched the unrelated 通販.
+        groups.append(frozenset(
+            (run, *(run[i:j] for i in range(n) for j in range(i + 2, n + 1)))
+        ))
+    return groups
+
+
+def _term_weights(templates) -> list[tuple[str, list[tuple[float, frozenset[str]]]]]:
+    """Per-template ``[(weight, term-group)]``, with catalogue boilerplate gone.
+
+    A term carried by more than half the catalogue (倉庫/ピッキング/オーダー…)
+    distinguishes nothing, so it is dropped. That cut is measured against the
+    live catalogue, so it keeps working as templates are added or removed --
+    no hand-maintained stoplist to drift.
+
+    Identical groups from different fields collapse to the strongest field, so a
+    word repeated in both the name and the description is still one signal.
+    """
+    per: list[tuple[str, dict[frozenset[str], float]]] = []
+    for t in templates:
+        tid = (t or {}).get("template_id")
+        if not tid:
+            continue
+        groups: dict[frozenset[str], float] = {}
+        for text, w in ((tid.replace("_", " "), _W_ID),
+                        (t.get("name") or "", _W_NAME),
+                        (t.get("description") or "", _W_DESC)):
+            for group in _terms(text):
+                if w > groups.get(group, 0.0):
+                    groups[group] = w
+        per.append((tid, groups))
+
+    df: dict[str, int] = {}
+    for _, groups in per:
+        seen: set[str] = set()
+        for group in groups:
+            seen |= group
+        for term in seen:
+            df[term] = df.get(term, 0) + 1
+    cut = max(2, (len(per) + 1) // 2)
+
+    out: list[tuple[str, list[tuple[float, frozenset[str]]]]] = []
+    for tid, groups in per:
+        kept = []
+        for group, w in groups.items():
+            terms = frozenset(x for x in group if df[x] < cut)
+            if terms:
+                kept.append((w, terms))
+        out.append((tid, kept))
+    return out
+
+
+def _mentions(message: str, term: str) -> bool:
+    """Is ``term`` present in ``message`` as a term (not glued inside a word)?
+
+    Japanese terms match as plain substrings (there are no word boundaries to
+    respect). Latin terms must NOT match inside a longer word, so a 2-letter id
+    fragment like ``ec`` cannot be triggered by "check" or "select".
+    """
+    if not term.isascii():
+        return term in message
+    start = 0
+    while True:
+        i = message.find(term, start)
+        if i < 0:
+            return False
+        before = message[i - 1] if i else ""
+        after = message[i + len(term)] if i + len(term) < len(message) else ""
+        if not (before.isascii() and before.isalnum()) and not (after.isascii() and after.isalnum()):
+            return True
+        start = i + 1
+
+
+def _score_templates(message: str, templates, *, prior: bool = True) -> list[tuple[float, str]]:
+    """Score every template against ``message``, best first.
+
+    Longer matched terms are more specific, so they score above short ones.
+
+    The default template carries a ``_W_PRIOR`` head start: it is the designated
+    starting point for a proposal, so a specialised template has to be CLEARLY
+    the better fit to displace it, not merely score first. Without that, "EC通販
+    の倉庫" landed on 通販EC・コンベア出荷ライン purely because that name happens
+    to spell 通販 -- committing the customer to a conveyor they never mentioned.
+    Pass ``prior=False`` to see the raw evidence.
+    """
+    folded = _fold(message)
+    scored: list[tuple[float, str]] = []
+    for tid, groups in _term_weights(templates):
+        score = _W_PRIOR if (prior and tid == _FALLBACK_TEMPLATE) else 0.0
+        for w, terms in groups:
+            hit = max((len(t) for t in terms if _mentions(folded, t)), default=0)
+            if hit:
+                score += w * (1.0 + 0.25 * (hit - 2))
+        scored.append((score, tid))
+    scored.sort(key=lambda s: -s[0])
+    return scored
+
+
+def _pick_template(context: dict) -> str:
+    """The template to use when the message gives no usable hint.
+
+    The canonical default when it is on offer -- NOT merely the first entry of
+    the catalogue, which is alphabetical and would hand a salesperson アパレル
+    for "新しく作って".
     """
     templates = (context or {}).get("templates") or []
-    ids = [t.get("template_id") for t in templates if t.get("template_id")]
-    return ids[0] if ids else _FALLBACK_TEMPLATE
+    ids = [t["template_id"] for t in templates if (t or {}).get("template_id")]
+    if _FALLBACK_TEMPLATE in ids or not ids:
+        return _FALLBACK_TEMPLATE
+    return ids[0]
 
 
 def _detect_template(message: str, context: dict) -> str:
-    """Detect a template from the message; prefer an EC template on EC hints."""
-    templates = (context or {}).get("templates") or []
-    ids = [t.get("template_id") for t in templates if t.get("template_id")]
-    low = message.lower()
+    """Detect the best-fitting template for ``message``.
 
-    # Explicit: the message mentions a template id verbatim.
-    for tid in ids:
-        if tid and tid.lower() in low:
+    An explicit template id wins outright; otherwise every template is scored on
+    the vocabulary of its own manifest and the best one is taken, provided it
+    clears ``_MIN_SCORE``. Ties go to the default template, then to catalogue
+    order, so the result never depends on how the catalogue happens to sort.
+    """
+    templates = (context or {}).get("templates") or []
+    ids = [t["template_id"] for t in templates if (t or {}).get("template_id")]
+    low = _fold(message)
+
+    # Explicit: the message mentions a template id verbatim. Longest first, so
+    # "ecommerce_xl" is not shadowed by a hypothetical "ecommerce".
+    for tid in sorted(ids, key=len, reverse=True):
+        if _fold(tid) in low:
             return tid
 
-    # EC / 通販 hint -> first template whose id/name looks like ecommerce.
-    if _contains(low, _KW_ECOMMERCE):
-        for t in templates:
-            tid = (t.get("template_id") or "").lower()
-            name = (t.get("name") or "").lower()
-            if "ecommerce" in tid or "ec" in tid or "通販" in name or "ec" in name:
-                return t["template_id"]
-        if _FALLBACK_TEMPLATE in ids or not ids:
+    scored = _score_templates(message, templates)
+    if scored and scored[0][0] >= _MIN_SCORE:
+        best = scored[0][0]
+        tied = [tid for score, tid in scored if score >= best - 1e-9]
+        if _FALLBACK_TEMPLATE in tied:
             return _FALLBACK_TEMPLATE
+        order = {tid: i for i, tid in enumerate(ids)}
+        return min(tied, key=lambda t: order.get(t, len(order)))
 
     return _pick_template(context)
+
+
+def _template_label(tid: str, context: dict) -> str:
+    """The template's Japanese name for Cody's reply, falling back to its id.
+
+    A salesperson cannot check a choice they cannot read: "pick_to_belt
+    テンプレート" hides the pick, 「通販EC・コンベア出荷ライン」 shows it.
+    """
+    for t in (context or {}).get("templates") or []:
+        if (t or {}).get("template_id") == tid:
+            name = (t.get("name") or "").strip()
+            if name:
+                return f"「{name}」"
+    return f"{tid} "
 
 
 def _extract_name(message: str) -> str | None:
@@ -167,7 +371,8 @@ def _handle_create(message: str, context: dict) -> dict:
     name = _extract_name(message)
     params = {"name": name, "template": template}
     if name:
-        reply = (f"まかせて！「{name}」を {template} テンプレートで立ち上げるよ。"
+        reply = (f"まかせて！「{name}」を {_template_label(template, context)}"
+                 f"テンプレートで立ち上げるよ。"
                  f"作ったら、そのままシミュレーションも回せるよ。")
         return _reply_dict(reply, "excited", "create_project", params,
                            ["シミュレーションを実行", "結果を見せて", "概算で見たい"])

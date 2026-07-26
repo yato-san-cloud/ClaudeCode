@@ -23,7 +23,7 @@ from math import hypot
 
 import pytest
 
-from whsim import kpis, templates
+from whsim import templates
 from whsim.engine.graph import AisleGraph
 from whsim.engine.run import run_once
 from whsim.rackgeom import rack_rects
