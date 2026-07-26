@@ -1,0 +1,208 @@
+# LINE 買い物チェックリスト
+
+LINEのトークに「牛乳2本と卵、あと洗剤なくなりそう」と書くと、売り場ごとに並んだ
+チェックリストになる Bot + ミニアプリ。買うたびに学習して、次回は下書きの方から出てくる。
+
+```
+妻: 牛乳2本と卵、あと洗剤なくなりそう
+                                  ↓
+Bot: 追加しました: 牛乳 2本、卵、洗剤（切らしそう）
+     ┌────────────────────────┐
+     │ 買い物リスト   残り3件  │
+     │ 乳製品・卵              │
+     │ ・牛乳 2本              │
+     │ ・卵                    │
+     │ 洗剤・掃除              │
+     │ ・洗剤（切らしそう）     │
+     │ [ チェックリストを開く ] │
+     └────────────────────────┘
+```
+
+## 何が解決されるか
+
+| 困りごと | この実装 |
+| --- | --- |
+| トークを遡らないと何を買うかわからない | 常に1画面のチェックリストにまとまる |
+| 消し込みできない | タップでチェック。二人同時に開いても同期する |
+| 売り場を行ったり来たりする | 野菜→精肉→鮮魚→…の順路順に自動で並ぶ |
+| 妻が毎回ゼロから書く | 買い物の前日に履歴から下書きを自動投稿。直すだけで済む |
+| 「あれ買い忘れた」 | 購入周期を学習して「そろそろ切れそう」を提案 |
+
+**妻の入力習慣は変えなくていい。** グループトークに普段どおり書くだけで拾う。
+Bot との1:1トークにも対応している。
+
+## 仕組み
+
+```
+LINEトーク ──webhook──▶ Cloudflare Worker ──▶ D1 (SQLite)
+                            │                    │
+                            │  ①ルールベース解析   │ 商品マスタ / 購入履歴
+                            │  ②Claude API (保険) │ 購入周期のEMA
+                            │                    │
+LIFF ミニアプリ ◀──JSON API──┘                    │
+                                                 │
+Cron (毎日) ──▶ 週次の下書き生成 ──push──▶ LINEトーク
+```
+
+### 自由文の解析は2段構え
+
+1. **ルールベース**（`src/parser/`）— 辞書と正規表現だけ。速く、無料で、外部通信なし。
+   区切り記号 → 助詞「と」の順に保守的に分解し、数量・単位・補足・在庫切れの合図を抜く。
+   `牛乳2本と卵` は切るが、`とうもろこし` や `たまごとうふ` は切らない
+   （左右の両方が辞書にある、または直前が数量+単位のときだけ「と」で切る）。
+2. **Claude API**（`src/parser/llm.ts`）— 1 の確信度が低いときだけ呼ぶ。
+   `output_config.format` のJSONスキーマで出力を拘束しているので、パース失敗や
+   前置き文が原理的に起きない。**落ちても 1 の結果でリストは機能する。**
+
+`ANTHROPIC_API_KEY` を設定しなければ 1 だけで動く。
+
+### 学習していること
+
+- **購入間隔の指数移動平均** — 「牛乳はだいたい10日周期」。前回からの経過が周期に近づくと提案に出る
+- **購入回数** — 「よく買う定番」
+- **表記ゆれ** — 「ぎゅうにゅう」「ギュウニュウ」を同じ商品に寄せる
+- **買い物曜日** — 購入履歴の曜日が偏っていれば、その前日に下書きを出す
+
+学習が進むのは**「買い物を終える」を押したとき**だけ。チェックしただけでは記録されない。
+
+## セットアップ
+
+### 1. LINE のチャネルを2つ作る
+
+[LINE Developers](https://developers.line.biz/console/) で1つのプロバイダーの下に作る。
+
+**a) Messaging API チャネル**（Bot本体）
+
+- `Channel secret` → `LINE_CHANNEL_SECRET`
+- `Channel access token`（長期）を発行 → `LINE_CHANNEL_ACCESS_TOKEN`
+- Messaging API 設定で:
+  - **応答メッセージ: オフ**（自動応答が邪魔をする）
+  - **あいさつメッセージ: オフ**
+  - **Webhook: オン**
+  - **グループトーク・複数人トークへの参加を許可する: オン** ← これを忘れると
+    グループで使えない
+
+**b) LINE Login チャネル**（チェックリスト画面用）
+
+- `Channel ID` → `LIFF_CHANNEL_ID`（IDトークンの検証に使う）
+- LIFF タブでアプリを追加:
+  - エンドポイントURL: `https://<あなたのworker>.workers.dev/`（デプロイ後に設定）
+  - サイズ: `Full`
+  - Scope: `profile`, `openid`
+  - **発行された LIFF ID** → `LIFF_ID`
+
+### 2. Cloudflare 側
+
+```bash
+npm install
+npx wrangler login
+
+# D1 を作り、出力された database_id を wrangler.jsonc に貼る
+npm run db:init
+npm run db:migrate          # 本番
+npm run db:migrate:local    # ローカル
+```
+
+### 3. シークレットを登録
+
+```bash
+npx wrangler secret put LINE_CHANNEL_SECRET
+npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+npx wrangler secret put LIFF_ID
+npx wrangler secret put LIFF_CHANNEL_ID
+npx wrangler secret put ANTHROPIC_API_KEY   # 任意
+```
+
+### 4. デプロイして Webhook を向ける
+
+```bash
+npm run deploy
+```
+
+- Messaging API の **Webhook URL** に `https://<worker>/line/webhook` を設定して「検証」
+- LIFF の **エンドポイントURL** に `https://<worker>/` を設定
+
+### 5. 使い始める
+
+夫婦のグループトークに Bot を招待し、何か1つ買うものを送る。以降そのトークが
+「世帯」として登録され、リストが紐づく。
+
+## ローカル開発
+
+```bash
+cp .dev.vars.example .dev.vars    # 値を埋める
+npm run db:migrate:local
+npm run dev
+```
+
+`.dev.vars` に `DEV_USER_ID` を入れておくと、LIFF を通さずに
+`x-dev-user: <その値>` ヘッダで API を叩ける（**本番では設定しないこと**）。
+
+Webhook をローカルに向けたい場合は `cloudflared tunnel --url http://localhost:8787` などで
+公開URLを作り、Messaging API の Webhook URL に設定する。
+
+```bash
+npm test        # ユニットテスト (118件)
+npm run typecheck
+```
+
+## Bot への合図
+
+普通の買い物メモはそのまま送るだけ。以下は例外的に「操作」として解釈される。
+
+| 送る言葉 | 動作 |
+| --- | --- |
+| `リスト` / `一覧` | いまのリストを表示 |
+| `完了` / `おわり` | 買い物を終える（購入を記録して学習を進める） |
+| `いつもの` | 定番をまとめて追加 |
+| `提案` / `そろそろ` | 切れそうなものを提案 |
+| `削除 牛乳` | 1件外す |
+| `全部消す` / `クリア` | リストを空にする |
+| `ヘルプ` | 使い方 |
+
+完全一致のみ。「リストに牛乳追加して」は普通のメモとして扱われる。
+
+## コスト
+
+- **Cloudflare Workers + D1** — 想定される利用量なら無料枠に収まる
+- **Claude API** — ルールベースで拾えなかった分だけ。システムプロンプトは
+  プロンプトキャッシュに載せているので、2回目以降の入力コストは約1/10。
+  一般的な家庭の利用（月100メッセージ程度、うち数割がフォールバック）で月100円前後。
+  `ANTHROPIC_API_KEY` を外せばゼロ。
+
+モデルは `wrangler.jsonc` の `ANTHROPIC_MODEL` で変えられる（既定 `claude-opus-5`）。
+費用を抑えたいなら `claude-haiku-4-5` でもこの用途には十分機能する。
+
+## ディレクトリ
+
+```
+src/
+├── index.ts            エントリ (webhook / API / Cron)
+├── parser/             自由文 → 品物リスト
+│   ├── normalize.ts      表記ゆれの正規化
+│   ├── units.ts          数量・単位の抽出
+│   ├── segment.ts        メッセージ → 断片への分解
+│   ├── rules.ts          ルールベース解析
+│   ├── llm.ts            Claude API フォールバック
+│   └── index.ts          2段構えのオーケストレーション
+├── domain/
+│   ├── categories.ts     売り場の定義と分類辞書
+│   ├── suggest.ts        購入周期の学習と提案 (純粋関数)
+│   ├── catalog.ts        商品マスタ
+│   ├── lists.ts          買い物リスト
+│   └── households.ts     世帯とメンバー
+├── line/                 Webhook / 署名検証 / メッセージ組み立て
+└── api/                  LIFF 向け JSON API と認証
+public/                   LIFF ミニアプリ (素のHTML/CSS/JS)
+migrations/               D1 スキーマ
+```
+
+## 設計上の判断
+
+- **LLM は保険であって本線ではない。** ルールベースで足りるものに毎回API代を払わない。
+  外部依存が落ちても買い物リストは機能する、を不変条件にしている。
+- **原文を捨てない。** `list_items.raw_text` に妻が書いたままの文字列を残し、
+  名前と違う場合はUIに併記する。勝手に言い換えられた感じを避けるため。
+- **確信度を持ち回す。** 低いものには `⚠︎` を出し、鵜呑みにさせない。
+- **チェックは楽観更新。** 店内は電波が悪い。タップした瞬間に線が引かれ、通信は後追い。
+- **Botは黙る。** 買い物メモでない発言には反応しない。グループトークに常駐するため。

@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "line-shopping-list",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // LIFF ミニアプリ (public/index.html) を同じオリジンから配信する。
+  // アセットに一致しないパス (/api/*, /line/webhook) はワーカーが処理する。
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "none"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shopping",
+      // `npm run db:init` が出力する ID に差し替える
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // 毎日 JST 18:00 (= UTC 09:00) に「そろそろ買い物では?」の下書きを判定する
+  "triggers": {
+    "crons": ["0 9 * * *"]
+  },
+
+  "vars": {
+    // 秘密情報ではないものだけここに置く。残りは `wrangler secret put` を使う。
+    "ANTHROPIC_MODEL": "claude-opus-5"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

@@ -1,0 +1,21 @@
+# `.dev.vars` にコピーして値を埋める (このファイル自体はコミットしない)
+# 本番は `wrangler secret put <NAME>` で登録する。
+
+# --- LINE Messaging API チャネル (Botを動かすチャネル) ---
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+
+# --- LINE Login チャネル + LIFF (チェックリスト画面) ---
+# LIFF_ID は "1234567890-abcdefgh" 形式。LIFF_CHANNEL_ID は IDトークン検証に使う
+# LINE Login チャネルの Channel ID (数字のみ)。
+LIFF_ID=
+LIFF_CHANNEL_ID=
+
+# --- Claude API (自由文パースのフォールバック。未設定ならルールベースのみで動く) ---
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-opus-5
+
+# --- ローカル開発用 ---
+# LIFF を通さずに API を叩くための逃げ道。本番では絶対に設定しない。
+# 設定すると `x-dev-user: <この値>` ヘッダで認証を通過できる。
+DEV_USER_ID=

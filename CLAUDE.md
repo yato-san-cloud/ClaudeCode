@@ -2,17 +2,113 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Repository Status
+## What this is
 
-This repository is currently uninitialized: no source files, no commits, and no configured tooling. The remote is `yato-san-cloud/ClaudeCode` on a local proxy. When real code is added, this file should be updated with:
+A LINE-based shopping checklist. A couple writes shopping requests into a LINE chat in
+free-form Japanese; the bot parses them into a checklist grouped by supermarket aisle,
+served as a LIFF mini-app. It learns purchase cycles and pre-drafts the next list.
 
-- Build, lint, test, and run commands (including how to run a single test)
-- High-level architecture that spans multiple files
-- Important conventions pulled from any README, `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md` that gets added later
+See `README.md` for the product-level description and the full LINE/Cloudflare setup.
+
+## Commands
+
+```bash
+npm install
+npm run dev                # wrangler dev (needs .dev.vars — copy .dev.vars.example)
+npm test                   # vitest, 118 unit tests
+npm test -- parser         # single file: matches test/parser.test.ts
+npm test -- -t '長音符'     # single test by name
+npm run typecheck          # tsc --noEmit
+npm run db:migrate:local   # apply migrations/ to the local D1
+npm run db:migrate         # apply to the remote D1
+npm run deploy             # wrangler deploy
+```
+
+`npx wrangler deploy --dry-run --outdir=<dir>` builds the bundle without deploying —
+useful for checking that the Worker compiles.
+
+Local end-to-end check: `npm run db:migrate:local && npm run dev`, then drive
+`/line/webhook` with an HMAC-SHA256 signature over the raw body using
+`LINE_CHANNEL_SECRET`, and the `/api/*` routes with an `x-dev-user` header matching
+`DEV_USER_ID`.
+
+## Architecture
+
+Single Cloudflare Worker (`src/index.ts`) with three entry points:
+
+- `POST /line/webhook` — LINE events. Verifies the signature against the **raw request
+  bytes**, returns 200 immediately, and processes in `waitUntil` (parsing can take
+  seconds when it falls through to the Claude API).
+- `/api/*` (Hono, `src/api/routes.ts`) — JSON API for the LIFF mini-app. Every route
+  authenticates a LINE ID token and checks household membership.
+- `scheduled()` — daily cron that posts a pre-filled draft list the day before the
+  household's learned shopping day.
+
+Static assets in `public/` are served by the Workers assets binding; unmatched paths
+fall through to the Worker. State lives in D1 (`migrations/0001_init.sql`).
+
+### Parsing is two-tier, and tier 1 must stand alone
+
+`src/parser/index.ts` orchestrates:
+
+1. **Rule-based** (`rules.ts` → `segment.ts` → `units.ts` + `domain/categories.ts`).
+   Dictionary and regex only. No network.
+2. **Claude API** (`llm.ts`) — called only when tier 1 reports `needsLlm`.
+
+**Invariant: the shopping list works when the LLM does not.** `parseWithLlm` never
+throws; it returns `null` on any failure (network, rate limit, refusal, truncation) and
+the caller falls back to tier 1. Keep it that way. `ANTHROPIC_API_KEY` is optional.
+
+`llm.ts` uses `client.beta.messages.create` with `output_config.format` (JSON schema),
+`effort: 'low'`, `cache_control` on the static system prompt, and
+`fallbacks: 'default'`. It checks `stop_reason` before reading `content`.
+
+### Parser invariants worth knowing before editing
+
+These are load-bearing and each is covered by a regression test:
+
+- **`normalize()` collapses whitespace, including newlines.** `segment()` splits on
+  newlines *before* normalizing. Reversing that order silently flattens multi-line
+  memos into one item.
+- **Never strip `ー` as a trailing particle.** It destroys katakana product names
+  (`トイレットペーパー` → `トイレットペーパ`). `stripParticles` lives in `segment.ts`,
+  not `normalize.ts`, because it needs `isKnownItem` to decide whether a trailing
+  hiragana is a particle (`牛乳を`) or part of the noun (`さかな`).
+- **Splitting on the particle `と` is deliberately conservative.** Only split when the
+  left side ends in a quantity+unit, or when both sides are dictionary items. Otherwise
+  `とうもろこし` and `たまごとうふ` get cut in half. Prefer under-splitting; the LLM
+  tier catches the rest.
+- **Quantity stays `null` when unwritten.** Do not default to 1 — `卵` and `卵1パック`
+  are different requests.
+
+`domain/categories.ts` does double duty: aisle ordering for the shopping route *and*
+the known-item dictionary that drives parser confidence. Adding keywords there improves
+both.
+
+### Learning
+
+`domain/suggest.ts` is pure (no DB) so cycle prediction can be tested with a fixed
+clock. Purchase intervals use an EMA (α = 0.3) with outlier guards; intervals under 12
+hours or over 120 days are discarded rather than averaged in.
+
+Learning advances **only** on list completion (`completeList`), not on checking items
+off. That writes `purchase_events`, updates the EMA, and re-infers the shopping day.
+
+## Conventions
+
+- Comments and user-facing strings are Japanese; identifiers and types are English.
+- Comments explain *why*, especially where a simpler-looking implementation is wrong
+  (see the parser invariants above). Don't narrate what the next line does.
+- Pure logic goes in modules with no D1 import so it stays unit-testable; D1 access is
+  confined to `domain/*.ts` and `api/routes.ts`.
+- Domain functions take `now: number = Date.now()` as a trailing parameter so tests can
+  fix the clock.
+- Every API route resolves the household from the authenticated user and verifies
+  membership. Never trust a `householdId` from the request body alone.
 
 ## Git Workflow
 
-- Active development branch for Claude-authored changes: `claude/add-claude-documentation-oNCDe`
+- Active development branch for Claude-authored changes: `claude/line-shopping-checklist-r3s5zr`
 - Push with `git push -u origin <branch-name>`; retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s) on network errors only
 - Do not open pull requests unless the user explicitly requests one
 - GitHub interactions must go through the `mcp__github__*` tools; `gh` CLI is not available

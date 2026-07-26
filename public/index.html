@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>買い物リスト</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
+    <script src="/app.js" type="module" defer></script>
+  </head>
+  <body>
+    <div id="boot" class="boot">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>読み込み中…</p>
+    </div>
+
+    <main id="app" hidden>
+      <header class="topbar">
+        <div class="topbar-row">
+          <select id="household" class="household-select" aria-label="リストを選ぶ"></select>
+          <button id="refresh" class="icon-button" type="button" aria-label="更新">↻</button>
+        </div>
+        <div class="progress">
+          <div id="progress-bar" class="progress-bar"><span></span></div>
+          <p id="progress-text" class="progress-text">—</p>
+        </div>
+      </header>
+
+      <section id="list" class="list" aria-live="polite"></section>
+
+      <section id="empty" class="empty" hidden>
+        <p class="empty-title">リストは空です</p>
+        <p class="empty-body">
+          LINEのトークに買うものを送ると、ここに自動で並びます。<br />
+          下のフォームから直接足すこともできます。
+        </p>
+      </section>
+
+      <section class="panel">
+        <details id="suggest-panel">
+          <summary>
+            <span>そろそろ・いつもの</span>
+            <span id="suggest-count" class="badge" hidden>0</span>
+          </summary>
+          <div id="suggestions" class="suggestions"></div>
+        </details>
+      </section>
+
+      <div class="spacer" aria-hidden="true"></div>
+
+      <footer class="composer">
+        <form id="add-form" class="add-form" autocomplete="off">
+          <input
+            id="add-input"
+            class="add-input"
+            type="text"
+            placeholder="買うものを足す（例: 牛乳2本）"
+            enterkeyhint="done"
+            list="catalog-suggestions"
+          />
+          <datalist id="catalog-suggestions"></datalist>
+          <button class="add-button" type="submit">追加</button>
+        </form>
+        <button id="complete" class="complete-button" type="button">
+          買い物を終える
+        </button>
+      </footer>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <template id="group-template">
+      <section class="group">
+        <h2 class="group-title"></h2>
+        <ul class="items"></ul>
+      </section>
+    </template>
+
+    <template id="item-template">
+      <li class="item">
+        <button class="item-main" type="button">
+          <span class="checkbox" aria-hidden="true"></span>
+          <span class="item-body">
+            <span class="item-name"></span>
+            <span class="item-meta"></span>
+          </span>
+        </button>
+        <button class="item-remove" type="button" aria-label="削除">×</button>
+      </li>
+    </template>
+  </body>
+</html>
