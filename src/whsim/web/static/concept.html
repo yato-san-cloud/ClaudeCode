@@ -121,6 +121,11 @@ fetch(src, { cache: 'no-store' })
       // camera, and left a 2 m-wide name plate covering the shot.
       scene.controls.update();
       scene._updateCameraTrack(t);
+      // The cutaway is a function of where the camera IS, so it has to run here
+      // too. The rAF loop calls it every frame; the seek path did not, so during
+      // a capture the roof and the near walls stayed exactly as the constructor
+      // left them — every aerial came out with the roof steel drawn across it.
+      scene._updateCutaway();
       scene._updateProps(t);
       scene._updateTotes(t);
       scene._updateWorkers(t, step);

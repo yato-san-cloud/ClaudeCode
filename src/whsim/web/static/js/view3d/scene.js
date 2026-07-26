@@ -1129,9 +1129,21 @@ export const sceneMethods = {
     const inside = c.y < ceil - 0.2
       && c.x > -1.5 && c.x < width + 1.5
       && c.z > -1.5 && c.z < depth + 1.5;
+    // ABOVE the roof steel is the other case that wants the roof gone. The whole
+    // point of an aerial is to look INTO the building; leaving the trusses on
+    // draws a girder across the middle of every overview, which is exactly the
+    // shot a warehouse proposal opens with. Previously only "inside" hid them,
+    // so an aerial — outside the footprint by definition once you pull back —
+    // got the full roof. Roof stays on only for a ground-level exterior view,
+    // where you would really see it.
+    const aerial = c.y >= ceil - 0.2;
+    const roofOn = !inside && !aerial;
+    if (roofOn !== this._roofOn) {
+      this._roofOn = roofOn;
+      for (const m of (parts || [])) m.visible = roofOn;
+    }
     if (inside !== this._cutInside) {
       this._cutInside = inside;
-      for (const m of (parts || [])) m.visible = inside;
       // Exception: in the presets where the building lights ITSELF (夜/夕/ブランド)
       // the high-bay lenses stay lit through the cutaway, so the overview reads
       // like a night aerial of a working DC rather than an unlit model. Daylight
