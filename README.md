@@ -195,6 +195,7 @@ AisleMate など）、買い物をゲーム化したもの。「LINEで共有」
 ### いちばん簡単な方法
 
 Cloudflare のアカウント（[無料・カード不要](https://dash.cloudflare.com/sign-up)）だけ先に作っておけば、あとは1コマンドです。
+Windows / Mac / Linux のどれでも同じように動きます（Node で書いてあるので bash は不要）。
 
 ```bash
 npm install
