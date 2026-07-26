@@ -213,6 +213,14 @@ export class Scene3D {
     const t = this.getTime() || 0;
     // Frame delta (s), clamped so a backgrounded tab can't jump animations.
     const dt = Math.min(0.1, this._clock.getDelta());
+    // CAMERA FIRST. controls.update() re-derives the pose from its own spherical
+    // state, so the scripted track has to overwrite it — and everything below
+    // reads the resulting camera (the cutaway, the caption range gate, the LOD).
+    // Resolving it at the end left them all one frame stale, which is invisible
+    // during a slow orbit and very visible on a hard cut: a name plate sized in
+    // metres stayed on screen for the first frame of a close-up and filled it.
+    this.controls.update();
+    this._updateCameraTrack(t);   // scripted camera (only if meta.camera_track)
     this._updateIntro();          // gentle one-shot camera move (if active)
     this._updateCutaway();        // roof/near-wall cutaway follows the camera
     this._updateWorkers(t, dt);
@@ -229,13 +237,6 @@ export class Scene3D {
     this._updateHud(t);           // sync DOM productivity overlay (if present)
     this._monitorFps(dt);         // auto-degrade if frame time gets heavy
     this._tickShadows();          // refresh the shadow map on a cadence, not every frame
-    this.controls.update();
-    // AFTER controls.update(), never before: OrbitControls re-derives the camera
-    // orientation from its own spherical state around `target` every frame, so a
-    // scripted pose set earlier in the frame gets overwritten — and at shallow
-    // pitches its re-derivation lands 180° rolled, which silently turned every
-    // floor label upside down. The track owns the camera, so it goes last.
-    this._updateCameraTrack(t);   // scripted camera (only if meta.camera_track)
     this.renderer.render(this.scene, this.camera);
     this._raf = requestAnimationFrame(this._loop);
   }

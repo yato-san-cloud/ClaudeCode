@@ -8,8 +8,12 @@
 // the choreography and the camera are all AUTHORED, and forcing them through
 // the engine would mean inventing a capacity model just to get a picture.
 //
-// So this module adds one generic primitive — `replay.props[]` — and nothing
-// customer- or method-specific. A prop is a box/cylinder/plane with a position,
+// So this module adds ONE generic primitive — `replay.props[]` — for the things
+// a storyboard needs that the replay contract has no word for. Everything the
+// contract DOES have a word for stays in the contract: people are
+// `replay.workers[]` (the articulated pickers in agents.js), benches are
+// `replay.stations[]`, belts are `replay.conveyors[]`, containers are
+// `replay.totes[]`. Re-implementing any of those here would fork the renderer. A prop is a box/cylinder/plane with a position,
 // a colour, an optional keyframe track and an optional set of named STATES. The
 // state machine is the load-bearing part: "this container's lid is closed" is a
 // material swap on a keyframe, which is how a storyboard says something changed
@@ -157,8 +161,6 @@ export const propMethods = {
       geom = new THREE.PlaneGeometry(num(spec.w, 1), num(spec.d, 1));
     } else if (shape === 'label') {
       return this._buildFloorLabel(spec, group);
-    } else if (shape === 'figure') {
-      return this._buildFigure(spec, group);
     } else {
       return null;
     }
@@ -306,69 +308,6 @@ export const propMethods = {
     };
   },
 
-  // An abstract, faceless stand-in for a person. NOT the articulated picker in
-  // agents.js: that one has a head, hands and a walk cycle, and at a named post
-  // it reads as "here is a specific person, and here is how fast they work" —
-  // which is a claim a concept scene has no basis for and is usually barred from
-  // making. This is the architectural-entourage answer: a single silhouette with
-  // no face and no arms, in one flat neutral tone, so the eye reads "a post is
-  // staffed" and stops there. Motion is a slow turn at the post (see
-  // _updateProps), driven off the storyboard clock so a frame-stepped capture
-  // reproduces exactly.
-  _buildFigure(spec, group) {
-    const h = num(spec.h, 1.68);
-    const color = col(spec.color, 0x7d8895);
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      roughness: num(spec.roughness, 0.85),
-      metalness: 0,
-      transparent: num(spec.opacity, 1) < 1,
-      opacity: num(spec.opacity, 1),
-    });
-    // Proportions as fractions of height, so one number sizes the whole figure.
-    // They matter: a straight column with a small ball on top reads as a bollard,
-    // not a person. The silhouette needs shoulders wider than the hips and a head
-    // near real scale — that is the whole vocabulary an abstract figure has.
-    const legH = h * 0.47;
-    const torsoH = h * 0.33;
-    const headR = h * 0.072;
-    const parts = [
-      // Legs are ONE tapered column, not two: a pair of legs implies a stride,
-      // and a stride implies a pace.
-      [new THREE.CylinderGeometry(h * 0.105, h * 0.068, legH, 14), legH / 2],
-      // radiusTop > radiusBottom, so the wide end is the shoulders.
-      [new THREE.CylinderGeometry(h * 0.135, h * 0.098, torsoH, 14), legH + torsoH / 2],
-      [new THREE.SphereGeometry(headR, 16, 12), legH + torsoH + headR * 1.15],
-    ];
-    for (const [geom, y] of parts) {
-      const m = new THREE.Mesh(geom, mat);
-      m.position.y = y;
-      // Flatten front-to-back into an ellipse. A body of revolution looks like a
-      // turned post from every angle; a shoulder-wide, shallow section is what
-      // makes a featureless shape read as a person facing somewhere.
-      m.scale.z = num(spec.depthScale, 0.60);
-      m.castShadow = spec.cast !== false;
-      m.receiveShadow = false;
-      group.add(m);
-      this._geometries.push(geom);
-    }
-    this._materials.push(mat);
-    group.position.set(num(spec.x), num(spec.y), num(spec.z));
-    group.rotation.y = num(spec.ry);
-    return {
-      spec, group, mesh: group, mat, isFigure: true,
-      base: {
-        color: mat.color.clone(), opacity: mat.opacity,
-        wireframe: false, transparent: mat.transparent,
-      },
-      keys: Array.isArray(spec.keys) ? spec.keys : null,
-      states: spec.states && typeof spec.states === 'object' ? spec.states : null,
-      curState: undefined,
-      from: spec.from === undefined ? null : num(spec.from),
-      to: spec.to === undefined ? null : num(spec.to),
-    };
-  },
-
   // A camera-facing caption above a prop (station names, 停A/停B …).
   _attachBillboard(group, spec, h) {
     const text = String(spec.label || '');
@@ -441,17 +380,6 @@ export const propMethods = {
           p.group.position.set(s.x, s.y, s.z);
           if (s.state && p.states) this._applyPropState(p, s.state);
         }
-      }
-      // A figure standing perfectly still for 90 seconds reads as furniture. A
-      // slow turn at the post is enough to say the post is worked — and it is
-      // deliberately NOT a walk cycle or a task loop, which would put a pace on
-      // screen. Driven off the storyboard clock, so a frame-stepped capture is
-      // reproducible; the phase offset keeps a row of figures from turning in
-      // unison like a chorus line.
-      if (p.isFigure && p.spec.idle !== false) {
-        const amp = num(p.spec.idle, 0.16);
-        const ph = num(p.spec.phase, 0);
-        p.group.rotation.y = num(p.spec.ry) + Math.sin(t * 0.45 + ph) * amp;
       }
       // Floor text has a reading direction, and a storyboard visits the same
       // zone from both sides — the packing zone is shot from -z in the hand-off

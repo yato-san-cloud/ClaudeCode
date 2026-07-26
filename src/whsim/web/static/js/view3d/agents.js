@@ -65,6 +65,19 @@ const BELT_TOP_Y = 0.21;     // conveyor tread surface (scene.js: yMid .12 + h/2
 const STATION_TOP_Y = 0.885; // pack bench top (scene.js _buildStations)
 const TOTE_H = 0.26;         // A.gTote box height — the box rests ON the surface
 const CARRY_Y = 1.06;        // fallback hand height (no picker within reach)
+// A tote's keyframe state is "<place>" or "<place>:<mark>". `place` is the
+// existing vocabulary (carry / pack / belt) and decides WHERE the box sits;
+// `mark` is optional and decides how it LOOKS. They are genuinely independent:
+// a lidded container is still on the bench, then still on the belt, and the one
+// thing the audience has to see is the moment the lid goes on. Without the
+// split that moment can only be expressed by moving the box somewhere, which is
+// a lie about the process. No colon ⇒ exactly today's behaviour.
+const _kraft = new THREE.Color(CARTON_BASE);
+const TOTE_MARK_COLOR = {
+  sealed: 0x2e7d32,   // 蓋つき・封止済み
+  open:   0x9cc8ec,   // 蓋が開いている
+  hold:   0xb3261e,   // 保留・隔離
+};
 // A `carry` tote is handed to the nearest picker within this radius (the rig
 // already owns a tote/carton child, so drawing ours too would double-draw).
 const CARRY_SNAP_M = 1.8;
@@ -436,13 +449,6 @@ export const agentMethods = {
   _buildWorkers() {
     const workers = this.replay.workers || [];
     if (workers.length === 0) return;
-    // Concept scenes may be barred from depicting people at all — a proposal
-    // that shows recognisable figures at named stations invites the audience to
-    // read it as "here is how many of you there will be, and how fast you work",
-    // which is a claim the scene is not making. `meta.hide_workers` drops the
-    // figures without touching the replay, so the same document still animates
-    // its totes, belts and props.
-    if (this.replay.meta && this.replay.meta.hide_workers) return;
     const A = this._agentAssets();
 
     for (const wk of workers) {
@@ -1139,8 +1145,14 @@ export const agentMethods = {
     // Cardboard, not a neon marker: the kraft base is multiplied by the same
     // per-carton tone table the racks use, so a queue of boxes on a belt never
     // reads as one flat extruded strip.
+    // WHITE base, kraft folded into the per-instance colour. InstancedMesh
+    // multiplies instanceColor by material.color, so a kraft base silently
+    // tinted every per-instance colour — fine while they were all near-white
+    // carton tones, wrong the moment a tote carries a deliberate mark (a green
+    // "sealed" came out olive). Unmarked totes are byte-identical: the product
+    // CARTON_BASE × tone is now baked into the tone itself.
     const mat = new THREE.MeshStandardMaterial({
-      color: CARTON_BASE, roughness: 0.86, metalness: 0.03,
+      color: 0xffffff, roughness: 0.86, metalness: 0.03,
       emissive: new THREE.Color(0x3a2a18), emissiveIntensity: 0.14,
     });
     this._materials.push(mat);
@@ -1158,7 +1170,7 @@ export const agentMethods = {
     for (let i = 0; i < n; i++) {
       // Seed the colour buffer so `instanceColor` exists; _updateTotes rewrites
       // slot colours as boxes are compacted into different slots each frame.
-      col.setHex(CARTON_TONES[i % CARTON_TONES.length]);
+      col.setHex(CARTON_TONES[i % CARTON_TONES.length]).multiply(_kraft);
       inst.setColorAt(i, col);
       const src = totes[i] || {};
       const kfs = Array.isArray(src.keyframes) ? src.keyframes : [];
@@ -1167,8 +1179,9 @@ export const agentMethods = {
         keyframes: kfs,
         t0: kfs.length ? kfs[0][0] : 0,
         t1: kfs.length ? kfs[kfs.length - 1][0] : 0,
+        beltId: src.belt_id || '',
         seed: (i * 0.7548776662) % 1,
-        tone: new THREE.Color(CARTON_TONES[i % CARTON_TONES.length]),
+        tone: new THREE.Color(CARTON_TONES[i % CARTON_TONES.length]).multiply(_kraft),
         yaw: 0, on: false, idx: i,
       });
     }
@@ -1201,6 +1214,34 @@ export const agentMethods = {
     this.scene.add(shade);
     this._geometries.push(shade);
     this._toteShadow = shade;
+  },
+
+  // Tread height of the conveyor segment nearest (x, z), or the historical
+  // single-level constant when there is no belt (or none close enough).
+  // `beltId` restricts the search to one conveyor, which is how a box that
+  // spends part of its life OFF the belt (staged on a floor, waiting) still
+  // lands on the right deck once it is on: out of range of its own belt it
+  // falls back to the ground-level constant instead of snapping to whichever
+  // deck happens to be nearest.
+  _deckYAt(x, z, beltId) {
+    const decks = this._beltDecks;
+    if (!decks || decks.length === 0) return BELT_TOP_Y;
+    let bestY = BELT_TOP_Y;
+    let bestD = 2.5 * 2.5;             // a box more than 2.5 m off any belt is not on one
+    for (const d of decks) {
+      if (beltId && d.id !== beltId) continue;
+      // Squared distance from the point to the segment.
+      const vx = d.x1 - d.x0;
+      const vz = d.z1 - d.z0;
+      const len2 = vx * vx + vz * vz;
+      let f = len2 > 0 ? ((x - d.x0) * vx + (z - d.z0) * vz) / len2 : 0;
+      f = f < 0 ? 0 : (f > 1 ? 1 : f);
+      const dx = x - (d.x0 + vx * f);
+      const dz = z - (d.z0 + vz * f);
+      const dd = dx * dx + dz * dz;
+      if (dd < bestD) { bestD = dd; bestY = d.y; }
+    }
+    return bestY;
   },
 
   // Nearest picker to (x, z) within `maxD` metres, or null. Used to hand a
@@ -1270,7 +1311,13 @@ export const agentMethods = {
         // is exactly what maps local +X onto (vx, vz) — the SAME expression
         // scene.js uses to lay a belt segment down, so box and belt agree.
         if (vx * vx + vz * vz > 1e-9) r.yaw = -Math.atan2(vz, vx);
-        if (s.state === 'carry') {
+        // Split "<place>:<mark>" once; `place` drives geometry, `mark` colour.
+        const raw = typeof s.state === 'string' ? s.state : '';
+        const ci = raw.indexOf(':');
+        const place = ci < 0 ? raw : raw.slice(0, ci);
+        const mark = ci < 0 ? '' : raw.slice(ci + 1);
+        r.mark = TOTE_MARK_COLOR[mark];
+        if (place === 'carry') {
           const w = this._nearestWorker(px, pz, CARRY_SNAP_M);
           if (w) {
             if (w.tote) w.tote.visible = true;   // it's in HIS hands, not ours
@@ -1278,12 +1325,15 @@ export const agentMethods = {
           }
           surfaceY = 0;
           py = CARRY_Y;
-        } else if (s.state === 'pack') {
+        } else if (place === 'pack') {
           surfaceY = STATION_TOP_Y;
           py = STATION_TOP_Y + TOTE_H / 2;
         } else {                                  // 'belt' + any unknown state
-          surfaceY = BELT_TOP_Y;
-          py = BELT_TOP_Y + TOTE_H / 2;
+          // Ride the deck of the belt actually underfoot, not a global constant:
+          // with multi-level conveyors a fixed height puts the upper deck's
+          // boxes inside the lower deck.
+          surfaceY = this._deckYAt(px, pz, r.beltId);
+          py = surfaceY + TOTE_H / 2;
           if (motion) py += 0.014 * Math.sin(now * 7.5 + r.seed * TWO_PI);
         }
         if (t > r.t1) {
@@ -1299,7 +1349,13 @@ export const agentMethods = {
       sv.set(scale, scale, scale);
       m.compose(p, q, sv);
       inst.setMatrixAt(k, m);
-      inst.setColorAt(k, r.tone);       // slot ↔ box changes frame to frame
+      // A marked tote overrides its carton tone (see TOTE_MARK_COLOR).
+      if (r.mark !== undefined) {
+        if (!r._markC) r._markC = new THREE.Color();
+        inst.setColorAt(k, r._markC.setHex(r.mark));
+      } else {
+        inst.setColorAt(k, r.tone);     // slot ↔ box changes frame to frame
+      }
       r.on = true;
       if (shade) {
         const sk = 0.66 * scale;

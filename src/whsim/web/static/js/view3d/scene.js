@@ -859,8 +859,12 @@ export const sceneMethods = {
       const color = z.color ? new THREE.Color(z.color) : new THREE.Color(0xcccccc);
       // Lighter than before: the concrete + painted markings now carry the floor,
       // so the zone tint is a hint, not a paint bucket.
+      // 0.22 is a hint laid over photoreal concrete, which is right when the
+      // floor is doing its own storytelling. A zone whose colour IS the message
+      // ("位置＝状態") can ask for more; absent, nothing changes.
+      const zOpacity = Number.isFinite(Number(z.opacity)) ? Number(z.opacity) : 0.22;
       const mat = new THREE.MeshBasicMaterial({
-        color, transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+        color, transparent: zOpacity < 1, opacity: zOpacity, side: THREE.DoubleSide,
         depthWrite: false,
       });
       mat.userData.noEnv = true;
@@ -953,7 +957,13 @@ export const sceneMethods = {
     if (conveyors.length === 0) return;
     const BELT_W = 0.5;   // belt width (m)
     const BELT_H = 0.18;  // belt thickness (m)
-    const yMid = 0.12;    // raised slightly off the floor
+    const Y_DEFAULT = 0.12; // raised slightly off the floor
+    // Deck heights, so _updateTotes can put a box on the belt it is actually
+    // riding. A two-tier drive conveyor — outbound over, empties back under — is
+    // ordinary warehouse hardware, and until now every belt sat at one height,
+    // which meant a box on the upper deck floated through the lower one.
+    this._belts.length = 0;
+    this._beltDecks = [];
     // One shared scrolling belt-tread texture for every segment's TOP face. The
     // map.offset is advanced every frame (delta-based) in _updateBelts() so the
     // tread appears to flow toward the conveyor's downstream end — a cheap,
@@ -962,6 +972,11 @@ export const sceneMethods = {
     for (const c of conveyors) {
       const pts = c.points || [];
       const dir = (c.speed_mps || 0) < 0 ? -1 : 1; // flow direction along the chain
+      // `elevation_m` is the belt's TREAD height; absent ⇒ the historical 0.21.
+      const yMid = Number.isFinite(Number(c.elevation_m))
+        ? Math.max(0, Number(c.elevation_m)) - BELT_H / 2
+        : Y_DEFAULT;
+      const deckY = yMid + BELT_H / 2;
       for (let i = 0; i < pts.length - 1; i++) {
         const p0 = pts[i];
         const p1 = pts[i + 1];
@@ -1002,6 +1017,23 @@ export const sceneMethods = {
         // Speed: belt linear speed (m/s) scaled to texture repeats; sign = flow.
         const sp = Math.min(2.5, Math.abs(c.speed_mps || 0.6) || 0.6) * dir;
         this._belts.push({ mat: treadMat, speed: sp });
+        this._beltDecks.push({
+          id: c.id || '', y: deckY,
+          x0: p0[0] || 0, z0: p0[1] || 0, x1: p1[0] || 0, z1: p1[1] || 0,
+        });
+        // Legs, so an elevated deck is standing on something instead of hovering.
+        if (deckY > 0.4) {
+          const nLeg = Math.max(2, Math.round(len / 3));
+          for (let s2 = 0; s2 <= nLeg; s2++) {
+            const f = s2 / nLeg;
+            const lg = new THREE.CylinderGeometry(0.05, 0.05, yMid, 8);
+            const lm = new THREE.Mesh(lg, railMat);
+            lm.position.set((p0[0] || 0) + dx * f, yMid / 2, (p0[1] || 0) + dz * f);
+            lm.castShadow = true;
+            this.scene.add(lm);
+            this._geometries.push(lg);
+          }
+        }
       }
     }
   },

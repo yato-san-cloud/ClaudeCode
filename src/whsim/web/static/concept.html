@@ -104,19 +104,26 @@ fetch(src, { cache: 'no-store' })
     // the driver is Playwright, which evaluates in page scope.
     window.__scene = scene;
     window.__conceptDuration = duration;
-    window.__conceptSeek = (sec) => {
+    // `dt` is what the smoothed parts of the scene (vest colour, facing, gait)
+    // integrate. Sequential capture passes the real frame step so the walk cycle
+    // advances exactly as it would in playback; a one-shot probe that jumps to an
+    // arbitrary time passes a large dt so those smoothers snap to their target
+    // instead of rendering a pose still easing out of whatever came before.
+    window.__conceptSeek = (sec, dt) => {
       playing = false;
       t = Number(sec) || 0;
+      const step = Number.isFinite(Number(dt)) ? Number(dt) : 1.0;
       // One synchronous render at exactly this time, so the screenshot the
       // caller takes next cannot be a frame early or late.
+      // Same order as Scene3D._loop: resolve the camera first, because the props
+      // pass range-gates its captions against it. Updating props first meant a
+      // probe that jumps straight to a close-up still measured the PREVIOUS
+      // camera, and left a 2 m-wide name plate covering the shot.
+      scene.controls.update();
+      scene._updateCameraTrack(t);
       scene._updateProps(t);
       scene._updateTotes(t);
-      scene._updateWorkers(t, 0);
-      scene.controls.update();
-      // After controls.update(), matching the order in Scene3D._loop — the
-      // controls re-derive the camera pose every call and would otherwise
-      // overwrite the scripted one.
-      scene._updateCameraTrack(t);
+      scene._updateWorkers(t, step);
       scene.renderer.render(scene.scene, scene.camera);
       return t;
     };

@@ -172,10 +172,13 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   キーフレーム＋**名前付き状態**＝材質入替）と `meta` の `studio`/`bare`/`hide_workers`/
   `camera_track`/`title`/`watermark` のみ。**状態は補間しない**（蓋は開か閉）。
   顧客・方式固有のものはコードに足さず、そのシーンの JSON で props を組む。
-  人が要る場合は `shape:"figure"`＝**顔も腕も歩行サイクルも無い抽象シルエット**
-  （view3d の人型ピッカーは `hide_workers` で止めたまま）。「置かない/最小限の
-  抽象シルエット」という提示制約の後者を選べるようにするためで、肩幅＞腰・
-  前後を潰した断面・持ち場での緩やかな旋回だけ（歩行や作業ループはペースの主張になる）。
+  **props は最後の手段**。人=`workers`(人型ピッカー)、作業台=`stations`、
+  ベルト=`conveyors`、荷物=`totes`、床の塗り=`zones` は replay 契約に既にあり、
+  そちらで書く（props に作り直すと同じ倉庫を2回描くことになる）。この用途で
+  契約に足したのは3つだけ: `conveyors[].elevation_m`(2段駆動コンベア)、
+  `totes[].belt_id`(どの段に載るか)、`totes` の state `"<置き場>:<見た目>"`
+  (`pack:sealed` 等。蓋が閉まっても箱は台の上＝置き場と見た目は独立)、
+  `zones[].opacity`。
   ホストは SPA 外の単独ページ `concept.html?scene=<url>`（時計をページが持つので
   `__conceptSeek(t)` で決定論的コマ送り＝収録が再現可能）。シーン JSON は製品の
   static に置かない。`props` の無い replay は挙動不変（ARCHITECTURE 不変条件16）。
