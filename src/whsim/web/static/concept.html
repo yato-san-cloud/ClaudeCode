@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>whsim — 概念シーン</title>
+<!--
+  concept.html — a standalone host for an AUTHORED 3D scene.
+
+  Deliberately NOT part of the SPA. A concept scene is a storyboard played to a
+  room: it has no project, no run, no phases, and it must be recordable frame by
+  frame. Mounting it inside app.js would have meant threading a fake project
+  through the journey stepper and fighting the SPA's own clock for control of
+  playback. Here the page owns the clock outright, which is also what makes the
+  headless capture deterministic — see __conceptSeek below.
+
+  Scene data is loaded from ?scene=<url> (default ./scene.json) and is NEVER
+  bundled here: a scene is somebody's layout, so it lives with their project,
+  not in the product's static assets.
+-->
+<style>
+  html, body { margin:0; padding:0; background:#0f141d; overflow:hidden; }
+  /* The stage is a fixed 16:9 box scaled to fit the window, so what a recorder
+     captures at 1920x1080 is pixel-identical to what a presenter sees on any
+     screen. Letting the canvas track the viewport would silently re-frame every
+     shot in the storyboard when the window differs from the projector. */
+  #stage {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:1920px; height:1080px; transform-origin:center center;
+    background:#0f141d;
+  }
+  #stage canvas { display:block; }
+  #boot {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#8FA5C0; font:600 20px/1.6 "Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    text-align:center; white-space:pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="boot">シーンを読み込んでいます…</div></div>
+<!-- The vendored OrbitControls imports the bare specifier "three"; index.html
+     carries the same map. Without it the module graph fails to resolve and the
+     page sits on the boot message forever. -->
+<script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.js" } }
+</script>
+<script type="module">
+import { Scene3D } from './js/view3d.js';
+
+const stage = document.getElementById('stage');
+const boot = document.getElementById('boot');
+const params = new URLSearchParams(location.search);
+const src = params.get('scene') || './scene.json';
+
+// Fit the fixed 1920x1080 stage into the window without changing its geometry.
+function fit() {
+  const k = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+  stage.style.transform = `translate(-50%,-50%) scale(${k})`;
+}
+window.addEventListener('resize', fit);
+fit();
+
+// --- clock -----------------------------------------------------------------
+// Two mutually exclusive modes:
+//   play  — wall-clock playback, for a person watching in a browser.
+//   seek  — the page is a pure function of a time the caller sets, for capture.
+// Capture MUST NOT use wall-clock: a software rasteriser renders a heavy frame
+// in far more than 1/30 s, so a real-time recorder would drop most of the
+// storyboard and land the hero moment on whichever frame it happened to catch.
+let t = 0;
+let playing = !params.has('seek');
+let t0 = performance.now();
+const speed = Number(params.get('speed')) || 1;
+let duration = 90;
+
+function now() {
+  if (playing) {
+    t = ((performance.now() - t0) / 1000) * speed;
+    if (duration > 0 && t > duration) { t0 = performance.now(); t = 0; }
+  }
+  return t;
+}
+
+fetch(src, { cache: 'no-store' })
+  .then((r) => {
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  })
+  .then((replay) => {
+    boot.remove();
+    duration = Number((replay.meta || {}).duration_s) || 90;
+    const scene = new Scene3D(stage, replay, now);
+    // In seek mode, stop the scene's own animation loop. It renders on every
+    // rAF whether or not the time changed, so during a capture the software
+    // rasteriser is drawing the full frame continuously in the background while
+    // the driver is trying to screenshot — every captured frame gets rendered
+    // twice and the run takes hours. Cancelling the pending frame is enough:
+    // _loop only re-requests from inside itself.
+    if (!playing && scene._raf) {
+      cancelAnimationFrame(scene._raf);
+      scene._raf = null;
+    }
+    // Handles the capture harness drives. Kept on window (not exported) because
+    // the driver is Playwright, which evaluates in page scope.
+    window.__scene = scene;
+    window.__conceptDuration = duration;
+    window.__conceptSeek = (sec) => {
+      playing = false;
+      t = Number(sec) || 0;
+      // One synchronous render at exactly this time, so the screenshot the
+      // caller takes next cannot be a frame early or late.
+      scene._updateProps(t);
+      scene._updateCameraTrack(t);
+      scene._updateTotes(t);
+      scene._updateWorkers(t, 0);
+      scene.controls.update();
+      scene.renderer.render(scene.scene, scene.camera);
+      return t;
+    };
+    window.__conceptReady = true;
+  })
+  .catch((e) => {
+    boot.textContent = `シーンを読み込めませんでした\n${src}\n${e.message}`;
+    window.__conceptError = String(e.message || e);
+  });
+</script>
+</body>
+</html>

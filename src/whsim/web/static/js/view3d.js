@@ -23,6 +23,7 @@ import { geometryMethods } from './view3d/geometry.js';
 import { sceneMethods } from './view3d/scene.js';
 import { agentMethods } from './view3d/agents.js';
 import { overlayMethods } from './view3d/overlay.js';
+import { propMethods } from './view3d/props.js';
 
 export class Scene3D {
   constructor(container, replay, getTime) {
@@ -47,6 +48,8 @@ export class Scene3D {
     this._bottleneck = null;  // { group, beamMat, ringMat, label, ... } spotlight or null
     this._hud = null;         // DOM overlay { root, ... } or null
     this._info = null;        // controls-hint + legend DOM overlay or null
+    this._props = null;       // authored concept-scene props or null
+    this._concept = null;     // concept title/disclaimer DOM overlay or null
     this._intro = null;       // intro camera tween state or null
     this._preset = 'brand';
     this._belts = [];         // animated conveyor belt mats { mat, speed }
@@ -160,6 +163,7 @@ export class Scene3D {
     this._buildContactShadows(); // soft blob shadows under moving agents
     this._buildGlowHalos();      // additive cyan activity halos (pseudo-bloom)
     this._buildPickFx();         // pooled pick-event pulse markers + connectors
+    this._buildProps();          // authored concept-scene props (only if replay.props)
 
     // Reduced-motion users get a fully static scene (belts + glow pulse off).
     if (this._reducedMotion()) this._beltSpeed = 0;
@@ -167,14 +171,22 @@ export class Scene3D {
     // Apply the default art preset (mutates lights/renderer/scene only).
     this.setPreset(this._preset);
 
+    // `meta.bare` strips every explanatory overlay: the productivity HUD, the
+    // controls hint / legend, and the click tooltip. All three exist to explain
+    // a SIMULATION, and all three put measured numbers on the canvas — which is
+    // exactly what must not appear in a frame of a concept recording. Off by
+    // default, so the normal 3D view keeps all of it.
+    const bare = !!(meta.bare);
     // Live productivity HUD (DOM overlay) — only when replay.series exists.
-    this._buildHud();
+    if (!bare) this._buildHud();
     // Controls hint + scene legend (DOM overlay) — tells the salesperson what
     // they're looking at and how to move the camera. Pure DOM, no render change.
-    this._buildInfoOverlay();
+    if (!bare) this._buildInfoOverlay();
+    // Concept-scene title + persistent disclaimer (only if meta.title/watermark).
+    this._buildConceptOverlay();
     // Click-to-select interactivity: a floor ring marker + a live DOM tooltip,
     // driven by a raycaster on the canvas. Additive; cleaned up in dispose().
-    this._buildSelection();
+    if (!bare) this._buildSelection();
     // Gentle one-shot intro camera move (skipped under reduced-motion).
     this._startIntro();
 
@@ -212,6 +224,8 @@ export class Scene3D {
     this._updateContactShadows(); // keep blob shadows under moving agents
     this._updateGlowHalos();      // additive cyan activity halos (pseudo-bloom)
     this._updateBottleneck();     // pulse the bottleneck spotlight (if any)
+    this._updateProps(t);         // authored prop tracks + state swaps (concept scenes)
+    this._updateCameraTrack(t);   // scripted camera (only if meta.camera_track)
     this._updateSelection(t, dt); // track ring/tooltip under the selected agent
     this._updateHud(t);           // sync DOM productivity overlay (if present)
     this._monitorFps(dt);         // auto-degrade if frame time gets heavy
@@ -341,6 +355,12 @@ export class Scene3D {
       this._info.root.parentNode.removeChild(this._info.root);
     }
     this._info = null;
+    // Remove the concept-scene title/disclaimer overlay (pure DOM, no GPU).
+    if (this._concept && this._concept.parentNode) {
+      this._concept.parentNode.removeChild(this._concept);
+    }
+    this._concept = null;
+    this._props = null;
     // Tear down click-to-select: detach canvas listeners, drop the floor ring
     // from the scene (its geom/mat are tracked in _geometries/_materials and
     // freed below), and remove the DOM tooltip card. Then null the state.
@@ -434,4 +454,5 @@ Object.assign(
   sceneMethods,
   agentMethods,
   overlayMethods,
+  propMethods,
 );

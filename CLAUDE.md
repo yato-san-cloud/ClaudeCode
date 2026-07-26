@@ -166,6 +166,15 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - `cad.py` — tolerant DXF import (ezdxf) → bounds/walls/zones in meters (unit auto-detect).
 - `export_doc.py` — editable PPTX + PDF proposal (python-pptx / reportlab, CJK fonts).
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
+- `web/static/js/view3d/props.js` + `web/static/concept.html` — **概念シーン**（提案前に
+  「新しいやり方がどう動くか」だけを見せる台本）。DES を通さず replay を手書きし、
+  レンダラだけ再利用する。追加は汎用プリミティブ `replay.props[]`（箱/円柱/平面＋
+  キーフレーム＋**名前付き状態**＝材質入替）と `meta` の `studio`/`bare`/`hide_workers`/
+  `camera_track`/`title`/`watermark` のみ。**状態は補間しない**（蓋は開か閉）。
+  顧客・方式固有のものはコードに足さず、そのシーンの JSON で props を組む。
+  ホストは SPA 外の単独ページ `concept.html?scene=<url>`（時計をページが持つので
+  `__conceptSeek(t)` で決定論的コマ送り＝収録が再現可能）。シーン JSON は製品の
+  static に置かない。`props` の無い replay は挙動不変（ARCHITECTURE 不変条件16）。
 - `render/png2d.py` — proposal PNG (layout + congestion heatmap + verdict + provenance footer).
 - `render/anim2d.py` — server-side animated 2D replay GIF (no browser needed).
 - `web/` — FastAPI backend + single-page frontend (`static/`). `js/view3d.js` (three.js

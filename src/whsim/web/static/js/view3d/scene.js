@@ -750,6 +750,21 @@ export const sceneMethods = {
     const TILE = 6.0;   // metres per concrete-texture repeat (slab pour size)
 
     const geom = new THREE.BoxGeometry(width, 0.2, depth);
+    // A studio floor is a plain matte sweep. The photoreal concrete (slab joints,
+    // stains, tyre marks) is doing storytelling of its own, and under a concept
+    // scene's flat zone tints it just competes with them for the eye.
+    if (this.replay.meta && this.replay.meta.studio) {
+      const smat = new THREE.MeshStandardMaterial({
+        color: 0xd9dee4, roughness: 0.92, metalness: 0.0,
+      });
+      const smesh = new THREE.Mesh(geom, smat);
+      smesh.position.set(width / 2, -0.1, depth / 2);
+      smesh.receiveShadow = true;
+      this.scene.add(smesh);
+      this._track(geom, smat);
+      this._buildGrid();
+      return;
+    }
     const map = this._makeFloorTexture(TILE);
     const rough = this._makeFloorRoughness(TILE);
     const norm = this._makeFloorNormal(TILE);
@@ -806,6 +821,9 @@ export const sceneMethods = {
   },
 
   _buildGrid() {
+    // Studio scenes have no survey grid: it reads as a claim of measured
+    // dimensions, which is the one thing a 概念モデル must not imply.
+    if (this.replay.meta && this.replay.meta.studio) { this._gridMat = null; return; }
     const { width, depth } = this.bounds;
     const a = art(this._preset);
     const tone = FLOOR_TONES[this._preset] || FLOOR_TONES.brand;
@@ -1033,6 +1051,13 @@ export const sceneMethods = {
     this._roofParts = [];
     this._wallPanels = [];
     this._cutInside = null;
+    // `meta.studio` drops the building: no walls, roof, parapet, columns, high-bay
+    // fixtures or doors. A concept scene is a diagram that happens to be in 3D —
+    // the audience is reading the FLOW, and a real envelope adds a roofline, a
+    // cutaway that swings with the camera, and structural columns that land in
+    // the middle of the very aisle the storyboard is following. It also asserts a
+    // building shape the scene has no data for.
+    if (this.replay.meta && this.replay.meta.studio) return;
     this._buildWalls();
     this._buildRoof();
     this._buildParapet();
@@ -1942,6 +1967,19 @@ export const sceneMethods = {
     // Rack emissive glow: subtle by day, strong at night.
     for (const m of this._rackMaterials) {
       if (m) m.emissiveIntensity = p.rackEmissive;
+    }
+    // Studio scenes finish on a seamless light sweep. Every preset paints a dark
+    // background with a fog band tuned to dissolve the far wall of a BUILDING;
+    // with the shell removed that fog is the only thing in the upper half of a
+    // wide shot, and it reads as a black void the floor is floating in. This
+    // runs LAST so the preset's lights and materials are all still applied — only
+    // the sky, the fog and the apron change.
+    if (this.replay.meta && this.replay.meta.studio && this.scene) {
+      const bg = 0xeef2f6;
+      if (this.scene.background && this.scene.background.setHex) this.scene.background.setHex(bg);
+      else this.scene.background = new THREE.Color(bg);
+      this.scene.fog = null;
+      if (this._apronMat) this._apronMat.color.setHex(bg);
     }
   },
 

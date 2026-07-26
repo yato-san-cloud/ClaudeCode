@@ -436,6 +436,13 @@ export const agentMethods = {
   _buildWorkers() {
     const workers = this.replay.workers || [];
     if (workers.length === 0) return;
+    // Concept scenes may be barred from depicting people at all — a proposal
+    // that shows recognisable figures at named stations invites the audience to
+    // read it as "here is how many of you there will be, and how fast you work",
+    // which is a claim the scene is not making. `meta.hide_workers` drops the
+    // figures without touching the replay, so the same document still animates
+    // its totes, belts and props.
+    if (this.replay.meta && this.replay.meta.hide_workers) return;
     const A = this._agentAssets();
 
     for (const wk of workers) {
