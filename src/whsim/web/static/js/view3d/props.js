@@ -272,9 +272,15 @@ export const propMethods = {
     tex.anisotropy = this._maxAniso ? this._maxAniso() : 1;
     this._textures.push(tex);
     const geom = new THREE.PlaneGeometry(w, d);
+    // `overlay` lifts a plate out of the floor's depth ordering entirely. Most
+    // floor text IS a floor marking and should be hidden by whatever stands on
+    // it — but a closing disclaimer is a caption that happens to be laid flat,
+    // and a workbench cutting three characters out of it defeats the whole
+    // reason it is in the scene rather than in the deck.
     const mat = new THREE.MeshBasicMaterial({
       map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       opacity: num(spec.opacity, 1),
+      depthTest: !spec.overlay,
     });
     mat.userData.noEnv = true;
     const mesh = new THREE.Mesh(geom, mat);
@@ -282,7 +288,7 @@ export const propMethods = {
     // Zone tints live at y=0.008 and floor markings just under; sit above both.
     mesh.position.y = num(spec.y, 0.02);
     // Always painted after the tints (see _buildProp) so text never washes out.
-    mesh.renderOrder = num(spec.renderOrder, 3);
+    mesh.renderOrder = num(spec.renderOrder, spec.overlay ? 40 : 3);
     group.add(mesh);
     this._track(geom, mat);
     group.position.set(num(spec.x), 0, num(spec.z));
