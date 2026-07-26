@@ -139,6 +139,37 @@ async def api_import_rmpm(name: str, file: UploadFile):
             "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
 
 
+@router.post("/api/projects/{name}/import-locmaster")
+async def api_import_locmaster(name: str, file: UploadFile):
+    """Import a WMS ロケーションマスタ → locations pegged onto the drawn shelves.
+
+    This is the piece that turns an imported drawing from furniture into a
+    warehouse: the drawing knows where shelf `AAA-00-02` is, a shipment history
+    knows a line was picked from `AAA-00-02-3-01`, and until this ran nothing
+    knew those were the same place. Import the layout FIRST — locations can only
+    be placed on shelves that exist."""
+    from whsim import locmaster
+    proj = _open(name)
+    data = await _read_upload(file)
+    model = proj.load_model()
+    names = {str(s.name).strip() for z in model.layout.zones for s in z.shelves
+             if str(s.name).strip()}
+    if not names:
+        raise HTTPException(400, "先にレイアウト（MapMaker/CAD）を取り込んでください。"
+                                 "ロケーションは図面の棚にしか置けません。")
+    try:
+        res = locmaster.import_locmaster_bytes(data, file.filename or "loc.csv",
+                                               shelf_names=names)
+    except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad export
+        raise HTTPException(400, f"ロケーションマスタを解析できませんでした: {e}")
+    applied = locmaster.apply_to_model(model, res["locations"])
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("locations", Source.IMPORTED)
+    proj.save_provenance(prov)
+    return {**applied, "warnings": res["warnings"], "stats": res["stats"]}
+
+
 # 在庫(master) maps the inventory schema; 商品マスタ(items) maps the item-master
 # schema (SKU/商品名/入数(CS入数)/ABC) — the only source of 入数, which the 荷姿・
 # 保管設備 chain needs. Both build model.items, but from different key fields.

@@ -22,6 +22,15 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - `templates.py` — a template is a fully filled-in (provisional) `model.json`.
 - `importer.py` — tolerant ZIP→subtree merge; broken/non-JSON files are skipped,
   never fatal; partial import is fine.
+- `locmaster.py` — **WMS ロケーションマスタ取込**（エリア/列/棚/段/間口・X_mm/Y_mm・
+  什器種別）。図面の棚に実ロケを載せる、取込チェーンの最後の一本。これが無い間、
+  レイアウトを取り込んでも中身は空の家具だった（図面は `AAA-00-02` の位置を知り、
+  出荷履歴は `AAA-00-02-3-01` から採ったことを知り、**同じ場所だと知る者が居なかった**）。
+  肝は2つ: (1) マスタはゼロ詰め・履歴は非ゼロ詰めなので**そのまま突合すると一致0件**
+  → 各部を2桁に正規化する。(2) 図面の粒度は **エリア-列-棚**（MapMaker の棚名）なので
+  そこで結合する（間口粒度だと0%、棚粒度で実案件54%が解決）。座標は**図面の棚**から
+  採る（マスタのX/Yを使うと3Dで在庫が棚の脇に浮く）。図面に無い棚は置かない・
+  黙って消さず `in_layout:false` で残す。POST `/api/projects/{n}/import-locmaster`。
 - `mapcsv.py` / `rmpm.py` — tolerant MapMaker importers (Hitachi WorldMap Map CSV /
   `.rmpm.json` export / **NATIVE `.rmpm`** = Java serialization, parsed via
   javaobj-py3 and validated byte-equal against the JSON-export oracle); shelves
