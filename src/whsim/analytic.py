@@ -55,6 +55,17 @@ from whsim.workmethod import orders_per_trip
 # halved the handling term of every profile-driven estimate.
 _PROFILE_UNITS_PER_LINE = 2.0
 
+# Stage label -> Japanese, for the stages this closed form actually prices. Keys
+# are a SUBSET of ``kpis``' own bottleneck vocabulary on purpose: the two dicts
+# share the ``bottleneck`` key, so they must not disagree about what a value
+# means. (kpis additionally reports sort / sorter / replenish / conveyor, which
+# only a run can measure.)
+_BOTTLENECK_JP = {"picking": "ピッキング", "packing": "梱包", "agv": "AGV搬送"}
+
+# How far a downstream stage must exceed picking before it is named the
+# bottleneck (see ``estimate``).
+_BOTTLENECK_MARGIN = 0.05
+
 
 def _erlang_c(c: int, a: float) -> float:
     """Probability an arrival waits (Erlang C), offered load a = lambda/mu.
@@ -429,9 +440,33 @@ def estimate(model: WarehouseModel) -> dict:
     pw = _erlang_c(c, a)
     wq = pw / (c * mu - lam) if (c * mu - lam) > 0 else float("inf")
 
-    # The binding stage: in GTP the AGV fleet is usually it -- the picker is idle
-    # by design, so reporting only the picker calls a saturated fleet 対応可能.
-    binding = max(rho, agv_util or 0.0)
+    # Pack stations are a capacitated stage of their own: the picker seizes one
+    # even when it packs inline (``world.packers.request()``), and a decoupled
+    # design hands the work to dedicated packers. Reporting only the picker would
+    # call a design with too few benches 対応可能.
+    # Packing sits DOWNSTREAM of picking, so like the GTP picker it cannot be
+    # offered work faster than the stage ahead releases it. Charging it full
+    # demand read a saturated thirdparty_3pl's benches at 100% against a measured
+    # 68% -- the pickers simply never hand over that much.
+    n_stations = (model.resources.stations[0].count if model.resources.stations else 1) or 1
+    pack_time = max(model.process.pack_time_s, 0.0)
+    pack_lam = min(lam, c * mu)
+    pack_util = min(pack_lam * pack_time / n_stations, 1.0) if pack_time > 0 else 0.0
+
+    # The binding stage, in the SAME vocabulary ``kpis.compute`` uses -- the two
+    # dicts share these key names, so a consumer must not have to know which one
+    # it is holding.
+    stages = {"picking": rho, "packing": pack_util}
+    if agv_util is not None:
+        stages["agv"] = agv_util
+    bottleneck = max(stages, key=stages.get)
+    # A downstream stage must CLEARLY beat picking to be named the constraint.
+    # Picking is the stage this closed form models in detail, so a hair's-breadth
+    # lead elsewhere is a co-bottleneck, not a finding -- and naming the wrong one
+    # sends the proposal after the wrong fix.
+    if bottleneck != "picking" and stages[bottleneck] - rho < _BOTTLENECK_MARGIN:
+        bottleneck = "picking"
+    binding = stages[bottleneck]
 
     return {
         "method": "analytic_mmc",
@@ -444,8 +479,10 @@ def estimate(model: WarehouseModel) -> dict:
         # ADDITIVE: None outside GTP, so nothing downstream changes for a manual
         # model. In GTP these are what the proposal actually turns on.
         "agv_utilization": agv_util,
+        "packer_utilization": pack_util,
         "bottleneck_utilization": min(binding, 1.0),
-        "bottleneck": ("agv" if (agv_util or 0.0) > rho else "picker"),
+        "bottleneck": bottleneck,
+        "bottleneck_jp": _BOTTLENECK_JP[bottleneck],
         "capacity_orders_per_hr": c * mu * 3600.0,
         "offered_orders_per_hr": rate_per_hr,
         "pick_wait_mean_s": wq if math.isfinite(wq) else None,

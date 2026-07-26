@@ -146,6 +146,13 @@ def test_analytic_converges_with_the_des_on_every_template(template_id):
                                                     rel=0.20, abs=1.0)
     # ...and the two must tell the same story about coping with demand.
     assert est["overloaded"] == (sim["bottleneck_utilization"] > 0.97)
+    # ...including WHICH stage is the constraint, in the same vocabulary. A
+    # proposal that names the wrong stage sends the customer after the wrong fix.
+    assert est["bottleneck"] == sim["bottleneck"]
+    assert est["bottleneck_utilization"] == pytest.approx(
+        sim["bottleneck_utilization"], abs=MAX_UTIL_RESIDUAL)
+    assert est["packer_utilization"] == pytest.approx(
+        sim["packer_utilization"], abs=0.10)
 
 
 def test_analytic_agreement_holds_across_the_catalogue():
@@ -179,11 +186,35 @@ def test_gtp_prices_the_agv_fleet_not_the_picker_s_feet():
     assert est["bottleneck_utilization"] > est["picker_utilization"]
 
 
+def test_bottleneck_vocabulary_matches_the_kpi_layer():
+    """``estimate`` and ``kpis.compute`` share the ``bottleneck`` key name, so a
+    consumer must not have to know which dict it is holding."""
+    from whsim import kpis as _k
+    est = analytic.estimate(templates.load_template_model("ecommerce_small"))
+    assert est["bottleneck"] in ("picking", "packing", "agv")
+    assert est["bottleneck_jp"] == analytic._BOTTLENECK_JP[est["bottleneck"]]
+    # every label the closed form can emit is one the KPI layer also knows
+    src = _k.__file__
+    with open(src, encoding="utf-8") as fh:
+        text = fh.read()
+    for label, jp in analytic._BOTTLENECK_JP.items():
+        assert f'"{label}": "{jp}"' in text, f"{label} disagrees with kpis' table"
+
+
+def test_a_downstream_stage_needs_a_clear_lead_to_be_named():
+    """A hair's-breadth lead is a co-bottleneck, not a finding."""
+    m = templates.load_template_model("pick_to_belt")
+    est = analytic.estimate(m)
+    # packing runs neck and neck with picking here; picking must keep the label
+    assert abs(est["packer_utilization"] - est["picker_utilization"]) < 0.05
+    assert est["bottleneck"] == "picking"
+
+
 def test_agv_fields_are_absent_for_a_manual_model():
     """ADDITIVE: a manual model must be untouched by the GTP branch."""
     est = analytic.estimate(templates.load_template_model("ecommerce_small"))
     assert est["agv_utilization"] is None
-    assert est["bottleneck"] == "picker"
+    assert est["bottleneck"] == "picking"
     assert est["bottleneck_utilization"] == est["picker_utilization"]
 
 
