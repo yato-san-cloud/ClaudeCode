@@ -1180,6 +1180,10 @@ export const agentMethods = {
         t0: kfs.length ? kfs[0][0] : 0,
         t1: kfs.length ? kfs[kfs.length - 1][0] : 0,
         beltId: src.belt_id || '',
+        // 段積み: 0=デッキ直置き、1=その上。コンベアの上で容器を2段に積むのは
+        // 普通の運用（同じ搬送で倍運ぶ）で、載る高さは容器1個ぶん上がるだけ。
+        // 位置(x,z)は下の段と同じなので、キーフレームを2本書けば段積みになる。
+        stack: Math.max(0, Math.round(Number(src.stack) || 0)),
         seed: (i * 0.7548776662) % 1,
         tone: new THREE.Color(CARTON_TONES[i % CARTON_TONES.length]).multiply(_kraft),
         yaw: 0, on: false, idx: i,
@@ -1327,13 +1331,13 @@ export const agentMethods = {
           py = CARRY_Y;
         } else if (place === 'pack') {
           surfaceY = STATION_TOP_Y;
-          py = STATION_TOP_Y + TOTE_H / 2;
+          py = STATION_TOP_Y + TOTE_H / 2 + r.stack * TOTE_H;
         } else {                                  // 'belt' + any unknown state
           // Ride the deck of the belt actually underfoot, not a global constant:
           // with multi-level conveyors a fixed height puts the upper deck's
           // boxes inside the lower deck.
           surfaceY = this._deckYAt(px, pz, r.beltId);
-          py = surfaceY + TOTE_H / 2;
+          py = surfaceY + TOTE_H / 2 + r.stack * TOTE_H;
           if (motion) py += 0.014 * Math.sin(now * 7.5 + r.seed * TWO_PI);
         }
         if (t > r.t1) {

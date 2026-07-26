@@ -95,7 +95,7 @@
 - `totes[]`：`{id, keyframes:[[t,x,y,state]…]}`＝**荷物そのものの軌跡**。`state ∈ {"carry"(ピッカーの手元)|"belt"(コンベア搬送中)|"pack"(荷降ろし・梱包)}`、丸めは `workers[].keyframes` と同一。コンベア搬送のみ生成（無ければ `[]`）、リプレイ窓内かつ最大 `MAX_TOTE_TRACKS=400` 本。曲がったコンベアは折れ点も keyframe に出るので、線形補間でベルトの経路をなぞれる。
 - `navnet`：`{waypoints:[[x,y]…], edges:[[i,j]…]}`（形は固定、点だけ改善）。
 - `props[]`（**概念シーン専用・任意**）：`{shape:"box"|"cyl"|"plane"|"label", x,y,z, w,h,d|r, ry, color, opacity, wireframe, parent, from,to, label, states:{name:{color,opacity,wireframe,emissive}}, state, keys:[[t,x,y,z,state]…]}`。`y` は**箱/円柱の底面**（床置きが `y:0`）。位置は補間、**`state` は補間しない**。`meta.camera_track:[{t,pos,look,cut}]` で台本カメラ、`meta.studio`/`bare`/`hide_workers`/`title`/`watermark` で概念モード。`render/replay.py` はこれを出さない — 手書きの台本 JSON だけが持つ（不変条件16）。
-- `conveyors[].elevation_m`（任意）：ベルトのトレッド高さ。既定は従来どおり 0.21。**2段駆動コンベア**（上段＝出、下段＝空容器の戻り）は実在のハードで、これが無いと上段の箱が下段を突き抜ける。`totes[].belt_id` を書くと、その箱は**そのベルトのデッキ**に載る（ベルトから離れている間は接地高さに戻る）。同じ平面位置に2段あるので、幾何だけでは段を選べない。
+- `conveyors[].elevation_m`（任意）：ベルトのトレッド高さ。既定は従来どおり 0.21。**2段駆動コンベア**（上段＝出、下段＝空容器の戻り）は実在のハードで、これが無いと上段の箱が下段を突き抜ける。`totes[].belt_id` を書くと、その箱は**そのベルトのデッキ**に載る（ベルトから離れている間は接地高さに戻る）。同じ平面位置に2段あるので、幾何だけでは段を選べない。`totes[].stack`（既定0）は容器の**段積み**: 同じ (x,z) を通る2本を stack 0/1 で書けばコンベア上で2段に積まれる（同じ搬送で倍運ぶのは普通の運用）。
 - `totes[].keyframes` の state は `"<置き場>"` または `"<置き場>:<見た目>"`。置き場は既存語彙（`carry`/`pack`/`belt`）で**どこに在るか**、見た目（`sealed`/`open`/`hold`）は**どう見えるか**。両者は独立で、蓋が閉まっても箱は台の上のままである必要がある（動かして表現すると工程について嘘をつくことになる）。コロン無し＝従来の挙動。
 - `zones[].opacity`（任意）：既定 0.22 は写実コンクリートの上の「ヒント」。床の色そのものが主張（位置＝状態）の場合だけ濃くする。
 - 追加フィールドは additive＋guard（無→legacy描画）。

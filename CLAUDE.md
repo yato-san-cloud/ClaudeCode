@@ -185,7 +185,8 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   ベルト=`conveyors`、荷物=`totes`、床の塗り=`zones` は replay 契約に既にあり、
   そちらで書く（props に作り直すと同じ倉庫を2回描くことになる）。この用途で
   契約に足したのは3つだけ: `conveyors[].elevation_m`(2段駆動コンベア)、
-  `totes[].belt_id`(どの段に載るか)、`totes` の state `"<置き場>:<見た目>"`
+  `totes[].belt_id`(どの段に載るか)、`totes[].stack`(容器の段積み)、
+  `totes` の state `"<置き場>:<見た目>"`
   (`pack:sealed` 等。蓋が閉まっても箱は台の上＝置き場と見た目は独立)、
   `zones[].opacity`。
   ホストは SPA 外の単独ページ `concept.html?scene=<url>`（時計をページが持つので
