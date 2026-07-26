@@ -139,17 +139,28 @@ def aisle_detour(model, depot: tuple[float, float]) -> dict | None:
     blk = aisle_block(model)
     if blk is None:
         return None
-    ell = blk["run_len_m"]
-    span = max(blk["span1"] - blk["span0"], 1e-6)
-    q = float(depot[1] if blk["axis"] == "y" else depot[0])
-    # How far into the run band the depot sits, rescaled onto one run's length
-    # (identical for the usual single-band layout, sane for staggered bands).
-    d = min(max(q - blk["span0"], 0.0), span) * (ell / span)
     return {
         **blk,
-        "depot_extra_m": 2.0 * d * (ell - d) / ell,
-        "hop_extra_m": ell / 3.0,
+        "depot_extra_m": aisle_escape_m(blk, depot),
+        "hop_extra_m": blk["run_len_m"] / 3.0,
     }
+
+
+def aisle_escape_m(blk: dict, point: tuple[float, float]) -> float:
+    """``depot_extra_m`` for ONE point against an already-computed block.
+
+    Split out of :func:`aisle_detour` so a caller with many points — the
+    conveyor model prices the escape at every boarding point along a belt — can
+    evaluate the same closed form without rebuilding the rack block each time.
+    Pure arithmetic, so it stays cheap in a loop.
+    """
+    ell = blk["run_len_m"]
+    span = max(blk["span1"] - blk["span0"], 1e-6)
+    q = float(point[1] if blk["axis"] == "y" else point[0])
+    # How far into the run band the point sits, rescaled onto one run's length
+    # (identical for the usual single-band layout, sane for staggered bands).
+    d = min(max(q - blk["span0"], 0.0), span) * (ell / span)
+    return 2.0 * d * (ell - d) / ell
 
 
 def rack_facings(model) -> list[str | None]:

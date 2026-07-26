@@ -683,13 +683,19 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
 
     while True:
         first = yield source.get()
+        # The picker is OCCUPIED from the moment it claims an order, not from the
+        # moment it starts walking. A wave/種まき release then holds it at the gate
+        # while its bucket fills (``_pull_batch``) -- it is committed and can do
+        # nothing else, so that hold is trip time. Excluding it read a saturated
+        # thirdparty_3pl (8036 orders in, 3282 out) as a comfortable 86% picker.
+        # Continuous release waits not at all here, so this is a no-op for it.
+        busy_start = env.now
         batch = yield from _pull_batch(world, source, first)
         orders = [b["order"] for b in batch]
         arrivals = [b["arrival"] for b in batch]
         world.log(t=env.now, event="pick_start", order_id=orders[0].order_id,
                   wait=env.now - arrivals[0], resource="picker", worker=w.id,
                   n_orders=len(orders))
-        busy_start = env.now
 
         # D axis: 種まき(sort) sweeps SKU TOTALS across the batch (each SKU
         # visited once); 摘み取り(pick) sweeps every order line as-is.

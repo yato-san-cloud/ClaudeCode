@@ -44,7 +44,7 @@ import math
 import statistics
 
 from whsim.engine.routing import manhattan
-from whsim.rackgeom import aisle_detour
+from whsim.rackgeom import aisle_block, aisle_detour, aisle_escape_m
 from whsim.schema.model import WarehouseModel
 from whsim.workmethod import orders_per_trip
 
@@ -76,11 +76,113 @@ def _erlang_c(c: int, a: float) -> float:
     return b / (1.0 - (a / c) * (1.0 - b))
 
 
+def _mean_abs_diff(xs, ys) -> float:
+    """``E|X - Y|`` over two empirical samples, in O(n log n).
+
+    Manhattan distance is separable, so the expected distance between a random
+    boarding point and a random slot is this on x plus this on y. Doing it with a
+    double loop would be O(n²) -- 360k distance calls on ``retail_dc`` -- which
+    would cost this module the 爆速 budget it exists for.
+    """
+    if not xs or not ys:
+        return 0.0
+    ys = sorted(ys)
+    m = len(ys)
+    pref = [0.0] * (m + 1)
+    for i, y in enumerate(ys):
+        pref[i + 1] = pref[i] + y
+    total = pref[m]
+    acc = 0.0
+    for x in xs:
+        lo, hi = 0, m
+        while lo < hi:                     # bisect: #{y <= x}
+            mid = (lo + hi) // 2
+            if ys[mid] <= x:
+                lo = mid + 1
+            else:
+                hi = mid
+        acc += x * lo - pref[lo] + (total - pref[lo]) - x * (m - lo)
+    return acc / (len(xs) * m)
+
+
+def _nearest_on_polyline(p, pts):
+    """(nearest point, Manhattan distance) from ``p`` to a polyline.
+
+    Mirrors ``engine.build.ConveyorLine.project`` + the Manhattan metric
+    ``processes._board_conveyor`` compares lines by, without importing the engine
+    (this module must stay sim-free and 爆速).
+    """
+    best = None
+    for a, b in zip(pts, pts[1:]):
+        vx, vy = b[0] - a[0], b[1] - a[1]
+        span = vx * vx + vy * vy
+        if span <= 1e-12:
+            q = (a[0], a[1])
+        else:
+            t = ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / span
+            t = min(1.0, max(0.0, t))
+            q = (a[0] + vx * t, a[1] + vy * t)
+        d = manhattan(p, q)
+        if best is None or d < best[1]:
+            best = (q, d)
+    return best
+
+
+def _belt_access(model: WarehouseModel):
+    """``(back_leg, board_point, out_leg)`` for a model with a conveyor.
+
+    With a conveyor the picker does NOT return to the packing station: it walks
+    to the nearest point on a belt's path, hands the totes over and is free
+    (``processes._board_conveyor``). Its NEXT trip then starts from there. So the
+    two legs are different distances:
+
+    * ``back_leg``  — mean slot→nearest-belt distance (a short sideways step).
+    * ``out_leg``   — mean belt→slot distance, i.e. how far the picker walks from
+      last trip's hand-off point to this trip's first pick.
+
+    Charging the depot leg for both overstated ``pick_to_belt``'s walking by 16%;
+    charging the short leg for both understated it by 32%.
+
+    ``None`` when no usable conveyor is drawn, which keeps every conveyor-less
+    model on exactly the historical depot-leg arithmetic.
+    """
+    lines = [cv.points for cv in model.resources.conveyors
+             if cv.points and len(cv.points) >= 2]
+    if not lines or not model.locations:
+        return None
+    # A belt often runs PAST the rack band as well as along its end, so the
+    # Manhattan-nearest boarding point can sit beside the middle of a run. The
+    # picker cannot cut across to it -- it must escape its aisle first, exactly
+    # as it does reaching a depot. Pricing the belt leg as plain Manhattan read
+    # pick_to_belt's carry 25% short (18.4 m against a measured 24.5 m).
+    blk = aisle_block(model)
+    total = 0.0
+    boards = []
+    for loc in model.locations:
+        p = (loc.x, loc.y)
+        near = min((_nearest_on_polyline(p, pts) for pts in lines), key=lambda r: r[1])
+        total += near[1] + (aisle_escape_m(blk, near[0]) if blk else 0.0)
+        boards.append(near[0])
+    n = len(model.locations)
+    board = (statistics.fmean(b[0] for b in boards),
+             statistics.fmean(b[1] for b in boards))
+    # E[dist(boarding point of a random slot, another random slot)] -- the mean
+    # boarding point would NOT do here: E|mean(A) - B| < E|A - B| (Jensen), which
+    # is exactly how the first cut of this came out 18% short.
+    out_d = (_mean_abs_diff([b[0] for b in boards], [loc.x for loc in model.locations])
+             + _mean_abs_diff([b[1] for b in boards], [loc.y for loc in model.locations]))
+    if blk:                              # same escape on the way back out
+        out_d += statistics.fmean(aisle_escape_m(blk, b) for b in boards)
+    return total / n, board, out_d
+
+
 def _trip_travel_m(
     depot_leg: float,
     hop: float,
     n_picks: float,
     det: dict | None,
+    back_leg: float | None = None,
+    aisle_extra: float | None = None,
 ) -> float:
     """Metres walked on ONE picking trip that visits ``n_picks`` slots.
 
@@ -88,12 +190,22 @@ def _trip_travel_m(
     aisle-network detour charged only on the hops that actually change aisle
     (a nearest-neighbour tour sweeps one aisle before moving to the next, so a
     trip with many picks per aisle detours far less per pick than a short one).
+
+    ``back_leg`` defaults to ``depot_leg`` (the symmetric round trip). A conveyor
+    makes the two legs differ: the picker walks OUT from wherever it last dropped
+    off, but only sideways to the nearest belt on the way BACK.
+
+    ``aisle_extra`` overrides the per-aisle-change detour. It defaults to the
+    nearest-neighbour figure (``hop_extra_m`` = l/3, entering and leaving an
+    aisle at a random depth); a SERPENTINE sweep instead runs each aisle it
+    enters end to end, which costs the full run length.
     """
     hops = max(n_picks - 1.0, 0.0)
-    travel = 2.0 * depot_leg + hops * hop
+    travel = depot_leg + (depot_leg if back_leg is None else back_leg) + hops * hop
     if det is not None:
         aisle_changes = min(hops, max(det["n_aisles"] - 1.0, 0.0))
-        travel += aisle_changes * det["hop_extra_m"]
+        travel += aisle_changes * (det["hop_extra_m"] if aisle_extra is None
+                                   else aisle_extra)
     return travel
 
 
@@ -124,16 +236,40 @@ def _batch_per_trip(
     """How many orders one picking trip really sweeps (1 .. ``b_cap``).
 
     ``b_cap`` is only the engine's CAP; a picker can sweep no more orders than
-    are actually waiting when it pulls. Those are the orders standing in the
-    queue (M/M/c's ``Lq``) plus the ones that land during the release window,
-    which is exactly what ``processes._pull_batch`` scoops up::
+    are actually STANDING IN THE STORE the instant it pulls
+    (``processes._pull_batch``). Two mechanisms put them there, and the trip
+    takes whichever leaves more — they draw on the SAME store, so they are a
+    max, never a sum.
 
-        B = 1 + min(b_cap - 1, lam·W + Lq(B))
+    **Standing queue.** Not the time-average ``Lq``. A picker that had to wait
+    for its first order found the store EMPTY — that is what waiting means — so
+    it sweeps exactly one. Only a picker that found work already waiting gets a
+    fuller trip, and even then only what is there::
 
-    Lq falls as B rises (a bigger sweep is cheaper per order, so the queue
-    drains), which makes the right-hand side strictly DECREASING in B — the
-    fixed point is therefore unique and bisection finds it in a fixed number of
-    cheap steps. (Plain iteration would oscillate between the extremes.)
+        extra = C(c,a) · E[min(depth - 1, b_cap - 1)]
+              = C(c,a) · rho·(1 - rho^(b_cap-1)) / (1 - rho)
+
+    with ``C`` the Erlang-C probability of finding every picker busy and the
+    store depth geometric in ``rho``. Charging ``Lq`` instead predicted trips of
+    2.5–4.6 orders where the engine measures 1.3–1.9; since the headline metric
+    is ``trip_metres / B``, that inflated batch is exactly why the oracle
+    under-read walking by 10–25% on every batching template.
+
+    **Release window** (wave / 種まき). Over one picker's window the store gains
+    ``lam·W`` arrivals but LOSES the first order of every trip that starts in the
+    meantime (rate ``lam/B``), because every other picker is sitting in an
+    overlapping window competing for the same arrivals. The scoop is therefore
+    self-limiting::
+
+        B - 1 = lam·W·(B - 1)/B    =>    B = lam·W
+
+    Charging the full ``lam·W`` to each picker independently read ``retail_dc``
+    at 4.4 orders/trip against a measured 1.9.
+
+    ``extra`` falls as B rises (a bigger sweep is cheaper per order, so the queue
+    drains), which makes the queue branch strictly DECREASING in B — its fixed
+    point is therefore unique and bisection finds it in a fixed number of cheap
+    steps. (Plain iteration would oscillate between the extremes.)
 
     Degenerates cleanly: ``b_cap == 1`` or no demand ⇒ exactly 1, i.e. the
     single-order round trip this oracle has always priced.
@@ -141,6 +277,7 @@ def _batch_per_trip(
     if b_cap <= 1.0 or lam <= 0:
         return 1.0
     window = _release_window_s(model, b_cap)
+    b_window = min(b_cap, lam * window) if window > 0.0 else 0.0
 
     def fill(b: float) -> float:
         a = lam * (trip_time_s(b) / b)               # offered load, orders
@@ -148,21 +285,24 @@ def _batch_per_trip(
         if rho >= 1.0:
             queued = b_cap                           # saturated: sweep the cap
         else:
-            queued = _erlang_c(c, a) * rho / (1.0 - rho)
-        return 1.0 + min(b_cap - 1.0, lam * window + queued)
+            k = b_cap - 1.0                          # room left after the first
+            queued = (_erlang_c(c, a) * rho * (1.0 - rho ** k) / (1.0 - rho))
+        return 1.0 + min(b_cap - 1.0, queued)
 
     if fill(1.0) <= 1.0:
-        return 1.0
-    if fill(b_cap) >= b_cap:
-        return b_cap
-    lo, hi = 1.0, b_cap
-    for _ in range(40):                              # ~1e-12 relative precision
-        mid = (lo + hi) / 2.0
-        if fill(mid) > mid:
-            lo = mid
-        else:
-            hi = mid
-    return (lo + hi) / 2.0
+        b_queue = 1.0
+    elif fill(b_cap) >= b_cap:
+        b_queue = b_cap
+    else:
+        lo, hi = 1.0, b_cap
+        for _ in range(40):                          # ~1e-12 relative precision
+            mid = (lo + hi) / 2.0
+            if fill(mid) > mid:
+                lo = mid
+            else:
+                hi = mid
+        b_queue = (lo + hi) / 2.0
+    return min(b_cap, max(1.0, b_queue, b_window))
 
 
 def estimate(model: WarehouseModel) -> dict:
@@ -200,31 +340,87 @@ def estimate(model: WarehouseModel) -> dict:
     depot_leg = avg_depot_dist + (det["depot_extra_m"] if det else 0.0)
     hop = avg_depot_dist * 0.3           # crude inter-pick hop, as before
 
+    # A conveyor makes the trip's two legs ASYMMETRIC. The picker starts where it
+    # last handed off (a point ON the belt) and walks out to the first pick, but
+    # comes back only as far as the nearest belt beside its last pick.
+    back_leg = None
+    belt = _belt_access(model)
+    if belt is not None:
+        # Both legs already carry their own aisle-escape detour, priced at each
+        # boarding point (see _belt_access) rather than at one depot.
+        back_leg, _board, depot_leg = belt
+
+    # GTP (AGV) mode: the AGV brings the totes to the picker, so the picker walks
+    # NOTHING and is occupied only by handling + packing (engine.processes'
+    # ``agv_mode`` branch). Charging it a picker's walk claimed 100% utilisation
+    # where the engine measures 19%. The engine falls back to manual when no AGV
+    # is actually placed (build.py), so mirror that condition exactly.
+    n_agvs = sum(e.count for e in model.resources.equipment if e.type == "agv")
+    gtp = model.process.pick_method() == "agv" and n_agvs > 0
+
     # When there is no conveyor, the picker DOUBLES AS THE PACKER and is occupied
     # through packing too (see engine.processes.picker_agent's busy definition).
     # The picker service time must include pack time, or this oracle understates
     # picker utilisation relative to the engine. A conveyor OR a 仮置き(staging)
     # buffer decouples pack onto its own downstream stage, so it is excluded.
+    # In GTP mode neither decoupling applies -- both branches are guarded by
+    # ``not agv_mode``, so a GTP picker always packs inline.
     has_conveyor = bool(model.resources.conveyors) and any(
         len(cv.points) >= 2 for cv in model.resources.conveyors)
-    decoupled_pack = has_conveyor or model.process.staging_capacity > 0
+    decoupled_pack = (not gtp) and (has_conveyor or model.process.staging_capacity > 0)
     pack_s = 0.0 if decoupled_pack else max(model.process.pack_time_s, 0.0)
 
     c = sum(w.count for w in model.resources.workers if w.role == "picker") or 1
     lam = rate_per_hr / 3600.0           # arrivals/s
 
+    # GTP is a PIPELINE (AGV fetch -> ready queue -> picker handles), so the
+    # picker cannot be offered work faster than the AGV fleet delivers it. When
+    # the fleet saturates, the picker's arrival rate is the fleet's throughput,
+    # not demand -- the engine's ready_store simply runs dry. Without this the
+    # oracle read 0.311 against a measured 0.192.
+    agv_util = agv_rate = None
+    if gtp:
+        agv_speed = ([e.speed_mps for e in model.resources.equipment
+                      if e.type == "agv"] or [1.6])[0]
+        # One AGV trip fetches ONE order's totes (the engine's agv_agent pulls a
+        # single order per trip), out and back from its dock.
+        agv_trip_s = _trip_travel_m(depot_leg, hop, max(lines_per, 1.0),
+                                    det) / max(agv_speed, 0.1)
+        agv_rate = n_agvs / agv_trip_s if agv_trip_s > 0 else float("inf")
+        agv_util = min(lam / agv_rate, 1.0) if agv_rate > 0 else 1.0
+        lam = min(lam, agv_rate)
+
+    # ゾーン picking walks a strict SERPENTINE by aisle column, no backtracking
+    # (the engine's ``_route_order``), so every aisle it enters is run end to end
+    # instead of dipped into at l/3.
+    serpentine = model.process.pick_strategy == "zone"
+    aisle_extra = det["run_len_m"] if (serpentine and det) else None
+
+    def trip_travel_m(b: float) -> float:
+        """Metres a PICKER walks on one trip sweeping ``b`` orders. Zero in GTP."""
+        if gtp:
+            return 0.0
+        return _trip_travel_m(depot_leg, hop, max(lines_per * b, 1.0), det,
+                              back_leg, aisle_extra)
+
+    b_cap = float(max(1, orders_per_trip(model)))
+    # A wave/種まき release holds the picker at the gate while its bucket fills.
+    # It has already claimed its first order, so that hold is trip time (the
+    # engine counts it from the claim -- see processes.picker_agent).
+    gate_s = 0.0 if gtp else _release_window_s(model, b_cap)
+
     def trip_time_s(b: float) -> float:
         """Seconds a picker is occupied by ONE trip that sweeps ``b`` orders."""
         n_picks = max(lines_per * b, 1.0)
-        return (_trip_travel_m(depot_leg, hop, n_picks, det) / speed
+        return (gate_s
+                + trip_travel_m(b) / speed
                 + n_picks * ts_mean * units_per_line
                 + b * pack_s)
 
-    b_cap = float(max(1, orders_per_trip(model)))
     batch = _batch_per_trip(model, b_cap, c, lam, trip_time_s)
 
     service_s = trip_time_s(batch) / batch   # picker-seconds per ORDER
-    travel = _trip_travel_m(depot_leg, hop, max(lines_per * batch, 1.0), det) / batch
+    travel = trip_travel_m(batch) / batch
 
     mu = 1.0 / max(service_s, 1e-6)      # service/s per picker
     a = lam / mu                         # offered load
@@ -232,6 +428,10 @@ def estimate(model: WarehouseModel) -> dict:
 
     pw = _erlang_c(c, a)
     wq = pw / (c * mu - lam) if (c * mu - lam) > 0 else float("inf")
+
+    # The binding stage: in GTP the AGV fleet is usually it -- the picker is idle
+    # by design, so reporting only the picker calls a saturated fleet 対応可能.
+    binding = max(rho, agv_util or 0.0)
 
     return {
         "method": "analytic_mmc",
@@ -241,8 +441,13 @@ def estimate(model: WarehouseModel) -> dict:
         "walk_m_per_order": travel,
         "orders_per_trip": batch,
         "picker_utilization": min(rho, 1.0),
+        # ADDITIVE: None outside GTP, so nothing downstream changes for a manual
+        # model. In GTP these are what the proposal actually turns on.
+        "agv_utilization": agv_util,
+        "bottleneck_utilization": min(binding, 1.0),
+        "bottleneck": ("agv" if (agv_util or 0.0) > rho else "picker"),
         "capacity_orders_per_hr": c * mu * 3600.0,
         "offered_orders_per_hr": rate_per_hr,
         "pick_wait_mean_s": wq if math.isfinite(wq) else None,
-        "overloaded": rho >= 1.0,
+        "overloaded": binding >= 1.0,
     }

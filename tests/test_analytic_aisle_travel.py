@@ -106,8 +106,29 @@ def test_closed_form_depot_detour_agrees_with_the_routing_graph(template_id):
 
 # --------------------------------------------------------- analytic <-> DES
 
-@pytest.mark.parametrize("template_id", ["ecommerce_small", "retail_dc"])
-def test_analytic_converges_with_the_des_on_both_templates(template_id):
+# EVERY bundled template, not a chosen two. The contract was pinned on
+# ecommerce_small + retail_dc only, and the six that were never checked hid real
+# model gaps — measured picker-utilisation residuals before this widened:
+#
+#     ecommerce_xl    +0.808   GTP: the oracle charged the picker an AGV's walk
+#     apparel         -0.153   ゾーン: no serpentine term
+#     thirdparty_3pl  +0.140   wave: the gate hold was nobody's time
+#     pick_to_belt    +0.090   conveyor: the trip ends at the belt, not the depot
+#
+# ``blank`` is excluded here (it has no racking, no locations and no demand
+# shape to converge ON); its never-blocks behaviour is covered separately below.
+ALL_TEMPLATES = [t["template_id"] for t in templates.list_templates()
+                 if t["template_id"] != "blank"]
+
+# Per-template bound on |analytic - DES| picker utilisation. The catalogue-wide
+# mean is held far tighter (see below) so one loose template cannot hide drift
+# in the rest.
+MAX_UTIL_RESIDUAL = 0.08
+MEAN_UTIL_RESIDUAL = 0.04
+
+
+@pytest.mark.parametrize("template_id", ALL_TEMPLATES)
+def test_analytic_converges_with_the_des_on_every_template(template_id):
     """The 「解析で当てる → DESで裏取り」 contract, pinned.
 
     A full shift is simulated (the template default) rather than a short window:
@@ -117,13 +138,63 @@ def test_analytic_converges_with_the_des_on_both_templates(template_id):
     m = templates.load_template_model(template_id)
     est = analytic.estimate(m)
     results, _ = run_replications(m)
-    sim = kpis.compute(results)
+    sim = kpis.compute(results, m)
 
-    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < 0.08
+    assert abs(est["picker_utilization"] - sim["picker_utilization"]) < MAX_UTIL_RESIDUAL
     # The metres are the mechanism, so pin them directly too.
-    assert est["walk_m_per_order"] == pytest.approx(sim["walk_per_order_m"], rel=0.20)
+    assert est["walk_m_per_order"] == pytest.approx(sim["walk_per_order_m"],
+                                                    rel=0.20, abs=1.0)
     # ...and the two must tell the same story about coping with demand.
-    assert est["overloaded"] == (sim["picker_utilization"] > 0.99)
+    assert est["overloaded"] == (sim["bottleneck_utilization"] > 0.97)
+
+
+def test_analytic_agreement_holds_across_the_catalogue():
+    """The MEAN residual, so no single template can drift unnoticed."""
+    residuals = {}
+    for tid in ALL_TEMPLATES:
+        m = templates.load_template_model(tid)
+        est = analytic.estimate(m)
+        results, _ = run_replications(m)
+        sim = kpis.compute(results, m)
+        residuals[tid] = abs(est["picker_utilization"] - sim["picker_utilization"])
+    mean = sum(residuals.values()) / len(residuals)
+    assert mean < MEAN_UTIL_RESIDUAL, f"catalogue drift: {residuals}"
+
+
+def test_gtp_prices_the_agv_fleet_not_the_picker_s_feet():
+    """In goods-to-person the picker does not walk — the fleet is the constraint.
+
+    ``ecommerce_xl`` measures a 19% picker against a saturated (99.7%) AGV fleet.
+    Reading the picker alone called a jammed fleet 対応可能.
+    """
+    m = templates.load_template_model("ecommerce_xl")
+    est = analytic.estimate(m)
+    results, _ = run_replications(m)
+    sim = kpis.compute(results, m)
+
+    assert est["walk_m_per_order"] == 0.0, "a GTP picker walks nowhere"
+    assert est["agv_utilization"] is not None
+    assert est["agv_utilization"] == pytest.approx(sim["agv_utilization"], abs=0.05)
+    assert est["bottleneck"] == "agv"
+    assert est["bottleneck_utilization"] > est["picker_utilization"]
+
+
+def test_agv_fields_are_absent_for_a_manual_model():
+    """ADDITIVE: a manual model must be untouched by the GTP branch."""
+    est = analytic.estimate(templates.load_template_model("ecommerce_small"))
+    assert est["agv_utilization"] is None
+    assert est["bottleneck"] == "picker"
+    assert est["bottleneck_utilization"] == est["picker_utilization"]
+
+
+def test_estimate_never_blocks_on_a_bare_or_blank_model():
+    """No racking, no locations, no conveyor ⇒ still a full, finite answer."""
+    for m in (WarehouseModel(), templates.load_template_model("blank")):
+        est = analytic.estimate(m)
+        assert est["walk_m_per_order"] >= 0.0
+        assert 0.0 <= est["picker_utilization"] <= 1.0
+        assert est["agv_utilization"] is None
+        assert est["orders_per_trip"] >= 1.0
 
 
 def test_analytic_travel_is_far_above_the_straight_line_distance():
