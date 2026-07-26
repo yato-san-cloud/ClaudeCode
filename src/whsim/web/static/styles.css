@@ -2508,3 +2508,69 @@ button.primary:disabled,
    still shown in the dedicated ④検証 3D view, which has no other overlays). */
 .dash-stage-3d > .whsim-info3d,
 .dash-stage-3d > .whsim-hud3d{display:none !important}
+
+/* ── ナビゲーションレール ──────────────────────────────────────────────────
+   The 5-phase journey rendered VERTICALLY in the sidebar. journey.js is
+   untouched: it emits the same .jn-pill[data-phase] / .jn-sub[data-view] nodes
+   and patches them the same way, so the onboarding coachmarks (which target
+   .jn-pill[data-phase=…]) and every handler keep working — only the axis and
+   the chrome change here. */
+.journey-nav.is-rail{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0}
+.journey-nav.is-rail .jn-top{display:flex;flex-direction:column;gap:var(--sp-2);
+  align-items:stretch;overflow:visible}
+.journey-nav.is-rail .jn-steps{display:flex;flex-direction:column;gap:2px;overflow:visible}
+.journey-nav.is-rail .jn-pins{display:flex;gap:var(--sp-2);padding-top:var(--sp-2);
+  border-top:1px solid var(--line-hair);margin-top:var(--sp-1)}
+.journey-nav.is-rail .jn-pins .jn-pin{flex:1 1 0;justify-content:center}
+
+/* A phase is one nav row: ordinal chip, title, state flag. The goal line is
+   secondary and hides when the rail is tight. */
+.journey-nav.is-rail .jn-pill{display:flex;flex-direction:column;align-items:flex-start;
+  gap:1px;width:100%;min-width:0;text-align:left;padding:7px 10px 7px 12px;
+  border:1px solid transparent;border-radius:var(--r-sm);background:transparent;
+  position:relative;white-space:normal}
+.journey-nav.is-rail .jn-pill:hover:not(:disabled){background:var(--bg-hover)}
+.journey-nav.is-rail .jn-pill-head{display:flex;align-items:center;gap:var(--sp-2);
+  width:100%;min-width:0;font-size:var(--fs-sm);font-weight:var(--fw-medium)}
+/* The goal line shows for the ACTIVE phase only: five two-line rows would turn
+   the rail into a wall of prose, and the guidance is only actionable for the
+   step you are standing on. */
+.journey-nav.is-rail .jn-pill-goal{display:none}
+.journey-nav.is-rail .jn-pill.is-active .jn-pill-goal{font-size:var(--fs-micro);
+  color:var(--ink-tertiary);line-height:1.35;padding-left:26px;padding-top:2px;
+  white-space:normal;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical}
+.journey-nav.is-rail .jn-pill-no{flex:0 0 auto;width:18px;text-align:center;
+  color:var(--ink-tertiary);font-variant-numeric:tabular-nums}
+.journey-nav.is-rail .jn-pill-flag{margin-left:auto;flex:0 0 auto}
+
+/* Active phase: an accent spine on the left edge, not a filled pill — the rail
+   already carries the eye, and a solid block at this size reads as noise. */
+.journey-nav.is-rail .jn-pill.is-active{background:var(--accent-tint);
+  border-color:var(--line-hair)}
+.journey-nav.is-rail .jn-pill.is-active::before{content:"";position:absolute;
+  left:0;top:6px;bottom:6px;width:3px;border-radius:0 2px 2px 0;background:var(--accent)}
+.journey-nav.is-rail .jn-pill.is-active .jn-pill-head{color:var(--ink-primary);
+  font-weight:var(--fw-semibold)}
+.journey-nav.is-rail .jn-pill.is-active .jn-pill-no{color:var(--accent-ink)}
+
+/* Sub-views of the active phase, indented under the rail like a nav section. */
+.journey-nav.is-rail .jn-subs{display:flex;flex-direction:column;gap:1px;
+  padding:var(--sp-1) 0 var(--sp-2) 12px;margin:0;border:0;overflow:visible}
+.journey-nav.is-rail .jn-sub{display:block;width:100%;text-align:left;
+  padding:5px 10px;border-radius:var(--r-xs);border:0;background:transparent;
+  font-size:var(--fs-xs);color:var(--ink-secondary);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.journey-nav.is-rail .jn-sub:hover{background:var(--bg-hover);color:var(--ink-primary)}
+.journey-nav.is-rail .jn-sub[aria-selected="true"]{background:var(--bg-active);
+  color:var(--ink-primary);font-weight:var(--fw-semibold)}
+/* The trailing "what this view does" line and the ←/→ affordance are laid out
+   for a horizontal row; in the rail they wrap to three lines and read as noise
+   (each phase already carries its own goal line). The description survives as
+   the sub-tab's title attribute, so nothing is lost. */
+.journey-nav.is-rail .jn-sub-hint,
+.journey-nav.is-rail .jn-kbdhint{display:none}
+
+/* NOTE: the sidebar already scrolls (see .sidebar above, overflow-y:auto); no
+   extra rule is needed here, and adding overscroll-behavior made automated
+   scroll-into-view hang against this container. */

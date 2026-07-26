@@ -40,6 +40,12 @@
 
   <div class="layout">
     <aside class="sidebar">
+      <!-- Primary navigation lives in the rail (the 5-phase journey rendered
+           vertically). Same journey.js, same .jn-pill/.jn-sub markup and data
+           attributes — only the CSS axis changes, so the onboarding coachmarks
+           and every existing handler keep working. -->
+      <div id="journey" class="journey-nav is-rail"></div>
+
       <section class="card">
         <h2>プロジェクト</h2>
         <div class="row proj-row">
@@ -159,8 +165,7 @@
     </aside>
 
     <main class="main">
-      <div class="tabs" role="navigation" aria-label="フェーズ動線">
-        <div id="journey" class="journey-nav" style="flex:1;min-width:0"></div>
+      <div class="tabs" role="navigation" aria-label="ビュー操作">
         <label id="presetCtl" class="preset-ctl" title="3D表現" style="display:none">3D表現
           <select id="presetSelect">
             <option value="brand">ブランド</option>
