@@ -81,6 +81,27 @@ function ask(query, { hidden = false } = {}) {
   });
 }
 
+/**
+ * 案内した URL は本文にも出してあるので、開けなくても止めない。
+ * spawn の ENOENT は同期例外ではなく error イベントで来る。listener を
+ * 付けないと未処理例外になってプロセスごと落ちる(xdg-open が無い環境など)。
+ */
+function openBrowser(url) {
+  const [cmd, args] =
+    process.platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : process.platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
+  try {
+    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    /* 無視 */
+  }
+}
+
 // ---------- wrangler ----------
 
 /**
@@ -221,8 +242,40 @@ ok('スキーマを適用しました');
 step('Worker をデプロイします');
 info('LIFF の登録に URL が要るので、シークレット登録より先にデプロイします。');
 
-const deploy = await wrangler(['deploy'], { capture: true });
-if (deploy.code !== 0) die('デプロイに失敗しました。');
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
+/** URL を拾うために stdout を捕まえる。副作用は下の登録待ちで補う。 */
+async function tryDeploy() {
+  const { code, out } = await wrangler(['deploy'], { capture: true });
+  return { code, out: stripAnsi(out) };
+}
+
+let deploy = await tryDeploy();
+
+// workers.dev のサブドメインはアカウントに一度だけ登録が要る。
+// stdout を捕まえている都合で wrangler が「非対話」と判断し、登録するかの
+// 確認に勝手に no と答えてしまう。捕捉をやめると URL が拾えなくなるので、
+// 失敗を検出してこちらから案内する。
+for (let attempt = 0; deploy.code !== 0 && attempt < 3; attempt += 1) {
+  if (!/workers\.dev subdomain/i.test(deploy.out)) break;
+
+  const onboarding =
+    deploy.out.match(/https:\/\/dash\.cloudflare\.com\/[^\s]*?\/workers\/onboarding/)?.[0] ??
+    'https://dash.cloudflare.com/?to=/:account/workers/onboarding';
+
+  console.log('');
+  warn('workers.dev のサブドメインが未登録です(アカウントごとに初回だけ必要)。');
+  info('開いたページで好きな名前を1つ登録してください。あとで変えにくいので短めが無難です。');
+  info(onboarding);
+  openBrowser(onboarding);
+  await ask('\n  登録し終えたら Enter を押してください: ');
+  deploy = await tryDeploy();
+}
+
+if (deploy.code !== 0) {
+  console.error(deploy.out);
+  die('デプロイに失敗しました。');
+}
 
 const url = deploy.out.match(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev/)?.[0];
 if (!url) die('デプロイ後の URL を取得できませんでした。上の出力を確認してください。');
