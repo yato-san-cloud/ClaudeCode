@@ -46,14 +46,54 @@ def _num(v) -> float | None:
 _JAVA_MAGIC = b"\xac\xed"
 
 
+# javaobj ships two parsers with DIFFERENT object models, and real MapMaker saves
+# need both (see _load_java). v2 hands back a JavaInstance carrying `field_data`
+# keyed by class; v1 hands back a JavaObject with the fields as plain attributes.
+_V1_SKIP = {"classdesc", "annotations", "get_class"}
+
+
 def _jfields(inst) -> dict:
-    """{field name: value} for a javaobj JavaInstance, merged across the class
-    hierarchy. Tolerant: anything without field_data yields {}."""
+    """{field name: value} for a javaobj instance, merged across the class
+    hierarchy, for EITHER parser's object model. Tolerant: anything we cannot
+    read yields {}."""
     out: dict = {}
     for _cls, fmap in (getattr(inst, "field_data", None) or {}).items():
         for jf, val in fmap.items():
             out[getattr(jf, "name", str(jf))] = val
+    if out:
+        return out
+    # v1: fields land straight on the instance dict.
+    for k, v in (getattr(inst, "__dict__", None) or {}).items():
+        if not k.startswith("_") and k not in _V1_SKIP:
+            out[k] = v
     return out
+
+
+def _load_java(data: bytes):
+    """Deserialize a MapMaker save, trying BOTH javaobj parsers.
+
+    v2 is the better-maintained parser and reads most saves, but it derails on
+    some real customer files — it loses alignment inside a custom writeObject
+    block and dies on a nonsense type code. v1 reads those. Neither is a superset
+    of the other, so this tries v2 first and keeps v1 as the fallback rather than
+    telling somebody their own layout file is corrupt when it is not."""
+    first: Exception | None = None
+    try:
+        import javaobj.v2 as _v2
+        return _v2.loads(data)
+    except ImportError as e:  # pragma: no cover — ships in pyproject deps
+        raise ValueError(
+            "ネイティブ .rmpm の読込には javaobj-py3 が必要です。"
+            "`pip install javaobj-py3`（start.bat の再実行でも更新されます）するか、"
+            "MapMaker の JSON エクスポート（.rmpm.json）をご利用ください。") from e
+    except Exception as e:  # noqa: BLE001 — fall through to the v1 parser
+        first = e
+    try:
+        import javaobj as _v1
+        return _v1.loads(data)
+    except Exception as e:  # noqa: BLE001 — corrupt stream → friendly error
+        raise ValueError(
+            f".rmpm（Java直列化）として解釈できませんでした: {first}") from e
 
 
 def _native_to_doc(data: bytes) -> dict:
@@ -65,17 +105,7 @@ def _native_to_doc(data: bytes) -> dict:
     and a FreeShelfObject's rack address from ``shelf.name``. Unrecognised
     objects are kept typed so the downstream mapper counts/skips them
     ("never blocks")."""
-    try:
-        import javaobj.v2 as javaobj
-    except ImportError as e:  # pragma: no cover — ships in pyproject deps
-        raise ValueError(
-            "ネイティブ .rmpm の読込には javaobj-py3 が必要です。"
-            "`pip install javaobj-py3`（start.bat の再実行でも更新されます）するか、"
-            "MapMaker の JSON エクスポート（.rmpm.json）をご利用ください。") from e
-    try:
-        top = javaobj.loads(data)
-    except Exception as e:  # noqa: BLE001 — corrupt stream → friendly error
-        raise ValueError(f".rmpm（Java直列化）として解釈できませんでした: {e}") from e
+    top = _load_java(data)
 
     exts = _jfields(top).get("WorldMapExtensionList")
     floors: list[dict] = []

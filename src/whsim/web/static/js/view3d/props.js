@@ -441,9 +441,12 @@ export const propMethods = {
     if (meta.title) {
       const h = document.createElement('div');
       h.textContent = String(meta.title);
-      h.style.cssText = 'position:absolute;left:28px;top:22px;color:#1F497D;'
+      // The title sits over whatever the top of the frame happens to be — a pale
+      // studio sweep in one scene, a dark warehouse ceiling in the next. A halo
+      // in BOTH directions is the only thing that survives both.
+      h.style.cssText = 'position:absolute;left:28px;top:22px;color:#ffffff;'
         + 'font-size:26px;font-weight:700;letter-spacing:.02em;'
-        + 'text-shadow:0 1px 3px rgba(255,255,255,.85)';
+        + 'text-shadow:0 2px 6px rgba(0,0,0,.75), 0 0 2px rgba(0,0,0,.9)';
       host.appendChild(h);
     }
     if (meta.watermark) {

@@ -353,6 +353,23 @@ export const sceneMethods = {
         out.push({ x: (+r.x || 0) - 0.6, y: (+r.y || 0) - 0.6, w: 1.2, h: 1.2 });
       }
     }
+    // Workbenches and non-storage zones are obstacles too. The building's
+    // columns are SYNTHESIZED on a grid — the layout data has no column
+    // positions — so one landing on a drawn bench, or in the middle of a work
+    // area somebody is proposing, is not a fact about the building: it is the
+    // renderer inventing an obstruction exactly where the design lives. Racks
+    // were already dodged; these are the same problem.
+    for (const st of (this.replay.stations || [])) {
+      if (!st) continue;
+      out.push({ x: (+st.x || 0) - 1.2, y: (+st.y || 0) - 0.7, w: 2.4, h: 1.4 });
+    }
+    for (const z of (this.replay.zones || [])) {
+      if (!z || z.type === 'storage') continue;
+      const w = +z.w || 0;
+      const h = +z.h || 0;
+      if (w <= 0 || h <= 0) continue;
+      out.push({ x: +z.x || 0, y: +z.y || 0, w, h });
+    }
     this._obstacles = out;
     return out;
   },
