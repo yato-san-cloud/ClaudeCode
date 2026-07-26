@@ -11,6 +11,17 @@ export const $ = (id) => document.getElementById(id);
 // JSON `detail` (falling back to the HTTP statusText).
 export const api = async (url, opts) => {
   const r = await fetch(url, opts);
+  // 401 = the access gate (web/auth.py) wants a session. That is not an error
+  // any caller can act on, so handle it once here: bounce to the login form
+  // carrying where we were, and never resolve (the navigation is the outcome).
+  if (r.status === 401) {
+    const body = await r.json().catch(() => ({}));
+    if (body && body.login) {
+      const back = location.pathname + location.search + location.hash;
+      location.href = `${body.login}?next=${encodeURIComponent(back)}`;
+      await new Promise(() => {});   // stop this call chain while we navigate
+    }
+  }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   return r.json();
 };

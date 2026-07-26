@@ -163,13 +163,54 @@ def serve(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
     sends no-cache headers, so a plain browser refresh (F5) always shows the
     latest -- no manual restart or hard-reload. See start.bat for a
     one-command setup that also auto-pulls the branch.
+
+    Remote access: keep the default loopback bind and put a tunnel in front (see
+    docs/REMOTE_ACCESS.md). Binding to a reachable address REQUIRES a password --
+    the project data is real customer material, so this refuses rather than
+    silently publishing it.
     """
     import os
 
     import uvicorn
+
+    from whsim.web import auth
+
+    # Fail-safe: the gate itself is opt-in (so local use and tests are
+    # unchanged), which means the guard against accidental exposure has to live
+    # here, at the moment we choose what to listen on.
+    if not _is_loopback(host) and not auth.enabled():
+        typer.echo(
+            f"'{host}' で待ち受けようとしていますが、パスワードが設定されていません。\n"
+            "プロジェクトには実データが入るため、外から届く場所へ無防備に公開できません。\n\n"
+            "  Linux/macOS:  export WHSIM_PASSWORD='任意のパスワード'\n"
+            "  Windows:      set WHSIM_PASSWORD=任意のパスワード\n\n"
+            "推奨は既定の 127.0.0.1 のままトンネル経由で公開する構成です "
+            "(docs/REMOTE_ACCESS.md)。",
+            err=True)
+        raise typer.Exit(code=2)
+
     if reload:
         os.environ["WHSIM_DEV"] = "1"  # app then adds no-cache headers
+    if auth.enabled():
+        typer.echo("パスワード保護: 有効（全ルート）")
     uvicorn.run("whsim.web.app:app", host=host, port=port, reload=reload)
+
+
+def _is_loopback(host: str) -> bool:
+    """Is this bind address reachable only from this machine?
+
+    Anything we cannot parse is treated as REACHABLE, so an unusual value fails
+    closed (demands a password) rather than open.
+    """
+    import ipaddress
+
+    h = (host or "").strip().strip("[]").lower()
+    if h in {"localhost", "localhost.localdomain"}:
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
 
 
 @app.command()

@@ -158,6 +158,14 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 
 ### Commands
 
+- Remote access (self-hosted): `WHSIM_PASSWORD` gates **every** route (SPA + all
+  `/api/*`) via a signed session cookie — `web/auth.py`, stdlib only, no accounts
+  and no third-party IdP; data never leaves `projects/`. Unset ⇒ gate inert (local
+  use + tests unchanged), so the fail-safe lives at the bind site: `whsim serve`
+  REFUSES a non-loopback host without a password. Intended deployment is loopback
+  + Cloudflare Tunnel — see `docs/REMOTE_ACCESS.md`. The KDF is memoised
+  (`_key_cache`): deriving per request put 200k PBKDF2 rounds on all ~80 assets of
+  a page load and stalled the boot splash.
 - Install: `pip install -e ".[dev]"`; web app adds `,web`; CAD/PPTX/PDF add `,docs` —
   everything: `pip install -e ".[dev,web,docs]"`
 - Flow: `whsim new <name> -t ecommerce_small` → `whsim import <name> <zip>` →

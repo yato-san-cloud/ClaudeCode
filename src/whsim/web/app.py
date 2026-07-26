@@ -21,9 +21,11 @@ import json
 import os
 import time as _time
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from whsim import analytic, kpis as kpi_mod
@@ -58,6 +60,7 @@ from whsim.web.routes import (
     design as design_routes,
     imports as imports_routes,
     inventory as inventory_routes,
+    login as login_routes,
     misc as misc_routes,
     projects as projects_routes,
     run_render as run_render_routes,
@@ -70,6 +73,35 @@ from whsim.web.routes import (
 STATIC = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(title="whsim", version="0.1.0")
+
+
+# ---- access gate ------------------------------------------------------------
+# whsim is self-hosted and reached over a tunnel, so EVERY route -- the SPA and
+# all of /api -- sits behind one password. The project data is real customer WMS
+# material; an unguarded /api/projects is a full export of it. Inert unless
+# WHSIM_PASSWORD is set, so local use and the tests are unchanged (the fail-safe
+# against accidental exposure lives at the bind site: `whsim serve` refuses a
+# non-loopback host without a password).
+@app.middleware("http")
+async def _require_session(request, call_next):
+    from whsim.web import auth as _auth
+
+    password = _auth.configured_password()
+    if password is None or _auth.is_open_path(request.url.path):
+        return await call_next(request)
+    if _auth.token_valid(request.cookies.get(_auth.COOKIE_NAME), password):
+        return await call_next(request)
+
+    # An unauthenticated API call gets 401 JSON (the SPA can act on it); a
+    # navigation gets the login form, carrying where it was headed.
+    accepts_html = "text/html" in (request.headers.get("accept") or "")
+    if request.url.path.startswith("/api/") or not accepts_html:
+        return JSONResponse({"detail": "サインインが必要です。", "login": "/login"},
+                            status_code=401)
+    nxt = request.url.path
+    if request.url.query:
+        nxt += "?" + request.url.query
+    return RedirectResponse("/login?next=" + quote(nxt, safe=""), status_code=302)
 
 # Dev convenience (enabled by `whsim serve --reload`): tell the browser never to
 # serve a cached copy, so a plain refresh always shows the freshly-pulled
@@ -429,6 +461,7 @@ async def api_workmethod_compare(name: str, payload: dict | None = None):
 
 # ---- routers ----------------------------------------------------------------
 # Concern-grouped APIRouter modules, mounted with byte-identical paths.
+app.include_router(login_routes.router)   # /login must resolve before the SPA
 app.include_router(misc_routes.router)
 app.include_router(projects_routes.router)
 app.include_router(imports_routes.router)
