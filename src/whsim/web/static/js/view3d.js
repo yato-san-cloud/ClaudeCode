@@ -225,12 +225,17 @@ export class Scene3D {
     this._updateGlowHalos();      // additive cyan activity halos (pseudo-bloom)
     this._updateBottleneck();     // pulse the bottleneck spotlight (if any)
     this._updateProps(t);         // authored prop tracks + state swaps (concept scenes)
-    this._updateCameraTrack(t);   // scripted camera (only if meta.camera_track)
     this._updateSelection(t, dt); // track ring/tooltip under the selected agent
     this._updateHud(t);           // sync DOM productivity overlay (if present)
     this._monitorFps(dt);         // auto-degrade if frame time gets heavy
     this._tickShadows();          // refresh the shadow map on a cadence, not every frame
     this.controls.update();
+    // AFTER controls.update(), never before: OrbitControls re-derives the camera
+    // orientation from its own spherical state around `target` every frame, so a
+    // scripted pose set earlier in the frame gets overwritten — and at shallow
+    // pitches its re-derivation lands 180° rolled, which silently turned every
+    // floor label upside down. The track owns the camera, so it goes last.
+    this._updateCameraTrack(t);   // scripted camera (only if meta.camera_track)
     this.renderer.render(this.scene, this.camera);
     this._raf = requestAnimationFrame(this._loop);
   }

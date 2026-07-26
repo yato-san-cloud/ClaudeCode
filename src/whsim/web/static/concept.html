@@ -110,10 +110,13 @@ fetch(src, { cache: 'no-store' })
       // One synchronous render at exactly this time, so the screenshot the
       // caller takes next cannot be a frame early or late.
       scene._updateProps(t);
-      scene._updateCameraTrack(t);
       scene._updateTotes(t);
       scene._updateWorkers(t, 0);
       scene.controls.update();
+      // After controls.update(), matching the order in Scene3D._loop — the
+      // controls re-derive the camera pose every call and would otherwise
+      // overwrite the scripted one.
+      scene._updateCameraTrack(t);
       scene.renderer.render(scene.scene, scene.camera);
       return t;
     };
