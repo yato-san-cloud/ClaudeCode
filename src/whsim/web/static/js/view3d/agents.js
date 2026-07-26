@@ -1183,6 +1183,8 @@ export const agentMethods = {
         // 段積み: 0=デッキ直置き、1=その上。コンベアの上で容器を2段に積むのは
         // 普通の運用（同じ搬送で倍運ぶ）で、載る高さは容器1個ぶん上がるだけ。
         // 位置(x,z)は下の段と同じなので、キーフレームを2本書けば段積みになる。
+        // これは既定値で、キーフレームの5要素目があればそちらが勝つ — 積まれた
+        // 荷は途中で降ろされるものだから、段は一生ものではなくその時の状態。
         stack: Math.max(0, Math.round(Number(src.stack) || 0)),
         seed: (i * 0.7548776662) % 1,
         tone: new THREE.Color(CARTON_TONES[i % CARTON_TONES.length]).multiply(_kraft),
@@ -1321,6 +1323,10 @@ export const agentMethods = {
         const place = ci < 0 ? raw : raw.slice(0, ci);
         const mark = ci < 0 ? '' : raw.slice(ci + 1);
         r.mark = TOTE_MARK_COLOR[mark];
+        // 段はキーフレームの5要素目（sampleKeyframes は `hit` として返す）。
+        // 状態と同じで補間しない — 0.5段に載っている箱は無い。
+        const lvl = (s.hit === null || s.hit === undefined)
+          ? r.stack : Math.max(0, Math.round(Number(s.hit) || 0));
         if (place === 'carry') {
           const w = this._nearestWorker(px, pz, CARRY_SNAP_M);
           if (w) {
@@ -1331,13 +1337,13 @@ export const agentMethods = {
           py = CARRY_Y;
         } else if (place === 'pack') {
           surfaceY = STATION_TOP_Y;
-          py = STATION_TOP_Y + TOTE_H / 2 + r.stack * TOTE_H;
+          py = STATION_TOP_Y + TOTE_H / 2 + lvl * TOTE_H;
         } else {                                  // 'belt' + any unknown state
           // Ride the deck of the belt actually underfoot, not a global constant:
           // with multi-level conveyors a fixed height puts the upper deck's
           // boxes inside the lower deck.
           surfaceY = this._deckYAt(px, pz, r.beltId);
-          py = surfaceY + TOTE_H / 2 + r.stack * TOTE_H;
+          py = surfaceY + TOTE_H / 2 + lvl * TOTE_H;
           if (motion) py += 0.014 * Math.sin(now * 7.5 + r.seed * TWO_PI);
         }
         if (t > r.t1) {
