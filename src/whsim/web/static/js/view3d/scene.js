@@ -1032,7 +1032,11 @@ export const sceneMethods = {
         this._geometries.push(geom);
         this._materials.push(railMat, treadMat);
         // Speed: belt linear speed (m/s) scaled to texture repeats; sign = flow.
-        const sp = Math.min(2.5, Math.abs(c.speed_mps || 0.6) || 0.6) * dir;
+        // 0 は「動かない」であって「未指定」ではない。`|| 0.6` だと無動力コンベア
+        // （人が手で引き込むローラー等、実在する）のトレッドが流れてしまい、絵が
+        // 「誰かが動かしている」と嘘をつく。未指定のときだけ既定値にする。
+        const raw = Number.isFinite(Number(c.speed_mps)) ? Number(c.speed_mps) : 0.6;
+        const sp = Math.min(2.5, Math.abs(raw)) * dir;
         this._belts.push({ mat: treadMat, speed: sp });
         this._beltDecks.push({
           id: c.id || '', y: deckY,

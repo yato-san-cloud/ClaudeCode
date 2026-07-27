@@ -1236,6 +1236,10 @@ export const agentMethods = {
     let bestD = 2.5 * 2.5;             // a box more than 2.5 m off any belt is not on one
     for (const d of decks) {
       if (beltId && d.id !== beltId) continue;
+      // Two decks of a multi-level conveyor occupy the SAME plan position, so
+      // distance alone cannot choose between them. Without a declared belt, take
+      // the LOWEST — a box does not levitate onto an upper deck; something has
+      // to put it there, and declaring belt_id is how the scene says so.
       // Squared distance from the point to the segment.
       const vx = d.x1 - d.x0;
       const vz = d.z1 - d.z0;
@@ -1245,7 +1249,8 @@ export const agentMethods = {
       const dx = x - (d.x0 + vx * f);
       const dz = z - (d.z0 + vz * f);
       const dd = dx * dx + dz * dz;
-      if (dd < bestD) { bestD = dd; bestY = d.y; }
+      if (dd < bestD - 1e-6) { bestD = dd; bestY = d.y; }
+      else if (Math.abs(dd - bestD) <= 1e-6 && d.y < bestY) { bestY = d.y; }
     }
     return bestY;
   },
