@@ -63,7 +63,14 @@ const AGV_WHEEL_R = 0.10;
 // floats or sinks into the thing carrying it:
 const BELT_TOP_Y = 0.21;     // conveyor tread surface (scene.js: yMid .12 + h/2)
 const STATION_TOP_Y = 0.885; // pack bench top (scene.js _buildStations)
+// A.gTote's box. A replay may override these per tote (`w`/`d`/`h`) — a scene
+// can hold two genuinely different containers (a 折コン and a shallow 仕分け
+// トレー are half the height of each other), and drawing both at the オリコン's
+// height turns "ten trays stacked on a cart" into a tower nobody would push.
+// Absent, a tote is the box every replay drew before this was possible.
+const TOTE_W = 0.36;
 const TOTE_H = 0.26;         // A.gTote box height — the box rests ON the surface
+const TOTE_D = 0.28;
 const CARRY_Y = 1.06;        // fallback hand height (no picker within reach)
 // A tote's keyframe state is "<place>" or "<place>:<mark>". `place` is the
 // existing vocabulary (carry / pack / belt) and decides WHERE the box sits;
@@ -1201,6 +1208,11 @@ export const agentMethods = {
         // これは既定値で、キーフレームの5要素目があればそちらが勝つ — 積まれた
         // 荷は途中で降ろされるものだから、段は一生ものではなくその時の状態。
         stack: Math.max(0, Math.round(Number(src.stack) || 0)),
+        // 外寸（省略＝既定の容器）。段積みの間隔も自分の高さで刻む。
+        bw: Math.max(0.02, +src.w || TOTE_W),
+        bh: Math.max(0.02, +src.h || TOTE_H),
+        bd: Math.max(0.02, +src.d || TOTE_D),
+        baseY: Math.max(0, +src.base_y || 0),   // 'rest' 状態が載る面の高さ
         seed: (i * 0.7548776662) % 1,
         tone: new THREE.Color(CARTON_TONES[i % CARTON_TONES.length]).multiply(_kraft),
         yaw: 0, on: false, idx: i,
@@ -1355,15 +1367,23 @@ export const agentMethods = {
           }
           surfaceY = 0;
           py = CARRY_Y;
+        } else if (place === 'rest') {
+          // An authored surface the contract has no word for — a cart deck, a
+          // chute tip, a pallet. `belt` looks up the conveyor underfoot and
+          // `pack` is the bench top; neither can say "this is on the trolley",
+          // so a scene had to fake it with props and then the same container
+          // existed twice in two systems.
+          surfaceY = r.baseY;
+          py = r.baseY + r.bh / 2 + lvl * r.bh;
         } else if (place === 'pack') {
           surfaceY = STATION_TOP_Y;
-          py = STATION_TOP_Y + TOTE_H / 2 + lvl * TOTE_H;
+          py = STATION_TOP_Y + r.bh / 2 + lvl * r.bh;
         } else {                                  // 'belt' + any unknown state
           // Ride the deck of the belt actually underfoot, not a global constant:
           // with multi-level conveyors a fixed height puts the upper deck's
           // boxes inside the lower deck.
           surfaceY = this._deckYAt(px, pz, r.beltId);
-          py = surfaceY + TOTE_H / 2 + lvl * TOTE_H;
+          py = surfaceY + r.bh / 2 + lvl * r.bh;
           if (motion) py += 0.014 * Math.sin(now * 7.5 + r.seed * TWO_PI);
         }
         if (t > r.t1) {
@@ -1376,7 +1396,7 @@ export const agentMethods = {
       e.set(0, r.yaw, 0);
       q.setFromEuler(e);
       p.set(px, py, pz);
-      sv.set(scale, scale, scale);
+      sv.set(scale * r.bw / TOTE_W, scale * r.bh / TOTE_H, scale * r.bd / TOTE_D);
       m.compose(p, q, sv);
       inst.setMatrixAt(k, m);
       // A marked tote overrides its carton tone (see TOTE_MARK_COLOR).
@@ -1389,7 +1409,7 @@ export const agentMethods = {
       r.on = true;
       if (shade) {
         const sk = 0.66 * scale;
-        m.makeScale(sk, 1, sk);
+        m.makeScale(sk * r.bw / TOTE_W, 1, sk * r.bd / TOTE_D);
         m.setPosition(px, surfaceY + 0.012, pz);
         shade.setMatrixAt(k, m);
       }
