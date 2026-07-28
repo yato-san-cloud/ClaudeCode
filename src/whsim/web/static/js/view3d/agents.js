@@ -452,6 +452,21 @@ export const agentMethods = {
     const A = this._agentAssets();
 
     for (const wk of workers) {
+      // Which way a worker who never walks is turned. Facing is derived from
+      // displacement, so a picker on a route needs nothing — but somebody who
+      // stands at one post all replay has no displacement to derive it from and
+      // was left at yaw 0, i.e. every stationary worker in a scene faced due
+      // south. When the layout's whole claim is "these two work across the
+      // conveyor from each other", that is the one thing the picture has to say.
+      // `face: [x, z]` is the point they are turned toward; absent, unchanged.
+      let baseYaw;
+      const fp = Array.isArray(wk.face) ? wk.face : null;
+      const k0 = (wk.keyframes || [])[0];
+      if (fp && k0) {
+        const dx = (+fp[0] || 0) - (+k0[1] || 0);
+        const dz = (+fp[1] || 0) - (+k0[2] || 0);
+        if (dx * dx + dz * dz > 1e-6) baseYaw = Math.atan2(dx, dz);
+      }
       const g = new THREE.Group();
       // `lifter` raises the whole figure like an order-picker deck WITHOUT moving
       // `g` (the floor anchor the shadow/halo followers track).
@@ -555,7 +570,7 @@ export const agentMethods = {
         armPivot: shoulders[1],
         platform, platDeck, platMast,
         keyframes: wk.keyframes || [],
-        glow: 0, reach: 0, lift: 0, faceYaw: 0, speed: 0, gait: 0,
+        glow: 0, reach: 0, lift: 0, faceYaw: baseYaw || 0, baseYaw, speed: 0, gait: 0,
         phase: (idx * 2.399963) % TWO_PI,  // golden-angle offset → no lockstep
         seed: (idx * 0.7548776662) % 1,
         roll: 0, lean: 0, carry: 0,
@@ -1493,6 +1508,10 @@ export const agentMethods = {
         vx = ahead.x - s.x; vz = ahead.y - s.y;
       }
       if (vx * vx + vz * vz > 1e-7) w.faceYaw = Math.atan2(vx, vz);
+      // Standing still with an authored post: turn back to face it. Without this
+      // a worker who walked away and came back would keep the heading of their
+      // last step and stand at their bench facing down the aisle.
+      else if (w.baseYaw !== undefined) w.faceYaw = w.baseYaw;
       if (!w._qT) { w._qT = new THREE.Quaternion(); w._eT = new THREE.Euler(); }
       w._eT.set(0, w.faceYaw, 0);
       w._qT.setFromEuler(w._eT);
