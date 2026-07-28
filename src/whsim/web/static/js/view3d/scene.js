@@ -31,7 +31,7 @@
 // Scene3D.prototype by view3d.js; every method runs with `this` bound to the
 // Scene3D instance.
 import * as THREE from '../../vendor/three/three.module.js';
-import { FLOOR_TONES, PRESETS, meta_grid, rackDims } from './constants.js';
+import { FLOOR_TONES, PRESETS, STATION_D, STATION_W, meta_grid, rackDims } from './constants.js';
 
 // ---------------------------------------------------------------------------
 // Art direction extension table.
@@ -361,7 +361,11 @@ export const sceneMethods = {
     // were already dodged; these are the same problem.
     for (const st of (this.replay.stations || [])) {
       if (!st) continue;
-      out.push({ x: (+st.x || 0) - 1.2, y: (+st.y || 0) - 0.7, w: 2.4, h: 1.4 });
+      // Same footprint the bench is drawn at, plus 0.4 m of standing room.
+      const bw = Math.max(0.3, +st.w || STATION_W);
+      const bd = Math.max(0.3, +st.d || STATION_D);
+      out.push({ x: (+st.x || 0) - bw / 2 - 0.2, y: (+st.y || 0) - bd / 2 - 0.2,
+        w: bw + 0.4, h: bd + 0.4 });
     }
     for (const z of (this.replay.zones || [])) {
       if (!z || z.type === 'storage') continue;
@@ -929,7 +933,7 @@ export const sceneMethods = {
     });
     this._materials.push(steel, top, screen);
     const legG = new THREE.BoxGeometry(0.08, 0.85, 0.08);
-    const topG = new THREE.BoxGeometry(2.0, 0.07, 0.9);
+    const topG = new THREE.BoxGeometry(STATION_W, 0.07, STATION_D);
     const monG = new THREE.BoxGeometry(0.5, 0.34, 0.04);
     this._geometries.push(legG, topG, monG);
 
@@ -939,23 +943,34 @@ export const sceneMethods = {
     const m4 = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const one = new THREE.Vector3(1, 1, 1);
+    const sc = new THREE.Vector3(1, 1, 1);
     const pos = new THREE.Vector3();
     let li = 0;
     for (let i = 0; i < n; i++) {
       const s = stations[i];
       const x = +s.x || 0;
       const z = +s.y || 0;
-      for (const ox of [-0.9, 0.9]) {
-        for (const oz of [-0.38, 0.38]) {
-          pos.set(x + ox, 0.425, z + oz);
+      // A bench has a footprint, and which way its long side runs decides where
+      // the people stand — a proposal that seats ten pairs facing each other
+      // across a spur is unreadable if every desk is drawn the same way round.
+      // Optional, and the default IS the old fixed desk, so every replay that
+      // does not say otherwise renders byte-identically.
+      const bw = Math.max(0.3, +s.w || STATION_W);
+      const bd = Math.max(0.3, +s.d || STATION_D);
+      for (const ox of [-1, 1]) {
+        for (const oz of [-1, 1]) {
+          pos.set(x + ox * (bw / 2 - 0.10), 0.425, z + oz * (bd / 2 - 0.07));
           m4.compose(pos, q, one);
           legs.setMatrixAt(li++, m4);
         }
       }
       pos.set(x, 0.885, z);
-      m4.compose(pos, q, one);
+      sc.set(bw / STATION_W, 1, bd / STATION_D);
+      m4.compose(pos, q, sc);
       tops.setMatrixAt(i, m4);
-      pos.set(x, 1.10, z - 0.38);
+      // The monitor sits on the far edge, so it follows the depth rather than
+      // staying 0.38 m out and floating off the end of a shallow bench.
+      pos.set(x, 1.10, z - (bd / 2 - 0.07));
       m4.compose(pos, q, one);
       mons.setMatrixAt(i, m4);
     }

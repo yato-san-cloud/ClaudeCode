@@ -31,6 +31,12 @@ export const AGV_COLOR = {
 // Height (m) at which AGV boxes ride, centered on their thin body.
 export const AGV_Y = 0.2;
 
+// Default workbench footprint (metres, plan view). A replay may override it per
+// station with `w`/`d`; these are the values every scene rendered before that
+// was possible, so an unstated station is unchanged.
+export const STATION_W = 2.0;
+export const STATION_D = 0.9;
+
 // Agent state → Japanese label for the click-to-select tooltip. Covers both the
 // worker STATE_COLOR keys and the AGV_COLOR action keys; unknown states fall back
 // to the raw string so the card is always informative.
