@@ -439,6 +439,13 @@ class Conveyor(BaseModel):
     id: str = "conveyor"
     points: list[list[float]] = Field(default_factory=list)  # [[x,y], ...]
     speed_mps: float = 0.5
+    # トレッド高さ (m). ``None`` ⇒ the viewers' historical 0.21 m deck, so every
+    # model written before this field renders byte-identically. A **2段駆動コンベア**
+    # is two decks over ONE footprint (下段=検品済みの搬送 / 上段=空容器の還流): the
+    # replay contract already carries ``conveyors[].elevation_m`` for exactly that
+    # (see docs/ARCHITECTURE.md §3), but a saved model had no way to say it, so the
+    # upper deck's totes rendered inside the lower belt.
+    elevation_m: float | None = None
 
 
 class Station(BaseModel):
@@ -447,6 +454,14 @@ class Station(BaseModel):
     x: float = 5.0
     y: float = 5.0
     count: int = 3
+    # 作業台の平面外寸 (m). ``None`` ⇒ the viewers' historical fixed 2.0×0.9 bench,
+    # so an unstated station is unchanged. A bench's footprint is not decoration:
+    # its LONG side decides where the people stand, so a line of 縦長 benches
+    # flanking an 引き込みコンベア cannot be drawn without it (the 3D already reads
+    # ``stations[].w`` / ``[].d``; the 2D canvas and the proposal PNG draw a bench
+    # as a point and ignore both).
+    w: float | None = None   # 幅 (x方向, m)
+    d: float | None = None   # 奥行 (y方向, m)
 
 
 class Resources(BaseModel):

@@ -366,7 +366,13 @@ def build(
     workers = model.resources.workers
     n_pickers = sum(w.count for w in workers if w.role == "picker") or 1
     station = model.resources.stations[0] if model.resources.stations else None
-    n_packers = (station.count if station else 1) or 1
+    # 梱包台数 = the WHOLE bench line, not just the first entry. The editor places
+    # every bench as its own Station (``designer/place.js`` writes ``count: 1``), so
+    # a 20-bench packing line arrives as 20 entries and reading ``stations[0]``
+    # alone modelled it as ONE bench. Summing is byte-identical for the single-group
+    # form every template and importer produced before, and ``analytic`` counts the
+    # same benches (they must not disagree about the pack stage's capacity).
+    n_packers = sum(max(0, s.count) for s in model.resources.stations) or 1
     home = (station.x, station.y) if station else (0.0, 0.0)
 
     agvs = [e for e in model.resources.equipment if e.type == "agv"]

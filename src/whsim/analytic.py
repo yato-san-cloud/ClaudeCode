@@ -448,7 +448,10 @@ def estimate(model: WarehouseModel) -> dict:
     # offered work faster than the stage ahead releases it. Charging it full
     # demand read a saturated thirdparty_3pl's benches at 100% against a measured
     # 68% -- the pickers simply never hand over that much.
-    n_stations = (model.resources.stations[0].count if model.resources.stations else 1) or 1
+    # Every bench on the line, not just the first entry — mirrors
+    # ``engine.build``'s ``n_packers`` exactly (a packing line drawn bench by bench
+    # arrives as one Station each). Identical for a single-group model.
+    n_stations = sum(max(0, s.count) for s in model.resources.stations) or 1
     pack_time = max(model.process.pack_time_s, 0.0)
     pack_lam = min(lam, c * mu)
     pack_util = min(pack_lam * pack_time / n_stations, 1.0) if pack_time > 0 else 0.0

@@ -246,6 +246,31 @@ def _attach_pick_hits(model: WarehouseModel, workers: list[dict],
         w["keyframes"] = new_kfs
 
 
+def _station_dict(s) -> dict:
+    """One bench for the replay contract.
+
+    ``w``/``d`` (the bench's plan footprint) are emitted ONLY when the model
+    states them: the 3D falls back to its historical fixed 2.0×0.9 desk when the
+    key is absent, and a ``null`` would read as a real zero there. So a model
+    that never sets a footprint ships a byte-identical replay.
+    """
+    out = {"id": s.id, "x": s.x, "y": s.y, "count": s.count}
+    if getattr(s, "w", None) is not None:
+        out["w"] = float(s.w)
+    if getattr(s, "d", None) is not None:
+        out["d"] = float(s.d)
+    return out
+
+
+def _conveyor_dict(c) -> dict:
+    """One belt for the replay contract (``elevation_m`` only when stated —
+    same additive-and-guarded rule as the bench footprint above)."""
+    out = {"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
+    if getattr(c, "elevation_m", None) is not None:
+        out["elevation_m"] = float(c.elevation_m)
+    return out
+
+
 def build_layout_replay(model: WarehouseModel) -> dict:
     """A run-free replay carrying only the STATIC layout — zones, racks/shelves,
     walls, doors, stations, equipment, conveyors, routes — so the 2D/3D viewers can
@@ -259,12 +284,10 @@ def build_layout_replay(model: WarehouseModel) -> dict:
              for loc in model.locations]
     zones = [{"id": z.id, "type": z.type, "x": z.x, "y": z.y, "w": z.w, "h": z.h,
               "color": z.color} for z in model.layout.zones]
-    stations = [{"id": s.id, "x": s.x, "y": s.y, "count": s.count}
-                for s in model.resources.stations]
+    stations = [_station_dict(s) for s in model.resources.stations]
     routes = [{"id": r.id, "name": r.name, "mover": r.mover,
                "speed_mps": r.speed_mps, "points": r.points} for r in model.routes]
-    conveyors = [{"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
-                 for c in model.resources.conveyors]
+    conveyors = [_conveyor_dict(c) for c in model.resources.conveyors]
     equipment = [{"id": e.id, "type": e.type, "x": e.x, "y": e.y, "count": e.count}
                  for e in model.resources.equipment]
     walls = [{"id": w.id, "points": w.points, "thickness": w.thickness}
@@ -299,10 +322,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
          "color": z.color}
         for z in model.layout.zones
     ]
-    stations = [
-        {"id": s.id, "x": s.x, "y": s.y, "count": s.count}
-        for s in model.resources.stations
-    ]
+    stations = [_station_dict(s) for s in model.resources.stations]
     workers = [
         {"id": w.id, "role": w.role, "keyframes": w.keyframes}
         for w in res.workers
@@ -341,10 +361,7 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
          "speed_mps": r.speed_mps, "points": r.points}
         for r in model.routes
     ]
-    conveyors = [
-        {"id": c.id, "points": c.points, "speed_mps": c.speed_mps}
-        for c in model.resources.conveyors
-    ]
+    conveyors = [_conveyor_dict(c) for c in model.resources.conveyors]
     # コンベア搬送: the goods as their own tracks — keyframes are (t, x, y, state)
     # exactly like a worker's, with state in {"carry","belt","pack"}. Additive and
     # guarded: an engine/run artefact without totes (or any model with no conveyor)
