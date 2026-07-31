@@ -71,6 +71,9 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   must have its mechanism here too, or the oracle silently tells a rosier story:
   **GTP(AGV)** (picker walks 0, the fleet is its own M/M/c and throttles the
   picker's arrival rate — `agv_utilization`/`bottleneck`, `None` when manual),
+  **種まき(sort)** (the sweep stops once per DISTINCT SKU — batch-formation
+  dependent, so measured over the engine's own FIFO windows when orders exist —
+  and every line then costs `sort_time_s` at the wall),
   **batch** (orders on a trip = what is standing in the store, `C·ρ(1-ρ^(cap-1))/(1-ρ)`
   — NOT the time-average `Lq`), **wave** (the window scoop is self-limiting,
   `B = λ·W`; the gate hold is picker-busy on both sides), **zone** (a serpentine

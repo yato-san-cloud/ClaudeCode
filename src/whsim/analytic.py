@@ -316,6 +316,55 @@ def _batch_per_trip(
     return min(b_cap, max(1.0, b_queue, b_window))
 
 
+def _sort_stops(model: WarehouseModel, b_cap: float):
+    """種まき: how many DISTINCT SKUs one trip of ``b`` orders actually sweeps.
+
+    ``processes._totals_points`` aggregates a 種まき batch's lines into SKU
+    totals, so the picker walks to one stop PER DISTINCT SKU — not per line.
+    How much that compresses is a property of **how the batch is formed**, which
+    no closed form can recover from the schema alone: batching by destination
+    saturates (every order wants the same fast movers), while batching by SKU
+    block grows linearly in ``b``. Charging lines instead of stops read a real
+    total-pick design at 100% picker utilisation against a measured 80%.
+
+    So when the model carries explicit orders, measure it the way the engine
+    batches them — over CONSECUTIVE FIFO windows (``processes._pull_batch`` pulls
+    whatever is standing in the store, in arrival order). Two window sizes are
+    enough: the value is interpolated between them, and both are sampled (≤32
+    windows each) so this stays cheap enough for drag-time re-estimation.
+
+    Returns ``None`` when there is nothing to measure (profile-driven demand),
+    which keeps the historical "one stop per line" behaviour — never blocks.
+    """
+    orders = model.orders.outbound
+    if not orders:
+        return None
+    n = len(orders)
+    hi = max(1, min(int(math.ceil(b_cap)), n))
+
+    def mean_distinct(k: int) -> float:
+        step = max(1, (n - k + 1) // 32)
+        total = count = 0
+        for s in range(0, n - k + 1, step):
+            skus = set()
+            for o in orders[s:s + k]:
+                skus.update(ln.sku for ln in o.lines)
+            total += len(skus)
+            count += 1
+        return total / max(count, 1)
+
+    d_lo = mean_distinct(1)
+    d_hi = mean_distinct(hi) if hi > 1 else d_lo
+
+    def stops(b: float) -> float:
+        if hi <= 1:
+            return d_lo
+        t = (min(max(b, 1.0), float(hi)) - 1.0) / (hi - 1.0)
+        return d_lo + t * (d_hi - d_lo)
+
+    return stops
+
+
 def estimate(model: WarehouseModel) -> dict:
     speed = max(model.process.walk_speed_mps, 0.1)
     station = model.resources.stations[0] if model.resources.stations else None
@@ -338,6 +387,23 @@ def estimate(model: WarehouseModel) -> dict:
                        * max(model.orders.profile.peak_factor, 0.0))
 
     ts_mean = statistics.fmean(it.ts_per_unit for it in model.items) if model.items else 1.5
+
+    # Handling seconds per LINE. With explicit orders, measure it directly as the
+    # mean of ``qty × ts[sku]`` over the real lines. The product of the two means
+    # (``ts_mean × units_per_line``) systematically OVER-charges whenever quantity
+    # and per-unit time are negatively correlated — a broken-case line is many
+    # units at a short unit time, a case line is one unit at a long one — which is
+    # exactly the mix a convenience-store DC ships (+38% on the real order set
+    # this was found on). Profile-driven demand (every bundled template) has no
+    # lines to measure, so it keeps the product-of-means and nothing in the
+    # catalogue moves.
+    if model.orders.outbound:
+        _ts_by_sku = {it.sku: it.ts_per_unit for it in model.items}
+        handle_per_line = statistics.fmean(
+            [ln.qty * _ts_by_sku.get(ln.sku, ts_mean)
+             for o in model.orders.outbound for ln in o.lines] or [ts_mean])
+    else:
+        handle_per_line = ts_mean * units_per_line
 
     if model.locations:
         avg_depot_dist = statistics.fmean(
@@ -407,14 +473,34 @@ def estimate(model: WarehouseModel) -> dict:
     serpentine = model.process.pick_strategy == "zone"
     aisle_extra = det["run_len_m"] if (serpentine and det) else None
 
+    b_cap = float(max(1, orders_per_trip(model)))
+
+    # --- 種まき(sort): the two mechanisms the engine has and this oracle needs --
+    # 1. The sweep visits SKU TOTALS, not lines: ``processes._totals_points``
+    #    collapses the batch's lines by SKU, so the picker STOPS once per
+    #    distinct SKU. Handling is unchanged (the same units are moved).
+    # 2. The picker then puts every line at the wall (``processes._sort_phase``),
+    #    costing ``sort_time_s`` per line — pure occupancy this oracle otherwise
+    #    charged nowhere.
+    # Both are gated on consolidation == "sort", so every 摘み取り model — the
+    # whole bundled catalogue — is byte-identical.
+    sortation = model.process.effective_work().consolidation == "sort"
+    sort_s = max(model.process.sort_time_s, 0.0) if sortation else 0.0
+    stops_fn = _sort_stops(model, b_cap) if sortation else None
+
+    def trip_stops(b: float) -> float:
+        """棚前に立つ回数 (travel is charged per STOP, handling per LINE)."""
+        if stops_fn is not None:
+            return max(stops_fn(b), 1.0)
+        return max(lines_per * b, 1.0)
+
     def trip_travel_m(b: float) -> float:
         """Metres a PICKER walks on one trip sweeping ``b`` orders. Zero in GTP."""
         if gtp:
             return 0.0
-        return _trip_travel_m(depot_leg, hop, max(lines_per * b, 1.0), det,
+        return _trip_travel_m(depot_leg, hop, trip_stops(b), det,
                               back_leg, aisle_extra)
 
-    b_cap = float(max(1, orders_per_trip(model)))
     # A wave/種まき release holds the picker at the gate while its bucket fills.
     # It has already claimed its first order, so that hold is trip time (the
     # engine counts it from the claim -- see processes.picker_agent).
@@ -422,10 +508,11 @@ def estimate(model: WarehouseModel) -> dict:
 
     def trip_time_s(b: float) -> float:
         """Seconds a picker is occupied by ONE trip that sweeps ``b`` orders."""
-        n_picks = max(lines_per * b, 1.0)
+        n_lines = max(lines_per * b, 1.0)
         return (gate_s
                 + trip_travel_m(b) / speed
-                + n_picks * ts_mean * units_per_line
+                + n_lines * handle_per_line
+                + n_lines * sort_s
                 + b * pack_s)
 
     batch = _batch_per_trip(model, b_cap, c, lam, trip_time_s)
