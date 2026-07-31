@@ -20,6 +20,12 @@ artifacts, so each is independently testable/replaceable. **See
 replay/MapMaker data contracts, and extension points — read it before a large change.
 
 - `templates.py` — a template is a fully filled-in (provisional) `model.json`.
+  同梱の **`line_inspection`（ライン検品・引き込み梱包ライン）** は「コンベア上で検品が完結する」
+  出荷ラインの事例: 仕分けシュート下の無動力2列 → 2段駆動コンベアの下段本線 → 引き込み5ヶ所×両側
+  → 縦長の梱包台20台 → 停止線/カーブ→積み付け（`scripts/gen_template_line_inspection.py` で再生成）。
+  梱包台は**1台＝1 `Station`**（実寸 `w`/`d`・長辺が引き込みと平行＝作業者の立ち位置が決まる）で、
+  ベルトは全本を `flow_edges` の `equipment_ref` で配線する — こうしないとエンジン
+  (`conveyor_ids_in_use` が絞る) と解析 (`analytic._belt_access` は全部読む) が違うベルト集合を見る。
 - `importer.py` — tolerant ZIP→subtree merge; broken/non-JSON files are skipped,
   never fatal; partial import is fine.
 - `locmaster.py` — **WMS ロケーションマスタ取込**（エリア/列/棚/段/間口・X_mm/Y_mm・

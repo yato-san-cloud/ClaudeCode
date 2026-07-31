@@ -22,6 +22,16 @@ from whsim.schema.model import FlowEdge, WarehouseModel, WorkProcess
 
 ALL_TEMPLATES = [t["template_id"] for t in templates.list_templates()]
 
+# Templates that ship NO authored edge — the fixtures for the compatibility leg
+# below, which is about what ``depends`` alone resolves to. A template that wires
+# its own legs (``line_inspection`` names the belt each stage receives on) is by
+# definition not exercising that path; it is covered by the authored-edge tests.
+DERIVED_TEMPLATES = [
+    tid for tid in ALL_TEMPLATES
+    if not (templates.load_template_dict(tid).get("process") or {}).get("flow_edges")
+]
+AUTHORED_TEMPLATES = [tid for tid in ALL_TEMPLATES if tid not in DERIVED_TEMPLATES]
+
 
 def _conveyor_events(model, seed: int = 5) -> int:
     return sum(1 for e in run_once(model, seed=seed).events if e["event"] == "conveyor_on")
@@ -79,7 +89,7 @@ def test_a_staffing_only_process_is_not_simulated():
 
 # --- compatibility: no authored edges ⇒ the graph `depends` already implied ---
 
-@pytest.mark.parametrize("template_id", ALL_TEMPLATES)
+@pytest.mark.parametrize("template_id", DERIVED_TEMPLATES)
 def test_derived_graph_reproduces_the_dependency_chain(template_id):
     from whsim.analysis.staffing.profile import process_deps
 
@@ -91,6 +101,26 @@ def test_derived_graph_reproduces_the_dependency_chain(template_id):
     for dst, ups in process_deps(m).items():
         for u in ups:
             assert (u, dst) in derived, f"{u}→{dst} lost in the derived graph"
+
+
+@pytest.mark.parametrize("template_id", AUTHORED_TEMPLATES)
+def test_an_authored_template_keeps_the_chain_it_wired(template_id):
+    """The other half: a template that DOES wire its legs must resolve to those
+    legs (not to derived ones), and still cover every precedence its master
+    declares — the wiring is an addition to the chain, never a replacement."""
+    from whsim.analysis.staffing.profile import process_deps
+
+    m = templates.load_template_model(template_id)
+    g = flowgraph.resolve(m)
+    assert m.process.flow_edges
+    edges = {(e.src, e.dst) for e in g.edges if e.src}
+    for dst, ups in process_deps(m).items():
+        for u in ups:
+            assert (u, dst) in edges, f"{u}→{dst} lost in the authored graph"
+    # Legs the design actually authored are NOT derived, and any machine they name
+    # is one that is placed (otherwise diagnose would be shouting).
+    assert any(not e.derived for e in g.edges)
+    assert flowgraph.diagnose(m) == []
 
 
 @pytest.mark.parametrize("template_id", ALL_TEMPLATES)
