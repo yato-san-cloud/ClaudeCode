@@ -22,10 +22,13 @@ export const EQUIP_JP = {
 // Rack ABC class -> colour.
 export const ABC_COLOR = { A: '#d7301f', B: '#fc8d59', C: '#fdcc8a' };
 
-// Worker/agent state -> colour.
+// Worker/agent state -> colour. Half a step off full saturation so a floor of
+// them reads as a shift rather than a pinball table; hues (= the meaning) are
+// unchanged. MUST stay numerically equal to the twin in `js/view3d/constants.js`
+// — the 2D dot and the 3D vest are the same worker (invariant 11).
 export const STATE_COLOR = {
-  idle: '#9e9e9e', travel: '#1f78b4', carry: '#6a3d9a',
-  pick: '#33a02c', pack: '#e31a1c', inspect: '#ffb300',
+  idle: '#9aa0a6', travel: '#3f719d', carry: '#6b5289',
+  pick: '#4d8c47', pack: '#c0554c', inspect: '#d9a441',
 };
 
 // Storage-equipment colours (mirror whsim.racktypes) — tints the 2D shelf bodies
@@ -36,10 +39,10 @@ export const RACK_COLOR = {
   mezzanine: '#b0885f', mobile: '#e07ad2', hanger: '#c8d44e',
 };
 
-// AGV action -> colour.
+// AGV action -> colour (same de-saturation pass as STATE_COLOR above).
 export const AGV_COLOR = {
-  idle: '#9e9e9e', travel: '#1f78b4', pickup: '#33a02c',
-  dropoff: '#f57f17', charge: '#8e24aa',
+  idle: '#9aa0a6', travel: '#3f719d', pickup: '#4d8c47',
+  dropoff: '#d08a30', charge: '#7e5c9c',
 };
 
 // 荷物（ワーク） state -> colour. The GOODS, as opposed to the people and

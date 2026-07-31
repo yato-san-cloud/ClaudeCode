@@ -93,11 +93,18 @@ export class Scene3D {
     }
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
-    // Soft, proposal-grade shadows. PCFSoft gives a fixed wide kernel in ONE
-    // pass — VSM's blur passes would cost two extra full shadow-map renders per
-    // frame for a softness we get from the fitted frustum anyway.
+    // Soft, proposal-grade shadows in ONE pass — VSM's blur passes would cost two
+    // extra full shadow-map renders per frame.
+    // PCF, not PCFSoft, and that is a softness decision rather than a perf one:
+    // in three r160 the PCF_SOFT kernel is nailed to ±1 texel (it ignores
+    // shadow.radius), so on a frustum fitted to a 100 m building its penumbra is
+    // a few centimetres — i.e. the hard-edged rack shadows this pass set out to
+    // fix. PCF's 17 taps ARE scaled by shadow.radius (see _fitShadow), which buys
+    // a ~20 cm penumbra: a high-bay luminaire is an area source, and its shadows
+    // have a real edge gradient. It also happens to be the cheaper of the two
+    // (PCF_SOFT's 20 lerped taps are 4 fetches each).
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(this.renderer.domElement);
 
     // Scene + camera.

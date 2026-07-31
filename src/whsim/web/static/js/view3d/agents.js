@@ -21,7 +21,7 @@
 //     rigid, so dozens of movers stay cheap (no per-frame allocation anywhere).
 import * as THREE from '../../vendor/three/three.module.js';
 import {
-  STATE_COLOR, AGV_COLOR, AGV_Y, GLOW_CYAN,
+  STATE_COLOR, AGV_COLOR, AGV_Y, ACTIVITY_TINT,
   ACTIVE_WORKER, ACTIVE_AGV, CARRY_AGV, ROUTE_COLOR,
   PICK_GLOW, PICK_LINE, CARTON_BASE, CARTON_TONES,
   sampleKeyframes, approach, _enableShadows,
@@ -267,11 +267,18 @@ export const agentMethods = {
       mSkin: mat({ color: 0xe3b98d, roughness: 0.72, metalness: 0.02 }),
       mShirt: mat({ color: 0x33404f, roughness: 0.85, metalness: 0.03 }),
       mTrouser: mat({ color: 0x232c38, roughness: 0.9, metalness: 0.02 }),
+      // Retro-reflective banding. It returns light to its source rather than
+      // emitting any, so the emissive term is only a stand-in for the fixture
+      // overhead — at 0.22 it was a lit strip in its own right and the bands
+      // floated off the vest in every dark frame.
       mBand: mat({
-        color: 0xe8eef2, roughness: 0.32, metalness: 0.15,
-        emissive: new THREE.Color(0x9fb6c2), emissiveIntensity: 0.22,
+        color: 0xdfe6ea, roughness: 0.34, metalness: 0.15,
+        emissive: new THREE.Color(0x9fb6c2), emissiveIntensity: 0.10,
       }),
-      mCap: mat({ color: 0xf2c200, roughness: 0.5, metalness: 0.08 }),
+      // Site helmet: a half step off signal yellow. The cap is the highest,
+      // roundest, most-repeated object in the frame, so it sets the saturation of
+      // the whole crowd; at 0xf2c200 twenty of them read as a bowl of lemons.
+      mCap: mat({ color: 0xd9b23e, roughness: 0.55, metalness: 0.05 }),
       mTote: mat({ color: 0xc9a36b, roughness: 0.85, metalness: 0.04 }),
       mCarton: mat({ color: 0xd8b483, roughness: 0.9, metalness: 0.02 }),
       // order-picker platform
@@ -510,7 +517,7 @@ export const agentMethods = {
       // Per-worker vest material: lerps to the state colour + carries the glow.
       const vestMat = new THREE.MeshStandardMaterial({
         color: STATE_COLOR.idle, roughness: 0.48, metalness: 0.05,
-        emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
+        emissive: new THREE.Color(ACTIVITY_TINT), emissiveIntensity: 0.0,
       });
       this._materials.push(vestMat);
       const vest = new THREE.Mesh(A.gVest, vestMat);
@@ -651,7 +658,7 @@ export const agentMethods = {
       // material (the colour the action-lerp drives) exactly as before.
       const mat = new THREE.MeshStandardMaterial({
         color: AGV_COLOR.idle, roughness: 0.38, metalness: 0.5,
-        emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
+        emissive: new THREE.Color(ACTIVITY_TINT), emissiveIntensity: 0.0,
       });
       this._materials.push(mat);
       const mesh = new THREE.Mesh(A.gAgvShell, mat);
@@ -689,7 +696,7 @@ export const agentMethods = {
       // Carried tote: a child of the chassis so it follows position for free.
       const toteMat = new THREE.MeshStandardMaterial({
         color: 0xc9a36b, roughness: 0.85, metalness: 0.05,
-        emissive: new THREE.Color(GLOW_CYAN), emissiveIntensity: 0.0,
+        emissive: new THREE.Color(ACTIVITY_TINT), emissiveIntensity: 0.0,
       });
       this._materials.push(toteMat);
       const tote = new THREE.Mesh(A.gAgvTote, toteMat);
@@ -937,15 +944,21 @@ export const agentMethods = {
     return tex;
   },
 
-  // -- Additive activity glow halos (pseudo-bloom) --------------------------
-  // A soft radial cyan billboard Sprite riding on top of each active agent
-  // (worker / AGV+tote / forklift). This is a CHEAP approximation of bloom: one
-  // shared CanvasTexture + AdditiveBlending makes overlapping active machines
-  // "bleed" light, reading like a glow without any post-processing pass (none is
-  // vendored). It rides the SAME activity ramp as the existing emissive pulse
-  // (worker.glow / agv.glow / forklift.glow), so it appears only while the agent
-  // works/moves and fully vanishes when idle. depthWrite:false keeps it from
-  // occluding; depthTest stays true so it tucks naturally behind geometry.
+  // -- Additive activity halos ----------------------------------------------
+  // A soft radial billboard Sprite riding on top of each active agent (worker /
+  // AGV+tote / forklift), on the SAME activity ramp as the emissive pulse
+  // (worker.glow / …), so it appears only while the agent works and vanishes
+  // when idle. depthWrite:false keeps it from occluding; depthTest stays true so
+  // it tucks behind geometry.
+  //
+  // It used to be a cyan pseudo-BLOOM at 0.75 opacity, and it was the single
+  // least believable thing in the renderer: every picker stood in a turquoise
+  // pool of light, which no warehouse has and no architectural render would
+  // draw. The information it carries — "this one is working" — is worth keeping,
+  // so the effect stays and its LOOK changes: a warm near-white at a fifth of
+  // the opacity, which reads as the luminaire overhead picking the worker out
+  // rather than as the worker emitting light. Overlapping actives still bleed
+  // together, so a busy pack line still brightens.
   _buildGlowHalos() {
     this._glowSprites = [];
     const tex = this._makeGlowTexture();
@@ -954,7 +967,7 @@ export const agentMethods = {
     // share the single additive CanvasTexture above. Tracked for dispose.
     const mkSprite = (size, yLift) => {
       const mat = new THREE.SpriteMaterial({
-        map: tex, color: GLOW_CYAN, transparent: true, opacity: 0,
+        map: tex, color: ACTIVITY_TINT, transparent: true, opacity: 0,
         blending: THREE.AdditiveBlending, depthWrite: false,
       });
       this._materials.push(mat);
@@ -981,8 +994,10 @@ export const agentMethods = {
     }
   },
 
-  // Radial cyan gradient (transparent core→edge) sized for additive blending.
-  // Black edge so AdditiveBlending contributes nothing outside the falloff.
+  // Radial warm-white gradient (bright core→transparent edge) for additive
+  // blending. Black edge so AdditiveBlending contributes nothing outside the
+  // falloff, and a much faster falloff than the old cyan disc so the halo hugs
+  // the figure instead of painting a 2 m ring on the slab.
   // Cached as a CanvasTexture, shared by every halo sprite.
   _makeGlowTexture() {
     const S = 128;
@@ -990,8 +1005,9 @@ export const agentMethods = {
     canvas.width = S; canvas.height = S;
     const ctx = canvas.getContext('2d');
     const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-    g.addColorStop(0.0, 'rgba(190,245,255,0.95)');
-    g.addColorStop(0.35, 'rgba(0,212,240,0.45)');
+    g.addColorStop(0.0, 'rgba(255,244,224,0.85)');
+    g.addColorStop(0.22, 'rgba(255,232,196,0.28)');
+    g.addColorStop(0.55, 'rgba(255,226,186,0.06)');
     g.addColorStop(1.0, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, S, S);
@@ -1460,7 +1476,11 @@ export const agentMethods = {
       const p = (h.kind === 'forklift') ? ref.group.position : ref.mesh.position;
       sp.position.x = p.x;
       sp.position.z = p.z;
-      h.mat.opacity = Math.pow(g, 0.7) * 0.75;
+      // 0.16, not 0.75: the halo is a hint that this agent is working, not a
+      // light source. Anything stronger and the additive blend clips the vest
+      // and the floor under it to white — which is what "neon" actually looks
+      // like on a filmic curve.
+      h.mat.opacity = Math.pow(g, 0.7) * 0.16;
       let breath = 0;
       if (this._beltSpeed !== 0) {
         breath = Math.sin(this._clock.elapsedTime * 2.4 + h.base) * 0.05 * g;
@@ -1516,7 +1536,9 @@ export const agentMethods = {
       w.vestMat.color.lerp(w._target, 1 - Math.exp(-dt * 12));
       const active = (glowOn && ACTIVE_WORKER[s.state]) ? 1 : 0;
       w.glow = approach(w.glow, active, dt, 4);
-      w.vestMat.emissiveIntensity = w.glow * 0.30;
+      // The vest lifts slightly while the worker is active. Warm and faint
+      // (0.30 → 0.12): a hi-vis vest under a high bay brightens, it does not lamp.
+      w.vestMat.emissiveIntensity = w.glow * 0.12;
 
       // --- motion: real displacement drives speed + walk phase ---------------
       _stepMotion(w, s.x, s.y, dt);
@@ -1706,7 +1728,7 @@ export const agentMethods = {
       a.mesh.material.color.lerp(a._target, k);
       const activeState = ACTIVE_AGV[s.state] ? 1 : 0;
       a.glow = approach(a.glow, (motion ? activeState : 0), dt, 4);
-      a.mat.emissiveIntensity = a.glow * 0.45;
+      a.mat.emissiveIntensity = a.glow * 0.18;
       if (a.ledMat) {
         a.ledMat.color.lerp(a._target, k);
         a.ledMat.emissive.copy(a.ledMat.color);
@@ -1718,7 +1740,7 @@ export const agentMethods = {
         a.tote.visible = !!CARRY_AGV[s.state];
         // Keep the carried tote reading as CARDBOARD — a full glow ramp on it
         // washes the box out to the same cyan as the robot it rides on.
-        a.tote.material.emissiveIntensity = a.glow * 0.18;
+        a.tote.material.emissiveIntensity = a.glow * 0.08;
         // Load settles on its own tiny spring as the robot starts/stops.
         a.tote.position.y = this._aa.agvBase + 0.61 + a.bob * 0.4;
       }

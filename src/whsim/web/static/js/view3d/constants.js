@@ -10,23 +10,29 @@ import * as THREE from '../../vendor/three/three.module.js';
 import { RACK_COLOR } from '../constants.js';
 
 // Worker state -> color.
+// Half a step off full saturation: these are 1.7 m of PAINTED FABRIC standing in
+// a quiet daylight hall, and at ColorBrewer's poster saturation a dozen of them
+// read as a pinball table rather than a shift. The hues (and therefore the
+// meaning) are unchanged — only chroma and value move, and the twin table in
+// `js/constants.js` moves with them so the 2D dots stay the same colour as the
+// vest they describe (invariant 11).
 export const STATE_COLOR = {
-  idle:   0x9e9e9e,
-  travel: 0x1f78b4,
-  carry:  0x6a3d9a,
-  pick:   0x33a02c,
-  pack:   0xe31a1c,
-  inspect: 0xffb300,
+  idle:   0x9aa0a6,
+  travel: 0x3f719d,
+  carry:  0x6b5289,
+  pick:   0x4d8c47,
+  pack:   0xc0554c,
+  inspect: 0xd9a441,
 };
 // Rack ABC class -> color.
 export const ABC_COLOR = { A: 0xd7301f, B: 0xfc8d59, C: 0xfdcc8a };
 // AGV action -> color.
 export const AGV_COLOR = {
-  idle:    0x9e9e9e,
-  travel:  0x1f78b4,
-  pickup:  0x33a02c,
-  dropoff: 0xf57f17,
-  charge:  0x8e24aa,
+  idle:    0x9aa0a6,
+  travel:  0x3f719d,
+  pickup:  0x4d8c47,
+  dropoff: 0xd08a30,
+  charge:  0x7e5c9c,
 };
 // Height (m) at which AGV boxes ride, centered on their thin body.
 export const AGV_Y = 0.2;
@@ -155,8 +161,15 @@ export const RACK_LOD = {
 export const PICK_GLOW = 0xffe14d;      // warm amber pulse on the reached cell
 export const PICK_LINE = 0xffe14d;
 
-// Cyan accent used for the "active machine glow" (WITNESS-beating chrome).
+// Cyan accent used for interactive CHROME (the selection ring). Deliberately
+// brand cyan: it is a cursor, not part of the building.
 export const GLOW_CYAN = 0x00d4f0;
+// Tint of the "this agent is working" halo + the vest's activity emissive.
+// It used to be GLOW_CYAN, which put a neon pool of light on the floor under
+// every picker — the single most science-fiction thing in the frame, and the
+// opposite of a photographed hall. A warm near-white reads as the fixture above
+// the worker catching their vest, which is what is actually happening.
+export const ACTIVITY_TINT = 0xffe7c4;
 // Agent states that read as "working/moving" → glow ramps up; others decay.
 export const ACTIVE_WORKER = { travel: 1, carry: 1, pick: 1, pack: 1, inspect: 1 };
 export const ACTIVE_AGV = { travel: 1, pickup: 1, dropoff: 1 };
@@ -167,22 +180,28 @@ export const CARRY_AGV = { pickup: 1, dropoff: 1, travel: 1 };
 // and tone-mapping exposure ONLY — never static geometry. See setPreset().
 // `shadow`: enable hard cast shadows for this preset; `shadowOpacity` controls
 // how dark the contact shadow reads (lower = softer/lighter).
+// COLOUR TEMPERATURE. Every preset now separates a WARM key from a COOL fill /
+// sky, which is what makes a rendered interior read as photographed rather than
+// modelled: the sun (or the high-bay lamp) is warm, the light that fills its
+// shadow comes off the sky and the cold end of the room. Before this the brand
+// key was 0xbfe6ff — a cold key over a cold ambient, so lit and unlit faces
+// differed only in brightness and the whole hall looked printed on one plate.
 export const PRESETS = {
-  // Dark-first brand preset (default) — matches the cool-slate + cyan chrome.
+  // Dark-first brand preset (default) — cool slate hall, warm high-bay key.
   brand: {
     background: 0x0f141d, fogColor: 0x121a26,
-    hemiSky: 0x6a8ba8, hemiGround: 0x0c1018, hemiInt: 0.5,
-    ambient: 0x2b3b52, ambientInt: 0.30,
-    dirColor: 0xbfe6ff, dirInt: 0.72,
-    exposure: 1.0, rackEmissive: 0.16,
+    hemiSky: 0x74889b, hemiGround: 0x0c1018, hemiInt: 0.5,
+    ambient: 0x2c3746, ambientInt: 0.30,
+    dirColor: 0xffe9cf, dirInt: 0.72,
+    exposure: 1.0, rackEmissive: 0.08,
     shadow: true, shadowOpacity: 0.55,
   },
   natural: {
-    background: 0xeef1f5, fogColor: 0xeef1f5,
-    hemiSky: 0xffffff, hemiGround: 0xb7c0cc, hemiInt: 0.85,
-    ambient: 0xffffff, ambientInt: 0.25,
-    dirColor: 0xfff4e6, dirInt: 0.85,
-    exposure: 1.05, rackEmissive: 0.06,
+    background: 0xe9ecef, fogColor: 0xe9ecef,
+    hemiSky: 0xdde8f4, hemiGround: 0xb3aea6, hemiInt: 0.85,
+    ambient: 0xf4f2ee, ambientInt: 0.25,
+    dirColor: 0xfff0da, dirInt: 0.85,
+    exposure: 1.05, rackEmissive: 0.04,
     shadow: true, shadowOpacity: 0.9,
   },
   evening: {

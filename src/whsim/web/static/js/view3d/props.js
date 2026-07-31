@@ -40,6 +40,46 @@ function canvas2d(w, h) {
 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
+// Typography for every plate this module draws. The stack is deliberately
+// JP-first: these captions are Japanese and the label is unreadable if the
+// browser falls back to a Latin face and composes the kana from a substitute.
+const LABEL_FONT = '"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",'
+  + '"Yu Gothic Medium","Meiryo",sans-serif';
+const font = (px, weight = 700) => `${weight} ${px}px ${LABEL_FONT}`;
+
+// Rounded rectangle, with a hand-rolled fallback for canvas2d implementations
+// that predate roundRect.
+function roundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, rr); return; }
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
+}
+
+// Largest font size at which `text` fits inside `room` px. Japanese captions run
+// 4–14 characters and a fixed size silently truncated the long ones (「梱包工程
+// （無変更）」 lost its last two characters — the one label whose entire job was
+// to say the packing step is unchanged).
+function fitFont(ctx, text, room, startPx, minPx = 8) {
+  let px = startPx;
+  ctx.font = font(px);
+  const w = ctx.measureText(text).width;
+  if (w > room && w > 0) {
+    px = Math.max(minPx, Math.floor(px * room / w));
+    ctx.font = font(px);
+  }
+  return px;
+}
+
 // Scratch vector for the per-frame caption range check (no per-frame allocation).
 const _wp = new THREE.Vector3();
 
@@ -242,30 +282,49 @@ export const propMethods = {
     const text = String(spec.text || '');
     const w = num(spec.w, 4);
     const d = num(spec.d, 1);
-    const PX = 128; // texels per metre of the long side
+    const PX = 160; // texels per metre (was 128 — floor text is read obliquely)
     const cw = Math.max(64, Math.min(2048, Math.round(w * PX)));
     const ch = Math.max(32, Math.min(1024, Math.round(d * PX)));
     const { c, ctx } = canvas2d(cw, ch);
     ctx.clearRect(0, 0, cw, ch);
+    const ink = String(spec.color || '#1F497D');
+    // The plate. A flush-cut rectangle with the text jammed to its edges read as
+    // a screenshot dropped on the floor; an inset panel with round corners, a
+    // hairline of the text's own ink and real side margins reads as signage.
+    const PAD = Math.max(3, Math.round(Math.min(cw, ch) * 0.055));
     if (spec.plate) {
-      ctx.fillStyle = spec.plate === true ? 'rgba(255,255,255,0.72)' : String(spec.plate);
-      ctx.fillRect(0, 0, cw, ch);
+      const px0 = PAD * 0.6;
+      const py0 = PAD * 0.6;
+      const pw = cw - px0 * 2;
+      const phh = ch - py0 * 2;
+      const r = Math.min(phh * 0.28, ch * 0.22);
+      ctx.save();
+      // A very soft drop shadow lifts the plate off the concrete without
+      // pretending the decal has thickness.
+      ctx.shadowColor = 'rgba(20,26,34,0.22)';
+      ctx.shadowBlur = Math.max(2, PAD * 0.9);
+      ctx.shadowOffsetY = Math.max(1, PAD * 0.35);
+      ctx.fillStyle = spec.plate === true ? 'rgba(255,255,255,0.86)' : String(spec.plate);
+      roundRectPath(ctx, px0, py0, pw, phh, r);
+      ctx.fill();
+      ctx.restore();
+      // Hairline border in the ink colour at low alpha: the quiet rule that
+      // makes a white panel look printed rather than cut out.
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = Math.max(1, Math.round(Math.min(cw, ch) * 0.008));
+      roundRectPath(ctx, px0, py0, pw, phh, r);
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.fillStyle = String(spec.color || '#1F497D');
+    ctx.fillStyle = ink;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    // Fit the text to the plate. A fixed size silently truncates the longer
-    // names — 「梱包工程（無変更）」 lost its last two characters, which is the
-    // one label whose whole job is to say the packing step is unchanged.
-    const font = (px) => `700 ${px}px "Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif`;
-    let fs = Math.round(ch * num(spec.textScale, 0.52));
-    ctx.font = font(fs);
-    const room = cw * 0.94;
-    const wide = ctx.measureText(text).width;
-    if (wide > room) {
-      fs = Math.max(8, Math.floor(fs * room / wide));
-      ctx.font = font(fs);
-    }
+    // Text is fitted to the plate MINUS its margins, not to the full bitmap, so
+    // a long caption ends inside the panel instead of touching its edge.
+    const room = cw - PAD * 4;
+    fitFont(ctx, text, room, Math.round(ch * num(spec.textScale, 0.46)));
     ctx.fillText(text, cw / 2, ch / 2);
     const tex = new THREE.CanvasTexture(c);
     // Canvas pixels are sRGB. Without saying so the renderer treats them as
@@ -309,29 +368,68 @@ export const propMethods = {
   },
 
   // A camera-facing caption above a prop (station names, 停A/停B …).
+  //
+  // Drawn as a proper name plate: round corners, real horizontal padding, a
+  // hairline rule in the ink colour and a soft cast shadow so it separates from
+  // whatever it floats over. Two shape rules matter as much as the styling:
+  //   • the plate is SIZED TO ITS TEXT. It used to be a fixed 2.4 m × 0.6 m card
+  //     whatever it said, so 「29」 got the same banner as 「既設 駆動コンベア」 and
+  //     a row of numbered stations read as a row of billboards.
+  //   • the height is the anchor (labelScale still scales it exactly as before),
+  //     and the width follows the measured text, clamped so nothing degenerates.
   _attachBillboard(group, spec, h) {
     const text = String(spec.label || '');
-    const W = 512;
-    const H = 128;
+    const H = 192;                       // texel height of the bitmap
+    const PAD = 34;                      // side padding, in the same texels
+    const probe = canvas2d(8, 8).ctx;
+    const FS = 84;
+    probe.font = font(FS);
+    const textW = Math.max(1, probe.measureText(text).width);
+    // Plate aspect, clamped: 1.35 keeps a 1–2 character plate from becoming a
+    // stamp, 4.6 keeps a long one from becoming a ribbon (the old fixed card was
+    // 4.0, so the longest captions are essentially unchanged).
+    const aspect = Math.max(1.35, Math.min(4.6, (textW + PAD * 2) / (H * 0.62)));
+    const W = Math.round(H * aspect);
     const { c, ctx } = canvas2d(W, H);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = String(spec.labelBg || 'rgba(255,255,255,0.88)');
-    const r = 16;
-    ctx.beginPath();
-    ctx.roundRect ? ctx.roundRect(4, 24, W - 8, H - 48, r) : ctx.rect(4, 24, W - 8, H - 48);
+    const ink = String(spec.labelColor || '#1F497D');
+    // Plate body occupies the middle band; the margin above/below is what gives
+    // the sprite its optical breathing room against the scene.
+    const py = 30;
+    const ph = H - py * 2;
+    const r = Math.round(ph * 0.30);
+    ctx.save();
+    ctx.shadowColor = 'rgba(18,24,32,0.30)';
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 4;
+    ctx.fillStyle = String(spec.labelBg || 'rgba(255,255,255,0.92)');
+    roundRectPath(ctx, 6, py, W - 12, ph, r);
     ctx.fill();
-    ctx.fillStyle = String(spec.labelColor || '#1F497D');
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.24;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 2.5;
+    roundRectPath(ctx, 6, py, W - 12, ph, r);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = ink;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '700 54px "Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif';
+    // Belt and braces: the aspect clamp above can still leave a very long
+    // caption short of room, so fit it rather than let it run off the plate.
+    fitFont(ctx, text, W - PAD * 2, FS);
     ctx.fillText(text, W / 2, H / 2);
     const tex = new THREE.CanvasTexture(c);
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    // Captions are read at an angle from across the hall; without anisotropy the
+    // mip chain smears the kana.
+    tex.anisotropy = this._maxAniso ? this._maxAniso() : 1;
     this._textures.push(tex);
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true });
     const sp = new THREE.Sprite(mat);
     const scale = num(spec.labelScale, 1);
-    sp.scale.set(2.4 * scale, 0.6 * scale, 1);
+    sp.scale.set(0.6 * aspect * scale, 0.6 * scale, 1);
     sp.position.y = h + num(spec.labelLift, 0.55);
     group.add(sp);
     this._materials.push(mat);
@@ -436,25 +534,27 @@ export const propMethods = {
     const host = document.createElement('div');
     host.className = 'v3d-concept';
     host.style.cssText = 'position:absolute;inset:0;pointer-events:none;'
-      + 'font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;'
-      + 'z-index:6';
+      + `font-family:${LABEL_FONT};z-index:6`;
     if (meta.title) {
       const h = document.createElement('div');
       h.textContent = String(meta.title);
       // The title sits over whatever the top of the frame happens to be — a pale
       // studio sweep in one scene, a dark warehouse ceiling in the next. A halo
-      // in BOTH directions is the only thing that survives both.
-      h.style.cssText = 'position:absolute;left:28px;top:22px;color:#ffffff;'
-        + 'font-size:26px;font-weight:700;letter-spacing:.02em;'
-        + 'text-shadow:0 2px 6px rgba(0,0,0,.75), 0 0 2px rgba(0,0,0,.9)';
+      // in BOTH directions is the only thing that survives both. Weight 600 with
+      // open tracking, not 700 tight: a caption on a building, not a headline.
+      h.style.cssText = 'position:absolute;left:30px;top:24px;color:#ffffff;'
+        + 'font-size:25px;font-weight:600;letter-spacing:.045em;line-height:1.3;'
+        + 'text-shadow:0 2px 10px rgba(0,0,0,.55), 0 0 2px rgba(0,0,0,.85)';
       host.appendChild(h);
     }
     if (meta.watermark) {
       const w = document.createElement('div');
       w.textContent = String(meta.watermark);
-      w.style.cssText = 'position:absolute;right:24px;bottom:18px;color:#5A6B80;'
-        + 'font-size:15px;font-weight:600;background:rgba(255,255,255,.72);'
-        + 'padding:6px 12px;border-radius:4px';
+      w.style.cssText = 'position:absolute;right:26px;bottom:20px;color:#4a5a6e;'
+        + 'font-size:14px;font-weight:600;letter-spacing:.02em;'
+        + 'background:rgba(255,255,255,.82);border:1px solid rgba(31,73,125,.16);'
+        + 'padding:7px 14px;border-radius:7px;'
+        + 'box-shadow:0 2px 10px rgba(16,22,30,.16)';
       host.appendChild(w);
     }
     const parent = this.container;

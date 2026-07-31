@@ -91,31 +91,37 @@ const ART = {
   // camera), the key was the weakest of any preset, and the shell/floor tints
   // were only a few levels above the background. All three are corrected here.
   brand: {
-    env: 0.98, exposure: 1.32,
+    env: 0.98, exposure: 1.30,
     fogNear: 1.10, fogFar: 3.8,
-    hemiScale: 0.58, ambScale: 0.58, dirScale: 2.00,
-    fillColor: 0x8fb4de, fillInt: 0.30,
-    bounceColor: 0x51739c, bounceInt: 0.16,
+    // Key over ambient. Pulling hemi/ambient DOWN and the key UP is what stops
+    // the hall reading flat: with the ambient terms this high the shadowed side
+    // of a rack sat within a few percent of its lit side, so nothing had a form.
+    hemiScale: 0.46, ambScale: 0.44, dirScale: 2.28,
+    fillColor: 0x8aa8cc, fillInt: 0.26,
+    bounceColor: 0x64798f, bounceInt: 0.18,
     roomStrip: 0xdcefff, roomStripInt: 6.2,
     roomWall: 0x4a5666, roomWallInt: 1.05, roomFloor: 0x11171f,
-    wall: 0x5d6875, curb: 0x39424d, ceil: 0x3e4854, ceilEmissive: 0.10,
-    steel: 0x6d7887, column: 0x6b7684, parapet: 0x4c5764,
+    // Envelope tones share ONE slate family (wall/column/parapet within a few
+    // levels of each other, curb and ceiling as its dark and light ends), so the
+    // building reads as one material in several conditions rather than four.
+    wall: 0x616974, curb: 0x525b66, ceil: 0x434b55, ceilEmissive: 0.15,
+    steel: 0x6b737e, column: 0x69717c, parapet: 0x4f5761,
     fixture: 7.0, skylight: 0.55, points: 0,
-    floorTint: 0x6d7783, mark: 0.80, grid: 0.16, apron: 0x171f2c,
+    floorTint: 0x79818b, mark: 0.70, grid: 0.14, apron: 0x171f2c,
   },
   // ナチュラル (昼) — daylight high-bay, the neutral "photo" preset.
   natural: {
-    env: 0.64, exposure: 0.96,
+    env: 0.64, exposure: 1.00,
     fogNear: 1.20, fogFar: 4.2,
-    hemiScale: 0.34, ambScale: 0.30, dirScale: 1.74,
-    fillColor: 0xcfe0f2, fillInt: 0.22,
-    bounceColor: 0xffeacd, bounceInt: 0.12,
+    hemiScale: 0.30, ambScale: 0.24, dirScale: 1.98,
+    fillColor: 0xc3d6ea, fillInt: 0.26,
+    bounceColor: 0xffe8c8, bounceInt: 0.16,
     roomStrip: 0xffffff, roomStripInt: 6.5,
     roomWall: 0x9aa4b2, roomWallInt: 1.05, roomFloor: 0x3a3f46,
-    wall: 0xa6aeb8, curb: 0x6b727a, ceil: 0xb2b8bf, ceilEmissive: 0.05,
-    steel: 0x8d949d, column: 0x9aa2aa, parapet: 0x929aa3,
+    wall: 0xaeb1b4, curb: 0x8b8e92, ceil: 0xbabdc0, ceilEmissive: 0.08,
+    steel: 0x8d9196, column: 0x9da0a4, parapet: 0x979a9e,
     fixture: 3.0, skylight: 0.75, points: 0,
-    floorTint: 0xa1a6ad, mark: 0.92, grid: 0.09, apron: 0x4d545c,
+    floorTint: 0x9fa2a5, mark: 0.78, grid: 0.09, apron: 0x565b60,
   },
   // 夕 — low warm key raking through the skylights.
   evening: {
@@ -406,10 +412,15 @@ export const sceneMethods = {
     this.scene.add(ambient);
     this._ambient = ambient;
 
-    // KEY: a high, slightly off-axis sun. Elevation ~53°, raking across the
-    // aisles so racks read as volumes and cast long, legible shadows.
+    // KEY: an off-axis sun raking across the aisles so racks read as volumes.
+    // Elevation ~41°, down from 53°: at the old angle a 2.4 m rack threw a 1.8 m
+    // shadow, which fits inside its own footprint plus a sliver and left the
+    // aerial — the shot a proposal opens with — looking like an unlit plan. At
+    // 41° the same rack lays ~2.8 m across the aisle, so the runs read as solids
+    // with gaps between them. `_fitShadow` refits the frustum from this vector,
+    // so the longer shadows cost nothing in map resolution.
     const dir = new THREE.DirectionalLight(p.dirColor, p.dirInt * a.dirScale);
-    const L = new THREE.Vector3(0.42, 0.80, 0.43).normalize().multiplyScalar(span * 1.15);
+    const L = new THREE.Vector3(0.52, 0.62, 0.50).normalize().multiplyScalar(span * 1.15);
     dir.position.set(cx + L.x, Math.max(this._clearHeight() * 1.6, L.y), cz + L.z);
     dir.target.position.set(cx, 0, cz);
     dir.castShadow = true;
@@ -487,7 +498,13 @@ export const sceneMethods = {
     const texel = (maxX - minX) / Math.max(1, dir.shadow.mapSize.x);
     dir.shadow.bias = -0.00035;
     dir.shadow.normalBias = clamp(texel * 1.6, 0.02, 0.35);
-    dir.shadow.radius = 2.2;   // used by PCF/VSM filtering
+    // Penumbra width, in shadow texels (PCFShadowMap scales its 17-tap kernel by
+    // this). Held to a WORLD size rather than a texel count: the same 2048² map
+    // fitted to a 30 m room and to a 110 m shed has texels 4× apart, and a fixed
+    // texel radius would give the small building a razor edge and the big one a
+    // smear. ~18 cm is a high-bay fixture's own softness, clamped so a tiny
+    // layout still gets a visible gradient and a huge one stays inside the kernel.
+    dir.shadow.radius = clamp(0.18 / Math.max(1e-4, texel), 1.5, 4.5);
   },
 
   // -- procedural floor ------------------------------------------------------
@@ -511,12 +528,19 @@ export const sceneMethods = {
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     };
-    for (let i = 0; i < 460; i++) {
-      const r = 22 + rand() * 155;
+    // QUIET. The first cut ran 460 blobs at up to 0.17 alpha over a ±22 speckle,
+    // which is a marble worktop, not a power-trowelled slab: from the hero camera
+    // the floor was the busiest surface in the frame and it read as weather.
+    // Real warehouse concrete is nearly uniform, and what tells you it is
+    // concrete is the SEAM GRID and the grazing sheen — both kept below. Fewer,
+    // wider, fainter patches, so the mottle survives as a large-scale
+    // pour-to-pour tone shift instead of cloud.
+    for (let i = 0; i < 190; i++) {
+      const r = 60 + rand() * 190;
       const x = rand() * S;
       const y = rand() * S;
       const light = rand() > 0.48;
-      const alpha = 0.05 + rand() * 0.12;
+      const alpha = 0.022 + rand() * 0.05;
       blob(x, y, r, light, alpha);
       // Wrap copies so the tile stays seamless at its edges.
       if (x < r) blob(x + S, y, r, light, alpha);
@@ -524,11 +548,13 @@ export const sceneMethods = {
       if (y < r) blob(x, y + S, r, light, alpha);
       if (y > S - r) blob(x, y - S, r, light, alpha);
     }
-    // Fine aggregate speckle (per-pixel, cheap single pass).
+    // Fine aggregate speckle (per-pixel, cheap single pass). Half the former
+    // amplitude: a trowelled floor has grain, not gravel, and at ±22 the noise
+    // crawled under camera motion once anisotropy sharpened it.
     const img = ctx.getImageData(0, 0, S, S);
     const d = img.data;
     for (let i = 0; i < d.length; i += 4) {
-      const n = (rand() - 0.5) * 22;
+      const n = (rand() - 0.5) * 11;
       d[i] = clamp(d[i] + n, 0, 255);
       d[i + 1] = clamp(d[i + 1] + n, 0, 255);
       d[i + 2] = clamp(d[i + 2] + n, 0, 255);
@@ -541,7 +567,7 @@ export const sceneMethods = {
     ctx.moveTo(1.5, 0); ctx.lineTo(1.5, S);
     ctx.moveTo(0, 1.5); ctx.lineTo(S, 1.5);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(4.5, 0); ctx.lineTo(4.5, S);
@@ -573,16 +599,19 @@ export const sceneMethods = {
     const rand = rng(0xb00c1e);
     ctx.fillStyle = '#b4b4b4';   // ~0.70 roughness base
     ctx.fillRect(0, 0, S, S);
-    for (let i = 0; i < 180; i++) {
-      const r = 30 + rand() * 130;
+    for (let i = 0; i < 130; i++) {
+      const r = 55 + rand() * 150;
       const x = rand() * S;
       const y = rand() * S;
       const g = ctx.createRadialGradient(x, y, 0, x, y, r);
       // Burnished (smoother = darker roughness) vs worn (rougher = lighter).
-      // The smooth end goes low enough (~0.38) that power-washed patches pick up
+      // The smooth end goes low enough (~0.45) that power-washed patches pick up
       // a broad reflection of the high-bay fixtures — the tell of real concrete.
-      const v = rand() > 0.5 ? '40,40,40' : '225,225,225';
-      g.addColorStop(0, `rgba(${v},${0.2 + rand() * 0.4})`);
+      // This is the map that has to carry the floor now that the ALBEDO mottle is
+      // quiet: gloss variation is what concrete actually differs in, and unlike a
+      // dark blotch it only shows where a light happens to graze it.
+      const v = rand() > 0.5 ? '60,60,60' : '215,215,215';
+      g.addColorStop(0, `rgba(${v},${0.16 + rand() * 0.30})`);
       g.addColorStop(1, `rgba(${v},0)`);
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
@@ -619,7 +648,10 @@ export const sceneMethods = {
     const out = ctx.createImageData(S, S);
     const o = out.data;
     const at = (x, y) => hs[(((y + S) % S) * S + ((x + S) % S)) * 4] / 255;
-    const STRENGTH = 2.4;
+    // Shallower than before (2.4): the height field is the roughness slab, whose
+    // patches are now broad and low-contrast, and a strong normal on top of that
+    // only re-introduced the fizz the albedo pass just removed.
+    const STRENGTH = 1.5;
     for (let y = 0; y < S; y++) {
       for (let x = 0; x < S; x++) {
         const dx = (at(x + 1, y) - at(x - 1, y)) * STRENGTH;
@@ -722,7 +754,10 @@ export const sceneMethods = {
     const INSET = 1.7;
     const WIDE = 1.3;
     if (width > 8 && depth > 8) {
-      wctx.strokeStyle = 'rgba(46,138,87,0.55)';
+      // Muted works-green, not emerald: this is a 1.3 m stripe running the whole
+      // perimeter, so it is one of the largest single colours in a wide shot and
+      // at full chroma it was the first thing the eye went to in every frame.
+      wctx.strokeStyle = 'rgba(74,120,92,0.42)';
       wctx.lineWidth = Math.max(2, px(WIDE));
       wctx.strokeRect(px(INSET), pz(INSET),
         px(width - INSET * 2), pz(depth - INSET * 2));
@@ -790,12 +825,12 @@ export const sceneMethods = {
     const rough = this._makeFloorRoughness(TILE);
     const norm = this._makeFloorNormal(TILE);
     const mat = new THREE.MeshStandardMaterial({
-      color: a.floorTint, roughness: 0.78, metalness: 0.02,
+      color: a.floorTint, roughness: 0.72, metalness: 0.02,
       map, roughnessMap: rough,
     });
     if (norm) {
       mat.normalMap = norm;
-      mat.normalScale = new THREE.Vector2(0.35, 0.35);
+      mat.normalScale = new THREE.Vector2(0.22, 0.22);
     }
     mat.envMapIntensity = a.env;
     this._floorMat = mat;
@@ -982,8 +1017,18 @@ export const sceneMethods = {
     }
   },
 
-  // Conveyors: a chain of thin elongated boxes laid along each polyline,
-  // low to the floor, neutral metallic gray. Missing/empty -> nothing.
+  // Conveyors: a chain of thin elongated boxes laid along each polyline.
+  // Missing/empty -> nothing.
+  //
+  // DRIVEN vs GRAVITY. `speed_mps === 0` is a real, common piece of hardware — a
+  // free/gravity roller line somebody pushes cartons along — and the renderer
+  // already refuses to scroll its tread (that would claim a motor nobody bought).
+  // But a stopped belt and a roller bed looked IDENTICAL, which is worse than the
+  // moving lie: in a proposal the whole question is often "which of these lines
+  // is powered?". They are different objects, so they get different MATERIALS:
+  //   driven  — dark rubber tread, matte, cleats across the run
+  //   gravity — bright galvanised rollers, the tube highlight running with it
+  // Nothing else changes; the frame, the decks and the tote hand-off are shared.
   _buildConveyors() {
     const conveyors = this.replay.conveyors || [];
     if (conveyors.length === 0) return;
@@ -1001,9 +1046,20 @@ export const sceneMethods = {
     // tread appears to flow toward the conveyor's downstream end — a cheap,
     // GPU-only motion cue. Reduced-motion leaves it static (_beltSpeed = 0).
     const beltTex = this._makeBeltTexture();
+    const rollerTex = this._makeRollerTexture();
+    const sideTex = this._makeConveyorSideTexture();
+    // Legs are pooled across EVERY conveyor and drawn as two InstancedMeshes at
+    // the end. Built inline they were one Mesh per post — a 24-belt scene spent
+    // ~200 draw calls on scaffolding — and that budget is exactly what pays for
+    // the second post and the foot plate that make a leg read as a leg.
+    const legSpots = [];
     for (const c of conveyors) {
       const pts = c.points || [];
       const dir = (c.speed_mps || 0) < 0 ? -1 : 1; // flow direction along the chain
+      // Unstated speed keeps its historical default (0.6 = driven); an explicit
+      // 0 means "no motor" and picks the roller look.
+      const rawSpeed = Number.isFinite(Number(c.speed_mps)) ? Number(c.speed_mps) : 0.6;
+      const driven = Math.abs(rawSpeed) > 1e-6;
       // `elevation_m` is the belt's TREAD height; absent ⇒ the historical 0.21.
       const yMid = Number.isFinite(Number(c.elevation_m))
         ? Math.max(0, Number(c.elevation_m)) - BELT_H / 2
@@ -1019,22 +1075,45 @@ export const sceneMethods = {
         if (len <= 0) continue;
         // Box's local X is its length; rotate about Y to align to the segment.
         const geom = new THREE.BoxGeometry(len, BELT_H, BELT_W);
-        // Side rails / structure stay matte gray; the belt tread (the moving
-        // texture) is a separate, lightly-emissive material so it reads under any
-        // preset. Six-material BoxGeometry: index 2 is the +Y (top) face.
+        // Powder-coated frame, NOT chrome. At metalness 0.7 / roughness 0.35 the
+        // stringer was a mirror that picked up the whole environment map and
+        // flared white down its length; real conveyor side frames are painted or
+        // mill-finish steel and mostly diffuse.
         const railMat = new THREE.MeshStandardMaterial({
-          color: 0x9aa3ad, roughness: 0.35, metalness: 0.7,
+          color: 0x848d97, roughness: 0.52, metalness: 0.35,
         });
-        const treadTex = beltTex.clone();
+        // The two long faces carry the frame profile (web + a lighter top flange),
+        // which is what gives the run a machined edge instead of a slab side.
+        const sTex = sideTex.clone();
+        sTex.needsUpdate = true;
+        sTex.repeat.set(Math.max(1, Math.round(len / 1.2)), 1);
+        this._textures.push(sTex);
+        const sideMat = new THREE.MeshStandardMaterial({
+          color: 0x7b838d, roughness: 0.55, metalness: 0.32, map: sTex,
+        });
+        const treadTex = (driven ? beltTex : rollerTex).clone();
         treadTex.needsUpdate = true;
         // Repeat the tread ~1 per metre along the run so motion speed reads right.
-        treadTex.repeat.set(Math.max(1, Math.round(len)), 1);
+        // Rollers are ~10 cm apart, so their tile repeats far more often — a
+        // 1 m roller pitch would read as a slatted deck, not a roller bed.
+        treadTex.repeat.set(
+          Math.max(1, Math.round(len * (driven ? 1 : 3.2))), 1);
         this._textures.push(treadTex);
-        const treadMat = new THREE.MeshStandardMaterial({
-          color: 0x2b323b, roughness: 0.55, metalness: 0.25, map: treadTex,
-          emissive: new THREE.Color(0x121821), emissiveIntensity: 0.25,
-        });
-        const mats = [railMat, railMat, treadMat, railMat, railMat, railMat];
+        const treadMat = driven
+          // Rubber: matte, dielectric, and NOT emissive. The old 0x121821 glow at
+          // 0.25 was there to keep the belt legible in the dark preset, but a
+          // self-lit belt is the exact science-fiction cue this pass removes —
+          // legibility now comes from the key light and the frame contrast.
+          ? new THREE.MeshStandardMaterial({
+            color: 0x2f353d, roughness: 0.62, metalness: 0.0, map: treadTex,
+          })
+          // Galvanised roller tubes: bright, fairly smooth, properly metallic, so
+          // the environment map draws a long specular streak down the line — the
+          // single strongest "these are free-turning rollers" cue there is.
+          : new THREE.MeshStandardMaterial({
+            color: 0xaeb6be, roughness: 0.30, metalness: 0.80, map: treadTex,
+          });
+        const mats = [railMat, railMat, treadMat, railMat, sideMat, sideMat];
         const mesh = new THREE.Mesh(geom, mats);
         mesh.position.set(
           (p0[0] || 0) + dx / 2, yMid, (p0[1] || 0) + dz / 2,
@@ -1043,34 +1122,75 @@ export const sceneMethods = {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.scene.add(mesh);
-        // railMat is shared per-segment; track both materials + geom for dispose.
+        // railMat/sideMat are per-segment; track every material + geom for dispose.
         this._geometries.push(geom);
-        this._materials.push(railMat, treadMat);
+        this._materials.push(railMat, sideMat, treadMat);
         // Speed: belt linear speed (m/s) scaled to texture repeats; sign = flow.
         // 0 は「動かない」であって「未指定」ではない。`|| 0.6` だと無動力コンベア
         // （人が手で引き込むローラー等、実在する）のトレッドが流れてしまい、絵が
         // 「誰かが動かしている」と嘘をつく。未指定のときだけ既定値にする。
-        const raw = Number.isFinite(Number(c.speed_mps)) ? Number(c.speed_mps) : 0.6;
-        const sp = Math.min(2.5, Math.abs(raw)) * dir;
+        const sp = Math.min(2.5, Math.abs(rawSpeed)) * dir;
         this._belts.push({ mat: treadMat, speed: sp });
         this._beltDecks.push({
           id: c.id || '', y: deckY,
           x0: p0[0] || 0, z0: p0[1] || 0, x1: p1[0] || 0, z1: p1[1] || 0,
         });
         // Legs, so an elevated deck is standing on something instead of hovering.
+        // A support bent is a PAIR of posts under the two stringers with a foot
+        // plate each — a single centre post read as a lollipop and gave the run
+        // no visible width from the side. Collected, not built: see legSpots.
         if (deckY > 0.4) {
           const nLeg = Math.max(2, Math.round(len / 3));
+          const ux = dz / len;   // unit normal across the run
+          const uz = -dx / len;
           for (let s2 = 0; s2 <= nLeg; s2++) {
             const f = s2 / nLeg;
-            const lg = new THREE.CylinderGeometry(0.05, 0.05, yMid, 8);
-            const lm = new THREE.Mesh(lg, railMat);
-            lm.position.set((p0[0] || 0) + dx * f, yMid / 2, (p0[1] || 0) + dz * f);
-            lm.castShadow = true;
-            this.scene.add(lm);
-            this._geometries.push(lg);
+            const bx = (p0[0] || 0) + dx * f;
+            const bz = (p0[1] || 0) + dz * f;
+            for (const off of [-1, 1]) {
+              legSpots.push([bx + ux * off * (BELT_W / 2 - 0.06),
+                bz + uz * off * (BELT_W / 2 - 0.06), yMid]);
+            }
           }
         }
       }
+    }
+    this._buildConveyorLegs(legSpots);
+  },
+
+  // Every conveyor support post + foot plate in the scene, in two instanced draw
+  // calls. Heights differ per belt, so the shared unit-height geometry is scaled
+  // per instance rather than rebuilt.
+  _buildConveyorLegs(spots) {
+    if (!spots || spots.length === 0) return;
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x6f7780, roughness: 0.58, metalness: 0.3,
+    });
+    this._materials.push(mat);
+    const postG = new THREE.BoxGeometry(0.05, 1, 0.05);   // y scaled per instance
+    const footG = new THREE.BoxGeometry(0.16, 0.012, 0.16);
+    this._geometries.push(postG, footG);
+    const posts = new THREE.InstancedMesh(postG, mat, spots.length);
+    const feet = new THREE.InstancedMesh(footG, mat, spots.length);
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const one = new THREE.Vector3(1, 1, 1);
+    const sc = new THREE.Vector3(1, 1, 1);
+    const pos = new THREE.Vector3();
+    for (let i = 0; i < spots.length; i++) {
+      const [x, z, h] = spots[i];
+      pos.set(x, h / 2, z);
+      sc.set(1, Math.max(0.05, h), 1);
+      m4.compose(pos, q, sc); posts.setMatrixAt(i, m4);
+      pos.set(x, 0.006, z);
+      m4.compose(pos, q, one); feet.setMatrixAt(i, m4);
+    }
+    for (const mesh of [posts, feet]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+      this._geometries.push(mesh);   // InstancedMesh.dispose() frees its buffers
     }
   },
 
@@ -1080,19 +1200,100 @@ export const sceneMethods = {
   _makeBeltTexture() {
     const S = 64;
     const { c, ctx } = canvas2d(S, S);
-    ctx.fillStyle = '#20262e';
+    ctx.fillStyle = '#252b33';
     ctx.fillRect(0, 0, S, S);
-    // Two light cleat bands per tile (perpendicular to flow = vertical here).
-    ctx.fillStyle = 'rgba(150,165,180,0.55)';
-    ctx.fillRect(2, 0, 5, S);
-    ctx.fillRect(Math.round(S / 2) + 2, 0, 5, S);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    // A belt is a moulded rubber sheet, not a ladder: the old 55%-alpha slats
+    // were the brightest thing on the machine and read as painted stripes. Two
+    // faint cleat lines are enough to make map.offset legible as flow.
+    ctx.fillStyle = 'rgba(150,165,180,0.20)';
+    ctx.fillRect(2, 0, 4, S);
+    ctx.fillRect(Math.round(S / 2) + 2, 0, 4, S);
+    ctx.fillStyle = 'rgba(255,255,255,0.09)';
     ctx.fillRect(2, 0, 2, S);
     ctx.fillRect(Math.round(S / 2) + 2, 0, 2, S);
+    // Long-axis wear: a slightly polished centre lane where the cartons ride.
+    const g = ctx.createLinearGradient(0, 0, 0, S);
+    g.addColorStop(0.0, 'rgba(0,0,0,0.16)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.07)');
+    g.addColorStop(1.0, 'rgba(0,0,0,0.16)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
     const tex = new THREE.CanvasTexture(c);
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    this._textures.push(tex);
+    return tex;
+  },
+
+  // Gravity-roller deck: one tube per tile, shaded as a cylinder (dark at the
+  // gaps, a hot line along its crown) with the axle end showing. Tiled ~3 per
+  // metre this is a bed of ~10 cm rollers, which is what a free line looks like.
+  // Never scrolled — `_belts` gives a speed-0 conveyor speed 0.
+  _makeRollerTexture() {
+    const S = 64;
+    const { c, ctx } = canvas2d(S, S);
+    // Shadow gap between adjacent rollers.
+    ctx.fillStyle = '#4c545c';
+    ctx.fillRect(0, 0, S, S);
+    // The tube: a cross-run cylinder, so the shading gradient runs ALONG the
+    // conveyor (u), and the highlight is a straight line across its crown.
+    const g = ctx.createLinearGradient(0, 0, S, 0);
+    g.addColorStop(0.00, '#5d666f');
+    g.addColorStop(0.10, '#98a3ad');
+    g.addColorStop(0.34, '#e2e8ed');
+    g.addColorStop(0.52, '#c3cbd3');
+    g.addColorStop(0.86, '#7d8791');
+    g.addColorStop(1.00, '#4c545c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, Math.round(S * 0.86), S);
+    // Bearing collars at both ends of the tube (v = across the run).
+    ctx.fillStyle = 'rgba(60,66,72,0.55)';
+    ctx.fillRect(0, 0, S, 3);
+    ctx.fillRect(0, S - 3, S, 3);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    // Anisotropy 2, not the device maximum. A conveyor deck is a long thin band
+    // read at a grazing angle from almost every camera, so it is the surface
+    // where anisotropic taps multiply fastest: at 16 the roller bed alone cost a
+    // third of the frame in an aerial of a 24-belt hall, and it is 3 tiles per
+    // metre — the mip chain is doing most of the work anyway.
+    tex.anisotropy = Math.min(2, this._maxAniso());
+    this._textures.push(tex);
+    return tex;
+  },
+
+  // Conveyor side frame seen from outside: a channel web with a lighter top
+  // flange and a periodic stiffener. Purely a shading cue — it is what keeps a
+  // 24 m run from reading as one extruded slab.
+  _makeConveyorSideTexture() {
+    const S = 64;
+    const { c, ctx } = canvas2d(S, S);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, S, S);
+    // v = 0 is the TOP of the box side (BoxGeometry UVs run downward), so the
+    // flange highlight goes at the top and the shadowed underside at the bottom.
+    const g = ctx.createLinearGradient(0, 0, 0, S);
+    g.addColorStop(0.00, 'rgba(255,255,255,0.34)');
+    g.addColorStop(0.16, 'rgba(255,255,255,0.10)');
+    g.addColorStop(0.22, 'rgba(0,0,0,0.20)');
+    g.addColorStop(0.75, 'rgba(0,0,0,0.10)');
+    g.addColorStop(1.00, 'rgba(0,0,0,0.34)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+    // One stiffener/joint per tile.
+    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx.fillRect(1, 0, 2, S);
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(3, 0, 1, S);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    // 0.18 m of frame profile: a soft mip is all it can show anyway.
+    tex.anisotropy = Math.min(2, this._maxAniso());
     this._textures.push(tex);
     return tex;
   },
@@ -1105,10 +1306,18 @@ export const sceneMethods = {
   // CUTAWAY CONTRACT (see _updateCutaway): the shell is a real, enclosed building
   // when you stand inside it, and an architectural cutaway model when you look at
   // it from outside. Two collections drive that, both filled here:
-  //   _roofParts   — deck / skylights / roof steel / high-bay fixtures. Visible
-  //                  only while the camera is INSIDE the hall; from an overview
-  //                  camera they would be a lattice of dark steel laid over the
-  //                  whole layout (exactly what made the merged build unreadable).
+  //   _roofParts   — deck / skylights / high-bay fixtures. Hidden only
+  //                  for an AERIAL camera, where they would be dark steel laid
+  //                  over the whole layout (exactly what made the merged build
+  //                  unreadable). Inside the hall they ARE the ceiling, and from
+  //                  a ground-level exterior they are the roof.
+  //   _roofLattice — the structural steel: girders + open-web joist chords, posts
+  //                  and diagonals. Same rule PLUS "not from inside". Hundreds of
+  //                  thin overlapping instances across the top of every interior
+  //                  frame cost ~16% of it on a software rasteriser, and they are
+  //                  read edge-on from 8 m below, so indoors they are the piece of
+  //                  the roof worth trading away — the deck and the luminaires
+  //                  hanging off it are what make the ceiling read as a ceiling.
   //   _wallPanels  — per-segment {mesh, inward normal, midpoint}. A panel is
   //                  hidden when the camera sits on its OUTSIDE face, so the near
   //                  walls open up and the far walls stay standing.
@@ -1117,6 +1326,7 @@ export const sceneMethods = {
   _buildShell() {
     this._shellMats = [];
     this._roofParts = [];
+    this._roofLattice = [];
     this._wallPanels = [];
     this._cutInside = null;
     // `meta.studio` drops the building: no walls, roof, parapet, columns, high-bay
@@ -1138,6 +1348,7 @@ export const sceneMethods = {
   // a handful of objects — no geometry, no material, no allocation.
   _updateCutaway() {
     const parts = this._roofParts;
+    const lattice = this._roofLattice;
     const panels = this._wallPanels;
     if ((!parts || !parts.length) && (!panels || !panels.length)) return;
     const ceil = this._clearHeight();
@@ -1148,18 +1359,33 @@ export const sceneMethods = {
     const inside = c.y < ceil - 0.2
       && c.x > -1.5 && c.x < width + 1.5
       && c.z > -1.5 && c.z < depth + 1.5;
-    // ABOVE the roof steel is the other case that wants the roof gone. The whole
-    // point of an aerial is to look INTO the building; leaving the trusses on
-    // draws a girder across the middle of every overview, which is exactly the
-    // shot a warehouse proposal opens with. Previously only "inside" hid them,
-    // so an aerial — outside the footprint by definition once you pull back —
-    // got the full roof. Roof stays on only for a ground-level exterior view,
-    // where you would really see it.
+    // ABOVE the roof steel is the case that wants the roof gone. The whole point
+    // of an aerial is to look INTO the building; leaving the trusses on draws a
+    // girder across the middle of every overview, which is exactly the shot a
+    // warehouse proposal opens with.
+    //
+    // Being INSIDE is the opposite case and used to be treated the same way, so
+    // every eye-level shot — the aisle walk-through, the pack line, the whole
+    // reason a 3D view beats the plan drawing — was played under an open sky:
+    // look up from between two racks and you saw the background colour. Nothing
+    // reads as less finished than a building with no ceiling, and the deck is
+    // also the surface the high-bay fixtures are attached to, so without it they
+    // hang off nothing. The roof is single-sided and faces DOWN, so from inside
+    // it costs one lit quad plus the (instanced) steel; from above it is
+    // back-faced away and cannot occlude the layout even before this test runs.
     const aerial = c.y >= ceil - 0.2;
-    const roofOn = !inside && !aerial;
+    const roofOn = !aerial;
     if (roofOn !== this._roofOn) {
       this._roofOn = roofOn;
       for (const m of (parts || [])) m.visible = roofOn;
+    }
+    // The structural steel is the costly part and rides a stricter rule:
+    // exterior, ground level only. Indoors the deck and the luminaires hanging
+    // from it are the ceiling.
+    const latticeOn = roofOn && !inside;
+    if (latticeOn !== this._latticeOn) {
+      this._latticeOn = latticeOn;
+      for (const m of (lattice || [])) m.visible = latticeOn;
     }
     if (inside !== this._cutInside) {
       this._cutInside = inside;
@@ -1379,7 +1605,13 @@ export const sceneMethods = {
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
     tex.repeat.set(Math.max(2, Math.round(this.bounds.width / 6)),
       Math.max(2, Math.round(this.bounds.depth / 6)));
-    tex.anisotropy = this._maxAniso();
+    // Anisotropy 4, not 16. Now that the deck is visible from INSIDE, it is the
+    // one surface in the scene always seen at a near-grazing angle and filling
+    // the top of the frame — precisely the worst case for anisotropic filtering,
+    // and on a software rasteriser 16 taps per texel there is the single most
+    // expensive thing the ceiling does. Its content is a 6 mm rib line; four taps
+    // resolve it, and the cost of the ceiling drops with no visible change.
+    tex.anisotropy = Math.min(4, this._maxAniso());
     this._textures.push(tex);
     return tex;
   },
@@ -1418,7 +1650,12 @@ export const sceneMethods = {
     }
     girders.instanceMatrix.needsUpdate = true;
     this.scene.add(girders);
-    this._roofParts.push(girders);
+    // Girders join the joists on the indoor-hidden list. They are eight 44 m
+    // beams across the top of the frame, and the fixture drop rods reach the deck
+    // on their own, so from inside nothing is left hanging — you get a deck with
+    // luminaires under it, which is what a modern DC ceiling actually looks like
+    // from the aisle floor.
+    this._roofLattice.push(girders);
 
     // Joists: top + bottom chord along X, with vertical posts and zig-zag webs.
     const chordTopY = ceil - 0.22;
@@ -1456,10 +1693,19 @@ export const sceneMethods = {
         q.identity();
       }
     }
+    // The joist lattice is the EXPENSIVE part of the roof — hundreds of thin
+    // instances whose silhouettes overlap across the top of any interior frame —
+    // and the cheapest to do without, because the deck plus the luminaires
+    // hanging from it already read as a ceiling. It therefore rides
+    // `_roofLattice` and stays off indoors (see _updateCutaway): +16% of frame
+    // time for detail you are looking at edge-on from 8 m below is not a trade a
+    // software rasteriser can make. From a ground-level exterior — the one shot
+    // where you look INTO the building through an open wall and the steel is the
+    // subject — it is on.
     for (const mesh of [chords, posts, diags]) {
       mesh.instanceMatrix.needsUpdate = true;
       this.scene.add(mesh);
-      this._roofParts.push(mesh);
+      this._roofLattice.push(mesh);
     }
   },
 
