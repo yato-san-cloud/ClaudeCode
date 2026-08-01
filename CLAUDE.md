@@ -32,25 +32,37 @@ No external assets or network requests, so it works offline and from `file://`.
 - **The flow branches at `Tech.pick()`** into three routes, and later phases differ per route:
   - default → `Contact` → `Thrust`
   - `gonstead` → `Nervo` → `Listing` → `Contact('gonstead')` → `Thrust('gonstead')`
-  - `toggle` (offered only when the marked segment is C1/C2) → `Atlas` → `Toggle`
+  - `toggle` (offered only when the marked segment is C1/C2) → `Atlas` → `Contact('toggle')` → `Thrust('toggle')`
   In the Gonstead route the correct contact and drive angle are *derived* from the true listing by
   `gsDerive()`, not read from the patient's `contact`/`drive` fields — so a misread film propagates
   into a wrong setup. `atDerive()` does the same for the atlas listing.
 - **`S`** is the global game state; **`S.cur`** accumulates the current patient's per-phase scores,
   which `Result.show()` folds into a weighted average via `WEIGHT`.
+- **Phase 5 is a scene, not a gauge.** `Body` draws the patient on the table in a normalized
+  1000-unit space and `Body.camera()` zooms to the target region; `Thrust` projects pointer
+  displacement onto the drive vector chosen in phase 4. Slack is that projection; the thrust is
+  detected from **frame-to-frame** velocity crossing a threshold, and amplitude is the distance
+  travelled from that moment. Crossing the drive-through line resolves immediately without waiting
+  for release. `Thrust.giveUp()` guarantees the phase always terminates (3 aborts or 42 seconds).
 - **`SPINE` / `spineLayout()` / `drawVertebra()`** are shared by the title animation, the palpation
-  view, and the zoomed contact view. Landmark coordinates in `LM` are ratios of the *drawn* vertebra's
+  view, the zoomed contact view, and the spine drawn through the patient's skin in phase 5. Landmark coordinates in `LM` are ratios of the *drawn* vertebra's
   width/height, so they stay aligned at any scale.
 - **`Snd`** synthesizes every sound at call time — no audio files. It must be resumed from a user
   gesture before it will play.
 - **Patient data** lives in the `PATIENTS` array; adding a case means adding one object there
   (target segment, correct technique, correct contact landmark, drive angle, red/yellow flag, dialogue).
   Every patient also needs a `gs` listing for the Gonstead route; C1/C2 cases additionally need `atlas`.
-- **Timing-based inputs must not be measured per animation frame.** Pointer event cadence varies by
-  device, so a per-frame velocity estimate can silently read as "too fast" for an entire drag — this
-  was a real bug in `Nervo`, where it produced 0% scan coverage. Measure over a time window and record
-  by *span covered* (fill every segment between the last position and the current one), so the result
-  depends on the user's actual motion rather than on frame timing.
+- **Sample pointer motion on a fixed cadence, and size the measurement window to the gesture.**
+  Pointer event cadence varies by device, so deriving velocity from event deltas makes the result
+  depend on the device rather than on the user. Both input bugs shipped in this file came from
+  getting the window wrong:
+  - `Nervo` is a *sustained glide*, so it needs a time window (170ms) and must record by **span
+    covered** — fill every segment between the last sampled position and the current one — otherwise
+    dropped frames punch holes in the trace. A per-frame estimate once read an entire drag as
+    "too fast" and produced 0% coverage.
+  - `Thrust` is a *flick*, which lasts a few frames, so a windowed average smears it below the
+    detection threshold. It uses the frame-to-frame delta instead, sampled from `draw()` rather than
+    from `pointermove`, so a pause mid-drag (waiting for end-expiration) cannot stale the history.
 
 ### Conventions
 

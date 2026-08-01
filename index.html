@@ -376,25 +376,6 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
   </div>
 </section>
 
-<!-- ══════════ トグル B : スタック → トグル → リコイル ══════════ -->
-<section id="s-toggle" class="screen">
-  <div class="card">
-    <div class="eyebrow">TOGGLE RECOIL ② ／ スタック・トグル・リコイル</div>
-    <div class="banner warn" id="tg-step">STEP 1 — 長押しで<b>手首を積む（スタック）</b>。3つのリングが重なった瞬間に離す。</div>
-    <div class="canvas-wrap"><canvas id="cv-toggle"></canvas></div>
-    <div class="readout">
-      <div class="ro"><b id="tg-stack">--</b><span>スタック</span></div>
-      <div class="ro amber"><b id="tg-tim">--</b><span>トグル</span></div>
-      <div class="ro"><b id="tg-rec">--</b><span>リコイル</span></div>
-      <div class="ro red"><b id="tg-depth">0</b><span>到達深度</span></div>
-    </div>
-    <div class="banner warn" style="margin-top:14px">
-      <b>環椎横突起へのコンタクトです。</b>深度が赤線を越えると環軸関節・椎骨動脈・上位頸髄に達します。
-      押し込むのではなく、<b>触れた瞬間に跳ね返る</b>。それがリコイルです。
-    </div>
-  </div>
-</section>
-
 <!-- ══════════ PHASE 4 : コンタクト ══════════ -->
 <section id="s-contact" class="screen">
   <div class="card">
@@ -417,22 +398,28 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
   </div>
 </section>
 
-<!-- ══════════ PHASE 5 : スラスト ══════════ -->
+<!-- ══════════ PHASE 5 : 施術台 ══════════ -->
 <section id="s-thrust" class="screen">
   <div class="card">
-    <div class="eyebrow">PHASE 5 ／ プリロード & スラスト</div>
-    <div class="banner info" id="th-step">STEP 1 — <b>長押し</b>で組織の遊び（スラック）を取る。緑の帯で離す。</div>
-    <div class="canvas-wrap"><canvas id="cv-thrust"></canvas></div>
+    <div class="eyebrow" id="th-eyebrow">PHASE 5 ／ プリロード & スラスト</div>
+    <div class="banner info" id="th-step">
+      患者の体に手を置いています。<b>コンタクト点を押さえたまま、矢印の向きへゆっくり引いて</b>組織の遊びを取ってください。
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-thrust"></canvas>
+      <div class="overlay-hint" id="th-hint">コンタクト点をドラッグ　／　キーボードは Space 長押し</div>
+    </div>
     <div class="readout">
       <div class="ro"><b id="th-pre">--</b><span>プリロード</span></div>
       <div class="ro amber"><b id="th-tim">--</b><span>タイミング</span></div>
+      <div class="ro"><b id="th-vel">--</b><span>スラスト速度</span></div>
       <div class="ro"><b id="th-amp">--</b><span>振幅</span></div>
       <div class="ro red"><b id="th-guard">0</b><span>患者の防御</span></div>
     </div>
-    <div class="tiny" style="margin-top:12px">
-      操作：<span class="kbd">クリック</span> / <span class="kbd">Space</span> を長押し→離す（プリロード）。
-      そのあと <b style="color:var(--tx)">呼気の終わり</b> に <b style="color:var(--tx)">短く鋭く</b> タップ（スラスト）。
-      高速・低振幅＝HVLA が理想です。押し込む時間が長いほど「深すぎる」と判定されます。
+    <div class="tiny" style="margin-top:12px" id="th-help">
+      <b style="color:var(--tx)">やること</b>：コンタクト点を押さえ、矢印の向きへドラッグしてスラックを取る（緑の帯）。
+      患者の<b style="color:var(--tx)">呼気が終わる瞬間</b>に、そのまま<b style="color:var(--tx)">短く鋭く弾く</b>。
+      速く・浅く＝HVLA。深く押し込むと患者は痛がります。
+      <span class="kbd">Space</span> 長押し→離す→短くタップでも操作できます。
     </div>
   </div>
 </section>
@@ -498,7 +485,7 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
       <li><b>触診</b> — 押しながら脊柱をなぞり、<b>可動性が低く緊張が高い</b>セグメントを1つ確定します。隣を選ぶと減点、離れると効果なし。</li>
       <li><b>テクニック選択</b> — 年齢・骨密度・妊娠・椎間板の状態に合わせて選びます。骨粗鬆症の高齢者に強いHVLAは<b>厳禁</b>。</li>
       <li><b>コンタクト & ドライブライン</b> — 触れる骨のランドマークを選び、力を加える方向を矢印で合わせます。反対側に触れると大きく減点。</li>
-      <li><b>プリロード & スラスト</b> — 長押しで組織の遊びを取り緑の帯で離す。次に<b>呼気の終わり</b>に<b>短く鋭く</b>タップ。長く押し込むほど痛みが出ます。</li>
+      <li><b>プリロード & スラスト</b> — 施術台の患者の体に手が置かれます。<b>コンタクト点を掴んで矢印の向きへ引き</b>、組織の遊びを取る（緑の帯）。そのまま<b>呼気の終わり</b>に<b>短く鋭く弾く</b>。速く・浅くが正解で、引きすぎると押し込みになり痛みが出ます。</li>
       <li><b>アフターケア</b> — その患者に合った指導を2つ選びます。</li>
     </ol>
     <hr class="sep">
@@ -527,10 +514,10 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
       <b>AS/AI＋R/L</b> のアトラス・リスティングを読み、側臥位で環椎横突起に豆状骨を当てます。
     </p>
     <ol class="howto">
-      <li><b>スタック</b> — 長押しで手首を積む。3つのリングが重なった瞬間に離す。</li>
-      <li><b>トグル</b> — 呼気の谷でタップ。</li>
-      <li><b>リコイル</b> — <b>押した瞬間から到達深度が跳ね上がります。</b>
-        緑の帯で離せば成功、<b style="color:var(--red)">赤い貫通ラインに触れたら重篤な有害事象</b>です。
+      <li><b>スラック</b> — 環椎横突起に置いた手を掴み、矢印の向きへ<b>ごく浅く</b>引く。</li>
+      <li><b>トグル</b> — 呼気の終わりに、その手を<b>短く鋭く弾く</b>。</li>
+      <li><b>リコイル</b> — 弾いたら<b>すぐに引き戻す</b>。戻さず進み続けると振幅が伸び、
+        <b style="color:var(--red)">貫通ラインを越えた瞬間に重篤な有害事象</b>になります。
         環椎の裏には環軸関節・椎骨動脈・上位頸髄があります。深く入れるのではなく、
         <b>触れた瞬間に跳ね返る</b>。関節を動かすのは深さではなく速さです。</li>
     </ol>
@@ -1669,7 +1656,7 @@ const Atlas = {
       else if(b.classList.contains('sel')) b.classList.add('bad'); });
     ok? Snd.great() : Snd.bad();
     $('#at-go').disabled=true;
-    setTimeout(()=>Toggle.open(), 1900);
+    setTimeout(()=>Contact.open(false,'toggle'), 1900);
   },
   /* 開口位正面像：環椎・歯突起・外側塊 */
   draw(t){
@@ -1747,223 +1734,6 @@ const Atlas = {
     // 走査線の演出
     const sy=(t/18)%H;
     c.fillStyle='rgba(120,220,200,.05)'; c.fillRect(0,sy,W,2);
-  }
-};
-
-/* ═══════════ TOGGLE ② : スタック → トグル → リコイル ═══════════ */
-const Toggle = {
-  cv:null,c:null,W:660,H:268,
-  stage:0, hold:false, holdT0:0, spread:0, stackVal:0,
-  t0:0, tapT0:0, tapPhase:0, depth:0, peak:0, resolved:false,
-  flash:0, shakeT:0, BP:3.2, tries:0,
-  open(){
-    this.stage=0; this.hold=false; this.spread=100; this.stackVal=0;
-    this.depth=0; this.peak=0; this.resolved=false; this.flash=0; this.shakeT=0;
-    this.tapT0=0; this.tries=0; this.t0=now();
-    this.cv=$('#cv-toggle'); this.c=fit(this.cv,this.W,this.H);
-    $('#tg-stack').textContent='--'; $('#tg-tim').textContent='--';
-    $('#tg-rec').textContent='--'; $('#tg-depth').textContent='0';
-    $('#tg-step').innerHTML='STEP 1 — 長押しで<b>手首を積む（スタック）</b>。3つのリングが重なった瞬間に離す。';
-    this.bind();
-    setDraw(t=>this.draw(t));
-    go('toggle');
-  },
-  active(){ return $('#s-toggle').classList.contains('on') && !this.resolved; },
-  bind(){
-    if(this._b) return; this._b=true;
-    this.cv.addEventListener('pointerdown',e=>{ if(!this.active())return; e.preventDefault(); Snd.resume(); this.down(); });
-    window.addEventListener('pointerup',()=>{ if($('#s-toggle').classList.contains('on')) this.up(); });
-    window.addEventListener('keydown',e=>{ if(e.code==='Space'&&!e.repeat&&this.active()){ e.preventDefault(); Snd.resume(); this.down(); } });
-    window.addEventListener('keyup',e=>{ if(e.code==='Space'&&$('#s-toggle').classList.contains('on')){ e.preventDefault(); this.up(); } });
-  },
-  DANGER(){ return [72,64,58][S.diff]; },     // 貫通ライン
-  GREEN(){  return [[26,60],[30,54],[32,50]][S.diff]; },
-  down(){
-    if(this.resolved) return;
-    if(this.stage===0){ this.hold=true; this.holdT0=now(); }
-    else if(this.stage===1 && !this.tapT0){
-      this.tapT0=now(); this.tapPhase=this.phase(); this.depth=0; this.peak=0;
-      Snd.tone(1400,.04,'square',.09);
-    }
-  },
-  up(){
-    if(this.resolved) return;
-    if(this.stage===0 && this.hold){
-      this.hold=false;
-      const sp=this.spread;
-      if(sp<=[16,11,7][S.diff]){
-        S.cur.stack = Math.round(100 - sp*[3.4,5.2,8][S.diff]);
-        this.stackVal=S.cur.stack;
-        $('#tg-stack').textContent=S.cur.stack;
-        this.stage=1; Snd.tone(660,.1,'triangle',.15);
-        $('#tg-step').innerHTML='STEP 2 — <b style="color:#7ddf64">呼気の谷</b>でタップ。'+
-          '押した瞬間から深度が跳ね上がります。<b style="color:#ef5b57">赤線に触れる前に離す</b>＝リコイル。';
-      }else{
-        this.tries++;
-        Snd.bad(); this.shakeT=now();
-        if(this.tries>=3){
-          S.cur.stack=Math.max(12, Math.round(60-sp*1.6)); this.stackVal=S.cur.stack;
-          $('#tg-stack').textContent=S.cur.stack; this.stage=1;
-          $('#tg-step').innerHTML='STEP 2 — スタックが甘いまま続行。<b style="color:#ef5b57">赤線に触れる前に離す</b>。';
-          toast('スタックが決まりませんでした。そのまま進みます',2200);
-        }else{
-          toast('手首が積めていません。リングが重なる瞬間に離して',1700);
-          this.spread=100;
-        }
-      }
-    }else if(this.stage===1 && this.tapT0){
-      const dur=now()-this.tapT0;
-      this.resolve(this.tapPhase, dur, this.peak);
-      this.tapT0=0;
-    }
-  },
-  phase(){ return ((now()-this.t0)/1000/this.BP)%1; },
-  breathY(p){ return p<.4 ? -0.5+Math.sin(p/.4*Math.PI/2) : 0.5-(1-Math.cos((p-.4)/.6*Math.PI))/2; },
-  resolve(ph, dur, peak){
-    this.resolved=true; this.stage=2;
-    const c=S.cur, p=S.p;
-    let dp=Math.abs(ph-0.97); dp=Math.min(dp,1-dp);
-    const errMs=dp*this.BP*1000, win=D().timeWin*0.7;
-    c.tglTiming = errMs<=win ? Math.round(100-(errMs/win)*30)
-                : errMs<=win*2.4 ? Math.round(70-((errMs-win)/(win*1.4))*52)
-                : Math.max(0,Math.round(18-(errMs-win*2.4)/25));
-    const gz=this.GREEN(), dz=this.DANGER();
-    if(peak>=dz){ c.recoil=0; }
-    else if(peak>=gz[0] && peak<=gz[1]){
-      const mid=(gz[0]+gz[1])/2, half=(gz[1]-gz[0])/2;
-      c.recoil = Math.round(100-Math.abs(peak-mid)/half*22);
-    }
-    else if(peak<gz[0]) c.recoil = Math.max(0, Math.round(70 - (gz[0]-peak)*5));
-    else c.recoil = Math.max(0, Math.round(70 - (peak-gz[1])*6));
-    c.tglPeak=Math.round(peak); c.tglMs=Math.round(dur); c.tglTimingMs=Math.round(errMs);
-    $('#tg-tim').textContent=c.tglTiming; $('#tg-rec').textContent=c.recoil;
-    $('#tg-depth').textContent=c.tglPeak;
-
-    if(peak>=dz){
-      // 駆動貫通 — 上位頸椎で最も避けねばならない事故
-      c.severe=true; c.hurt=true;
-      c.severeReason='リコイルが遅れ、環椎横突起を押し込んだまま駆動が貫通しました。'+
-        '環軸関節・椎骨動脈・上位頸髄に力が及ぶ深度です。';
-      c.log.push('✘✘ 駆動貫通 — リコイル失敗による重篤な有害事象');
-      Snd.crack(1.3); setTimeout(()=>Snd.alarm(),120); setTimeout(()=>Snd.alarm(),700);
-      this.flash=now(); this.shakeT=now();
-      toast('駆動が貫通しました。ただちに中止してください',3000);
-    }else{
-      const good = c.stack>=55 && c.tglTiming>=50 && c.recoil>=55 && c.gsCorrect!==false && c.palp>=50;
-      c.cav=good;
-      if(good){
-        Snd.crack(.85); this.flash=now();
-        c.log.push('✔ トグル＆リコイル成功 — 極浅・極速で環椎が動いた');
-        toast('トッ、と抜けた — リコイル成功',2200);
-      }else{
-        Snd.dud();
-        c.log.push('△ 環椎が動かなかった — スタック・タイミング・リコイルのいずれかが不足');
-        toast('抜けきらず — 環椎は動きませんでした',2200);
-      }
-    }
-    // トグル系は preload/timing/amp の代わりに stack/tglTiming/recoil で評価する
-    setTimeout(()=>After.open(), 2400);
-  },
-  draw(t){
-    const c=this.c,W=this.W,H=this.H;
-    c.save();
-    if(now()-this.shakeT<420){ const k=1-(now()-this.shakeT)/420; c.translate(rnd(-8,8)*k, rnd(-5,5)*k); }
-    c.clearRect(-14,-14,W+28,H+28);
-    c.strokeStyle='rgba(255,255,255,.04)';
-    for(let x=0;x<W;x+=32){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,H); c.stroke(); }
-
-    /* 左：スタックのリング */
-    const sx=96, sy=104;
-    if(this.hold && this.stage===0){
-      const dt=(now()-this.holdT0)/1000;
-      this.spread = Math.abs(Math.cos(dt*2.1))*100;   // 収束して再び開く
-    }
-    const sp=this.stage===0? this.spread : 0;
-    [0,1,2].forEach(i=>{
-      const r=26 + sp*(i*0.34);
-      c.beginPath(); c.arc(sx,sy,r,0,Math.PI*2);
-      c.strokeStyle = this.stage===0
-        ? (sp<=[16,11,7][S.diff] ? 'rgba(125,223,100,.95)' : 'rgba(63,216,194,'+(.85-i*.2)+')')
-        : 'rgba(125,223,100,.7)';
-      c.lineWidth = i===0?3:2; c.stroke();
-    });
-    c.font='11px '+FONT(); c.textAlign='center'; c.fillStyle='rgba(139,164,177,.8)';
-    c.fillText('手首のスタック', sx, sy+86);
-    c.fillStyle= this.stage===0? '#dde9ef':'rgba(125,223,100,.9)';
-    c.font='700 13px '+FONT();
-    c.fillText(this.stage===0? 'ずれ '+Math.round(sp) : 'STACKED '+this.stackVal, sx, sy+106);
-
-    /* 中央：呼吸 */
-    const bx0=188, bx1=452, baseY=74, amp=22, ph=this.phase();
-    const xOf=p=>bx0+p*(bx1-bx0);
-    c.fillStyle='rgba(125,223,100,.13)';
-    c.fillRect(xOf(.88), baseY-amp-10, xOf(1)-xOf(.88), amp*2+20);
-    c.beginPath();
-    for(let i=0;i<=200;i++){ const p2=i/200, y=baseY-this.breathY(p2)*amp*2;
-      i?c.lineTo(xOf(p2),y):c.moveTo(xOf(p2),y); }
-    c.strokeStyle='rgba(63,216,194,.7)'; c.lineWidth=2; c.stroke();
-    c.beginPath(); c.arc(xOf(ph), baseY-this.breathY(ph)*amp*2, 6,0,Math.PI*2);
-    c.fillStyle= ph>=.88? '#7ddf64':'#f0a04b'; c.shadowColor=c.fillStyle; c.shadowBlur=12;
-    c.fill(); c.shadowBlur=0;
-    c.font='10px '+FONT(); c.textAlign='center'; c.fillStyle='rgba(125,223,100,.85)';
-    c.fillText('呼気終末', xOf(.94), baseY+amp*2+18);
-
-    /* 右：深度バー（縦） */
-    const dx=W-96, dy0=44, dh=164, dw=46;
-    if(this.stage===1 && this.tapT0){
-      const held=(now()-this.tapT0);
-      this.depth = held*0.30;                       // 押している間、深度が跳ね上がる
-      this.peak=Math.max(this.peak,this.depth);
-      if(this.depth>=this.DANGER() && !this.resolved){
-        this.resolve(this.tapPhase, held, this.depth); this.tapT0=0;
-      }
-    }
-    c.fillStyle='#0e171d'; rr(c,dx,dy0,dw,dh,8); c.fill();
-    c.strokeStyle='rgba(255,255,255,.10)'; c.lineWidth=1; c.stroke();
-    const gz=this.GREEN(), dz=this.DANGER();
-    const yOf=v=>dy0+dh-(v/100)*dh;
-    c.fillStyle='rgba(125,223,100,.22)';
-    c.fillRect(dx, yOf(gz[1]), dw, yOf(gz[0])-yOf(gz[1]));
-    const dv=this.stage===2? this.peak : this.depth;
-    c.fillStyle= dv>=dz? '#ef5b57' : dv>gz[1]? '#f0a04b' : '#3fd8c2';
-    c.fillRect(dx+3, yOf(dv), dw-6, dy0+dh-yOf(dv));
-    c.strokeStyle='rgba(190,255,170,.9)'; c.lineWidth=2;
-    c.strokeRect(dx-2, yOf(gz[1]), dw+4, yOf(gz[0])-yOf(gz[1]));
-    c.strokeStyle='#ef5b57'; c.lineWidth=2.5;
-    c.beginPath(); c.moveTo(dx-8, yOf(dz)); c.lineTo(dx+dw+8, yOf(dz)); c.stroke();
-    c.font='10px '+FONT(); c.textAlign='right'; c.fillStyle='#ef5b57';
-    c.fillText('貫通', dx-12, yOf(dz)+4);
-    c.fillStyle='rgba(125,223,100,.9)'; c.fillText('適正', dx-12, (yOf(gz[0])+yOf(gz[1]))/2+4);
-    c.textAlign='center'; c.fillStyle='rgba(139,164,177,.8)'; c.font='11px '+FONT();
-    c.fillText('到達深度', dx+dw/2, dy0-14);
-    c.font='700 15px '+FONT();
-    c.fillStyle= dv>=dz? '#ef5b57' : dv>gz[1]? '#f0a04b' : '#3fd8c2';
-    c.fillText(Math.round(dv)+'', dx+dw/2, dy0+dh+20);
-
-    /* プロンプト */
-    c.textAlign='center'; c.font='800 18px '+FONT();
-    const px=(bx0+bx1)/2;
-    if(this.stage===0){
-      c.fillStyle= this.hold? '#3fd8c2':'rgba(221,233,239,.75)';
-      c.fillText(this.hold? 'リングが重なる瞬間に離す' : '長押しで手首を積む', px, H-62);
-    }else if(this.stage===1){
-      if(this.tapT0){ c.fillStyle='#ef5b57'; c.fillText('離せ！ 跳ね返せ！', px, H-62); }
-      else { c.fillStyle= ph>=.88? '#7ddf64':'rgba(240,160,75,.85)';
-             c.fillText(ph>=.88? '今！ 触れて、跳ね返る' : '呼気を待つ…', px, H-62); }
-    }else{
-      const cc=S.cur;
-      c.fillStyle= cc.severe? '#ef5b57' : cc.cav? '#7ddf64':'rgba(221,233,239,.7)';
-      c.fillText(cc.severe? '⚠ 駆動貫通 — 重篤な有害事象' : cc.cav? '✔ トッ — 環椎が動いた' : '… 抜けきらず', px, H-62);
-    }
-    c.font='11px '+FONT(); c.fillStyle='rgba(139,164,177,.7)';
-    if(this.stage===1&&!this.tapT0) c.fillText('タップしたら即座に離す。押し込む時間がそのまま深度になる。', px, H-38);
-
-    if(now()-this.flash<340){
-      const k=1-(now()-this.flash)/340;
-      c.fillStyle= S.cur.severe? 'rgba(239,91,87,'+(k*.45)+')' : 'rgba(125,223,100,'+(k*.26)+')';
-      c.fillRect(0,0,W,H);
-    }
-    c.restore();
   }
 };
 
@@ -2046,7 +1816,7 @@ const Contact = {
     else if(LM_SIDE(got)!=='M' && LM_SIDE(got)===LM_SIDE(want)) cs=55;
     else if(LM_SIDE(got)==='M' || LM_SIDE(want)==='M') cs=38;
     else cs=14;                                       // 反対側に触れた
-    c.contact=cs; c.contactPick=this.pick.n;
+    c.contact=cs; c.contactPick=this.pick.n; c.contactId=this.pick.id; c.driveAngle=this.angle;
 
     let dd=Math.abs(((this.angle-truth.drive)%360+360)%360);
     if(dd>180) dd=360-dd;
@@ -2065,7 +1835,7 @@ const Contact = {
   },
   gentle(){
     const c=S.cur;
-    c.noThrust=true; c.preload=82; c.timing=82; c.amp=88; c.cav=false;
+    c.noThrust=true; c.preload=82; c.timing=82; c.vel=80; c.amp=88; c.cav=false;
     c.log.push('◇ スラストを伴わないテクニックのため、可動域内の緩徐な反復運動を行った');
     Snd.ok();
     After.open();
@@ -2129,217 +1899,673 @@ const Contact = {
   }
 };
 
-/* ═══════════ PHASE 5 : プリロード & スラスト ═══════════ */
+/* ═══════════ 患者の身体（後面観・施術台の上） ═══════════
+   body space は縦1000・横1000の正規化座標。カメラで対象部位に寄る。 */
+const BODY = { spineTop:150, spineBot:690 };
+const bodyLay = (function(){
+  const total = SPINE.reduce((a,s)=>a+s.h,0) + (SPINE.length-1)*2.4;
+  const k = (BODY.spineBot-BODY.spineTop)/total;
+  let y=BODY.spineTop, out=[];
+  SPINE.forEach((s,i)=>{
+    const h=s.h*k, w=s.w*k*1.15;
+    out.push({id:s.id, reg:s.reg, name:s.name, i:i, x:500, y:y+h/2, w:w, h:h});
+    y += h + 2.4*k;
+  });
+  return out;
+})();
+
+const Body = {
+  /* 対象部位に応じた寄り（見える縦幅を body 単位で返す） */
+  zoomFor(reg){ return reg==='C'? 520 : reg==='T'? 560 : 580; },
+  camera(W,H,reg,segY){
+    const band=this.zoomFor(reg);
+    const scale=H/band;
+    // 頭や骨盤が切れないよう注視点をクランプ
+    const cy=clamp(segY, band/2-40, 1000-band/2+120);
+    return { scale:scale, ox:W/2-500*scale, oy:H/2-cy*scale };
+  },
+  apply(c,cam){ c.translate(cam.ox,cam.oy); c.scale(cam.scale,cam.scale); },
+  toScreen(cam,x,y){ return {x:cam.ox+x*cam.scale, y:cam.oy+y*cam.scale}; },
+
+  /* 施術台 */
+  table(c){
+    const g=c.createLinearGradient(0,0,0,1000);
+    g.addColorStop(0,'#1d2f3a'); g.addColorStop(.5,'#223946'); g.addColorStop(1,'#1a2b34');
+    c.fillStyle=g;
+    rr(c,214,-90,572,1220,54); c.fill();
+    c.strokeStyle='rgba(255,255,255,.07)'; c.lineWidth=3; c.stroke();
+    // レザーの継ぎ目
+    c.strokeStyle='rgba(255,255,255,.05)'; c.lineWidth=2;
+    [120,640].forEach(y=>{ c.beginPath(); c.moveTo(222,y); c.lineTo(778,y); c.stroke(); });
+    // フェイスピース（顔を通す穴）
+    c.fillStyle='rgba(0,0,0,.42)';
+    c.beginPath(); c.ellipse(500,64,74,58,0,0,Math.PI*2); c.fill();
+  },
+
+  /* 身体のシルエット。pose で頭の向きと脚の構えが変わる */
+  figure(c, pose, st){
+    const br=st.breath;                       // -0.5..0.5
+    const headRot = pose==='cervical'? .40 : .22;
+    // 全パーツを一度に描く関数。輪郭用に少し太らせて二度描きする
+    const shapes=(grow)=>{
+      const g=grow;
+      c.save(); c.translate(500,78); c.rotate(headRot);
+      c.beginPath(); c.ellipse(0,0,62+g,74+g,0,0,Math.PI*2); c.fill(); c.restore();
+      rr(c,456-g,120-g,88+g*2,92+g*2,26); c.fill();                        // 首
+      c.beginPath(); c.ellipse(352,244,64+g,58+g,0,0,Math.PI*2); c.fill(); // 三角筋
+      c.beginPath(); c.ellipse(648,244,64+g,58+g,0,0,Math.PI*2); c.fill();
+      const spread=1+br*.02;
+      c.save(); c.translate(500,400); c.scale(spread,1); c.translate(-500,-400);
+      c.beginPath();                                                        // 胴
+      c.moveTo(356-g,222);
+      c.bezierCurveTo(330-g,300, 328-g,420, 372-g,545);
+      c.lineTo(628+g,545);
+      c.bezierCurveTo(672+g,420, 670+g,300, 644+g,222);
+      c.closePath(); c.fill();
+      c.restore();
+      [[-1,300],[1,700]].forEach(m=>{                                       // 腕
+        c.save(); c.translate(m[1],250); c.rotate(m[0]*.10);
+        rr(c,-34-g,0,68+g*2,300,32); c.fill();
+        c.beginPath(); c.ellipse(0,312,32+g,40+g,0,0,Math.PI*2); c.fill();
+        c.restore();
+      });
+      rr(c,362-g,506,276+g*2,214+g,72); c.fill();                           // 骨盤・臀部
+      const legOpen = (pose==='lumbar')? .20 : 0;                           // 大腿
+      c.save(); c.translate(560,700); c.rotate(legOpen);
+      rr(c,-56-g,0,112+g*2,300,44); c.fill(); c.restore();
+      c.save(); c.translate(444,700);
+      rr(c,-56-g,0,112+g*2,300,44); c.fill(); c.restore();
+    };
+
+    c.fillStyle='#7a4a34'; shapes(5);          // 輪郭（一回り大きい暗い層）
+    const skin=c.createLinearGradient(300,0,700,0);
+    skin.addColorStop(0,'#b87c5e'); skin.addColorStop(.38,'#e6b190');
+    skin.addColorStop(.60,'#f0c2a2'); skin.addColorStop(1,'#b87c5e');
+    c.fillStyle=skin; shapes(0);
+
+    // 髪（頭が頭だと分かるように）
+    c.save(); c.translate(500,78); c.rotate(headRot);
+    c.fillStyle='#2c2119';
+    c.beginPath(); c.ellipse(0,-14,62,60,0,0,Math.PI*2); c.fill();
+    c.fillStyle='rgba(255,255,255,.09)';
+    c.beginPath(); c.ellipse(-16,-30,26,18,-.5,0,Math.PI*2); c.fill();
+    c.restore();
+
+    // 陰影
+    c.save(); c.globalCompositeOperation='multiply';
+    const sh=c.createRadialGradient(500,370,80,500,420,360);
+    sh.addColorStop(0,'rgba(255,255,255,1)'); sh.addColorStop(1,'rgba(146,88,64,.6)');
+    c.fillStyle=sh; c.fillRect(270,110,460,660);
+    c.restore();
+
+    // 脊柱溝
+    c.save(); c.globalAlpha=.34;
+    c.strokeStyle='#7e4c34'; c.lineWidth=10; c.lineCap='round';
+    c.beginPath();
+    bodyLay.forEach((v,i)=> i? c.lineTo(v.x,v.y) : c.moveTo(v.x,v.y));
+    c.stroke(); c.restore();
+    // 僧帽筋・肩甲骨・腸骨稜
+    c.save(); c.globalAlpha=.20; c.strokeStyle='#7e4c34'; c.lineWidth=7; c.lineCap='round';
+    c.beginPath(); c.moveTo(470,196); c.quadraticCurveTo(400,224,352,264); c.stroke();
+    c.beginPath(); c.moveTo(530,196); c.quadraticCurveTo(600,224,648,264); c.stroke();
+    c.beginPath(); c.moveTo(414,290); c.quadraticCurveTo(390,352,434,404); c.stroke();
+    c.beginPath(); c.moveTo(586,290); c.quadraticCurveTo(610,352,566,404); c.stroke();
+    c.beginPath(); c.moveTo(392,552); c.quadraticCurveTo(500,520,608,552); c.stroke();
+    c.restore();
+
+    // 防御（傍脊柱筋の緊張）
+    if(st.guard>4){
+      c.save(); c.globalAlpha=clamp(st.guard/60,0,1)*.55;
+      c.strokeStyle='#c0562c'; c.lineWidth=15; c.lineCap='round';
+      [-32,32].forEach(dx=>{
+        c.beginPath();
+        bodyLay.forEach((v,i)=> i? c.lineTo(v.x+dx,v.y) : c.moveTo(v.x+dx,v.y));
+        c.stroke();
+      });
+      c.restore();
+    }
+
+    // ドレープ（下半身の掛け布）
+    c.save();
+    const dg=c.createLinearGradient(0,690,0,1010);
+    dg.addColorStop(0,'#a8bfcb'); dg.addColorStop(1,'#7d94a1');
+    c.fillStyle=dg; c.strokeStyle='rgba(0,0,0,.22)'; c.lineWidth=4;
+    rr(c,330,700,340,330,26); c.fill(); c.stroke();
+    c.strokeStyle='rgba(255,255,255,.18)'; c.lineWidth=2;
+    [758,828,898].forEach(y=>{ c.beginPath(); c.moveTo(344,y); c.quadraticCurveTo(500,y+14,656,y); c.stroke(); });
+    c.restore();
+  },
+
+  /* 皮膚の下に透けて見える脊柱。target が光る */
+  spine(c, targetIdx, st){
+    c.save(); c.globalAlpha=.58;
+    bodyLay.forEach((v,i)=>{
+      if(i===targetIdx) return;
+      drawVertebra(c, {x:v.x, y:v.y, w:v.w, h:v.h}, {});
+    });
+    c.restore();
+    // 対象椎はしっかり光らせる
+    const v=bodyLay[targetIdx], off=st.segOff;
+    c.save(); c.globalAlpha=.95;
+    drawVertebra(c, {x:v.x+off.x, y:v.y+off.y, w:v.w*1.12, h:v.h*1.12},
+      {glow:1, glowColor:'rgba(63,216,194,.85)', glowColor2:'#3fd8c2', sel:true});
+    c.globalAlpha=.85;
+    c.strokeStyle='#3fd8c2'; c.lineWidth=3; c.setLineDash([6,6]);
+    c.beginPath(); c.arc(v.x+off.x, v.y+off.y, v.w*1.15, 0, Math.PI*2); c.stroke();
+    c.setLineDash([]);
+    c.restore();
+  },
+
+  /* 接触部の組織変形：くぼみと引き寄せ */
+  tissue(c, pt, dir, depth, stretch){
+    if(depth<=0.02 && stretch<=0.5) return;
+    c.save();
+    // くぼみ（影）
+    c.globalAlpha=clamp(depth,0,1)*.55;
+    const g=c.createRadialGradient(pt.x,pt.y,4,pt.x,pt.y,74);
+    g.addColorStop(0,'rgba(90,44,28,.95)'); g.addColorStop(1,'rgba(90,44,28,0)');
+    c.fillStyle=g; c.beginPath(); c.arc(pt.x,pt.y,76,0,Math.PI*2); c.fill();
+    // 反対側のふくらみ（皮膚が寄る）
+    c.globalAlpha=clamp(depth,0,1)*.35;
+    const hg=c.createRadialGradient(pt.x-dir.x*46,pt.y-dir.y*46,4,pt.x-dir.x*46,pt.y-dir.y*46,58);
+    hg.addColorStop(0,'rgba(255,225,205,.9)'); hg.addColorStop(1,'rgba(255,225,205,0)');
+    c.fillStyle=hg; c.beginPath(); c.arc(pt.x-dir.x*46,pt.y-dir.y*46,60,0,Math.PI*2); c.fill();
+    // 牽引される皮線
+    c.globalAlpha=clamp(stretch/70,0,1)*.5;
+    c.strokeStyle='rgba(120,64,42,.9)'; c.lineWidth=3; c.lineCap='round';
+    for(let k=-2;k<=2;k++){
+      const px=-dir.y, py=dir.x;
+      c.beginPath();
+      c.moveTo(pt.x+px*k*17-dir.x*54, pt.y+py*k*17-dir.y*54);
+      c.quadraticCurveTo(pt.x+px*k*13, pt.y+py*k*13, pt.x+px*k*7+dir.x*34, pt.y+py*k*7+dir.y*34);
+      c.stroke();
+    }
+    c.restore();
+  },
+
+  /* 術者の手：豆状骨コンタクト＋その上に重ねる支持手 */
+  hands(c, pt, dir, press, tech){
+    const ang=Math.atan2(dir.y,dir.x);
+    const sc = tech==='toggle'? .78 : 1;
+    c.save(); c.translate(pt.x,pt.y); c.rotate(ang+Math.PI/2); c.scale(sc,sc);
+
+    const outline='#6d4632';
+    const hg=c.createLinearGradient(-70,-50,70,110);
+    hg.addColorStop(0,'#ffdfc6'); hg.addColorStop(.55,'#f0bd9a'); hg.addColorStop(1,'#c68e6c');
+
+    // 前腕（奥）
+    c.fillStyle='#c99madd'.slice(0,7); c.fillStyle='#c9906c';
+    c.strokeStyle=outline; c.lineWidth=4;
+    rr(c,-31,40,62,215,28); c.fill(); c.stroke();
+
+    // 支持手（下の手に重ねる）
+    c.fillStyle='#e0aa86'; c.strokeStyle=outline; c.lineWidth=4;
+    c.beginPath(); c.ellipse(14,34,50,36,-.35,0,Math.PI*2); c.fill(); c.stroke();
+    for(let i=0;i<4;i++){
+      c.beginPath(); c.ellipse(-24+i*20, 66+Math.abs(i-1.5)*4, 9, 22, .12*(i-1.5),0,Math.PI*2);
+      c.fillStyle='#d9a07c'; c.fill(); c.stroke();
+    }
+
+    // コンタクト手
+    c.fillStyle=hg; c.strokeStyle=outline; c.lineWidth=4;
+    c.beginPath(); c.ellipse(0,6,52,40,0,0,Math.PI*2); c.fill(); c.stroke();
+    // 豆状骨（実際に骨に当たる一点）
+    c.fillStyle='#fff1e2'; c.strokeStyle='rgba(120,74,50,.7)'; c.lineWidth=2.5;
+    c.beginPath(); c.ellipse(0,-16,20,15,0,0,Math.PI*2); c.fill(); c.stroke();
+    // 指
+    c.lineWidth=3.5; c.strokeStyle=outline;
+    for(let i=0;i<4;i++){
+      c.beginPath(); c.ellipse(-30+i*20, 46-Math.abs(i-1.5)*3, 9, 21, .1*(i-1.5),0,Math.PI*2);
+      c.fillStyle='#eab furnace'.slice(0,4)+'b58e'; c.fillStyle='#eab58e'; c.fill(); c.stroke();
+    }
+    // 母指
+    c.beginPath(); c.ellipse(-44,10,13,22,-.6,0,Math.PI*2);
+    c.fillStyle='#eab58e'; c.fill(); c.stroke();
+
+    if(press>0){
+      c.strokeStyle='rgba(63,216,194,'+(.45+press*.5)+')'; c.lineWidth=4;
+      c.beginPath(); c.arc(0,-14,26+press*12,0,Math.PI*2); c.stroke();
+    }
+    c.restore();
+  }
+};
+
+/* ═══════════ PHASE 5 : 施術台でのスラスト ═══════════ */
 const Thrust = {
-  cv:null,c:null,W:640,H:236, BP:4.0,
-  stage:0, hold:false, holdT0:0, pre:0, preLocked:0, guard:0,
-  tapT0:0, tapPhase:0, tries:0, t0:0, resolved:false, flash:0, shakeT:0, mode:'normal',
-  /* ガンステッドはボディドロップ：スラック帯もタイミングも振幅も判定が狭い */
+  cv:null,c:null,W:660,H:432, BP:4.0, mode:'normal',
+  t0:0, stage:0, engaged:false, resolved:false,
+  origin:null, cur:null, disp:0, maxDisp:0, guard:0,
+  track:[], thrusting:false, thrustStart:0, peakVel:0, thrustPhase:0, excursion:0,
+  segIdx:0, pose:'thoracic', dir:{x:0,y:1}, contactPt:{x:500,y:400},
+  flash:0, shakeT:0, jolt:0, relax:0, kb:false, kbT0:0, kbHold:false, tries:0,
+  segOff:{x:0,y:0}, snapT:0, endT:0,
+
   band(){ const b=D().band; return this.mode==='gonstead'
     ? [b[0]+(b[1]-b[0])*.22, b[1]-(b[1]-b[0])*.22] : b; },
   win(){  return D().timeWin * (this.mode==='gonstead'?.72:1); },
-  ampG(){ return D().ampGood * (this.mode==='gonstead'?.78:1); },
-  ampB(){ return D().ampBad  * (this.mode==='gonstead'?.78:1); },
+  SLACK(){ return 130; },                                  // プリロード100に相当する引き幅(px)
+  VEL(){ return this.mode==='toggle'? [700,1800] : [700,1900]; },   // [スラストと見なす速度, 満点]
+  AMP(){ const k=this.mode==='gonstead'?.84:1;
+         return this.mode==='toggle'? [38,80] : [58*k,124*k]; },     // [満点まで, ここから急落]
+  DANGER(){ return this.mode==='toggle'? [150,128,110][S.diff] : [250,220,192][S.diff]; },
+
   open(mode){
+    const p=S.p, c0=S.cur;
     this.mode = mode||'normal';
-    this.stage=0; this.hold=false; this.pre=0; this.preLocked=0; this.guard=0;
-    this.tries=0; this.resolved=false; this.flash=0; this.shakeT=0; this.tapT0=0;
-    this.t0=now();
+    this.stage=0; this.engaged=false; this.resolved=false; this.thrusting=false;
+    this.disp=0; this.rawDisp=0; this.maxDisp=0; this.guard=0; this.last=null; this.peakVel=0;
+    this.excursion=0; this.flash=0; this.shakeT=0; this.jolt=0; this.relax=0;
+    this.kb=false; this.kbHold=false; this.kbTap=0; this.tries=0; this.segOff={x:0,y:0};
+    this.recoiled=false; this.recoilMs=0; this.thrustLockPre=null; this.lockedPre=0; this.aborts=0;
+    this.snapT=0; this.endT=0; this.t0=now();
+
+    const seg = c0.marked||p.target;
+    this.segIdx = SEG_INDEX[seg];
+    const v = bodyLay[this.segIdx];
+    this.pose = v.reg==='C'? 'cervical' : (v.reg==='L'||v.reg==='S')? 'lumbar' : 'thoracic';
+
+    // Phase 4 で選んだランドマークと駆動方向をそのまま身体の上へ持ち込む
+    const lm = (LM[v.reg]||LM.T).find(l=>l.id===c0.contactId);
+    const lmr = lm || {x:0,y:.38};
+    this.contactPt = { x:v.x + lmr.x*v.w*1.9, y:v.y + lmr.y*v.h*1.5 };
+    const a = (c0.driveAngle!=null? c0.driveAngle : 270)*Math.PI/180;
+    this.dir = {x:Math.cos(a), y:Math.sin(a)};
+
     this.cv=$('#cv-thrust'); this.c=fit(this.cv,this.W,this.H);
+    this.cam = Body.camera(this.W,this.H,v.reg,v.y);
+    this.ptScreen = Body.toScreen(this.cam,this.contactPt.x,this.contactPt.y);
+
     $('#th-pre').textContent='--'; $('#th-tim').textContent='--';
-    $('#th-amp').textContent='--'; $('#th-guard').textContent='0';
-    $('#th-step').innerHTML = this.mode==='gonstead'
-      ? 'STEP 1 — ガンステッド。<b>長押し</b>で組織の遊びを取り切る。帯は狭い。'
-      : 'STEP 1 — <b>長押し</b>で組織の遊び（スラック）を取る。緑の帯に入ったら<b>離す</b>。';
+    $('#th-vel').textContent='--'; $('#th-amp').textContent='--'; $('#th-guard').textContent='0';
+    const part = v.reg==='C'? '首' : v.reg==='T'? '背中' : v.reg==='S'? '骨盤' : '腰';
+    $('#th-eyebrow').textContent='PHASE 5 ／ '+(this.mode==='toggle'?'トグル & リコイル':'プリロード & スラスト')+
+      '　—　'+v.name+'（'+part+'）';
+    $('#th-step').innerHTML = this.mode==='toggle'
+      ? '<b>環椎横突起に豆状骨を当てています。</b>矢印の向きへ軽く引いて遊びを取り、'+
+        '呼気の終わりに<b>弾いて、すぐ戻す</b>。深く入れたら終わりです。'
+      : '患者の'+part+'に手を置いています。<b>コンタクト点を押さえたまま、矢印の向きへゆっくり引いて</b>'+
+        '組織の遊びを取ってください。';
+    $('#th-hint').textContent='';
     this.bind();
     setDraw(t=>this.draw(t));
     go('thrust');
   },
+
   active(){ return $('#s-thrust').classList.contains('on') && !this.resolved; },
   bind(){
     if(this._b) return; this._b=true;
-    this.cv.addEventListener('pointerdown',e=>{ if(!this.active())return; e.preventDefault(); Snd.resume(); this.down(); });
-    window.addEventListener('pointerup',()=>{ if($('#s-thrust').classList.contains('on')) this.up(); });
-    window.addEventListener('keydown',e=>{ if(e.code==='Space'&&!e.repeat&&this.active()){ e.preventDefault(); Snd.resume(); this.down(); } });
-    window.addEventListener('keyup',  e=>{ if(e.code==='Space'&&$('#s-thrust').classList.contains('on')){ e.preventDefault(); this.up(); } });
-  },
-  down(){
-    if(this.resolved) return;
-    if(this.stage===0){ this.hold=true; this.holdT0=now(); }
-    else if(this.stage===1 && !this.tapT0){ this.tapT0=now(); this.tapPhase=this.phase(); }
-  },
-  up(){
-    if(this.resolved) return;
-    const band=this.band(), lo=band[0], hi=band[1];
-    if(this.stage===0 && this.hold){
-      this.hold=false;
-      const v=this.pre;
-      if(v>=lo && v<=hi){
-        this.preLocked=v;
-        const mid=(lo+hi)/2, half=(hi-lo)/2;
-        S.cur.preload = Math.round(100 - Math.abs(v-mid)/half*24);
-        this.stage=1;
-        Snd.tone(520,.12,'triangle',.16);
-        $('#th-pre').textContent=S.cur.preload;
-        $('#th-step').innerHTML = this.mode==='gonstead'
-          ? 'STEP 2 — <b style="color:#7ddf64">呼気の終わり</b>に、体重ごと落とす<b>ボディドロップ</b>を一瞬で。'
-          : 'STEP 2 — <b style="color:#7ddf64">呼気の終わり</b>（波の谷）で <b>短く鋭く</b> タップ！';
-      }else{
-        this.tries++;
-        Snd.bad(); this.shakeT=now();
-        if(this.tries>=3){
-          S.cur.preload=Math.max(15, Math.round(55-Math.abs(v-(lo+hi)/2)));
-          this.preLocked=v; this.stage=1;
-          $('#th-pre').textContent=S.cur.preload;
-          $('#th-step').innerHTML='STEP 2 — プリロードは不十分ですが続行。<b style="color:#7ddf64">呼気の終わり</b>に <b>短く鋭く</b> タップ！';
-          toast('プリロードが決まりませんでした。そのまま進みます',2200);
-        }else{
-          toast(v>hi ? '押し込みすぎ！ 患者が力みました' : 'まだ遊びが残っています。緑の帯で離して',1700);
-          if(v>hi) this.guard=Math.min(60,this.guard+14);
-          this.pre=0;
-        }
+    const cv=this.cv;
+    cv.addEventListener('pointerdown',e=>{
+      if(!this.active()) return; e.preventDefault(); Snd.resume();
+      try{cv.setPointerCapture(e.pointerId);}catch(_){}
+      const q=ptr(cv,e);
+      // コンタクト点の近くを掴む
+      if(Math.hypot(q.x-this.ptScreen.x, q.y-this.ptScreen.y) > 96 && !this.engaged){
+        toast('手はコンタクト点に置いたままです。そこを掴んでください',1600); return;
       }
-    }else if(this.stage===1 && this.tapT0){
-      const dur = now()-this.tapT0;
-      const ph  = this.tapPhase;
-      this.tapT0=0;
-      this.resolve(ph, dur);
+      this.engaged=true; this.kb=false;
+      this.origin={x:q.x - this.disp*this.dir.x, y:q.y - this.disp*this.dir.y};
+      this.rawDisp=this.disp; this.last=null;
+    });
+    cv.addEventListener('pointermove',e=>{
+      if(!this.active()||!this.engaged||this.kb) return;
+      const q=ptr(cv,e);
+      // 生の位置だけ拾う。速度はフレーム側で一定間隔にサンプリングする
+      this.rawDisp = clamp((q.x-this.origin.x)*this.dir.x + (q.y-this.origin.y)*this.dir.y, 0, this.SLACK()*3);
+    });
+    const release=()=>{
+      if(!this.active()||!this.engaged) return;
+      this.engaged=false;
+      if(this.thrusting) this.finishThrust();
+      else {
+        // スラストに至らずに手を離した
+        this.aborts++;
+        const pushed=this.maxDisp;
+        this.disp=0; this.rawDisp=0; this.last=null; this.stage=0; this.maxDisp=0;
+        S.cur.preload=null; this.thrustLockPre=null; $('#th-pre').textContent='--';
+        this.guard=Math.min(70,this.guard+8);
+        if(this.aborts>=3){ this.giveUp('スラストに至らないまま手を離し続け、患者が体位を保てなくなった'); return; }
+        toast(pushed>26 ? '押しているだけではスラストになりません。速く弾いてください'
+                        : '手を離しました。遊びは戻ります', 2000);
+      }
+    };
+    cv.addEventListener('pointerup',release);
+    cv.addEventListener('pointercancel',release);
+    // キーボード：長押しでプリロード、離して固定、短いタップでスラスト
+    window.addEventListener('keydown',e=>{
+      if(e.code!=='Space'||e.repeat||!this.active()) return;
+      e.preventDefault(); Snd.resume(); this.kb=true;
+      if(this.stage===0){ this.kbHold=true; this.kbT0=now(); }
+      else if(this.stage===1 && !this.kbTap){ this.kbTap=now(); this.thrustPhase=this.phase(); }
+    });
+    window.addEventListener('keyup',e=>{
+      if(e.code!=='Space'||!this.active()||!this.kb) return;
+      e.preventDefault();
+      if(this.stage===0 && this.kbHold){
+        this.kbHold=false;
+        const b=this.band();
+        if(this.disp/this.SLACK()*100>=b[0] && this.disp/this.SLACK()*100<=b[1]) this.lock();
+        else { this.tries++; Snd.bad(); this.shakeT=now();
+               if(this.tries>=3) this.lock(true); else { this.disp=0; toast('緑の帯で離してください',1500); } }
+      }else if(this.stage===1 && this.kbTap){
+        const dur=now()-this.kbTap; this.kbTap=0;
+        this.peakVel = 46000/Math.max(18,dur);
+        this.excursion = Math.max(10, dur*0.58);
+        // キーボードでは「短く離すこと」がそのままリコイルにあたる
+        this.recoiled = dur<=95; this.recoilMs = Math.max(40,dur);
+        this.resolve();
+      }
+    });
+  },
+
+  /* 毎フレーム呼ぶ。フリックは一瞬なので、窓平均ではなくフレーム間の瞬間速度で見る */
+  sample(){
+    if(!this.engaged || this.kb || this.resolved) return;
+    const d=this.rawDisp, t=now();
+    const prev=this.last;
+    this.last={t:t, d:d};
+    this.disp=d; this.maxDisp=Math.max(this.maxDisp,d);
+    if(!prev) return;
+    const dt=Math.max(8, t-prev.t);
+    const vel=(d-prev.d)/dt*1000;
+
+    if(!this.thrusting && vel>this.VEL()[0] && d-prev.d>7){
+      // スラスト開始 — この瞬間のプリロードと呼吸位相で採点する
+      this.thrusting=true;
+      this.thrustStart=prev.d;
+      this.thrustPhase=this.phase();
+      this.thrustLockPre = this.stage>=1? this.lockedPre : this.disp/this.SLACK()*100;
+      this.peakVel=vel; this.jolt=now();
+    }
+    if(this.thrusting){
+      this.peakVel=Math.max(this.peakVel,vel);
+      this.excursion=Math.max(this.excursion, d-this.thrustStart);
+      if(this.mode==='toggle' && vel < -this.VEL()[0]*.45 && !this.recoiled){
+        this.recoiled=true; this.recoilMs=now()-this.jolt;    // 引き戻した＝リコイル
+      }
+      // 貫通は離すのを待たずに確定する
+      if(this.excursion>=this.DANGER()){ this.finishThrust(); return; }
+      // 減速しきったら終了
+      if(this.excursion>6 && vel < this.peakVel*.18 && now()-this.jolt>60) this.finishThrust();
     }
   },
-  phase(){ return ((now()-this.t0)/1000/this.BP)%1; },
-  /* 呼吸曲線 : -0.5 〜 +0.5。0–0.4 吸気で上昇、0.4–1.0 呼気で下降し谷（＝呼気終末） */
-  breathY(p){
-    if(p<.4) return -0.5 + Math.sin(p/.4*Math.PI/2);
-    return 0.5 - (1-Math.cos((p-.4)/.6*Math.PI))/2;
+  finishThrust(){
+    if(this.resolved) return;
+    this.engaged=false;
+    this.resolve();
   },
-  resolve(ph, dur){
-    this.resolved=true; this.stage=2;
+  /* 決着しないまま終わらせない — 中断過多／時間切れの逃げ道 */
+  giveUp(reason){
+    if(this.resolved) return;
+    this.engaged=false; this.thrusting=false;
+    this.peakVel=0; this.excursion=0; this.thrustPhase=0.5;
+    if(this.thrustLockPre==null) this.thrustLockPre=this.disp/this.SLACK()*100;
+    S.cur.log.push('✘ '+reason);
+    toast('施術を中断しました',2400);
+    this.resolve();
+  },
+  lock(forced){
+    this.stage=1;
+    this.lockedPre = this.disp/this.SLACK()*100;
+    S.cur.preload = forced
+      ? Math.max(15, Math.round(55-Math.abs(this.lockedPre-(this.band()[0]+this.band()[1])/2)))
+      : (function(b,v){ const mid=(b[0]+b[1])/2, half=(b[1]-b[0])/2;
+          return Math.round(100-Math.abs(v-mid)/half*24); })(this.band(), this.lockedPre);
+    $('#th-pre').textContent=S.cur.preload;
+    Snd.tone(520,.12,'triangle',.16);
+  },
+
+  phase(){ return ((now()-this.t0)/1000/this.BP)%1; },
+  breathY(p){ return p<.4 ? -0.5+Math.sin(p/.4*Math.PI/2) : 0.5-(1-Math.cos((p-.4)/.6*Math.PI))/2; },
+
+  resolve(){
+    if(this.resolved) return;
+    this.resolved=true; this.stage=2; this.endT=now();
     const c=S.cur, p=S.p;
-    let dp=Math.abs(ph-0.97); dp=Math.min(dp,1-dp);
+
+    // プリロード（スラスト開始時点の遊びの取れ具合）
+    const preVal = this.thrustLockPre!=null? this.thrustLockPre : (this.disp/this.SLACK()*100);
+    if(c.preload==null){
+      const b=this.band(), mid=(b[0]+b[1])/2, half=(b[1]-b[0])/2;
+      c.preload = preVal>=b[0]&&preVal<=b[1]
+        ? Math.round(100-Math.abs(preVal-mid)/half*24)
+        : Math.max(0, Math.round(72 - Math.abs(preVal-mid)*1.7));
+    }
+    // タイミング
+    let dp=Math.abs(this.thrustPhase-0.97); dp=Math.min(dp,1-dp);
     const errMs=dp*this.BP*1000, win=this.win();
     c.timing = errMs<=win ? Math.round(100-(errMs/win)*28)
              : errMs<=win*2.4 ? Math.round(72-((errMs-win)/(win*1.4))*52)
              : Math.max(0,Math.round(20-(errMs-win*2.4)/25));
-    const ag=this.ampG(), ab=this.ampB();
-    c.amp = dur<=ag ? Math.round(100-(dur/ag)*12)
-          : dur<=ab ? Math.round(88-((dur-ag)/(ab-ag))*46)
-          : Math.max(0,Math.round(42-(dur-ab)/9));
-    c.ampMs=Math.round(dur); c.timingMs=Math.round(errMs); c.guard=Math.round(this.guard);
-    $('#th-tim').textContent=c.timing; $('#th-amp').textContent=c.amp; $('#th-guard').textContent=c.guard;
+    // 速度（HVLA の H）
+    const V=this.VEL();
+    c.vel = this.peakVel<=0 ? 0
+          : this.peakVel>=V[1] ? 100
+          : Math.max(0, Math.round((this.peakVel-V[0])/(V[1]-V[0])*70+30));
+    if(this.peakVel<V[0]) c.vel=Math.max(0,Math.round(this.peakVel/V[0]*28));
+    // 振幅（HVLA の LA）
+    const A=this.AMP(), dz=this.DANGER();
+    c.amp = this.peakVel<=0 ? 0
+          : this.excursion<=A[0] ? 100
+          : this.excursion<=A[1] ? Math.round(100-(this.excursion-A[0])/(A[1]-A[0])*55)
+          : Math.max(0, Math.round(45 - (this.excursion-A[1])/(dz-A[1])*45));
+    c.velPx=Math.round(this.peakVel); c.ampPx=Math.round(this.excursion);
+    c.timingMs=Math.round(errMs); c.guard=Math.round(this.guard);
+    $('#th-tim').textContent=c.timing; $('#th-vel').textContent=c.vel; $('#th-amp').textContent=c.amp;
 
-    const good = c.preload>=55 && c.timing>=52 && c.amp>=50 && c.palp>=50 && c.techScore>=50;
-    c.cav = good;
-    const forceLv = TECH[c.tech].force;
-    const tooDeep = dur>ab*1.25;
-    c.hurt = !!((c.riskyTech && forceLv>=2) || (tooDeep && forceLv>=2) || (p.yellow && c.riskyTech));
-    // 頸椎に高力量テクニックで深く押し込むのは重篤事故になりうる
-    const segReg = SPINE[SEG_INDEX[c.marked||p.target]].reg;
-    if(segReg==='C' && forceLv>=3 && dur>ab*1.9){
+    // トグルのリコイル
+    if(this.mode==='toggle'){
+      const depthOK = this.excursion < dz;
+      c.recoil = !depthOK ? 0
+        : this.recoiled ? Math.round(clamp(100 - Math.max(0,this.recoilMs-90)*0.42, 25, 100))
+        : Math.max(0, Math.round(46 - this.excursion*0.3));
+      c.tglPeak=Math.round(this.excursion); c.tglDanger=dz;
+    }
+
+    const through = this.excursion>=dz;
+    const segReg = bodyLay[this.segIdx].reg;
+    if(through){
       c.severe=true; c.hurt=true;
-      c.severeReason='頸椎に対して高力量のスラストを深く押し込みました。'+
-        '頸椎は可動性が高く支持が少ないため、振幅過大は椎骨動脈・神経根・靭帯を損傷しうる深度です。';
-    }
-
-    if(c.hurt){
-      Snd.crack(1.15); setTimeout(()=>Snd.alarm(),140);
+      c.severeReason = this.mode==='toggle'
+        ? 'リコイルが遅れ、環椎横突起を押し込んだまま駆動が貫通しました。環軸関節・椎骨動脈・上位頸髄に力が及ぶ深度です。'
+        : (segReg==='C'
+          ? '頸椎を深く押し込みました。頸椎は可動性が高く支持が少ないため、この振幅は椎骨動脈・神経根・靭帯を損傷しうる深度です。'
+          : '関節の生理的可動域をはるかに越えて押し込みました。靭帯・関節包を損傷する深度です。');
+      c.log.push('✘✘ 駆動が貫通した — 振幅 '+Math.round(this.excursion)+'px（限界 '+dz+'px）');
+      Snd.crack(1.3); setTimeout(()=>Snd.alarm(),120); setTimeout(()=>Snd.alarm(),700);
       this.flash=now(); this.shakeT=now();
-      c.log.push('✘ 患者に痛みが出た — 力量または振幅が過大');
-      toast('患者が痛みを訴えています！',2400);
-    }else if(good){
-      Snd.crack(1); this.flash=now();
-      c.log.push('✔ 明瞭なキャビテーション（ポキッ）— 良好なアジャストメント');
-      toast('ポキッ！ — キャビテーション成功',2200);
+      toast('押し込みすぎです。ただちに中止してください',3000);
     }else{
-      Snd.dud();
-      c.log.push('△ キャビテーションなし — スラストが関節に届いていない');
-      toast('空振り — 関節音は出ませんでした',2200);
+      const forceLv = TECH[c.tech].force;
+      const tooDeep = this.peakVel>0 && c.amp<28;
+      c.hurt = !!((c.riskyTech && forceLv>=2) || (tooDeep && forceLv>=2) || (p.yellow && c.riskyTech));
+      const good = c.preload>=55 && c.timing>=52 && c.vel>=55 && c.amp>=50
+                 && c.palp>=50 && c.techScore>=50
+                 && (this.mode!=='toggle' || c.recoil>=55);
+      c.cav=good;
+      if(c.hurt){
+        Snd.crack(1.1); setTimeout(()=>Snd.alarm(),140);
+        this.flash=now(); this.shakeT=now();
+        c.log.push('✘ 患者に痛みが出た — 力量または振幅が過大');
+        toast('患者が痛みを訴えています！',2400);
+      }else if(good){
+        Snd.crack(1); this.flash=now(); this.snapT=now(); this.relax=1;
+        c.log.push(this.mode==='toggle'
+          ? '✔ トグル＆リコイル成功 — 極浅・極速で環椎が動いた'
+          : '✔ 明瞭なキャビテーション（ポキッ）— 良好なアジャストメント');
+        toast(this.mode==='toggle'? 'トッ！ — リコイル成功' : 'ポキッ！ — キャビテーション成功',2200);
+      }else{
+        Snd.dud();
+        c.log.push('△ キャビテーションなし — 関節が動いていない');
+        toast('空振り — 関節音は出ませんでした',2200);
+      }
     }
-    setTimeout(()=>After.open(), 2200);
+    setTimeout(()=>After.open(), 2400);
   },
+
   draw(t){
-    const c=this.c,W=this.W,H=this.H;
+    const c=this.c,W=this.W,H=this.H, cam=this.cam;
     c.save();
-    if(now()-this.shakeT<380){ const k=1-(now()-this.shakeT)/380; c.translate(rnd(-6,6)*k, rnd(-4,4)*k); }
-    c.clearRect(-12,-12,W+24,H+24);
-    c.strokeStyle='rgba(255,255,255,.04)'; c.lineWidth=1;
-    for(let x=0;x<W;x+=32){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,H); c.stroke(); }
+    if(now()-this.shakeT<420){ const k=1-(now()-this.shakeT)/420; c.translate(rnd(-9,9)*k, rnd(-6,6)*k); }
+    c.clearRect(-16,-16,W+32,H+32);
+    const g=c.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#101c24'); g.addColorStop(1,'#0b141a');
+    c.fillStyle=g; c.fillRect(0,0,W,H);
 
-    /* 呼吸波 */
-    const baseY=66, amp=34, zoneA=.88, ph=this.phase();
-    const xOf = p => 40 + p*(W-80);
-    c.fillStyle='rgba(125,223,100,.13)';
-    c.fillRect(xOf(zoneA), baseY-amp-12, xOf(1)-xOf(zoneA), amp*2+24);
-    c.strokeStyle='rgba(125,223,100,.5)'; c.setLineDash([4,4]);
-    c.beginPath(); c.moveTo(xOf(.97),baseY-amp-12); c.lineTo(xOf(.97),baseY+amp+12); c.stroke();
-    c.setLineDash([]);
-    c.beginPath();
-    for(let i=0;i<=240;i++){
-      const p2=i/240, y=baseY - this.breathY(p2)*amp*2;
-      i? c.lineTo(xOf(p2),y) : c.moveTo(xOf(p2),y);
+    const ph=this.phase(), br=this.breathY(ph);
+    this.sample();
+
+    // キーボード操作時のプリロード自動上昇
+    if(this.kb && this.kbHold && this.stage===0){
+      const dt=(now()-this.kbT0)/1000;
+      this.disp = this.SLACK()*clamp(1-Math.exp(-dt*1.15),0,1.6);
+      if(this.disp/this.SLACK()*100>this.band()[1]+6) this.guard=Math.min(70,this.guard+.35);
     }
-    c.strokeStyle='rgba(63,216,194,.75)'; c.lineWidth=2.4; c.stroke();
-    const cxp=xOf(ph), cyp=baseY-this.breathY(ph)*amp*2;
-    c.fillStyle = (ph>=zoneA)? '#7ddf64':'#f0a04b';
-    c.shadowColor=c.fillStyle; c.shadowBlur=14;
-    c.beginPath(); c.arc(cxp,cyp,7,0,Math.PI*2); c.fill();
-    c.shadowBlur=0;
-    c.font='11px '+FONT(); c.textAlign='left';
-    c.fillStyle='rgba(139,164,177,.8)';
-    c.fillText('吸気',xOf(.10),baseY-amp-18);
-    c.fillText('呼気',xOf(.58),baseY-amp-18);
-    c.fillStyle='rgba(125,223,100,.95)';
-    c.fillText('呼気終末＝スラスト',xOf(.74),baseY+amp+30);
-
-    /* プリロードゲージ */
-    const gx=44, gy=H-52, gw=W-88, gh=22;
-    if(this.hold && this.stage===0){
-      const dt=(now()-this.holdT0)/1000;
-      this.pre = clamp(100*(1-Math.exp(-dt*1.15)) + Math.sin(now()/90)*1.1, 0,100);
-      if(this.pre>this.band()[1]+6) this.guard = Math.min(60,this.guard+.35);
-      if(Math.random()<.09) Snd.creak(this.pre);
-    }
-    if(this.stage<=1) this.guard = Math.min(60, this.guard+.02);
-    $('#th-guard').textContent=Math.round(this.guard);
-
-    c.fillStyle='#0e171d'; rr(c,gx,gy,gw,gh,8); c.fill();
-    c.strokeStyle='rgba(255,255,255,.10)'; c.lineWidth=1; c.stroke();
-    const band=this.band();
-    c.fillStyle='rgba(125,223,100,.20)';
-    c.fillRect(gx+gw*band[0]/100, gy, gw*(band[1]-band[0])/100, gh);
-    const val = this.stage===0? this.pre : this.preLocked;
-    const gr=c.createLinearGradient(gx,0,gx+gw,0);
-    gr.addColorStop(0,'#2f9d8c'); gr.addColorStop(.7,'#3fd8c2'); gr.addColorStop(1,'#ef5b57');
-    c.fillStyle=gr; rr(c,gx+2,gy+3,Math.max(0,gw*val/100-4),gh-6,6); c.fill();
-    // 目標帯の枠はフィルの上に描いて常に見えるようにする
-    c.strokeStyle='rgba(190,255,170,.9)'; c.lineWidth=2;
-    c.strokeRect(gx+gw*band[0]/100, gy-2, gw*(band[1]-band[0])/100, gh+4);
-    c.font='11px '+FONT(); c.textAlign='left'; c.fillStyle='rgba(139,164,177,.85)';
-    c.fillText('プリロード（組織の遊びを取る）',gx,gy-8);
-    c.textAlign='right'; c.fillStyle='#dde9ef';
-    c.fillText(Math.round(val)+' / 100', gx+gw, gy-8);
-
-    /* 中央プロンプト */
-    c.textAlign='center'; c.font='800 19px '+FONT();
-    if(this.stage===0){
-      c.fillStyle= this.hold? '#3fd8c2':'rgba(221,233,239,.75)';
-      c.fillText(this.hold? 'スラックを取っています… 緑の帯で離す' : '長押ししてプリロード開始', W/2, H-84);
-    }else if(this.stage===1){
-      const inZone = ph>=zoneA;
-      c.fillStyle= inZone? '#7ddf64':'rgba(240,160,75,.85)';
-      c.fillText(inZone? (this.mode==='gonstead'? '今！ ボディドロップ！' : '今！ 短く鋭くタップ！')
-                       : '呼気を待つ…', W/2, H-84);
-    }else{
-      const cc=S.cur;
-      c.fillStyle= cc.hurt? '#ef5b57' : cc.cav? '#7ddf64':'rgba(221,233,239,.7)';
-      c.fillText(cc.hurt? '⚠ 患者が痛みを訴えた' : cc.cav? '✔ ポキッ！ キャビテーション' : '… 空振り（関節音なし）', W/2, H-84);
+    // 遊びを取ったまま止まっていると患者は身構える
+    if(!this.resolved){
+      const preNow=this.disp/this.SLACK()*100;
+      if(preNow>this.band()[1]+8) this.guard=Math.min(70,this.guard+.30);
+      else this.guard=Math.min(70,this.guard+.02);
+      $('#th-guard').textContent=Math.round(this.guard);
+      const left=42-(now()-this.t0)/1000;
+      if(left<=0){ this.giveUp('セットアップに時間をかけすぎ、患者が体位を保てなくなった'); }
+      else if(left<12){
+        c.save(); c.font='700 12px '+FONT(); c.textAlign='right';
+        c.fillStyle= left<6? '#ef5b57':'#f0a04b';
+        c.fillText('患者が体位を保てるのはあと '+Math.ceil(left)+' 秒', W-14, 46);
+        c.restore();
+      }
+      if(this.stage===0 && !this.kb && this.engaged &&
+         preNow>=this.band()[0] && preNow<=this.band()[1]) this.lock();
     }
 
-    if(now()-this.flash<300){
-      const k=1-(now()-this.flash)/300;
-      c.fillStyle= S.cur.hurt? 'rgba(239,91,87,'+(k*.35)+')' : 'rgba(125,223,100,'+(k*.28)+')';
+    // 対象椎骨の変位（引かれた分だけ動く。成功時は跳ね返る）
+    const drag = Math.min(this.disp,this.SLACK()*1.5)*0.30 + this.excursion*0.34;
+    let ox=this.dir.x*drag, oy=this.dir.y*drag;
+    if(this.snapT){
+      const k=clamp((now()-this.snapT)/420,0,1);
+      const spring=Math.cos(k*Math.PI*3)*(1-k)*14;
+      ox=-this.dir.x*spring; oy=-this.dir.y*spring;
+    }
+    this.segOff={x:ox, y:oy};
+
+    /* ── 身体 ── */
+    c.save();
+    Body.apply(c,cam);
+    if(now()-this.jolt<180 && this.resolved){ const k=1-(now()-this.jolt)/180;
+      c.translate(this.dir.x*10*k, this.dir.y*10*k); }
+    Body.table(c);
+    Body.figure(c, this.pose, {breath:br, guard:this.guard*(1-this.relax)});
+    Body.spine(c, this.segIdx, {segOff:this.segOff});
+    Body.tissue(c, this.contactPt, this.dir,
+      clamp(this.disp/this.SLACK(),0,1.3), Math.min(this.disp,this.SLACK()*1.4));
+    Body.hands(c, {x:this.contactPt.x+ox*.8, y:this.contactPt.y+oy*.8}, this.dir,
+      this.engaged||this.kbHold? clamp(this.disp/this.SLACK(),0,1):0, this.mode);
+    // 手の下の関節を見失わないためのマーカー
+    (function(v,off){
+      c.save(); c.globalAlpha=.72;
+      c.strokeStyle='#3fd8c2'; c.lineWidth=3; c.setLineDash([7,7]);
+      c.beginPath(); c.arc(v.x+off.x, v.y+off.y, v.w*1.15, 0, Math.PI*2); c.stroke();
+      c.setLineDash([]);
+      c.globalAlpha=.85; c.fillStyle='#9ff5e6';
+      c.beginPath(); c.arc(v.x+off.x, v.y+off.y, 4.5, 0, Math.PI*2); c.fill();
+      c.restore();
+    })(bodyLay[this.segIdx], this.segOff);
+    // ドライブラインの案内
+    if(!this.resolved){
+      c.save(); c.globalAlpha=.5;
+      c.strokeStyle='#f0a04b'; c.lineWidth=6; c.lineCap='round'; c.setLineDash([14,12]);
+      c.beginPath(); c.moveTo(this.contactPt.x, this.contactPt.y);
+      c.lineTo(this.contactPt.x+this.dir.x*150, this.contactPt.y+this.dir.y*150); c.stroke();
+      c.setLineDash([]);
+      c.translate(this.contactPt.x+this.dir.x*150, this.contactPt.y+this.dir.y*150);
+      c.rotate(Math.atan2(this.dir.y,this.dir.x));
+      c.fillStyle='#f0a04b'; c.beginPath();
+      c.moveTo(20,0); c.lineTo(-13,-13); c.lineTo(-13,13); c.closePath(); c.fill();
+      c.restore();
+    }
+
+    c.restore();
+
+    /* ── 衝撃の輪（キャビテーション） ── */
+    if(this.snapT && now()-this.snapT<520){
+      const k=(now()-this.snapT)/520;
+      const s=Body.toScreen(cam,this.contactPt.x,this.contactPt.y);
+      c.save(); c.globalAlpha=(1-k)*.85;
+      c.strokeStyle='#9ff5e6'; c.lineWidth=5*(1-k)+1;
+      c.beginPath(); c.arc(s.x,s.y, 18+k*130, 0, Math.PI*2); c.stroke();
+      c.restore();
+    }
+
+    /* ── 計器オーバーレイ ── */
+    this.hud(c,W,H,ph,br);
+
+    if(now()-this.flash<340){
+      const k=1-(now()-this.flash)/340;
+      c.fillStyle= S.cur.severe||S.cur.hurt? 'rgba(239,91,87,'+(k*.42)+')' : 'rgba(125,223,100,'+(k*.24)+')';
       c.fillRect(0,0,W,H);
     }
     c.restore();
+  },
+
+  hud(c,W,H,ph,br){
+    const pad=12;
+    const tg=c.createLinearGradient(0,0,0,54);
+    tg.addColorStop(0,'rgba(8,14,19,.92)'); tg.addColorStop(1,'rgba(8,14,19,0)');
+    c.fillStyle=tg; c.fillRect(0,0,W,54);
+    // 呼吸バー（上）
+    const bw=W-pad*2, bh=8, by=pad;
+    c.fillStyle='rgba(10,18,24,.72)'; rr(c,pad,by,bw,bh,4); c.fill();
+    c.fillStyle='rgba(125,223,100,.30)';
+    c.fillRect(pad+bw*.88, by, bw*.12, bh);
+    c.fillStyle= ph>=.88? '#7ddf64':'#f0a04b';
+    c.beginPath(); c.arc(pad+bw*ph, by+bh/2, 6,0,Math.PI*2); c.fill();
+    c.font='10px '+FONT(); c.textAlign='left'; c.fillStyle='rgba(160,190,200,.8)';
+    c.fillText('吸気', pad+bw*.08, by+24);
+    c.fillText('呼気', pad+bw*.55, by+24);
+    c.fillStyle='rgba(125,223,100,.95)'; c.fillText('呼気終末', pad+bw*.855, by+24);
+
+    // プリロード帯（左）
+    const gx=pad, gy=H-64, gw=210, gh=16;
+    const pre=clamp(this.disp/this.SLACK()*100,0,140);
+    c.fillStyle='rgba(10,18,24,.78)'; rr(c,gx-6,gy-20,gw+12,gh+30,10); c.fill();
+    c.fillStyle='#0e171d'; rr(c,gx,gy,gw,gh,6); c.fill();
+    const b=this.band();
+    c.fillStyle='rgba(125,223,100,.22)';
+    c.fillRect(gx+gw*b[0]/100, gy, gw*(b[1]-b[0])/100, gh);
+    const gr=c.createLinearGradient(gx,0,gx+gw,0);
+    gr.addColorStop(0,'#2f9d8c'); gr.addColorStop(.7,'#3fd8c2'); gr.addColorStop(1,'#ef5b57');
+    c.fillStyle=gr; rr(c,gx+2,gy+2,Math.max(0,gw*Math.min(pre,100)/100-4),gh-4,4); c.fill();
+    c.strokeStyle='rgba(190,255,170,.9)'; c.lineWidth=2;
+    c.strokeRect(gx+gw*b[0]/100, gy-2, gw*(b[1]-b[0])/100, gh+4);
+    c.font='10px '+FONT(); c.textAlign='left'; c.fillStyle='rgba(160,190,200,.85)';
+    c.fillText('組織の遊び（スラック）', gx, gy-6);
+    if(this.stage>=1){ c.textAlign='right'; c.fillStyle='#7ddf64'; c.fillText('スラック確保', gx+gw, gy-6); }
+
+    // 指示（読めるように暗い帯を敷く）
+    c.fillStyle='rgba(8,14,19,.72)'; c.fillRect(0,H-46,W,46);
+    c.textAlign='center'; c.font='800 19px '+FONT();
+    const py=H-18;
+    if(this.resolved){
+      const cc=S.cur;
+      c.fillStyle= cc.severe? '#ef5b57' : cc.hurt? '#ef5b57' : cc.cav? '#7ddf64':'rgba(221,233,239,.75)';
+      c.fillText(cc.severe? '⚠ 押し込みすぎ — 重篤な有害事象'
+        : cc.hurt? '⚠ 患者が痛みを訴えた'
+        : cc.cav? (this.mode==='toggle'? '✔ トッ！ 環椎が動いた':'✔ ポキッ！ キャビテーション')
+        : '… 空振り（関節は動かず）', W/2, py);
+    }else if(this.thrusting){
+      c.fillStyle='#ef5b57';
+      c.fillText(this.mode==='toggle'? '戻せ！ 跳ね返せ！':'抜けろ！', W/2, py);
+    }else if(this.stage===1){
+      const inZone=ph>=.88;
+      c.fillStyle= inZone? '#7ddf64':'rgba(240,160,75,.9)';
+      c.fillText(inZone? (this.mode==='toggle'? '今！ 弾いて、すぐ戻す':'今！ 矢印の向きへ短く鋭く弾く')
+                       : '呼気を待つ…（手はそのまま）', W/2, py);
+    }else{
+      c.fillStyle= this.engaged||this.kbHold? '#3fd8c2':'rgba(221,233,239,.8)';
+      c.fillText(this.engaged||this.kbHold? '遊びを取っています… 緑の帯まで'
+                                          : '手を置いた場所を掴んで、矢印の向きへ引く', W/2, py);
+    }
   }
 };
 
@@ -2393,13 +2619,12 @@ const After = {
 
 /* ═══════════ 結果 ═══════════ */
 const WEIGHT = {intake:14, palp:18, nervo:11, listing:13, techScore:13, contact:9, drive:9,
-                preload:8, timing:9, amp:8, stack:8, tglTiming:9, recoil:11, after:9};
+                preload:8, timing:9, vel:9, amp:8, recoil:11, after:9};
 const LABEL = {intake:'問診・スクリーニング', palp:'固着セグメントの特定',
   nervo:'ノビスコープ走査', listing:'リスティング判定', techScore:'テクニック選択',
-  contact:'コンタクトポイント', drive:'ドライブライン', preload:'プリロード',
-  timing:'スラストのタイミング', amp:'振幅（低いほど良い）',
-  stack:'手首のスタック', tglTiming:'トグルのタイミング', recoil:'リコイル（深度制御）',
-  after:'アフターケア指導'};
+  contact:'コンタクトポイント', drive:'ドライブライン', preload:'プリロード（遊びの取り方）',
+  timing:'スラストのタイミング', vel:'スラスト速度（速いほど良い）', amp:'振幅（浅いほど良い）',
+  recoil:'リコイル（跳ね返り）', after:'アフターケア指導'};
 
 const Result = {
   show(){
@@ -2490,12 +2715,10 @@ const Result = {
     note += '<div class="tiny" style="margin-top:12px">'+c.log.map(l=>'<div>'+l+'</div>').join('')+
             '<div style="margin-top:8px;color:'+(rep>=0?'var(--ok)':'var(--red)')+'">信頼度 '+(rep>=0?'+':'')+rep+'</div></div>';
     if(!c.referred && c.timingMs!=null){
-      note += '<div class="tiny" style="margin-top:6px">タイミング誤差 '+c.timingMs+'ms ／ 接触時間 '+c.ampMs+
-              'ms ／ ドライブ誤差 '+c.driveErr+'°</div>';
-    }
-    if(c.tglPeak!=null){
-      note += '<div class="tiny" style="margin-top:6px">トグル誤差 '+c.tglTimingMs+'ms ／ 接触時間 '+c.tglMs+
-              'ms ／ 到達深度 '+c.tglPeak+'（貫通ライン '+Toggle.DANGER()+'）</div>';
+      note += '<div class="tiny" style="margin-top:6px">タイミング誤差 '+c.timingMs+'ms ／ スラスト速度 '+
+              c.velPx+'px/秒 ／ 振幅 '+c.ampPx+'px'+
+              (c.tglDanger? '（貫通ライン '+c.tglDanger+'px）':'')+
+              ' ／ ドライブ誤差 '+c.driveErr+'°</div>';
     }
     $('#rs-note').innerHTML=note;
 
@@ -2528,8 +2751,8 @@ const Game = {
   openPatient(){
     S.p=S.queue[S.idx];
     S.cur={ log:[], intake:null, palp:null, nervo:null, listing:null, techScore:null,
-            contact:null, drive:null, preload:null, timing:null, amp:null,
-            stack:null, tglTiming:null, recoil:null, after:null,
+            contact:null, drive:null, preload:null, timing:null, vel:null, amp:null,
+            recoil:null, after:null, contactId:null, driveAngle:null,
             cav:false, hurt:false, severe:false, rep:null,
             referred:false, wrongTreat:false, noThrust:false };
     this.hud();
