@@ -296,6 +296,105 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
   </div>
 </section>
 
+<!-- ══════════ ガンステッド A : ノビスコープ ══════════ -->
+<section id="s-nervo" class="screen">
+  <div class="card">
+    <div class="eyebrow">GONSTEAD 分析 ① ／ ノビスコープ（皮膚温左右差の計測）</div>
+    <p class="muted" style="margin-top:0">
+      二又プローブを棘突起の両脇に当て、<b style="color:var(--tx)">上から下へ一定の速さで</b>滑らせます。
+      速すぎるとその高さは記録されません（トレースに穴が空きます）。サブラクセイションのレベルで針が<b style="color:var(--acc2)">振れる（ブレイク）</b>ので、
+      走査後にトレースから読み取ってください。
+    </p>
+    <div class="split a">
+      <div class="canvas-wrap"><canvas id="cv-nervo"></canvas>
+        <div class="overlay-hint" id="nv-hint">上端からドラッグして下へ滑らせる</div>
+      </div>
+      <div>
+        <div class="ro amber" style="margin-bottom:10px"><b id="nv-dt">0.0</b><span>ΔT 左右差</span></div>
+        <div class="meter"><div class="meter-lab"><span>走査速度 GLIDE SPEED</span><b id="nv-spd">--</b></div>
+          <div class="bar"><i id="b-spd" style="width:0%"></i></div></div>
+        <div class="meter"><div class="meter-lab"><span>走査カバー率 COVERAGE</span><b id="nv-cov">0%</b></div>
+          <div class="bar"><i id="b-cov" style="width:0%"></i></div></div>
+        <div class="meter"><div class="meter-lab"><span>患者の忍耐 PATIENCE</span><b id="nv-pat">100</b></div>
+          <div class="bar thin"><i id="b-nvpat" style="width:100%"></i></div></div>
+        <div class="tiny" id="nv-msg" style="margin-top:10px">
+          プローブを上端に置いてドラッグを開始してください。
+        </div>
+        <div class="btnrow"><button class="btn primary wide" id="nv-go" disabled onclick="Nervo.confirm()">ブレイクを確定</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ ガンステッド B : X線リスティング ══════════ -->
+<section id="s-listing" class="screen">
+  <div class="card">
+    <div class="eyebrow">GONSTEAD 分析 ② ／ X線リスティング</div>
+    <p class="muted" style="margin-top:0">
+      正面像で<b style="color:var(--tx)">棘突起がどちら側へ寄っているか</b>、側面像で<b style="color:var(--tx)">棘突起先端が上か下か</b>を読み、
+      リスティングを確定します。これがコンタクトとドライブラインを決めます。
+    </p>
+    <div class="canvas-wrap"><canvas id="cv-xray"></canvas></div>
+    <div class="grid2" style="margin-top:14px">
+      <div>
+        <div class="eyebrow">① 棘突起の偏位（正面像）</div>
+        <div id="ls-rl"></div>
+      </div>
+      <div>
+        <div class="eyebrow">② 棘突起先端の向き（側面像）</div>
+        <div id="ls-si"></div>
+      </div>
+    </div>
+    <div class="ro" style="margin-top:6px"><b id="ls-str">— — —</b><span>リスティング</span></div>
+    <div class="tiny" style="margin-top:10px">
+      表記：<b>P</b>（椎体後方）＋<b>R/L</b>（棘突起の偏位側）＋<b>S/I</b>（先端が上／下）＋接触構造。
+      骨盤は <b>PI</b>（腸骨が後下方）＋左右。
+    </div>
+    <div class="btnrow"><button class="btn primary" id="ls-go" disabled onclick="Listing.confirm()">リスティングを確定</button></div>
+  </div>
+</section>
+
+<!-- ══════════ トグル A : アトラス・リスティング ══════════ -->
+<section id="s-atlas" class="screen">
+  <div class="card">
+    <div class="eyebrow">TOGGLE RECOIL ① ／ アトラス・リスティング</div>
+    <p class="muted" style="margin-top:0">
+      開口位正面像で環椎（C1）を読みます。<b style="color:var(--tx)">外側塊と歯突起の間隙が狭い側</b>がラテラリティ、
+      <b style="color:var(--tx)">横突起が高い／低い</b>が S／I です。
+    </p>
+    <div class="canvas-wrap"><canvas id="cv-atlas"></canvas></div>
+    <div class="grid2" style="margin-top:14px">
+      <div><div class="eyebrow">① ラテラリティ</div><div id="at-lat"></div></div>
+      <div><div class="eyebrow">② 上方／下方</div><div id="at-si"></div></div>
+    </div>
+    <div class="ro" style="margin-top:6px"><b id="at-str">—</b><span>アトラス・リスティング</span></div>
+    <div class="tiny" style="margin-top:10px">
+      <b>AS</b>＝Atlas Superior、<b>AI</b>＝Atlas Inferior、末尾の <b>R/L</b> がラテラリティ。
+      コンタクトはラテラリティ側の横突起、駆動は反対側＋（S なら下方／I なら上方）。
+    </div>
+    <div class="btnrow"><button class="btn primary" id="at-go" disabled onclick="Atlas.confirm()">リスティングを確定</button></div>
+  </div>
+</section>
+
+<!-- ══════════ トグル B : スタック → トグル → リコイル ══════════ -->
+<section id="s-toggle" class="screen">
+  <div class="card">
+    <div class="eyebrow">TOGGLE RECOIL ② ／ スタック・トグル・リコイル</div>
+    <div class="banner warn" id="tg-step">STEP 1 — 長押しで<b>手首を積む（スタック）</b>。3つのリングが重なった瞬間に離す。</div>
+    <div class="canvas-wrap"><canvas id="cv-toggle"></canvas></div>
+    <div class="readout">
+      <div class="ro"><b id="tg-stack">--</b><span>スタック</span></div>
+      <div class="ro amber"><b id="tg-tim">--</b><span>トグル</span></div>
+      <div class="ro"><b id="tg-rec">--</b><span>リコイル</span></div>
+      <div class="ro red"><b id="tg-depth">0</b><span>到達深度</span></div>
+    </div>
+    <div class="banner warn" style="margin-top:14px">
+      <b>環椎横突起へのコンタクトです。</b>深度が赤線を越えると環軸関節・椎骨動脈・上位頸髄に達します。
+      押し込むのではなく、<b>触れた瞬間に跳ね返る</b>。それがリコイルです。
+    </div>
+  </div>
+</section>
+
 <!-- ══════════ PHASE 4 : コンタクト ══════════ -->
 <section id="s-contact" class="screen">
   <div class="card">
@@ -401,6 +500,39 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
       <li><b>コンタクト & ドライブライン</b> — 触れる骨のランドマークを選び、力を加える方向を矢印で合わせます。反対側に触れると大きく減点。</li>
       <li><b>プリロード & スラスト</b> — 長押しで組織の遊びを取り緑の帯で離す。次に<b>呼気の終わり</b>に<b>短く鋭く</b>タップ。長く押し込むほど痛みが出ます。</li>
       <li><b>アフターケア</b> — その患者に合った指導を2つ選びます。</li>
+    </ol>
+    <hr class="sep">
+    <div class="eyebrow">本格派の2ルート</div>
+    <h3 style="margin:6px 0 4px">ガンステッド・システム</h3>
+    <p class="muted" style="margin:0">
+      テクニック選択で選ぶと、フェーズ4の前に<b>分析2工程</b>が挟まります。
+    </p>
+    <ol class="howto">
+      <li><b>ノビスコープ</b> — 二又プローブを棘突起の両脇に当て、<b>一定の速さで</b>上から下へ滑らせて皮膚温の左右差を記録します。
+        速すぎるとその高さは計測できません。走査後、トレース上の<b>ブレイク</b>（急な振れ）をクリック。
+        ここで触診より正確に当てられれば、<b>触診の所見が上書きされて挽回できます</b>。</li>
+      <li><b>X線リスティング</b> — 正面像で棘突起がどちらへ寄っているか（<b>R/L</b>）、
+        側面像で棘突起先端が上か下か（<b>S/I</b>）を読み、<b>P＋R/L＋S/I＋接触構造</b>のリスティングを確定します。</li>
+    </ol>
+    <p class="muted" style="margin:0">
+      リスティングが決まればコンタクトとドライブラインは機械的に決まります。
+      <b>接触＝棘突起が偏位した側の構造。駆動＝偏位の逆向き</b>（R→患者の左／L→患者の右、S→尾側／I→頭側）。
+      読影を間違えれば、そのまま逆側に組み立ててしまいます。
+      スラストは<b>ボディドロップ</b>で、スラック帯・タイミング・振幅すべての判定が通常より狭い代わりに、
+      正しく決めれば精度ボーナスがつきます。
+    </p>
+    <h3 style="margin:12px 0 4px">トグルリコイル（上位頸椎専用）</h3>
+    <p class="muted" style="margin:0">
+      対象が <b>C1・C2</b> のときだけ選べます。開口位正面像から
+      <b>AS/AI＋R/L</b> のアトラス・リスティングを読み、側臥位で環椎横突起に豆状骨を当てます。
+    </p>
+    <ol class="howto">
+      <li><b>スタック</b> — 長押しで手首を積む。3つのリングが重なった瞬間に離す。</li>
+      <li><b>トグル</b> — 呼気の谷でタップ。</li>
+      <li><b>リコイル</b> — <b>押した瞬間から到達深度が跳ね上がります。</b>
+        緑の帯で離せば成功、<b style="color:var(--red)">赤い貫通ラインに触れたら重篤な有害事象</b>です。
+        環椎の裏には環軸関節・椎骨動脈・上位頸髄があります。深く入れるのではなく、
+        <b>触れた瞬間に跳ね返る</b>。関節を動かすのは深さではなく速さです。</li>
     </ol>
     <hr class="sep">
     <div class="eyebrow">用語メモ</div>
@@ -513,12 +645,39 @@ const REG_NAME = {C:'頸椎',T:'胸椎',L:'腰椎',S:'骨盤'};
 /* ─────────────── テクニック ─────────────── */
 const TECH = {
   diversified:{n:'ディバーシファイド（HVLA）', d:'手による高速・低振幅スラスト。最も一般的で、明瞭なキャビテーションが出やすい。', force:3},
-  gonstead   :{n:'ガンステッド',               d:'1つの椎に絞り込む精密なHVLA。セットアップが厳密。',                    force:3},
+  gonstead   :{n:'ガンステッド・システム',      d:'ノビスコープとX線でリスティングを確定し、単一椎にボディドロップで入れる。分析4工程＋精密なセットアップ。判定は厳しいが正確に決めれば最高評価。', force:3, deep:true},
+  toggle     :{n:'トグルリコイル（上部頸椎）',   d:'側臥位・トグルヘッドピースで環椎横突起に豆状骨コンタクト。極浅・極速のトグルと、触れた瞬間に跳ね返るリコイル。上位頸椎専用。', force:2, upperCx:true},
   drop       :{n:'ドロップテーブル（トンプソン）',d:'台が落ちる反動を使う中低刺激。振幅が小さく安全域が広い。',            force:2},
   activator  :{n:'アクティベータ（器具）',       d:'器具による極低刺激の微振動。骨が脆い人・高齢者・小児向け。',          force:1},
   fd         :{n:'フレクション・ディストラクション',d:'台の屈曲で椎間板をやさしく牽引・減圧する。スラストなし。',           force:1},
   mob        :{n:'モビリゼーション（非スラスト）',d:'関節可動域内でのゆっくりした反復運動。刺激は最小。',                 force:1}
 };
+
+/* ガンステッド・リスティング → 接触構造とドライブラインを機械的に導出する
+   接触：棘突起が偏位した側の構造（接尾辞が構造を示す）
+   駆動：偏位の逆向き。R→患者の左へ / L→患者の右へ、S→尾側へ / I→頭側へ */
+const SUF2LM = {la:'lam', m:'mam', t:'tp', pil:'pil', sp:'sp'};
+const SUF_NAME = {la:'椎弓板', m:'乳様突起', t:'横突起', pil:'関節柱', sp:'棘突起'};
+function gsDerive(gs, segId){
+  const v = SPINE[SEG_INDEX[segId]];
+  if(v.reg==='S'){
+    return { listing:'PI-'+gs.sp, contact:'psis_'+gs.sp, drive:270,
+             text:'腸骨が後下方に変位。PSISから前上方へ戻す。' };
+  }
+  const lm = SUF2LM[gs.suffix];
+  const contact = lm==='sp' ? 'sp' : lm+'_'+gs.sp;
+  const drive = gs.sp==='R' ? (gs.wedge==='S'?135:225) : (gs.wedge==='S'?45:315);
+  return { listing:'P'+gs.sp+gs.wedge+'-'+gs.suffix, contact:contact, drive:drive,
+           text:(gs.sp==='R'?'右':'左')+'の'+SUF_NAME[gs.suffix]+'にコンタクトし、患者の'+
+                (gs.sp==='R'?'左':'右')+'かつ'+(gs.wedge==='S'?'尾側':'頭側')+'へ駆動。' };
+}
+/* アトラス（環椎）リスティング → 横突起コンタクトと駆動方向 */
+function atDerive(at){
+  const drive = at.lat==='R' ? (at.si==='S'?135:225) : (at.si==='S'?45:315);
+  return { listing:'A'+at.si+at.lat, contact:'tp_'+at.lat, drive:drive,
+           text:(at.lat==='R'?'右':'左')+'の環椎横突起にコンタクトし、患者の'+
+                (at.lat==='R'?'左':'右')+'かつ'+(at.si==='S'?'尾側':'頭側')+'へトグル。' };
+}
 
 /* ─────────────── ランドマーク（描画椎骨の幅/高さに対する比） ─────────────── */
 const LM = {
@@ -564,6 +723,7 @@ const PATIENTS = [
   history:['3ヶ月前から徐々に出現','午前は軽く、夕方に悪化','週末は少し楽になる','外傷歴なし'],
   exam:['頸椎の右回旋が明らかに制限','上部僧帽筋・肩甲挙筋の過緊張','神経学的検査（反射・筋力・感覚）すべて陰性','血圧・全身状態に異常なし'],
   red:null, yellow:null,
+  gs:{sp:'R', wedge:'S', suffix:'pil'},
   target:'C5', restriction:'右回旋の制限',
   techBest:'diversified', techOk:['gonstead','drop','mob'],
   contact:'pil_R', drive:300, driveHint:'右の関節柱に触れ、やや上方＋外側へ押し上げる',
@@ -576,6 +736,7 @@ const PATIENTS = [
   history:['1ヶ月前から','深呼吸・くしゃみで増悪','腕を上げる姿勢が多い','夜間痛なし・体重変化なし'],
   exam:['上部胸椎の伸展制限','胸郭の可動性低下（右優位）','肋横突関節部に限局した圧痛','神経学的所見なし'],
   red:null, yellow:null,
+  gs:{sp:'R', wedge:'I', suffix:'t'},
   target:'T4', restriction:'伸展・右回旋の制限',
   techBest:'diversified', techOk:['gonstead','drop'],
   contact:'tp_R', drive:75, driveHint:'右横突起に触れ、やや下方（尾側）へ滑らせる',
@@ -589,6 +750,7 @@ const PATIENTS = [
   exam:['腰椎の全体的な可動性低下','L3レベルで分節的な固着','棘突起の叩打痛なし（骨折を示唆する所見なし）','下肢の筋力・感覚は正常'],
   red:null,
   yellow:{n:'骨粗鬆症', why:'骨密度が低く、強いHVLAスラストは圧迫骨折のリスクがある', need:'低刺激テクニックを選択すること'},
+  gs:{sp:'L', wedge:'S', suffix:'m'},
   target:'L3', restriction:'伸展の制限',
   techBest:'activator', techOk:['drop','mob'],
   contact:'mam_L', drive:280, driveHint:'左の乳様突起に軽く触れ、ほぼ真上（頭側）へ穏やかに',
@@ -602,6 +764,7 @@ const PATIENTS = [
   exam:['SLRテスト 左40度で陽性','左L5領域の感覚鈍麻（軽度）','左長母趾伸筋 筋力4/5（軽度低下・進行なし）','腰椎の前屈制限、体幹は右へ偏位'],
   red:null,
   yellow:{n:'急性椎間板障害（神経根症）', why:'椎間板ヘルニアによる神経根症状がある。回旋を伴う強いスラストは症状を悪化させうる', need:'牽引・減圧系の低刺激テクニックを選択すること'},
+  gs:{sp:'R', wedge:'I', suffix:'m'},
   target:'L5', restriction:'前屈時の分節的制限',
   techBest:'fd', techOk:['activator','mob'],
   contact:'sp', drive:270, driveHint:'棘突起を保持し、真っ直ぐ上方（頭側）へ穏やかに牽引',
@@ -615,6 +778,7 @@ const PATIENTS = [
   exam:['右仙腸関節に限局した圧痛','ゲンスレンテスト 右陽性','骨盤の前方回旋（右）','神経学的所見なし・血圧正常'],
   red:null,
   yellow:{n:'妊娠後期', why:'腹臥位が取れず、リラキシンで靭帯が緩み関節が不安定になっている', need:'側臥位での低刺激テクニックを選択すること'},
+  gs:{sp:'R'},
   target:'SAC', restriction:'右仙腸関節の可動制限',
   techBest:'drop', techOk:['activator','mob'],
   contact:'psis_R', drive:250, driveHint:'右PSISに触れ、上方＋やや内側へ（前方回旋を戻す）',
@@ -660,6 +824,10 @@ const PATIENTS = [
   history:['半年以上、慢性的に','長時間の座位で増悪','ストレッチでは一時的にしか改善しない','夜間痛・発熱・体重減少なし'],
   exam:['中位胸椎の伸展・回旋制限','胸椎後彎の増強と円背姿勢','傍脊柱筋の索状硬結','神経学的所見なし・心電図に異常なし'],
   red:null, yellow:null,
+  gs:{sp:'L', wedge:'S', suffix:'t'},
+  gs:{sp:'L', wedge:'I', suffix:'pil'},
+  gs:{sp:'R', wedge:'S', suffix:'m'},
+  gs:{sp:'L', wedge:'S', suffix:'la'},
   target:'T7', restriction:'伸展の制限',
   techBest:'diversified', techOk:['gonstead','drop','mob'],
   contact:'lam_L', drive:100, driveHint:'左の椎弓板に触れ、やや下方（尾側）へ',
@@ -672,6 +840,7 @@ const PATIENTS = [
   history:['2ヶ月前から','片脚立ち・階段で増悪','夜間痛なし、朝のこわばりは30分未満','出産歴2回'],
   exam:['右仙腸関節の圧痛（PSIS直下）','ファーバーテスト 右陽性','立位屈曲テスト 右陽性','見かけ上の下肢長差10mm（右短縮）'],
   red:null, yellow:null,
+  gs:{sp:'R'},
   target:'SAC', restriction:'右仙腸関節の後方回旋固着',
   techBest:'drop', techOk:['diversified','gonstead','activator'],
   contact:'psis_R', drive:245, driveHint:'右PSISに触れ、上方＋やや内側へ（後方回旋した腸骨を戻す）',
@@ -695,12 +864,31 @@ const PATIENTS = [
   history:['1年前から、週2〜3回','首を長時間同じ向きにしていると出る','鎮痛薬の効きが悪い','光過敏・嘔吐なし、外傷歴なし'],
   exam:['上位頸椎（C1-C2）の左回旋制限','後頭下筋群の圧痛で頭痛が再現される','屈曲回旋テスト 左陽性','神経学的検査 陰性、めまい・複視なし'],
   red:null, yellow:null,
+  gs:{sp:'R', wedge:'I', suffix:'m'},
+  gs:{sp:'L', wedge:'I', suffix:'pil'},
   target:'C2', restriction:'左回旋の制限',
   techBest:'diversified', techOk:['gonstead','activator','mob'],
   contact:'pil_L', drive:240, driveHint:'左の関節柱に触れ、やや上方＋外側へ',
   advice:['deepflex','sleep'], pool:['deepflex','sleep','selfcrack','stretchmax','massageonly'],
   lines:{greet:'頭痛が首から来てるって言われて来ました。', good:'あ……目の奥の重さが消えました！すごい。',
-         mid:'頭が少し軽い気がします。', bad:'頭痛は変わらないですね……', hurt:'いたっ！首がビリッとしました！'} }
+         mid:'頭が少し軽い気がします。', bad:'頭痛は変わらないですね……', hurt:'いたっ！首がビリッとしました！'} },
+
+{ id:'p13', av:'🧑‍🏫', name:'岡田 亮', age:37, sex:'男性', job:'予備校講師',
+  complaint:'後頭部がずっと重くて、首を左右に向けた時の感じが左右で全然違うんです。',
+  history:['2年前から慢性的に','長時間の立ち姿勢と板書で悪化','枕を変えても改善しない','外傷歴なし・服薬なし'],
+  exam:['環椎（C1）左横突起に限局した圧痛','頭部の側屈・回旋で症状が再現される','後頭下筋群の著明な緊張と左右差',
+        '頸椎回旋でめまい・複視・眼振の誘発なし（椎骨脳底動脈系は陰性）','神経学的検査 陰性・血圧左右差なし'],
+  red:null, yellow:null,
+  gs:{sp:'L', wedge:'S', suffix:'pil'},
+  atlas:{lat:'L', si:'S'},
+  target:'C1', restriction:'環椎の左方変位（アトラス・ラテラリティ左）',
+  techBest:'toggle', techOk:['gonstead','activator','mob','diversified'],
+  contact:'tp_L', drive:45, driveHint:'左の環椎横突起に豆状骨を当て、患者の右かつ尾側へ極浅く',
+  advice:['deepflex','sleep'], pool:['deepflex','sleep','selfcrack','stretchmax','corset'],
+  lines:{greet:'上の方の首だと思うんですが、強く鳴らされるのは正直こわいです。',
+         good:'……あ、すごい。首の付け根がふっと軽くなって、視界まで広くなった感じです。',
+         mid:'少し楽になった気がします。', bad:'うーん、あまり変わらないですね。',
+         hurt:'うっ……！首の奥が、なんか変な感じです……'} }
 ];
 
 /* ─────────────── 難易度 ─────────────── */
@@ -1081,9 +1269,14 @@ const Tech = {
     let brief = '対象：<b>'+v.name+'（'+REG_NAME[v.reg]+'）</b> ／ 所見：<b>'+p.restriction+'</b>';
     if(c.lowForceOnly) brief += '<br>※ 低刺激に限定する方針で進めています。';
     if(p.yellow && c.intake<60) brief += '<br>※ カルテを読み直しましょう — この患者には注意点があります。';
+    const upperCx = (seg==='C1'||seg==='C2');
+    if(!upperCx) brief += '<br><span style="color:var(--dim)">※ トグルリコイルは上位頸椎（C1・C2）専用のため、この対象では選べません。</span>';
     $('#tech-brief').innerHTML=brief;
-    $('#tech-opts').innerHTML = Object.keys(TECH).map(k=>
-      '<button class="opt" data-k="'+k+'"><b>'+TECH[k].n+'</b><span>'+TECH[k].d+'</span></button>').join('');
+    $('#tech-opts').innerHTML = Object.keys(TECH).filter(k=>!TECH[k].upperCx||upperCx).map(k=>{
+      const tag = TECH[k].deep? '<span style="color:var(--acc2)">［分析工程あり］</span> '
+                : TECH[k].upperCx? '<span style="color:var(--pur)">［上位頸椎専用］</span> ' : '';
+      return '<button class="opt" data-k="'+k+'"><b>'+TECH[k].n+'</b><span>'+tag+TECH[k].d+'</span></button>';
+    }).join('');
     $$('#tech-opts .opt').forEach(b=> b.onclick=()=>this.pick(b.dataset.k));
     setDraw(null);
     go('tech');
@@ -1108,30 +1301,703 @@ const Tech = {
       const best=$$('#tech-opts .opt').find(b=>b.dataset.k===p.techBest);
       if(best) best.classList.add('good');
     }
-    const noThrust = (k==='fd'||k==='mob');
-    setTimeout(()=>Contact.open(noThrust), 1400);
+    setTimeout(()=>{
+      if(k==='gonstead'){ toast('ガンステッド・システム — 分析工程に入ります',2200); Nervo.open(); }
+      else if(k==='toggle'){ toast('トグルリコイル — 上位頸椎の設定に入ります',2200); Atlas.open(); }
+      else Contact.open(k==='fd'||k==='mob', 'normal');
+    }, 1400);
+  }
+};
+
+/* ═══════════ GONSTEAD ① : ノビスコープ ═══════════ */
+const Nervo = {
+  cv:null,c:null,lay:null,W:340,H:640,
+  y:null, speed:0, gliding:false, done:false, hist:[], lastSeg:null,
+  samples:[], target:0, pick:null, patience:100, dt:0, traceX:0,
+  MAXSPD(){ return [340,260,190][S.diff]; },   // 走査速度の上限（論理px/秒）
+  open(){
+    this.target = SEG_INDEX[S.cur.marked||S.p.target];
+    this.trueTarget = SEG_INDEX[S.p.target];
+    this.samples = new Array(SPINE.length).fill(null);
+    this.y=null; this.speed=0; this.gliding=false; this.done=false;
+    this.hist=[]; this.lastSeg=null; this.pick=null; this.patience=100; this.dt=0;
+    this.cv=$('#cv-nervo'); this.c=fit(this.cv,this.W,this.H);
+    this.lay=spineLayout(this.W,this.H,72,52);
+    this.traceX = this.W-58;
+    $('#nv-go').disabled=true;
+    $('#nv-dt').textContent='0.0';
+    $('#nv-cov').textContent='0%'; $('#b-cov').style.width='0%';
+    $('#nv-spd').textContent='--'; $('#b-spd').style.width='0%';
+    $('#b-nvpat').style.width='100%'; $('#nv-pat').textContent='100';
+    $('#nv-msg').textContent='プローブを上端に置いてドラッグを開始してください。';
+    $('#nv-hint').textContent = D().hints
+      ? 'ヒント：'+REG_NAME[SPINE[this.trueTarget].reg]+'領域でブレイクが出ます'
+      : '上端からドラッグして下へ滑らせる';
+    this.bind();
+    setDraw(t=>this.draw(t));
+    go('nervo');
+  },
+  bind(){
+    const cv=this.cv; if(cv._bound) return; cv._bound=true;
+    const at=e=>ptr(cv,e).y;
+    cv.addEventListener('pointerdown',e=>{ e.preventDefault(); Snd.resume();
+      try{cv.setPointerCapture(e.pointerId);}catch(_){}
+      if(this.done) { this.pickAt(ptr(cv,e)); return; }
+      this.gliding=true; this.y=at(e); this.hist=[{t:now(), y:this.y}]; this.lastSeg=null; });
+    cv.addEventListener('pointermove',e=>{ if(this.gliding&&!this.done) this.y=at(e);
+      else if(this.done) this.hover=ptr(cv,e); });
+    const stop=()=>{ this.gliding=false; this.speed=0; this.hist=[]; this.lastSeg=null; };
+    cv.addEventListener('pointerup',stop);
+    cv.addEventListener('pointercancel',stop);
+    cv.addEventListener('pointerleave',()=>{ stop(); this.hover=null; });
+  },
+  /* 皮膚温左右差：サブラクセイションで鋭く振れる（ブレイク） */
+  trueDT(i){
+    const d=i-this.trueTarget;
+    const spike = Math.exp(-(d*d)/1.1) * 5.4 * (S.p.gs && S.p.gs.sp==='L' ? -1 : 1);
+    const drift = Math.sin(i*.55)*0.55 + Math.cos(i*1.7)*0.3;
+    return spike + drift + (Math.random()-.5)*D().noise*7;
+  },
+  coverage(){ return this.samples.filter(v=>v!=null).length / SPINE.length; },
+  segAt(y){
+    let best=-1,bd=1e9;
+    this.lay.forEach((v,i)=>{ const d=Math.abs(v.y-y); if(d<bd){bd=d;best=i;} });
+    return (best>=0 && bd<this.lay[best].h*1.5)? best : -1;
+  },
+  pickAt(q){
+    const i=this.segAt(q.y);
+    if(i<0 || this.samples[i]==null) return;
+    this.pick=i; Snd.blip();
+    $('#nv-go').disabled=false;
+    $('#nv-msg').innerHTML='ブレイク候補：<b style="color:var(--acc)">'+SPINE[i].name+'</b>（ΔT '+this.samples[i].toFixed(1)+'）';
+  },
+  finishGlide(){
+    this.done=true; this.gliding=false;
+    $('#nv-msg').innerHTML='走査終了。トレース上の<b style="color:var(--acc2)">最大のブレイク</b>をクリックしてください。';
+    $('#nv-hint').textContent='トレース上のブレイク（急な振れ）をクリック';
+  },
+  confirm(){
+    if(this.pick==null) return;
+    const c=S.cur;
+    const d=Math.abs(this.pick-this.trueTarget);
+    const cov=this.coverage();
+    const acc = d===0?100 : d===1?60 : d===2?24 : 0;
+    c.nervo = Math.round(acc*(.55+.45*Math.min(1,cov/0.92)));
+    c.log.push((d===0?'✔':d===1?'△':'✘')+' ノビスコープ：'+SPINE[this.pick].name+
+               ' でブレイクと判定（カバー率 '+Math.round(cov*100)+'%）');
+    // 器械的確認で触診より正確なら、こちらを採用して再評価する
+    const prev = Math.abs(SEG_INDEX[c.marked] - this.trueTarget);
+    if(d < prev){
+      c.marked = SPINE[this.pick].id; c.segOff=d;
+      c.palp = Math.max(c.palp, d===0?100:d===1?62:d===2?26:0);
+      c.log.push('　 → 触診の所見をノビスコープで修正（'+SPINE[this.pick].name+' を採用）');
+      Snd.great();
+    }else if(d===prev){ Snd.ok(); }
+    else{ Snd.bad(); c.log.push('　 → 触診の方が正確だった。器械の読みは採用しない'); }
+    $('#nv-go').disabled=true;
+    setTimeout(()=>Listing.open(), 1500);
+  },
+  draw(t){
+    const c=this.c,W=this.W,H=this.H;
+    c.clearRect(0,0,W,H);
+    drawTorso(c,W,this.lay);
+
+    // 走査速度と収集
+    if(this.gliding && !this.done && this.y!=null){
+      const tNow=now();
+      // 速度は時間窓で測る（ポインタイベントの間隔に依存させない）
+      this.hist.push({t:tNow, y:this.y});
+      while(this.hist.length>2 && tNow-this.hist[0].t>170) this.hist.shift();
+      const h0=this.hist[0], span=tNow-h0.t;
+      if(span>=70) this.speed=(this.y-h0.y)/span*1000;
+      const max=this.MAXSPD();
+      const good = this.speed < max;               // 速すぎだけが失格。遅いのは忍耐で払う
+      this.patience = clamp(this.patience-100/(D().palpTime*1.6*60),0,100);
+      $('#b-nvpat').style.width=this.patience+'%'; $('#nv-pat').textContent=Math.round(this.patience);
+
+      // 通過した区間をまとめて記録する（フレーム落ちで穴が開かないように）
+      const i=this.segAt(this.y);
+      if(i>=0){
+        if(good){
+          const from = this.lastSeg==null? i : this.lastSeg;
+          const lo=Math.min(from,i), hi=Math.max(from,i);
+          for(let k=lo;k<=hi;k++){
+            if(this.samples[k]==null){
+              this.samples[k]=this.trueDT(k);
+              if(Math.abs(this.samples[k])>3) Snd.tone(300+Math.abs(this.samples[k])*90,.05,'square',.05);
+            }
+          }
+          this.dt = lerp(this.dt, this.samples[i], .4);
+        }else{
+          this.dt = lerp(this.dt, 0, .25);
+        }
+        this.lastSeg=i;
+      }
+      $('#b-spd').style.width=clamp(Math.abs(this.speed)/max*100,0,100)+'%';
+      $('#b-spd').className = good? '' : 'hot';
+      $('#nv-spd').textContent = !good? '速すぎ' : this.speed<max*.12? '停止' : '適正';
+      $('#nv-dt').textContent=(this.dt>=0?'+':'')+this.dt.toFixed(1);
+      const cov=this.coverage();
+      $('#nv-cov').textContent=Math.round(cov*100)+'%';
+      $('#b-cov').style.width=(cov*100)+'%';
+      if(cov>=.94 || (this.y>this.lay[SPINE.length-1].y && cov>=.55)) this.finishGlide();
+      if(this.patience<=0){ this.finishGlide(); toast('患者の忍耐が尽きました。走査を打ち切ります',2200); }
+    }
+
+    // 椎骨
+    this.lay.forEach((v,i)=>{
+      const sel = this.done && this.pick===i;
+      drawVertebra(c,v,{sel:sel, glow:sel?1:0, glowColor:'rgba(63,216,194,.6)', glowColor2:'#3fd8c2'});
+    });
+
+    // トレース（右側の縦グラフ）
+    const tx=this.traceX;
+    c.strokeStyle='rgba(255,255,255,.14)'; c.lineWidth=1;
+    c.beginPath(); c.moveTo(tx,this.lay[0].y-14); c.lineTo(tx,this.lay[SPINE.length-1].y+14); c.stroke();
+    c.font='9px '+FONT(); c.fillStyle='rgba(139,164,177,.5)'; c.textAlign='center';
+    c.fillText('ΔT', tx, this.lay[0].y-22);
+    let started=false;
+    c.beginPath();
+    this.lay.forEach((v,i)=>{
+      const s=this.samples[i];
+      if(s==null){ started=false; return; }
+      const x=tx+clamp(s,-6,6)*6.4;
+      started? c.lineTo(x,v.y) : c.moveTo(x,v.y);
+      started=true;
+    });
+    c.strokeStyle='#f0a04b'; c.lineWidth=2; c.stroke();
+    this.lay.forEach((v,i)=>{
+      const s=this.samples[i]; if(s==null) return;
+      const x=tx+clamp(s,-6,6)*6.4;
+      const big=Math.abs(s)>3;
+      c.beginPath(); c.arc(x,v.y, this.pick===i?5:big?3.4:2, 0, Math.PI*2);
+      c.fillStyle= this.pick===i? '#3fd8c2' : big? '#ffd39a' : 'rgba(240,160,75,.6)';
+      c.fill();
+    });
+    if(this.done && this.hover){
+      const i=this.segAt(this.hover.y);
+      if(i>=0 && this.samples[i]!=null){
+        c.font='700 11px '+FONT(); c.fillStyle='#f0c48b'; c.textAlign='right';
+        c.fillText(SPINE[i].name, tx-46, this.lay[i].y+4);
+      }
+    }
+
+    // プローブ
+    if(this.y!=null && !this.done) this.drawProbe(c, W/2, this.y, this.gliding, t);
+  },
+  drawProbe(c,x,y,on,t){
+    c.save(); c.translate(x,y);
+    c.strokeStyle= on? 'rgba(63,216,194,.9)':'rgba(200,220,230,.5)'; c.lineWidth=2.4;
+    c.beginPath(); c.moveTo(-9,-16); c.lineTo(-9,6); c.moveTo(9,-16); c.lineTo(9,6); c.stroke();
+    c.fillStyle= on? '#3fd8c2':'rgba(200,220,230,.6)';
+    c.beginPath(); c.arc(-9,7,3.4,0,Math.PI*2); c.fill();
+    c.beginPath(); c.arc(9,7,3.4,0,Math.PI*2); c.fill();
+    c.fillStyle='rgba(30,44,54,.95)'; c.strokeStyle='rgba(255,255,255,.25)'; c.lineWidth=1;
+    rr(c,-22,-40,44,26,6); c.fill(); c.stroke();
+    // 針
+    const ang=clamp(this.dt/6,-1,1)*0.9;
+    c.strokeStyle= Math.abs(this.dt)>3? '#ef5b57':'#7ddf64'; c.lineWidth=2;
+    c.beginPath(); c.moveTo(0,-18); c.lineTo(Math.sin(ang)*15,-18-Math.cos(ang)*15); c.stroke();
+    c.restore();
+  }
+};
+
+/* ═══════════ GONSTEAD ② : X線リスティング ═══════════ */
+const Listing = {
+  cv:null,c:null,W:620,H:300, rl:null, si:null, isPelvis:false,
+  open(){
+    const p=S.p, seg=S.cur.marked||p.target;
+    const v=SPINE[SEG_INDEX[seg]];
+    this.isPelvis = v.reg==='S';
+    this.rl=null; this.si=this.isPelvis?'-':null;
+    this.cv=$('#cv-xray'); this.c=fit(this.cv,this.W,this.H);
+    $('#ls-rl').innerHTML =
+      '<button class="opt" data-v="R"><b>右へ偏位（R）</b></button>'+
+      '<button class="opt" data-v="L"><b>左へ偏位（L）</b></button>';
+    $('#ls-si').innerHTML = this.isPelvis
+      ? '<div class="tiny">骨盤のリスティングは腸骨の後下方変位（PI）＋左右のみです。</div>'
+      : '<button class="opt" data-v="S"><b>先端が上方（S）</b></button>'+
+        '<button class="opt" data-v="I"><b>先端が下方（I）</b></button>';
+    $$('#ls-rl .opt').forEach(b=> b.onclick=()=>{ this.rl=b.dataset.v; Snd.blip();
+      $$('#ls-rl .opt').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); this.upd(); });
+    $$('#ls-si .opt').forEach(b=> b.onclick=()=>{ this.si=b.dataset.v; Snd.blip();
+      $$('#ls-si .opt').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); this.upd(); });
+    $('#ls-str').textContent='— — —';
+    $('#ls-go').disabled=true;
+    setDraw(()=>this.draw());
+    go('listing');
+  },
+  upd(){
+    const seg=S.cur.marked||S.p.target;
+    const v=SPINE[SEG_INDEX[seg]];
+    if(!this.rl || !this.si){ $('#ls-str').textContent='— — —'; $('#ls-go').disabled=true; return; }
+    const gs = this.isPelvis? {sp:this.rl} : {sp:this.rl, wedge:this.si, suffix:S.p.gs.suffix};
+    $('#ls-str').textContent = v.name+' '+gsDerive(gs, seg).listing;
+    $('#ls-go').disabled=false;
+  },
+  confirm(){
+    const p=S.p, c=S.cur, seg=c.marked||p.target;
+    if($('#ls-go').disabled) return;
+    $$('#ls-rl .opt,#ls-si .opt').forEach(b=>b.disabled=true);
+    const okRL = this.rl===p.gs.sp;
+    const okSI = this.isPelvis? true : this.si===p.gs.wedge;
+    c.listing = okRL&&okSI ? 100 : (okRL||okSI) ? 46 : 8;
+    c.gsCorrect = okRL&&okSI;
+    c.gsPlayer = this.isPelvis? {sp:this.rl} : {sp:this.rl, wedge:this.si, suffix:p.gs.suffix};
+    const truth = gsDerive(this.isPelvis?{sp:p.gs.sp}:p.gs, seg);
+    c.gsTruth = truth;
+    c.gsGuide = gsDerive(c.gsPlayer, seg);
+    c.log.push((c.gsCorrect?'✔':'✘')+' リスティング判定：'+c.gsGuide.listing+
+               '（正解 '+truth.listing+'）');
+    $$('#ls-rl .opt').forEach(b=>{ if(b.dataset.v===p.gs.sp) b.classList.add('good');
+      else if(b.classList.contains('sel')) b.classList.add('bad'); });
+    if(!this.isPelvis) $$('#ls-si .opt').forEach(b=>{ if(b.dataset.v===p.gs.wedge) b.classList.add('good');
+      else if(b.classList.contains('sel')) b.classList.add('bad'); });
+    c.gsCorrect? Snd.great() : Snd.bad();
+    $('#ls-go').disabled=true;
+    setTimeout(()=>Contact.open(false,'gonstead'), 1900);
+  },
+  /* 正面像＋側面像の模式レントゲン */
+  draw(){
+    const c=this.c,W=this.W,H=this.H;
+    const p=S.p, seg=S.cur.marked||p.target, v=SPINE[SEG_INDEX[seg]];
+    c.clearRect(0,0,W,H);
+    // フィルム地
+    const g=c.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#0c1620'); g.addColorStop(1,'#101d27');
+    c.fillStyle=g; c.fillRect(0,0,W,H);
+    for(let i=0;i<900;i++){
+      c.fillStyle='rgba(255,255,255,'+(Math.random()*.022)+')';
+      c.fillRect(Math.random()*W, Math.random()*H, 1.4,1.4);
+    }
+    c.strokeStyle='rgba(255,255,255,.10)';
+    c.beginPath(); c.moveTo(W/2,12); c.lineTo(W/2,H-12); c.stroke();
+    c.font='11px '+FONT(); c.fillStyle='rgba(150,190,210,.75)'; c.textAlign='center';
+    c.fillText('AP（正面像）', W*.25, 22);
+    c.fillText('LATERAL（側面像）', W*.75, 22);
+
+    const bone=(a)=>'rgba(214,232,240,'+a+')';
+    /* ── AP ── */
+    const ax=W*.25, ay=H*.55, aw=118, ah=40;
+    c.setLineDash([4,5]); c.strokeStyle='rgba(120,220,200,.45)'; c.lineWidth=1;
+    c.beginPath(); c.moveTo(ax,52); c.lineTo(ax,H-34); c.stroke(); c.setLineDash([]);
+    for(let k=-1;k<=1;k++){
+      const yy=ay+k*(ah+22), isT=(k===0);
+      const shift = isT ? (p.gs.sp==='R'? 17 : -17) : 0;
+      c.fillStyle=bone(isT?.92:.55);
+      rr(c, ax-aw/2, yy-ah/2, aw, ah, 9); c.fill();
+      // 横突起
+      c.fillStyle=bone(isT?.8:.45);
+      rr(c, ax-aw/2-24, yy-9, 26, 18, 7); c.fill();
+      rr(c, ax+aw/2-2, yy-9, 26, 18, 7); c.fill();
+      // 棘突起（AP では正中の縦長の影）
+      c.fillStyle= isT? 'rgba(140,240,215,.95)' : bone(.7);
+      rr(c, ax+shift-6, yy-14, 12, 28, 5); c.fill();
+      if(isT){
+        c.strokeStyle='rgba(140,240,215,.85)'; c.lineWidth=1.4;
+        c.beginPath(); c.moveTo(ax,yy); c.lineTo(ax+shift,yy); c.stroke();
+        c.font='700 11px '+FONT(); c.fillStyle='rgba(140,240,215,.95)'; c.textAlign='left';
+        c.fillText(v.name, ax+aw/2+34, yy+4);
+      }
+    }
+    c.font='10px '+FONT(); c.fillStyle='rgba(150,190,210,.55)'; c.textAlign='center';
+    c.fillText('◀ 患者の左', ax-aw/2-30, H-18);
+    c.fillText('患者の右 ▶', ax+aw/2+30, H-18);
+
+    /* ── LATERAL ── */
+    const lx=W*.75, ly=H*.55, lw=74, lh=40;
+    for(let k=-1;k<=1;k++){
+      const yy=ly+k*(lh+22), isT=(k===0);
+      c.fillStyle=bone(isT?.92:.55);
+      rr(c, lx-lw/2+16, yy-lh/2, lw, lh, 8); c.fill();     // 椎体（前方＝右）
+      // 棘突起（後方＝左へ伸びる棒）。S は先端が上＝画面上方へ向く
+      const tilt = isT ? (p.gs.wedge==='S'? 16 : -16) : 0;
+      c.save(); c.translate(lx-lw/2+16, yy);
+      c.rotate(tilt*Math.PI/180);
+      c.fillStyle= isT? 'rgba(140,240,215,.95)' : bone(.7);
+      rr(c, -52, -7, 54, 14, 6); c.fill();
+      c.restore();
+      if(isT){
+        c.setLineDash([3,4]); c.strokeStyle='rgba(255,255,255,.35)'; c.lineWidth=1;
+        c.beginPath(); c.moveTo(lx-lw/2+16, yy); c.lineTo(lx-lw/2-38, yy); c.stroke(); c.setLineDash([]);
+        c.font='10px '+FONT(); c.fillStyle='rgba(255,255,255,.5)'; c.textAlign='right';
+        c.fillText('中間位', lx-lw/2-42, yy+4);
+      }
+    }
+    c.font='10px '+FONT(); c.fillStyle='rgba(150,190,210,.55)'; c.textAlign='center';
+    c.fillText('◀ 後方　　前方 ▶', lx, H-18);
+  }
+};
+
+/* ═══════════ TOGGLE ① : アトラス・リスティング ═══════════ */
+const Atlas = {
+  cv:null,c:null,W:560,H:272, lat:null, si:null,
+  open(){
+    this.lat=null; this.si=null;
+    this.cv=$('#cv-atlas'); this.c=fit(this.cv,this.W,this.H);
+    $('#at-lat').innerHTML='<button class="opt" data-v="R"><b>右（R）</b></button>'+
+                           '<button class="opt" data-v="L"><b>左（L）</b></button>';
+    $('#at-si').innerHTML ='<button class="opt" data-v="S"><b>上方（Superior）</b></button>'+
+                           '<button class="opt" data-v="I"><b>下方（Inferior）</b></button>';
+    $$('#at-lat .opt').forEach(b=> b.onclick=()=>{ this.lat=b.dataset.v; Snd.blip();
+      $$('#at-lat .opt').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); this.upd(); });
+    $$('#at-si .opt').forEach(b=> b.onclick=()=>{ this.si=b.dataset.v; Snd.blip();
+      $$('#at-si .opt').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); this.upd(); });
+    $('#at-str').textContent='—'; $('#at-go').disabled=true;
+    setDraw(t=>this.draw(t));
+    go('atlas');
+  },
+  upd(){
+    if(!this.lat||!this.si){ $('#at-str').textContent='—'; $('#at-go').disabled=true; return; }
+    $('#at-str').textContent = atDerive({lat:this.lat,si:this.si}).listing;
+    $('#at-go').disabled=false;
+  },
+  confirm(){
+    const p=S.p, c=S.cur;
+    if($('#at-go').disabled) return;
+    $$('#at-lat .opt,#at-si .opt').forEach(b=>b.disabled=true);
+    const ok = this.lat===p.atlas.lat && this.si===p.atlas.si;
+    c.listing = ok?100 : (this.lat===p.atlas.lat||this.si===p.atlas.si)?46:8;
+    c.atPlayer={lat:this.lat, si:this.si};
+    c.atTruth = atDerive(p.atlas);
+    c.atGuide = atDerive(c.atPlayer);
+    c.gsCorrect = ok;
+    c.log.push((ok?'✔':'✘')+' アトラス・リスティング：'+c.atGuide.listing+'（正解 '+c.atTruth.listing+'）');
+    $$('#at-lat .opt').forEach(b=>{ if(b.dataset.v===p.atlas.lat) b.classList.add('good');
+      else if(b.classList.contains('sel')) b.classList.add('bad'); });
+    $$('#at-si .opt').forEach(b=>{ if(b.dataset.v===p.atlas.si) b.classList.add('good');
+      else if(b.classList.contains('sel')) b.classList.add('bad'); });
+    ok? Snd.great() : Snd.bad();
+    $('#at-go').disabled=true;
+    setTimeout(()=>Toggle.open(), 1900);
+  },
+  /* 開口位正面像：環椎・歯突起・外側塊 */
+  draw(t){
+    const c=this.c,W=this.W,H=this.H, a=S.p.atlas;
+    c.clearRect(0,0,W,H);
+    const g=c.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#0c1620'); g.addColorStop(1,'#101d27');
+    c.fillStyle=g; c.fillRect(0,0,W,H);
+    for(let i=0;i<700;i++){
+      c.fillStyle='rgba(255,255,255,'+(Math.random()*.02)+')';
+      c.fillRect(Math.random()*W, Math.random()*H, 1.4,1.4);
+    }
+    const cx=W/2, cy=H*.52, bone=a2=>'rgba(214,232,240,'+a2+')';
+    const DENS=15, MASS=58, TP=40;
+    const gapR = a.lat==='R'? 13 : 31, gapL = a.lat==='R'? 31 : 13;
+    const tpDy = a.si==='S' ? -17 : 17;   // 横突起の高さ（S なら高い）
+    const tpY  = cy+4;                     // 中間位の横突起の高さ
+
+    // 軸椎（C2）体 — 背景に薄く
+    c.fillStyle=bone(.34);
+    rr(c, cx-56, cy+30, 112, 42, 10); c.fill();
+    // 歯突起（デンス）
+    c.fillStyle=bone(.92);
+    rr(c, cx-DENS, cy-46, DENS*2, 76, 9); c.fill();
+
+    [['L',-1,gapL],['R',1,gapR]].forEach(function(m){
+      const side=m[0], sgn=m[1], gap=m[2];
+      const inner = cx + sgn*(DENS+gap);            // 外側塊の内側縁
+      const outer = inner + sgn*MASS;
+      // 外側塊
+      c.fillStyle=bone(.9);
+      rr(c, Math.min(inner,outer), cy-30, MASS, 54, 9); c.fill();
+      // 横突起（リスティング側だけ高さがずれる）
+      const ty = tpY + (side===a.lat? tpDy : 0);
+      c.fillStyle=bone(.82);
+      rr(c, sgn<0? outer-TP : outer, ty-8, TP, 17, 7); c.fill();
+      // 間隙の寸法線 — 骨の上に文字を置かず、上方へ引き出す
+      const midX=(inner+cx+sgn*DENS)/2, ly=cy-62;
+      c.strokeStyle='rgba(140,240,215,.85)'; c.lineWidth=1.3;
+      c.beginPath();
+      c.moveTo(cx+sgn*DENS, cy-40); c.lineTo(cx+sgn*DENS, ly);
+      c.moveTo(inner, cy-30);       c.lineTo(inner, ly);
+      c.moveTo(cx+sgn*DENS, ly);    c.lineTo(inner, ly);
+      c.stroke();
+      const nar = (gap===Math.min(gapL,gapR));
+      c.textAlign='center';
+      c.font='700 14px '+FONT();
+      c.fillStyle = nar? '#7dfae0' : 'rgba(140,240,215,.65)';
+      c.fillText(gap+'', midX, ly-8);
+      if(nar){ c.font='700 10px '+FONT(); c.fillStyle='#7dfae0';
+               c.fillText('狭い', midX, ly-24); }
+      // 横突起の高さ表示
+      if(side===a.lat){
+        const lx2 = sgn<0? outer-TP-6 : outer+TP+6;
+        c.strokeStyle='#f0a04b'; c.lineWidth=2;
+        c.beginPath(); c.moveTo(lx2, tpY); c.lineTo(lx2, ty);
+        c.moveTo(lx2-4, ty); c.lineTo(lx2+4, ty); c.stroke();
+        c.font='700 11px '+FONT(); c.textAlign= sgn<0?'right':'left';
+        c.fillStyle='#f0c48b';
+        c.fillText(tpDy<0?'▲ 高い':'▼ 低い', lx2+sgn*8, (tpY+ty)/2+4);
+      }
+    });
+
+    // 横突起の中間位の基準線
+    c.setLineDash([3,4]); c.strokeStyle='rgba(255,255,255,.30)'; c.lineWidth=1;
+    c.beginPath(); c.moveTo(24, tpY); c.lineTo(W-24, tpY); c.stroke(); c.setLineDash([]);
+    c.font='10px '+FONT(); c.textAlign='left'; c.fillStyle='rgba(255,255,255,.45)';
+    c.fillText('横突起の中間位', 26, tpY-6);
+
+    c.textAlign='center'; c.fillStyle='rgba(150,190,210,.8)'; c.font='11px '+FONT();
+    c.fillText('C1 開口位正面像　—　数値は歯突起と外側塊の間隙', cx, 20);
+    c.fillStyle='rgba(150,190,210,.5)'; c.font='10px '+FONT();
+    c.textAlign='left';  c.fillText('◀ 患者の左', 16, H-12);
+    c.textAlign='right'; c.fillText('患者の右 ▶', W-16, H-12);
+    // 走査線の演出
+    const sy=(t/18)%H;
+    c.fillStyle='rgba(120,220,200,.05)'; c.fillRect(0,sy,W,2);
+  }
+};
+
+/* ═══════════ TOGGLE ② : スタック → トグル → リコイル ═══════════ */
+const Toggle = {
+  cv:null,c:null,W:660,H:268,
+  stage:0, hold:false, holdT0:0, spread:0, stackVal:0,
+  t0:0, tapT0:0, tapPhase:0, depth:0, peak:0, resolved:false,
+  flash:0, shakeT:0, BP:3.2, tries:0,
+  open(){
+    this.stage=0; this.hold=false; this.spread=100; this.stackVal=0;
+    this.depth=0; this.peak=0; this.resolved=false; this.flash=0; this.shakeT=0;
+    this.tapT0=0; this.tries=0; this.t0=now();
+    this.cv=$('#cv-toggle'); this.c=fit(this.cv,this.W,this.H);
+    $('#tg-stack').textContent='--'; $('#tg-tim').textContent='--';
+    $('#tg-rec').textContent='--'; $('#tg-depth').textContent='0';
+    $('#tg-step').innerHTML='STEP 1 — 長押しで<b>手首を積む（スタック）</b>。3つのリングが重なった瞬間に離す。';
+    this.bind();
+    setDraw(t=>this.draw(t));
+    go('toggle');
+  },
+  active(){ return $('#s-toggle').classList.contains('on') && !this.resolved; },
+  bind(){
+    if(this._b) return; this._b=true;
+    this.cv.addEventListener('pointerdown',e=>{ if(!this.active())return; e.preventDefault(); Snd.resume(); this.down(); });
+    window.addEventListener('pointerup',()=>{ if($('#s-toggle').classList.contains('on')) this.up(); });
+    window.addEventListener('keydown',e=>{ if(e.code==='Space'&&!e.repeat&&this.active()){ e.preventDefault(); Snd.resume(); this.down(); } });
+    window.addEventListener('keyup',e=>{ if(e.code==='Space'&&$('#s-toggle').classList.contains('on')){ e.preventDefault(); this.up(); } });
+  },
+  DANGER(){ return [72,64,58][S.diff]; },     // 貫通ライン
+  GREEN(){  return [[26,60],[30,54],[32,50]][S.diff]; },
+  down(){
+    if(this.resolved) return;
+    if(this.stage===0){ this.hold=true; this.holdT0=now(); }
+    else if(this.stage===1 && !this.tapT0){
+      this.tapT0=now(); this.tapPhase=this.phase(); this.depth=0; this.peak=0;
+      Snd.tone(1400,.04,'square',.09);
+    }
+  },
+  up(){
+    if(this.resolved) return;
+    if(this.stage===0 && this.hold){
+      this.hold=false;
+      const sp=this.spread;
+      if(sp<=[16,11,7][S.diff]){
+        S.cur.stack = Math.round(100 - sp*[3.4,5.2,8][S.diff]);
+        this.stackVal=S.cur.stack;
+        $('#tg-stack').textContent=S.cur.stack;
+        this.stage=1; Snd.tone(660,.1,'triangle',.15);
+        $('#tg-step').innerHTML='STEP 2 — <b style="color:#7ddf64">呼気の谷</b>でタップ。'+
+          '押した瞬間から深度が跳ね上がります。<b style="color:#ef5b57">赤線に触れる前に離す</b>＝リコイル。';
+      }else{
+        this.tries++;
+        Snd.bad(); this.shakeT=now();
+        if(this.tries>=3){
+          S.cur.stack=Math.max(12, Math.round(60-sp*1.6)); this.stackVal=S.cur.stack;
+          $('#tg-stack').textContent=S.cur.stack; this.stage=1;
+          $('#tg-step').innerHTML='STEP 2 — スタックが甘いまま続行。<b style="color:#ef5b57">赤線に触れる前に離す</b>。';
+          toast('スタックが決まりませんでした。そのまま進みます',2200);
+        }else{
+          toast('手首が積めていません。リングが重なる瞬間に離して',1700);
+          this.spread=100;
+        }
+      }
+    }else if(this.stage===1 && this.tapT0){
+      const dur=now()-this.tapT0;
+      this.resolve(this.tapPhase, dur, this.peak);
+      this.tapT0=0;
+    }
+  },
+  phase(){ return ((now()-this.t0)/1000/this.BP)%1; },
+  breathY(p){ return p<.4 ? -0.5+Math.sin(p/.4*Math.PI/2) : 0.5-(1-Math.cos((p-.4)/.6*Math.PI))/2; },
+  resolve(ph, dur, peak){
+    this.resolved=true; this.stage=2;
+    const c=S.cur, p=S.p;
+    let dp=Math.abs(ph-0.97); dp=Math.min(dp,1-dp);
+    const errMs=dp*this.BP*1000, win=D().timeWin*0.7;
+    c.tglTiming = errMs<=win ? Math.round(100-(errMs/win)*30)
+                : errMs<=win*2.4 ? Math.round(70-((errMs-win)/(win*1.4))*52)
+                : Math.max(0,Math.round(18-(errMs-win*2.4)/25));
+    const gz=this.GREEN(), dz=this.DANGER();
+    if(peak>=dz){ c.recoil=0; }
+    else if(peak>=gz[0] && peak<=gz[1]){
+      const mid=(gz[0]+gz[1])/2, half=(gz[1]-gz[0])/2;
+      c.recoil = Math.round(100-Math.abs(peak-mid)/half*22);
+    }
+    else if(peak<gz[0]) c.recoil = Math.max(0, Math.round(70 - (gz[0]-peak)*5));
+    else c.recoil = Math.max(0, Math.round(70 - (peak-gz[1])*6));
+    c.tglPeak=Math.round(peak); c.tglMs=Math.round(dur); c.tglTimingMs=Math.round(errMs);
+    $('#tg-tim').textContent=c.tglTiming; $('#tg-rec').textContent=c.recoil;
+    $('#tg-depth').textContent=c.tglPeak;
+
+    if(peak>=dz){
+      // 駆動貫通 — 上位頸椎で最も避けねばならない事故
+      c.severe=true; c.hurt=true;
+      c.severeReason='リコイルが遅れ、環椎横突起を押し込んだまま駆動が貫通しました。'+
+        '環軸関節・椎骨動脈・上位頸髄に力が及ぶ深度です。';
+      c.log.push('✘✘ 駆動貫通 — リコイル失敗による重篤な有害事象');
+      Snd.crack(1.3); setTimeout(()=>Snd.alarm(),120); setTimeout(()=>Snd.alarm(),700);
+      this.flash=now(); this.shakeT=now();
+      toast('駆動が貫通しました。ただちに中止してください',3000);
+    }else{
+      const good = c.stack>=55 && c.tglTiming>=50 && c.recoil>=55 && c.gsCorrect!==false && c.palp>=50;
+      c.cav=good;
+      if(good){
+        Snd.crack(.85); this.flash=now();
+        c.log.push('✔ トグル＆リコイル成功 — 極浅・極速で環椎が動いた');
+        toast('トッ、と抜けた — リコイル成功',2200);
+      }else{
+        Snd.dud();
+        c.log.push('△ 環椎が動かなかった — スタック・タイミング・リコイルのいずれかが不足');
+        toast('抜けきらず — 環椎は動きませんでした',2200);
+      }
+    }
+    // トグル系は preload/timing/amp の代わりに stack/tglTiming/recoil で評価する
+    setTimeout(()=>After.open(), 2400);
+  },
+  draw(t){
+    const c=this.c,W=this.W,H=this.H;
+    c.save();
+    if(now()-this.shakeT<420){ const k=1-(now()-this.shakeT)/420; c.translate(rnd(-8,8)*k, rnd(-5,5)*k); }
+    c.clearRect(-14,-14,W+28,H+28);
+    c.strokeStyle='rgba(255,255,255,.04)';
+    for(let x=0;x<W;x+=32){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,H); c.stroke(); }
+
+    /* 左：スタックのリング */
+    const sx=96, sy=104;
+    if(this.hold && this.stage===0){
+      const dt=(now()-this.holdT0)/1000;
+      this.spread = Math.abs(Math.cos(dt*2.1))*100;   // 収束して再び開く
+    }
+    const sp=this.stage===0? this.spread : 0;
+    [0,1,2].forEach(i=>{
+      const r=26 + sp*(i*0.34);
+      c.beginPath(); c.arc(sx,sy,r,0,Math.PI*2);
+      c.strokeStyle = this.stage===0
+        ? (sp<=[16,11,7][S.diff] ? 'rgba(125,223,100,.95)' : 'rgba(63,216,194,'+(.85-i*.2)+')')
+        : 'rgba(125,223,100,.7)';
+      c.lineWidth = i===0?3:2; c.stroke();
+    });
+    c.font='11px '+FONT(); c.textAlign='center'; c.fillStyle='rgba(139,164,177,.8)';
+    c.fillText('手首のスタック', sx, sy+86);
+    c.fillStyle= this.stage===0? '#dde9ef':'rgba(125,223,100,.9)';
+    c.font='700 13px '+FONT();
+    c.fillText(this.stage===0? 'ずれ '+Math.round(sp) : 'STACKED '+this.stackVal, sx, sy+106);
+
+    /* 中央：呼吸 */
+    const bx0=188, bx1=452, baseY=74, amp=22, ph=this.phase();
+    const xOf=p=>bx0+p*(bx1-bx0);
+    c.fillStyle='rgba(125,223,100,.13)';
+    c.fillRect(xOf(.88), baseY-amp-10, xOf(1)-xOf(.88), amp*2+20);
+    c.beginPath();
+    for(let i=0;i<=200;i++){ const p2=i/200, y=baseY-this.breathY(p2)*amp*2;
+      i?c.lineTo(xOf(p2),y):c.moveTo(xOf(p2),y); }
+    c.strokeStyle='rgba(63,216,194,.7)'; c.lineWidth=2; c.stroke();
+    c.beginPath(); c.arc(xOf(ph), baseY-this.breathY(ph)*amp*2, 6,0,Math.PI*2);
+    c.fillStyle= ph>=.88? '#7ddf64':'#f0a04b'; c.shadowColor=c.fillStyle; c.shadowBlur=12;
+    c.fill(); c.shadowBlur=0;
+    c.font='10px '+FONT(); c.textAlign='center'; c.fillStyle='rgba(125,223,100,.85)';
+    c.fillText('呼気終末', xOf(.94), baseY+amp*2+18);
+
+    /* 右：深度バー（縦） */
+    const dx=W-96, dy0=44, dh=164, dw=46;
+    if(this.stage===1 && this.tapT0){
+      const held=(now()-this.tapT0);
+      this.depth = held*0.30;                       // 押している間、深度が跳ね上がる
+      this.peak=Math.max(this.peak,this.depth);
+      if(this.depth>=this.DANGER() && !this.resolved){
+        this.resolve(this.tapPhase, held, this.depth); this.tapT0=0;
+      }
+    }
+    c.fillStyle='#0e171d'; rr(c,dx,dy0,dw,dh,8); c.fill();
+    c.strokeStyle='rgba(255,255,255,.10)'; c.lineWidth=1; c.stroke();
+    const gz=this.GREEN(), dz=this.DANGER();
+    const yOf=v=>dy0+dh-(v/100)*dh;
+    c.fillStyle='rgba(125,223,100,.22)';
+    c.fillRect(dx, yOf(gz[1]), dw, yOf(gz[0])-yOf(gz[1]));
+    const dv=this.stage===2? this.peak : this.depth;
+    c.fillStyle= dv>=dz? '#ef5b57' : dv>gz[1]? '#f0a04b' : '#3fd8c2';
+    c.fillRect(dx+3, yOf(dv), dw-6, dy0+dh-yOf(dv));
+    c.strokeStyle='rgba(190,255,170,.9)'; c.lineWidth=2;
+    c.strokeRect(dx-2, yOf(gz[1]), dw+4, yOf(gz[0])-yOf(gz[1]));
+    c.strokeStyle='#ef5b57'; c.lineWidth=2.5;
+    c.beginPath(); c.moveTo(dx-8, yOf(dz)); c.lineTo(dx+dw+8, yOf(dz)); c.stroke();
+    c.font='10px '+FONT(); c.textAlign='right'; c.fillStyle='#ef5b57';
+    c.fillText('貫通', dx-12, yOf(dz)+4);
+    c.fillStyle='rgba(125,223,100,.9)'; c.fillText('適正', dx-12, (yOf(gz[0])+yOf(gz[1]))/2+4);
+    c.textAlign='center'; c.fillStyle='rgba(139,164,177,.8)'; c.font='11px '+FONT();
+    c.fillText('到達深度', dx+dw/2, dy0-14);
+    c.font='700 15px '+FONT();
+    c.fillStyle= dv>=dz? '#ef5b57' : dv>gz[1]? '#f0a04b' : '#3fd8c2';
+    c.fillText(Math.round(dv)+'', dx+dw/2, dy0+dh+20);
+
+    /* プロンプト */
+    c.textAlign='center'; c.font='800 18px '+FONT();
+    const px=(bx0+bx1)/2;
+    if(this.stage===0){
+      c.fillStyle= this.hold? '#3fd8c2':'rgba(221,233,239,.75)';
+      c.fillText(this.hold? 'リングが重なる瞬間に離す' : '長押しで手首を積む', px, H-62);
+    }else if(this.stage===1){
+      if(this.tapT0){ c.fillStyle='#ef5b57'; c.fillText('離せ！ 跳ね返せ！', px, H-62); }
+      else { c.fillStyle= ph>=.88? '#7ddf64':'rgba(240,160,75,.85)';
+             c.fillText(ph>=.88? '今！ 触れて、跳ね返る' : '呼気を待つ…', px, H-62); }
+    }else{
+      const cc=S.cur;
+      c.fillStyle= cc.severe? '#ef5b57' : cc.cav? '#7ddf64':'rgba(221,233,239,.7)';
+      c.fillText(cc.severe? '⚠ 駆動貫通 — 重篤な有害事象' : cc.cav? '✔ トッ — 環椎が動いた' : '… 抜けきらず', px, H-62);
+    }
+    c.font='11px '+FONT(); c.fillStyle='rgba(139,164,177,.7)';
+    if(this.stage===1&&!this.tapT0) c.fillText('タップしたら即座に離す。押し込む時間がそのまま深度になる。', px, H-38);
+
+    if(now()-this.flash<340){
+      const k=1-(now()-this.flash)/340;
+      c.fillStyle= S.cur.severe? 'rgba(239,91,87,'+(k*.45)+')' : 'rgba(125,223,100,'+(k*.26)+')';
+      c.fillRect(0,0,W,H);
+    }
+    c.restore();
   }
 };
 
 /* ═══════════ PHASE 4 : コンタクト & ドライブライン ═══════════ */
 const Contact = {
   cv:null,c:null,W:430,H:430, lms:[], pick:null, angle:270, dragging:false,
-  noThrust:false, hover:null, vw:0, vh:0,
-  open(noThrust){
+  noThrust:false, hover:null, vw:0, vh:0, mode:'normal',
+  open(noThrust, mode){
     const p=S.p, c0=S.cur;
-    this.noThrust=noThrust; this.pick=null; this.angle=270; this.dragging=false; this.hover=null;
+    this.noThrust=noThrust; this.mode=mode||'normal';
+    this.pick=null; this.angle=270; this.dragging=false; this.hover=null;
     const seg = c0.marked||p.target;
     const v = SPINE[SEG_INDEX[seg]];
     this.lms = LM[v.reg];
     this.cv=$('#cv-vert'); this.c=fit(this.cv,this.W,this.H);
     this.vw = this.W*.54;
     this.vh = this.vw*(v.h/v.w);
-    $('#ct-brief').innerHTML =
-      '<b>'+v.name+'</b> に <b>'+TECH[c0.tech].n+'</b> を行います。<br>'+
-      '触れる骨のランドマークを選び、力を加える方向（ドライブライン）を矢印で合わせてください。';
-    $('#ct-tip').innerHTML = D().hints
-      ? 'ヒント：<b style="color:var(--acc)">'+p.driveHint+'</b>'
-      : '所見「'+p.restriction+'」から、どこに触れてどちらへ押すかを考えましょう。ランドマークを選ぶと矢印が出ます（ドラッグで回転）。';
+    if(this.mode==='gonstead'){
+      const g=c0.gsGuide;
+      $('#ct-brief').innerHTML =
+        '<b>'+v.name+' '+g.listing+'</b> ／ <b>'+TECH.gonstead.n+'</b><br>'+
+        'あなたが確定したリスティングに従ってセットアップしてください。';
+      $('#ct-tip').innerHTML =
+        '<b style="color:var(--acc)">リスティングが示す設定：'+g.text+'</b><br>'+
+        'ガンステッドの規則 — 接触は<b>棘突起が偏位した側</b>の構造。駆動は<b>偏位の逆向き</b>'+
+        '（R→患者の左、L→患者の右、S→尾側、I→頭側）。';
+    }else{
+      $('#ct-brief').innerHTML =
+        '<b>'+v.name+'</b> に <b>'+TECH[c0.tech].n+'</b> を行います。<br>'+
+        '触れる骨のランドマークを選び、力を加える方向（ドライブライン）を矢印で合わせてください。';
+      $('#ct-tip').innerHTML = D().hints
+        ? 'ヒント：<b style="color:var(--acc)">'+p.driveHint+'</b>'
+        : '所見「'+p.restriction+'」から、どこに触れてどちらへ押すかを考えましょう。ランドマークを選ぶと矢印が出ます（ドラッグで回転）。';
+    }
     $('#ct-pick').textContent='—'; $('#ct-angle').textContent='—';
     $('#ct-go').disabled=true;
     this.bind();
@@ -1172,7 +2038,9 @@ const Contact = {
   confirm(){
     const p=S.p, c=S.cur;
     if(!this.pick || $('#ct-go').disabled) return;
-    const want=p.contact, got=this.pick.id;
+    // ガンステッドでは正解はリスティングから導かれる（＝自分の読影が誤れば設定も誤る）
+    const truth = this.mode==='gonstead' ? c.gsTruth : {contact:p.contact, drive:p.drive};
+    const want=truth.contact, got=this.pick.id;
     let cs;
     if(got===want) cs=100;
     else if(LM_SIDE(got)!=='M' && LM_SIDE(got)===LM_SIDE(want)) cs=55;
@@ -1180,9 +2048,9 @@ const Contact = {
     else cs=14;                                       // 反対側に触れた
     c.contact=cs; c.contactPick=this.pick.n;
 
-    let dd=Math.abs(((this.angle-p.drive)%360+360)%360);
+    let dd=Math.abs(((this.angle-truth.drive)%360+360)%360);
     if(dd>180) dd=360-dd;
-    const tol=D().driveTol;
+    const tol=D().driveTol * (this.mode==='gonstead'?0.75:1);   // ガンステッドは判定が狭い
     c.drive = dd<=tol ? Math.round(100-(dd/tol)*22)
             : dd<=tol*2.2 ? Math.round(78-((dd-tol)/(tol*1.2))*54)
             : Math.max(0, Math.round(24-(dd-tol*2.2)*.35));
@@ -1192,7 +2060,8 @@ const Contact = {
     c.log.push((c.drive>=78?'✔':c.drive>=45?'△':'✘')+' ドライブライン：誤差 '+c.driveErr+'°');
     if(cs===100&&c.drive>=78) Snd.great(); else if(cs>=38&&c.drive>=45) Snd.ok(); else Snd.bad();
     $('#ct-go').disabled=true;
-    setTimeout(()=> this.noThrust ? this.gentle() : Thrust.open(), 1200);
+    const mode=this.mode;
+    setTimeout(()=> this.noThrust ? this.gentle() : Thrust.open(mode), 1200);
   },
   gentle(){
     const c=S.cur;
@@ -1243,7 +2112,8 @@ const Contact = {
       const pos=this.lmPos(this.pick);
       const a=this.angle*Math.PI/180, L=72;
       if(D().hints){
-        const ta=S.p.drive*Math.PI/180, tol=D().driveTol*Math.PI/180;
+        const td = this.mode==='gonstead' ? S.cur.gsTruth.drive : S.p.drive;
+        const ta=td*Math.PI/180, tol=D().driveTol*(this.mode==='gonstead'?.75:1)*Math.PI/180;
         c.save(); c.globalAlpha=.15; c.fillStyle='#7ddf64';
         c.beginPath(); c.moveTo(pos.x,pos.y); c.arc(pos.x,pos.y,L+16,ta-tol,ta+tol); c.closePath(); c.fill(); c.restore();
       }
@@ -1263,15 +2133,24 @@ const Contact = {
 const Thrust = {
   cv:null,c:null,W:640,H:236, BP:4.0,
   stage:0, hold:false, holdT0:0, pre:0, preLocked:0, guard:0,
-  tapT0:0, tapPhase:0, tries:0, t0:0, resolved:false, flash:0, shakeT:0,
-  open(){
+  tapT0:0, tapPhase:0, tries:0, t0:0, resolved:false, flash:0, shakeT:0, mode:'normal',
+  /* ガンステッドはボディドロップ：スラック帯もタイミングも振幅も判定が狭い */
+  band(){ const b=D().band; return this.mode==='gonstead'
+    ? [b[0]+(b[1]-b[0])*.22, b[1]-(b[1]-b[0])*.22] : b; },
+  win(){  return D().timeWin * (this.mode==='gonstead'?.72:1); },
+  ampG(){ return D().ampGood * (this.mode==='gonstead'?.78:1); },
+  ampB(){ return D().ampBad  * (this.mode==='gonstead'?.78:1); },
+  open(mode){
+    this.mode = mode||'normal';
     this.stage=0; this.hold=false; this.pre=0; this.preLocked=0; this.guard=0;
     this.tries=0; this.resolved=false; this.flash=0; this.shakeT=0; this.tapT0=0;
     this.t0=now();
     this.cv=$('#cv-thrust'); this.c=fit(this.cv,this.W,this.H);
     $('#th-pre').textContent='--'; $('#th-tim').textContent='--';
     $('#th-amp').textContent='--'; $('#th-guard').textContent='0';
-    $('#th-step').innerHTML='STEP 1 — <b>長押し</b>で組織の遊び（スラック）を取る。緑の帯に入ったら<b>離す</b>。';
+    $('#th-step').innerHTML = this.mode==='gonstead'
+      ? 'STEP 1 — ガンステッド。<b>長押し</b>で組織の遊びを取り切る。帯は狭い。'
+      : 'STEP 1 — <b>長押し</b>で組織の遊び（スラック）を取る。緑の帯に入ったら<b>離す</b>。';
     this.bind();
     setDraw(t=>this.draw(t));
     go('thrust');
@@ -1291,7 +2170,7 @@ const Thrust = {
   },
   up(){
     if(this.resolved) return;
-    const band=D().band, lo=band[0], hi=band[1];
+    const band=this.band(), lo=band[0], hi=band[1];
     if(this.stage===0 && this.hold){
       this.hold=false;
       const v=this.pre;
@@ -1302,7 +2181,9 @@ const Thrust = {
         this.stage=1;
         Snd.tone(520,.12,'triangle',.16);
         $('#th-pre').textContent=S.cur.preload;
-        $('#th-step').innerHTML='STEP 2 — <b style="color:#7ddf64">呼気の終わり</b>（波の谷）で <b>短く鋭く</b> タップ！';
+        $('#th-step').innerHTML = this.mode==='gonstead'
+          ? 'STEP 2 — <b style="color:#7ddf64">呼気の終わり</b>に、体重ごと落とす<b>ボディドロップ</b>を一瞬で。'
+          : 'STEP 2 — <b style="color:#7ddf64">呼気の終わり</b>（波の谷）で <b>短く鋭く</b> タップ！';
       }else{
         this.tries++;
         Snd.bad(); this.shakeT=now();
@@ -1335,11 +2216,11 @@ const Thrust = {
     this.resolved=true; this.stage=2;
     const c=S.cur, p=S.p;
     let dp=Math.abs(ph-0.97); dp=Math.min(dp,1-dp);
-    const errMs=dp*this.BP*1000, win=D().timeWin;
+    const errMs=dp*this.BP*1000, win=this.win();
     c.timing = errMs<=win ? Math.round(100-(errMs/win)*28)
              : errMs<=win*2.4 ? Math.round(72-((errMs-win)/(win*1.4))*52)
              : Math.max(0,Math.round(20-(errMs-win*2.4)/25));
-    const ag=D().ampGood, ab=D().ampBad;
+    const ag=this.ampG(), ab=this.ampB();
     c.amp = dur<=ag ? Math.round(100-(dur/ag)*12)
           : dur<=ab ? Math.round(88-((dur-ag)/(ab-ag))*46)
           : Math.max(0,Math.round(42-(dur-ab)/9));
@@ -1351,6 +2232,13 @@ const Thrust = {
     const forceLv = TECH[c.tech].force;
     const tooDeep = dur>ab*1.25;
     c.hurt = !!((c.riskyTech && forceLv>=2) || (tooDeep && forceLv>=2) || (p.yellow && c.riskyTech));
+    // 頸椎に高力量テクニックで深く押し込むのは重篤事故になりうる
+    const segReg = SPINE[SEG_INDEX[c.marked||p.target]].reg;
+    if(segReg==='C' && forceLv>=3 && dur>ab*1.9){
+      c.severe=true; c.hurt=true;
+      c.severeReason='頸椎に対して高力量のスラストを深く押し込みました。'+
+        '頸椎は可動性が高く支持が少ないため、振幅過大は椎骨動脈・神経根・靭帯を損傷しうる深度です。';
+    }
 
     if(c.hurt){
       Snd.crack(1.15); setTimeout(()=>Snd.alarm(),140);
@@ -1407,7 +2295,7 @@ const Thrust = {
     if(this.hold && this.stage===0){
       const dt=(now()-this.holdT0)/1000;
       this.pre = clamp(100*(1-Math.exp(-dt*1.15)) + Math.sin(now()/90)*1.1, 0,100);
-      if(this.pre>D().band[1]+6) this.guard = Math.min(60,this.guard+.35);
+      if(this.pre>this.band()[1]+6) this.guard = Math.min(60,this.guard+.35);
       if(Math.random()<.09) Snd.creak(this.pre);
     }
     if(this.stage<=1) this.guard = Math.min(60, this.guard+.02);
@@ -1415,7 +2303,7 @@ const Thrust = {
 
     c.fillStyle='#0e171d'; rr(c,gx,gy,gw,gh,8); c.fill();
     c.strokeStyle='rgba(255,255,255,.10)'; c.lineWidth=1; c.stroke();
-    const band=D().band;
+    const band=this.band();
     c.fillStyle='rgba(125,223,100,.20)';
     c.fillRect(gx+gw*band[0]/100, gy, gw*(band[1]-band[0])/100, gh);
     const val = this.stage===0? this.pre : this.preLocked;
@@ -1438,7 +2326,8 @@ const Thrust = {
     }else if(this.stage===1){
       const inZone = ph>=zoneA;
       c.fillStyle= inZone? '#7ddf64':'rgba(240,160,75,.85)';
-      c.fillText(inZone? '今！ 短く鋭くタップ！' : '呼気を待つ…', W/2, H-84);
+      c.fillText(inZone? (this.mode==='gonstead'? '今！ ボディドロップ！' : '今！ 短く鋭くタップ！')
+                       : '呼気を待つ…', W/2, H-84);
     }else{
       const cc=S.cur;
       c.fillStyle= cc.hurt? '#ef5b57' : cc.cav? '#7ddf64':'rgba(221,233,239,.7)';
@@ -1461,7 +2350,8 @@ const After = {
     const p=S.p, c=S.cur;
     this.sel=new Set();
     let msg, cls;
-    if(c.hurt){ msg=p.lines.hurt; cls='warn'; }
+    if(c.severe){ msg='……先生、腕が……しびれて……　（すぐに救急要請してください）'; cls='warn'; }
+    else if(c.hurt){ msg=p.lines.hurt; cls='warn'; }
     else if(c.noThrust){ msg=p.lines.mid||'少し楽になりました。'; cls='info'; }
     else if(c.cav && c.palp>=90){ msg=p.lines.good; cls='gold'; }
     else if(c.cav){ msg=p.lines.mid; cls='info'; }
@@ -1502,10 +2392,14 @@ const After = {
 };
 
 /* ═══════════ 結果 ═══════════ */
-const WEIGHT = {intake:14, palp:20, techScore:14, contact:9, drive:9, preload:8, timing:9, amp:8, after:9};
-const LABEL = {intake:'問診・スクリーニング', palp:'固着セグメントの特定', techScore:'テクニック選択',
+const WEIGHT = {intake:14, palp:18, nervo:11, listing:13, techScore:13, contact:9, drive:9,
+                preload:8, timing:9, amp:8, stack:8, tglTiming:9, recoil:11, after:9};
+const LABEL = {intake:'問診・スクリーニング', palp:'固着セグメントの特定',
+  nervo:'ノビスコープ走査', listing:'リスティング判定', techScore:'テクニック選択',
   contact:'コンタクトポイント', drive:'ドライブライン', preload:'プリロード',
-  timing:'スラストのタイミング', amp:'振幅（低いほど良い）', after:'アフターケア指導'};
+  timing:'スラストのタイミング', amp:'振幅（低いほど良い）',
+  stack:'手首のスタック', tglTiming:'トグルのタイミング', recoil:'リコイル（深度制御）',
+  after:'アフターケア指導'};
 
 const Result = {
   show(){
@@ -1518,7 +2412,15 @@ const Result = {
       let wsum=0, acc=0;
       keys.forEach(k=>{ wsum+=WEIGHT[k]; acc+=WEIGHT[k]*c[k]; });
       total=wsum? acc/wsum : 0;
+      // ガンステッド／トグルを正しく完遂したときの精度ボーナス
+      if(c.gsCorrect && (c.nervo==null || c.nervo>=75)) total*=1.03;
+      // 分析が完璧でも関節が動かなければアジャストメントは成立していない
+      if(!c.noThrust && !c.cav && !c.hurt){
+        total*=.78;
+        c.log.push('△ 関節は動かなかった — 分析が正しくても、入らなければ矯正は成立しない');
+      }
       if(c.hurt)     total*=.55;
+      if(c.severe)   total =0;
       if(c.guard>35) total*=.94;
     }
     c.total=clamp(Math.round(total),0,100);
@@ -1528,6 +2430,7 @@ const Result = {
     else{
       rep = c.total>=85? 5 : c.total>=70? 2 : c.total>=50? 0 : c.total>=30? -5 : -10;
       if(c.hurt) rep-=12;
+      if(c.severe) rep=-40;
     }
     S.rep=clamp(S.rep+rep,0,150);
     S.score+=c.total;
@@ -1535,7 +2438,8 @@ const Result = {
     const stars = c.total>=90?5:c.total>=78?4:c.total>=62?3:c.total>=40?2:c.total>=15?1:0;
     $('#rs-stars').textContent='★★★★★'.slice(0,stars)+'☆☆☆☆☆'.slice(0,5-stars);
     const vd=$('#rs-verdict');
-    if(c.wrongTreat){ vd.textContent='重大インシデント'; vd.className='verdict bad'; }
+    if(c.severe){ vd.textContent='重篤な有害事象 — 救急搬送'; vd.className='verdict bad'; }
+    else if(c.wrongTreat){ vd.textContent='重大インシデント'; vd.className='verdict bad'; }
     else if(c.referred){
       if(c.intake>=70){ vd.textContent='適切なトリアージ'; vd.className='verdict good'; }
       else{ vd.textContent='判断に改善の余地あり'; vd.className='verdict mid'; }
@@ -1558,7 +2462,8 @@ const Result = {
     $('#rs-lines').innerHTML=html;
 
     let q;
-    if(c.wrongTreat) q=p.lines.hurt||'……';
+    if(c.severe) q='……先生、腕が……しびれて……';
+    else if(c.wrongTreat) q=p.lines.hurt||'……';
     else if(c.referred) q='わかりました、病院で診てもらいます。ありがとうございます。';
     else if(c.hurt) q=p.lines.hurt;
     else if(c.cav&&c.palp>=90) q=p.lines.good;
@@ -1567,6 +2472,12 @@ const Result = {
     $('#rs-quote').textContent='「'+q+'」';
 
     let note='';
+    if(c.severe){
+      note += '<div class="banner warn" style="margin-top:12px"><b>駆動が深すぎました。</b><br>'+
+              c.severeReason+'<br>患者はただちに救急搬送となり、施術は中止です。'+
+              '<br><b>→ 上位頸椎では「押し込む」のではなく、触れた瞬間に跳ね返る。'+
+              '深さではなく速さが関節を動かします。</b></div>';
+    }
     if(p.red){
       note += '<div class="banner '+(c.wrongTreat?'warn':'info')+'" style="margin-top:12px">'+
               '<b>レッドフラッグ：'+p.red.n+'</b><br>'+p.red.why+
@@ -1582,9 +2493,13 @@ const Result = {
       note += '<div class="tiny" style="margin-top:6px">タイミング誤差 '+c.timingMs+'ms ／ 接触時間 '+c.ampMs+
               'ms ／ ドライブ誤差 '+c.driveErr+'°</div>';
     }
+    if(c.tglPeak!=null){
+      note += '<div class="tiny" style="margin-top:6px">トグル誤差 '+c.tglTimingMs+'ms ／ 接触時間 '+c.tglMs+
+              'ms ／ 到達深度 '+c.tglPeak+'（貫通ライン '+Toggle.DANGER()+'）</div>';
+    }
     $('#rs-note').innerHTML=note;
 
-    S.results.push({name:p.name, total:c.total, stars:stars,
+    S.results.push({name:p.name, total:c.total, stars:stars, severe:!!c.severe,
       hurt:!!c.hurt, wrong:!!c.wrongTreat, referred:!!c.referred});
     Game.hud();
     setDraw(null);
@@ -1612,9 +2527,11 @@ const Game = {
   },
   openPatient(){
     S.p=S.queue[S.idx];
-    S.cur={ log:[], intake:null, palp:null, techScore:null, contact:null, drive:null,
-            preload:null, timing:null, amp:null, after:null,
-            cav:false, hurt:false, rep:null, referred:false, wrongTreat:false, noThrust:false };
+    S.cur={ log:[], intake:null, palp:null, nervo:null, listing:null, techScore:null,
+            contact:null, drive:null, preload:null, timing:null, amp:null,
+            stack:null, tglTiming:null, recoil:null, after:null,
+            cav:false, hurt:false, severe:false, rep:null,
+            referred:false, wrongTreat:false, noThrust:false };
     this.hud();
     Intake.open();
   },
@@ -1627,7 +2544,8 @@ const Game = {
     $('#dy-title').textContent='DAY '+S.day+' 終了';
     $('#dy-score').textContent=S.score;
     $('#dy-list').innerHTML=S.results.map(r=>{
-      const tag = r.wrong? '<span style="color:var(--red)">重大ミス</span>'
+      const tag = r.severe? '<span style="color:var(--red)">重篤・搬送</span>'
+                : r.wrong? '<span style="color:var(--red)">重大ミス</span>'
                 : r.hurt? '<span style="color:var(--red)">有害事象</span>'
                 : r.referred? '<span style="color:var(--acc)">紹介</span>'
                 : '<span style="color:var(--dim2)">施術</span>';

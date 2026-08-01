@@ -29,6 +29,13 @@ No external assets or network requests, so it works offline and from `file://`.
   screens with no canvas call `setDraw(null)`.
 - **Phase modules** (`Intake`, `Palp`, `Tech`, `Contact`, `Thrust`, `After`, `Result`) are plain object
   literals, each with `open()` and their own state. They hand off to each other directly.
+- **The flow branches at `Tech.pick()`** into three routes, and later phases differ per route:
+  - default → `Contact` → `Thrust`
+  - `gonstead` → `Nervo` → `Listing` → `Contact('gonstead')` → `Thrust('gonstead')`
+  - `toggle` (offered only when the marked segment is C1/C2) → `Atlas` → `Toggle`
+  In the Gonstead route the correct contact and drive angle are *derived* from the true listing by
+  `gsDerive()`, not read from the patient's `contact`/`drive` fields — so a misread film propagates
+  into a wrong setup. `atDerive()` does the same for the atlas listing.
 - **`S`** is the global game state; **`S.cur`** accumulates the current patient's per-phase scores,
   which `Result.show()` folds into a weighted average via `WEIGHT`.
 - **`SPINE` / `spineLayout()` / `drawVertebra()`** are shared by the title animation, the palpation
@@ -38,6 +45,12 @@ No external assets or network requests, so it works offline and from `file://`.
   gesture before it will play.
 - **Patient data** lives in the `PATIENTS` array; adding a case means adding one object there
   (target segment, correct technique, correct contact landmark, drive angle, red/yellow flag, dialogue).
+  Every patient also needs a `gs` listing for the Gonstead route; C1/C2 cases additionally need `atlas`.
+- **Timing-based inputs must not be measured per animation frame.** Pointer event cadence varies by
+  device, so a per-frame velocity estimate can silently read as "too fast" for an entire drag — this
+  was a real bug in `Nervo`, where it produced 0% scan coverage. Measure over a time window and record
+  by *span covered* (fill every segment between the last position and the current one), so the result
+  depends on the user's actual motion rather than on frame timing.
 
 ### Conventions
 
