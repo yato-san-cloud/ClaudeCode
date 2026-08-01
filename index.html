@@ -1,0 +1,1684 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ボキボキ・クリニック — カイロプラクティック アジャストメント シミュレーター</title>
+<meta name="description" content="問診・触診・テクニック選択・スラストまで、カイロプラクティックのアジャストメント一連の流れを体験するブラウザゲーム。">
+<style>
+:root{
+  --bg:#0a1015; --panel:#131e26; --panel2:#18262f; --line:#25373f;
+  --tx:#dde9ef; --dim:#8ba4b1; --dim2:#5f7885;
+  --acc:#3fd8c2; --acc2:#f0a04b; --red:#ef5b57; --ok:#7ddf64; --pur:#9d8cf5;
+  --shadow:0 10px 30px rgba(0,0,0,.45);
+  --jp:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic","Noto Sans JP","Meiryo",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #16303a 0%, transparent 60%),
+    radial-gradient(800px 500px at 90% 100%, #1a2430 0%, transparent 55%),
+    var(--bg);
+  color:var(--tx); font-family:var(--jp); font-size:15px; line-height:1.7;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+button{font-family:inherit;font-size:inherit;color:inherit;cursor:pointer}
+h1,h2,h3{margin:0;font-weight:700;letter-spacing:.02em}
+
+#app{max-width:980px;margin:0 auto;padding:14px 16px 60px}
+header#hud{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:10px 14px;margin-bottom:14px;
+  background:linear-gradient(180deg,var(--panel2),var(--panel));
+  border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)
+}
+#hud.hide{display:none}
+.brand{font-weight:800;letter-spacing:.06em;font-size:15px;white-space:nowrap}
+.brand small{display:block;font-size:10px;color:var(--dim2);letter-spacing:.18em;font-weight:600}
+.hud-sp{flex:1}
+.stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}
+.stat b{font-family:var(--mono);font-size:17px;color:var(--acc)}
+.stat span{font-size:10px;color:var(--dim2);letter-spacing:.12em}
+.stat.amber b{color:var(--acc2)}
+.stat.pur b{color:var(--pur)}
+
+.screen{display:none;animation:fade .35s ease}
+.screen.on{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+.card{
+  background:linear-gradient(180deg,var(--panel2),var(--panel));
+  border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:var(--shadow)
+}
+.card+.card{margin-top:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.split{display:grid;gap:16px}
+.split.a{grid-template-columns:1fr 300px}
+.split.b{grid-template-columns:1fr 286px}
+@media(max-width:860px){.grid2,.split.a,.split.b{grid-template-columns:1fr}}
+
+.eyebrow{font-size:11px;letter-spacing:.22em;color:var(--acc);font-weight:700;margin-bottom:6px}
+.muted{color:var(--dim);font-size:13px}
+.tiny{font-size:11.5px;color:var(--dim2);line-height:1.65}
+hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:11px 20px;border-radius:11px;border:1px solid var(--line);
+  background:linear-gradient(180deg,#20323c,#182630);font-weight:700;
+  transition:.14s transform,.14s box-shadow,.14s border-color;
+}
+.btn:hover{transform:translateY(-1px);border-color:#3a5563}
+.btn:active{transform:translateY(0)}
+.btn.primary{background:linear-gradient(180deg,#3fd8c2,#22a894);border-color:#4ff0d8;color:#04231e;box-shadow:0 6px 18px rgba(63,216,194,.25)}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.38;cursor:not-allowed;transform:none;box-shadow:none}
+.btn.wide{width:100%}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.btnrow.center{justify-content:center}
+
+#s-title{text-align:center;padding-top:18px}
+.logo{font-size:clamp(32px,7.6vw,60px);font-weight:900;letter-spacing:.02em;line-height:1.05;
+  background:linear-gradient(180deg,#ffffff,#7fe8d8 60%,#2fae9b);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 6px 22px rgba(63,216,194,.28))}
+.logo-sub{font-size:11.5px;letter-spacing:.3em;color:var(--dim);margin-top:8px}
+.spinecue{margin:6px auto 2px;display:block}
+.diffrow{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px}
+.chip{padding:7px 15px;border-radius:999px;border:1px solid var(--line);background:#152029;font-size:13px;font-weight:700;transition:.15s}
+.chip.on{background:linear-gradient(180deg,#3fd8c2,#25ab97);color:#04231e;border-color:#57f0da}
+
+.chart-head{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.avatar{width:58px;height:58px;border-radius:14px;flex:none;display:grid;place-items:center;
+  font-size:26px;background:linear-gradient(180deg,#26414d,#1a2c36);border:1px solid var(--line)}
+.namebox h2{font-size:21px}
+.namebox .meta{font-size:12px;color:var(--dim)}
+.quote{
+  margin:14px 0 0;padding:12px 14px 12px 16px;border-left:3px solid var(--acc2);
+  background:#16222b;border-radius:0 10px 10px 0;font-size:14px
+}
+ul.findings{margin:8px 0 0;padding-left:0;list-style:none}
+ul.findings li{position:relative;padding:5px 0 5px 22px;font-size:13.5px;border-bottom:1px dashed #1e2d36}
+ul.findings li:last-child{border-bottom:0}
+ul.findings li::before{content:"▸";position:absolute;left:4px;color:var(--acc)}
+
+.opt{
+  display:block;width:100%;text-align:left;padding:13px 15px;margin-bottom:9px;
+  border-radius:12px;border:1px solid var(--line);background:#16222b;transition:.14s
+}
+.opt:hover:not(:disabled){border-color:var(--acc);background:#1a2b35;transform:translateX(3px)}
+.opt.sel{border-color:var(--acc);background:#173037;box-shadow:inset 0 0 0 1px rgba(63,216,194,.35)}
+.opt.good{border-color:var(--ok);background:#16301c}
+.opt.bad{border-color:var(--red);background:#2e1717}
+.opt b{display:block;font-size:14.5px}
+.opt span{display:block;font-size:12px;color:var(--dim);margin-top:2px}
+.opt:disabled{cursor:default;opacity:.92}
+
+.meter{margin-bottom:11px}
+.meter-lab{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.08em;color:var(--dim);margin-bottom:4px}
+.meter-lab b{font-family:var(--mono);color:var(--tx)}
+.bar{height:11px;border-radius:6px;background:#0e171d;border:1px solid var(--line);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,#2f9d8c,var(--acc))}
+.bar i.warm{background:linear-gradient(90deg,#c07a2e,var(--acc2))}
+.bar i.hot{background:linear-gradient(90deg,#b23c39,var(--red))}
+.bar.thin{height:7px}
+
+canvas{display:block;max-width:100%;touch-action:none;border-radius:14px}
+.canvas-wrap{display:flex;justify-content:center;background:
+  radial-gradient(420px 320px at 50% 32%,#1a2a33,#101a20);
+  border:1px solid var(--line);border-radius:16px;padding:8px;position:relative;overflow:hidden}
+.canvas-wrap::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px)}
+.overlay-hint{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:11.5px;color:var(--dim);pointer-events:none}
+
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px;margin-top:12px}
+.ro{background:#101a20;border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-align:center}
+.ro b{display:block;font-family:var(--mono);font-size:18px;color:var(--acc);word-break:break-all}
+.ro span{font-size:10px;color:var(--dim2);letter-spacing:.08em}
+.ro.amber b{color:var(--acc2)} .ro.red b{color:var(--red)}
+
+.stars{font-size:30px;letter-spacing:6px;color:var(--acc2);text-shadow:0 0 18px rgba(240,160,75,.4)}
+.scoreline{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed #1e2d36;font-size:13.5px}
+.scoreline:last-child{border-bottom:0}
+.scoreline b{font-family:var(--mono);font-size:15px;min-width:2.6em;text-align:right}
+.scoreline .sbar{flex:1;height:6px;border-radius:3px;background:#0e171d;overflow:hidden}
+.scoreline .sbar i{display:block;height:100%;background:linear-gradient(90deg,#2f9d8c,var(--acc))}
+.verdict{font-size:19px;font-weight:800;text-align:center;padding:8px 0}
+.verdict.good{color:var(--ok)} .verdict.mid{color:var(--acc2)} .verdict.bad{color:var(--red)}
+.pop{animation:pop .5s cubic-bezier(.2,1.6,.4,1)}
+@keyframes pop{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+
+.banner{border-radius:12px;padding:13px 16px;margin-bottom:14px;font-size:13.5px;border:1px solid}
+.banner.warn{background:#2e1717;border-color:#7a2f2c;color:#ffcecc}
+.banner.info{background:#132a2f;border-color:#2c5c60;color:#c6f0ea}
+.banner.gold{background:#2c2313;border-color:#6b5424;color:#f7dfae}
+.banner b{color:#fff}
+
+.modal{position:fixed;inset:0;background:rgba(4,8,11,.82);backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.modal.on{display:flex}
+.modal .card{max-width:660px;max-height:86vh;overflow:auto}
+.kbd{display:inline-block;padding:1px 7px;border-radius:5px;border:1px solid var(--line);
+  background:#0e171d;font-family:var(--mono);font-size:12px}
+.foot{text-align:center;margin-top:22px}
+ol.howto{padding-left:20px;margin:8px 0}
+ol.howto li{margin-bottom:7px;font-size:13.5px}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13px;margin-top:8px}
+.dl dt{color:var(--acc);font-weight:700;white-space:nowrap}
+.dl dd{margin:0;color:var(--dim)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+  background:#18262f;border:1px solid var(--line);border-radius:12px;padding:10px 20px;
+  font-weight:700;opacity:0;transition:.3s;pointer-events:none;z-index:60;box-shadow:var(--shadow);
+  max-width:88vw;text-align:center}
+.toast.on{opacity:1;transform:translateX(-50%)}
+.shake{animation:shake .4s}
+@keyframes shake{0%,100%{transform:none}20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(3px)}}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+<header id="hud" class="hide">
+  <div class="brand">ボキボキ・クリニック<small>CHIROPRACTIC SIM</small></div>
+  <div class="hud-sp"></div>
+  <div class="stat"><b id="hud-day">1</b><span>DAY</span></div>
+  <div class="stat"><b id="hud-pt">1/5</b><span>PATIENT</span></div>
+  <div class="stat amber"><b id="hud-score">0</b><span>SCORE</span></div>
+  <div class="stat pur"><b id="hud-rep">100</b><span>信頼度</span></div>
+  <button class="btn ghost" style="padding:6px 13px" onclick="Game.help()">?</button>
+</header>
+
+<!-- ══════════ TITLE ══════════ -->
+<section id="s-title" class="screen on">
+  <canvas id="cv-title" class="spinecue"></canvas>
+  <h1 class="logo">ボキボキ・クリニック</h1>
+  <div class="logo-sub">CHIROPRACTIC ADJUSTMENT SIMULATOR</div>
+
+  <div class="card" style="margin-top:24px;text-align:left">
+    <div class="eyebrow">本日の業務</div>
+    <p class="muted" style="margin:0">
+      あなたは開業したてのカイロプラクター。1日5人の患者を担当します。<br>
+      <b style="color:var(--tx)">問診 → 触診 → テクニック選択 → コンタクト → スラスト → アフターケア</b><br>
+      この一連の流れを、正しい判断と正確な手技でやり切ってください。
+      レッドフラッグ（危険信号）を見逃したまま施術すると、信頼度は一気に落ちます。
+    </p>
+    <hr class="sep">
+    <div class="eyebrow">難易度</div>
+    <div class="diffrow" id="diffrow">
+      <button class="chip" data-d="0">初級 — 判定が広い・ヒントあり</button>
+      <button class="chip on" data-d="1">標準</button>
+      <button class="chip" data-d="2">上級 — 判定が狭い・ヒントなし</button>
+    </div>
+    <div class="btnrow center">
+      <button class="btn primary" onclick="Game.start()">診療を開始する</button>
+      <button class="btn" onclick="Game.help()">遊びかた</button>
+    </div>
+    <div class="tiny" style="text-align:center;margin-top:14px">
+      ※ 本作はフィクションのゲームです。実在の医療行為・資格・教育課程を再現したものではなく、
+      手技や判断の内容は娯楽のために単純化・脚色されています。医学的助言として利用しないでください。
+    </div>
+  </div>
+  <div class="foot tiny">BEST SCORE <b id="best-score" style="font-family:var(--mono);color:var(--acc2)">—</b></div>
+</section>
+
+<!-- ══════════ PHASE 1 : 問診 ══════════ -->
+<section id="s-intake" class="screen">
+  <div class="card">
+    <div class="eyebrow">PHASE 1 ／ 問診・スクリーニング</div>
+    <div class="chart-head">
+      <div class="avatar" id="in-av">🧑</div>
+      <div class="namebox">
+        <h2 id="in-name">—</h2>
+        <div class="meta" id="in-meta">—</div>
+      </div>
+    </div>
+    <p class="quote" id="in-complaint">—</p>
+    <div class="grid2" style="margin-top:14px">
+      <div>
+        <div class="eyebrow">病歴・経過</div>
+        <ul class="findings" id="in-history"></ul>
+      </div>
+      <div>
+        <div class="eyebrow">検査所見</div>
+        <ul class="findings" id="in-exam"></ul>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="eyebrow">判断</div>
+    <p class="muted" style="margin-top:0">この患者にカイロプラクティック・ケアを提供してよいか？</p>
+    <div id="in-opts"></div>
+  </div>
+</section>
+
+<!-- ══════════ PHASE 2 : 触診 ══════════ -->
+<section id="s-palp" class="screen">
+  <div class="card">
+    <div class="eyebrow">PHASE 2 ／ 触診（モーション・パルペーション）</div>
+    <p class="muted" style="margin-top:0">
+      背中に手を当て、<b style="color:var(--tx)">押しながら</b>脊柱をなぞってください。
+      <b style="color:var(--acc)">可動性が低く</b>・<b style="color:var(--acc2)">緊張が高い</b>セグメントが「固着」です。
+    </p>
+    <div class="split a">
+      <div class="canvas-wrap"><canvas id="cv-spine"></canvas>
+        <div class="overlay-hint" id="palp-hint">押しながら上下に動かす</div>
+      </div>
+      <div>
+        <div class="meter"><div class="meter-lab"><span>関節可動性 MOBILITY</span><b id="m-mob">--</b></div>
+          <div class="bar"><i id="b-mob" style="width:0%"></i></div></div>
+        <div class="meter"><div class="meter-lab"><span>軟部組織緊張 TENSION</span><b id="m-ten">--</b></div>
+          <div class="bar"><i id="b-ten" class="warm" style="width:0%"></i></div></div>
+        <div class="meter"><div class="meter-lab"><span>圧痛 TENDERNESS</span><b id="m-tnd">--</b></div>
+          <div class="bar"><i id="b-tnd" class="hot" style="width:0%"></i></div></div>
+        <hr class="sep">
+        <div class="meter"><div class="meter-lab"><span>患者の忍耐 PATIENCE</span><b id="m-pat">100</b></div>
+          <div class="bar thin"><i id="b-pat" style="width:100%"></i></div></div>
+        <div class="ro" style="margin:12px 0"><b id="palp-seg">—</b><span>触れているセグメント</span></div>
+        <button class="btn primary wide" id="palp-mark" disabled onclick="Palp.mark()">ここを固着と判断する</button>
+        <div class="tiny" style="margin-top:10px">
+          押した状態で触れたセグメントが記録されます。忍耐がゼロになると触診は打ち切られます。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ PHASE 3 : テクニック ══════════ -->
+<section id="s-tech" class="screen">
+  <div class="card">
+    <div class="eyebrow">PHASE 3 ／ テクニックの選択</div>
+    <div class="banner info" id="tech-brief">—</div>
+    <div id="tech-opts"></div>
+  </div>
+</section>
+
+<!-- ══════════ PHASE 4 : コンタクト ══════════ -->
+<section id="s-contact" class="screen">
+  <div class="card">
+    <div class="eyebrow">PHASE 4 ／ コンタクトポイント & ドライブライン</div>
+    <div class="banner info" id="ct-brief">—</div>
+    <div class="split b">
+      <div class="canvas-wrap"><canvas id="cv-vert"></canvas>
+        <div class="overlay-hint" id="ct-hint">骨のランドマークをクリック → 矢印をドラッグして方向を決める</div>
+      </div>
+      <div>
+        <div class="ro" style="margin-bottom:10px"><b id="ct-pick">—</b><span>コンタクトポイント</span></div>
+        <div class="ro amber" style="margin-bottom:10px"><b id="ct-angle">—</b><span>ドライブライン</span></div>
+        <div class="tiny" style="margin-bottom:8px">
+          矢印の向き ＝ ↑上（頭側）／ ↓下（尾側）／ ←患者の左 ／ →患者の右
+        </div>
+        <div class="tiny" id="ct-tip">—</div>
+        <div class="btnrow"><button class="btn primary wide" id="ct-go" disabled onclick="Contact.confirm()">セットアップ完了</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ PHASE 5 : スラスト ══════════ -->
+<section id="s-thrust" class="screen">
+  <div class="card">
+    <div class="eyebrow">PHASE 5 ／ プリロード & スラスト</div>
+    <div class="banner info" id="th-step">STEP 1 — <b>長押し</b>で組織の遊び（スラック）を取る。緑の帯で離す。</div>
+    <div class="canvas-wrap"><canvas id="cv-thrust"></canvas></div>
+    <div class="readout">
+      <div class="ro"><b id="th-pre">--</b><span>プリロード</span></div>
+      <div class="ro amber"><b id="th-tim">--</b><span>タイミング</span></div>
+      <div class="ro"><b id="th-amp">--</b><span>振幅</span></div>
+      <div class="ro red"><b id="th-guard">0</b><span>患者の防御</span></div>
+    </div>
+    <div class="tiny" style="margin-top:12px">
+      操作：<span class="kbd">クリック</span> / <span class="kbd">Space</span> を長押し→離す（プリロード）。
+      そのあと <b style="color:var(--tx)">呼気の終わり</b> に <b style="color:var(--tx)">短く鋭く</b> タップ（スラスト）。
+      高速・低振幅＝HVLA が理想です。押し込む時間が長いほど「深すぎる」と判定されます。
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ PHASE 6 : アフターケア ══════════ -->
+<section id="s-after" class="screen">
+  <div class="card">
+    <div class="eyebrow">PHASE 6 ／ アフターケア指導</div>
+    <div class="banner" id="af-react">—</div>
+    <p class="muted" style="margin-top:0">この患者に渡すセルフケア指導を <b style="color:var(--tx)">2つ</b> 選んでください。</p>
+    <div id="af-opts"></div>
+    <div class="btnrow"><button class="btn primary" id="af-go" disabled onclick="After.confirm()">指導して見送る</button></div>
+  </div>
+</section>
+
+<!-- ══════════ 結果 ══════════ -->
+<section id="s-result" class="screen">
+  <div class="card">
+    <div class="eyebrow">施術サマリー</div>
+    <div style="text-align:center">
+      <div class="stars pop" id="rs-stars">★★★</div>
+      <div class="verdict" id="rs-verdict">—</div>
+      <div style="font-family:var(--mono);font-size:44px;font-weight:800;color:var(--acc)" id="rs-score">0</div>
+      <div class="tiny">SCORE</div>
+    </div>
+    <hr class="sep">
+    <div id="rs-lines"></div>
+    <hr class="sep">
+    <div class="quote" id="rs-quote">—</div>
+    <div id="rs-note"></div>
+    <div class="btnrow center"><button class="btn primary" onclick="Game.nextPatient()">次の患者へ（Enter）</button></div>
+  </div>
+</section>
+
+<!-- ══════════ 一日の終わり ══════════ -->
+<section id="s-day" class="screen">
+  <div class="card" style="text-align:center">
+    <div class="eyebrow">本日の診療終了</div>
+    <h1 style="font-size:30px;margin:6px 0" id="dy-title">DAY 1 終了</h1>
+    <div style="font-family:var(--mono);font-size:52px;font-weight:800;color:var(--acc2)" id="dy-score">0</div>
+    <div class="tiny">TOTAL SCORE</div>
+    <hr class="sep">
+    <div id="dy-list" style="text-align:left"></div>
+    <hr class="sep">
+    <div class="verdict" id="dy-rank">—</div>
+    <p class="muted" id="dy-msg" style="margin-top:0"></p>
+    <div class="btnrow center">
+      <button class="btn primary" onclick="Game.nextDay()">翌日を開始</button>
+      <button class="btn ghost" onclick="location.reload()">タイトルへ</button>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- ══════════ ヘルプ ══════════ -->
+<div class="modal" id="modal">
+  <div class="card">
+    <div class="eyebrow">遊びかた</div>
+    <h2 style="margin-bottom:8px">アジャストメント 6ステップ</h2>
+    <ol class="howto">
+      <li><b>問診・スクリーニング</b> — 病歴と所見からレッドフラッグ（腫瘍・感染・馬尾症候群・椎骨脳底動脈不全）を探します。1つでもあれば施術せず<b>医師へ紹介</b>。</li>
+      <li><b>触診</b> — 押しながら脊柱をなぞり、<b>可動性が低く緊張が高い</b>セグメントを1つ確定します。隣を選ぶと減点、離れると効果なし。</li>
+      <li><b>テクニック選択</b> — 年齢・骨密度・妊娠・椎間板の状態に合わせて選びます。骨粗鬆症の高齢者に強いHVLAは<b>厳禁</b>。</li>
+      <li><b>コンタクト & ドライブライン</b> — 触れる骨のランドマークを選び、力を加える方向を矢印で合わせます。反対側に触れると大きく減点。</li>
+      <li><b>プリロード & スラスト</b> — 長押しで組織の遊びを取り緑の帯で離す。次に<b>呼気の終わり</b>に<b>短く鋭く</b>タップ。長く押し込むほど痛みが出ます。</li>
+      <li><b>アフターケア</b> — その患者に合った指導を2つ選びます。</li>
+    </ol>
+    <hr class="sep">
+    <div class="eyebrow">用語メモ</div>
+    <dl class="dl">
+      <dt>HVLA</dt><dd>高速・低振幅スラスト。速く・浅くが基本。</dd>
+      <dt>プリロード</dt><dd>スラスト前に関節の「遊び」を取り切ること。足りないと空振り、取りすぎると痛い。</dd>
+      <dt>キャビテーション</dt><dd>関節内で起こる「ポキッ」という音。成功の目安（ただし音＝効果ではない）。</dd>
+      <dt>ドロップテーブル</dt><dd>台が落ちる反動を使う中低刺激のテクニック。</dd>
+      <dt>アクティベータ</dt><dd>器具による極低刺激の微振動。高齢者や骨が脆い人に。</dd>
+      <dt>F/D</dt><dd>フレクション・ディストラクション。椎間板へのやさしい牽引・減圧。</dd>
+      <dt>レッドフラッグ</dt><dd>重篤な疾患を疑う危険信号。施術ではなく紹介が正解。</dd>
+    </dl>
+    <hr class="sep">
+    <div class="tiny">
+      ※ 本作はフィクションのゲームです。実在の医療行為・資格・教育課程を再現したものではありません。
+      内容は娯楽目的で単純化・脚色されており、医学的助言ではありません。体の不調は必ず医療機関にご相談ください。
+    </div>
+    <div class="btnrow center"><button class="btn primary" onclick="Game.closeHelp()">閉じる</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════
+   ボキボキ・クリニック / Chiropractic Adjustment Simulator
+   単一ファイル・依存ゼロ。描画は Canvas、効果音は WebAudio で合成。
+   ══════════════════════════════════════════════════════════════ */
+
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const lerp  = (a,b,t) => a+(b-a)*t;
+const rnd   = (a,b) => a+Math.random()*(b-a);
+const now   = () => performance.now();
+const FONT  = () => getComputedStyle(document.body).fontFamily;
+
+/* ─────────────── オーディオ ─────────────── */
+const Snd = {
+  ctx:null, master:null,
+  init(){
+    if(this.ctx) return;
+    const AC = window.AudioContext||window.webkitAudioContext; if(!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = .45;
+    this.master.connect(this.ctx.destination);
+  },
+  resume(){ this.init(); if(this.ctx && this.ctx.state==='suspended') this.ctx.resume(); },
+  noiseBuf(dur){
+    const ctx=this.ctx, n=Math.max(1,Math.floor(ctx.sampleRate*dur));
+    const b=ctx.createBuffer(1,n,ctx.sampleRate), d=b.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
+    return b;
+  },
+  /* 関節キャビテーション「ポキッ」 */
+  crack(power=1){
+    this.init(); if(!this.ctx) return; const ctx=this.ctx, t=ctx.currentTime;
+    const src=ctx.createBufferSource(); src.buffer=this.noiseBuf(.22);
+    const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=6.5;
+    bp.frequency.setValueAtTime(2900,t); bp.frequency.exponentialRampToValueAtTime(760,t+.09);
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(.0001,t);
+    g.gain.exponentialRampToValueAtTime(.8*power,t+.004);
+    g.gain.exponentialRampToValueAtTime(.0001,t+.13);
+    src.connect(bp).connect(g).connect(this.master); src.start(t); src.stop(t+.25);
+    const o=ctx.createOscillator(), og=ctx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(190,t); o.frequency.exponentialRampToValueAtTime(70,t+.08);
+    og.gain.setValueAtTime(.0001,t); og.gain.exponentialRampToValueAtTime(.45*power,t+.006);
+    og.gain.exponentialRampToValueAtTime(.0001,t+.16);
+    o.connect(og).connect(this.master); o.start(t); o.stop(t+.2);
+  },
+  /* 空振り */
+  dud(){
+    this.init(); if(!this.ctx) return; const ctx=this.ctx,t=ctx.currentTime;
+    const src=ctx.createBufferSource(); src.buffer=this.noiseBuf(.2);
+    const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=320;
+    const g=ctx.createGain();
+    g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.32,t+.02);
+    g.gain.exponentialRampToValueAtTime(.0001,t+.2);
+    src.connect(lp).connect(g).connect(this.master); src.start(t); src.stop(t+.25);
+  },
+  tone(freq,dur=.12,type='sine',vol=.2,slide=0){
+    this.init(); if(!this.ctx) return; const ctx=this.ctx,t=ctx.currentTime;
+    const o=ctx.createOscillator(),g=ctx.createGain();
+    o.type=type; o.frequency.setValueAtTime(freq,t);
+    if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(40,freq+slide),t+dur);
+    g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+.012);
+    g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    o.connect(g).connect(this.master); o.start(t); o.stop(t+dur+.03);
+  },
+  blip(){ this.tone(880,.06,'square',.06); },
+  ok(){ this.tone(660,.1,'triangle',.16); setTimeout(()=>this.tone(990,.16,'triangle',.14),90); },
+  great(){ [523,659,784,1047].forEach((f,i)=>setTimeout(()=>this.tone(f,.18,'triangle',.15),i*80)); },
+  bad(){ this.tone(200,.3,'sawtooth',.15,-90); },
+  alarm(){ [0,180,360].forEach(d=>setTimeout(()=>this.tone(320,.14,'square',.13),d)); },
+  creak(v){ this.tone(110+v*3,.05,'sawtooth',.028); }
+};
+
+/* ─────────────── 脊柱モデル ─────────────── */
+const SPINE = [];
+for(let i=1;i<=7;i++)  SPINE.push({id:'C'+i, reg:'C', h:17,   w:33+i*0.7, name:'C'+i});
+for(let i=1;i<=12;i++) SPINE.push({id:'T'+i, reg:'T', h:20.5, w:41+i*0.9, name:'T'+i});
+for(let i=1;i<=5;i++)  SPINE.push({id:'L'+i, reg:'L', h:27,   w:57+i*1.6, name:'L'+i});
+SPINE.push({id:'SAC', reg:'S', h:50, w:76, name:'仙腸関節'});
+const SEG_INDEX = Object.fromEntries(SPINE.map((s,i)=>[s.id,i]));
+const REG_NAME = {C:'頸椎',T:'胸椎',L:'腰椎',S:'骨盤'};
+
+/* ─────────────── テクニック ─────────────── */
+const TECH = {
+  diversified:{n:'ディバーシファイド（HVLA）', d:'手による高速・低振幅スラスト。最も一般的で、明瞭なキャビテーションが出やすい。', force:3},
+  gonstead   :{n:'ガンステッド',               d:'1つの椎に絞り込む精密なHVLA。セットアップが厳密。',                    force:3},
+  drop       :{n:'ドロップテーブル（トンプソン）',d:'台が落ちる反動を使う中低刺激。振幅が小さく安全域が広い。',            force:2},
+  activator  :{n:'アクティベータ（器具）',       d:'器具による極低刺激の微振動。骨が脆い人・高齢者・小児向け。',          force:1},
+  fd         :{n:'フレクション・ディストラクション',d:'台の屈曲で椎間板をやさしく牽引・減圧する。スラストなし。',           force:1},
+  mob        :{n:'モビリゼーション（非スラスト）',d:'関節可動域内でのゆっくりした反復運動。刺激は最小。',                 force:1}
+};
+
+/* ─────────────── ランドマーク（描画椎骨の幅/高さに対する比） ─────────────── */
+const LM = {
+  C:[{id:'sp',n:'棘突起',x:0,y:.38},{id:'pil_L',n:'左関節柱',x:-.18,y:-.06},{id:'pil_R',n:'右関節柱',x:.18,y:-.06},
+     {id:'tp_L',n:'左横突起',x:-.40,y:0},{id:'tp_R',n:'右横突起',x:.40,y:0}],
+  T:[{id:'sp',n:'棘突起',x:0,y:.38},{id:'lam_L',n:'左椎弓板',x:-.18,y:-.08},{id:'lam_R',n:'右椎弓板',x:.18,y:-.08},
+     {id:'tp_L',n:'左横突起',x:-.40,y:0},{id:'tp_R',n:'右横突起',x:.40,y:0}],
+  L:[{id:'sp',n:'棘突起',x:0,y:.38},{id:'mam_L',n:'左乳様突起',x:-.20,y:-.14},{id:'mam_R',n:'右乳様突起',x:.20,y:-.14},
+     {id:'tp_L',n:'左横突起',x:-.40,y:.02},{id:'tp_R',n:'右横突起',x:.40,y:.02}],
+  S:[{id:'base',n:'仙骨底',x:0,y:-.34},{id:'psis_L',n:'左PSIS',x:-.34,y:-.10},{id:'psis_R',n:'右PSIS',x:.34,y:-.10},
+     {id:'apex',n:'仙骨尖',x:0,y:.40},{id:'isch_R',n:'右坐骨結節',x:.30,y:.48}]
+};
+const LM_NAME = id => { for(const k in LM){const f=LM[k].find(l=>l.id===id); if(f) return f.n;} return id; };
+const LM_SIDE = id => id.endsWith('_L')?'L' : id.endsWith('_R')?'R' : 'M';
+
+/* ─────────────── アフターケア ─────────────── */
+const ADVICE = {
+  deepflex:'頸部深層屈筋のトレーニング（顎引き）',
+  ergo:'デスク環境の調整（モニタ高・肘角度・座面）',
+  microbrk:'30〜45分ごとのマイクロブレイク',
+  heat:'慢性期の温熱と入浴',
+  core:'体幹スタビライゼーション（ドローイン等）',
+  walk:'毎日20分のウォーキング',
+  sleep:'睡眠姿勢と枕の高さの見直し',
+  lift:'持ち上げ動作の指導（股関節ヒンジ）',
+  pelvic:'骨盤底筋と呼吸のエクササイズ',
+  sidesleep:'側臥位＋抱き枕での就寝',
+  boneload:'荷重運動＋ビタミンD/カルシウムの相談',
+  neurowatch:'しびれや麻痺が増悪したら直ちに受診',
+  breath:'胸郭を広げる呼吸エクササイズ',
+  standrot:'立ち仕事の左右差を減らす立ち方',
+  bedrest:'1週間の完全ベッド安静',
+  corset:'コルセットの24時間常用',
+  stretchmax:'痛くても限界まで毎日ストレッチ',
+  selfcrack:'自分で首を鳴らす習慣をつける',
+  massageonly:'マッサージ店へ通うだけにする'
+};
+
+/* ─────────────── 患者 ─────────────── */
+const PATIENTS = [
+{ id:'p1', av:'🧑‍💻', name:'佐藤 健一', age:34, sex:'男性', job:'ソフトウェア開発',
+  complaint:'首の後ろから右肩にかけて、夕方になるとガチガチに張るんです。',
+  history:['3ヶ月前から徐々に出現','午前は軽く、夕方に悪化','週末は少し楽になる','外傷歴なし'],
+  exam:['頸椎の右回旋が明らかに制限','上部僧帽筋・肩甲挙筋の過緊張','神経学的検査（反射・筋力・感覚）すべて陰性','血圧・全身状態に異常なし'],
+  red:null, yellow:null,
+  target:'C5', restriction:'右回旋の制限',
+  techBest:'diversified', techOk:['gonstead','drop','mob'],
+  contact:'pil_R', drive:300, driveHint:'右の関節柱に触れ、やや上方＋外側へ押し上げる',
+  advice:['deepflex','ergo'], pool:['deepflex','ergo','bedrest','corset','selfcrack'],
+  lines:{greet:'よろしくお願いします……肩が石みたいで。', good:'うわ、首が軽い！こんなに回るんですね。',
+         mid:'少しラクになった気がします。', bad:'んー……あんまり変わらないかも？', hurt:'いてっ！ちょっと痛かったです……'} },
+
+{ id:'p2', av:'💇‍♀️', name:'田中 美咲', age:28, sex:'女性', job:'美容師',
+  complaint:'背中の真ん中が、息を吸うとズキッとします。立ちっぱなしの仕事で。',
+  history:['1ヶ月前から','深呼吸・くしゃみで増悪','腕を上げる姿勢が多い','夜間痛なし・体重変化なし'],
+  exam:['上部胸椎の伸展制限','胸郭の可動性低下（右優位）','肋横突関節部に限局した圧痛','神経学的所見なし'],
+  red:null, yellow:null,
+  target:'T4', restriction:'伸展・右回旋の制限',
+  techBest:'diversified', techOk:['gonstead','drop'],
+  contact:'tp_R', drive:75, driveHint:'右横突起に触れ、やや下方（尾側）へ滑らせる',
+  advice:['breath','standrot'], pool:['breath','standrot','corset','stretchmax','bedrest'],
+  lines:{greet:'背中が硬くて、息が浅い感じがして。', good:'あ、息がすごく入る！背中が広がった感じです。',
+         mid:'ちょっと呼吸がしやすいかも。', bad:'うーん、まだ引っかかる感じが残ってます。', hurt:'ううっ、そこ強かったです……'} },
+
+{ id:'p3', av:'👵', name:'鈴木 花子', age:71, sex:'女性', job:'無職（元教員）',
+  complaint:'腰が重だるくて、長く歩けなくなってしまって。',
+  history:['半年前から緩やかに','歩行で増悪、座ると軽快','転倒歴なし','5年前に骨粗鬆症と診断、内服治療中'],
+  exam:['腰椎の全体的な可動性低下','L3レベルで分節的な固着','棘突起の叩打痛なし（骨折を示唆する所見なし）','下肢の筋力・感覚は正常'],
+  red:null,
+  yellow:{n:'骨粗鬆症', why:'骨密度が低く、強いHVLAスラストは圧迫骨折のリスクがある', need:'低刺激テクニックを選択すること'},
+  target:'L3', restriction:'伸展の制限',
+  techBest:'activator', techOk:['drop','mob'],
+  contact:'mam_L', drive:280, driveHint:'左の乳様突起に軽く触れ、ほぼ真上（頭側）へ穏やかに',
+  advice:['boneload','walk'], pool:['boneload','walk','stretchmax','corset','selfcrack'],
+  lines:{greet:'先生、骨が弱いって言われているので、そっとお願いね。', good:'あら、腰がすっと伸びる。ありがとうねぇ。',
+         mid:'少し楽になったかしら。', bad:'うーん、あんまり変わらないねぇ。', hurt:'いたた！ちょっと強すぎるわ！'} },
+
+{ id:'p4', av:'🚚', name:'高橋 大輔', age:45, sex:'男性', job:'配送ドライバー',
+  complaint:'重い荷物を持った時にギクッときて、左のお尻から足の外側にしびれが。',
+  history:['5日前に荷物の持ち上げで発症','前屈・座位で増悪、立位・伸展で軽快','咳・くしゃみで下肢に響く','排尿排便は正常、サドル領域の感覚も正常'],
+  exam:['SLRテスト 左40度で陽性','左L5領域の感覚鈍麻（軽度）','左長母趾伸筋 筋力4/5（軽度低下・進行なし）','腰椎の前屈制限、体幹は右へ偏位'],
+  red:null,
+  yellow:{n:'急性椎間板障害（神経根症）', why:'椎間板ヘルニアによる神経根症状がある。回旋を伴う強いスラストは症状を悪化させうる', need:'牽引・減圧系の低刺激テクニックを選択すること'},
+  target:'L5', restriction:'前屈時の分節的制限',
+  techBest:'fd', techOk:['activator','mob'],
+  contact:'sp', drive:270, driveHint:'棘突起を保持し、真っ直ぐ上方（頭側）へ穏やかに牽引',
+  advice:['lift','neurowatch'], pool:['lift','neurowatch','bedrest','stretchmax','massageonly'],
+  lines:{greet:'足のしびれが怖くて……仕事に戻れますかね。', good:'あ、足のつっぱりが減りました。前より曲げられる。',
+         mid:'ちょっとだけ軽いかな。', bad:'しびれは変わらないですね……', hurt:'ぐあっ！足に電気が走りました！'} },
+
+{ id:'p5', av:'🤰', name:'伊藤 由紀', age:33, sex:'女性', job:'事務職（妊娠32週）',
+  complaint:'お尻の右上あたりが痛くて、寝返りのたびに目が覚めます。',
+  history:['妊娠28週頃から','寝返り・階段で増悪','妊娠経過は順調、産科の許可あり','下肢のしびれ・むくみの急変なし'],
+  exam:['右仙腸関節に限局した圧痛','ゲンスレンテスト 右陽性','骨盤の前方回旋（右）','神経学的所見なし・血圧正常'],
+  red:null,
+  yellow:{n:'妊娠後期', why:'腹臥位が取れず、リラキシンで靭帯が緩み関節が不安定になっている', need:'側臥位での低刺激テクニックを選択すること'},
+  target:'SAC', restriction:'右仙腸関節の可動制限',
+  techBest:'drop', techOk:['activator','mob'],
+  contact:'psis_R', drive:250, driveHint:'右PSISに触れ、上方＋やや内側へ（前方回旋を戻す）',
+  advice:['pelvic','sidesleep'], pool:['pelvic','sidesleep','corset','stretchmax','bedrest'],
+  lines:{greet:'お腹が大きいので、うつ伏せは無理なんです……', good:'わ、寝返りのイメージが楽になりました！',
+         mid:'ちょっとマシかもしれません。', bad:'まだ同じところが痛いです。', hurt:'いたっ！お腹に響きました……'} },
+
+{ id:'p6', av:'🧔', name:'山本 徹', age:58, sex:'男性', job:'自営業',
+  complaint:'背中と腰がずっと痛くて、夜中に痛みで目が覚めるんです。',
+  history:['3ヶ月前から持続し、だんだん強くなる','安静でも軽快せず、夜間痛が強い','この2ヶ月で体重が6kg減った','5年前に前立腺癌の手術歴あり'],
+  exam:['体動と無関係に持続する深部痛','胸腰椎移行部に限局した叩打痛','食欲低下・全身倦怠感','明らかな神経脱落所見はまだない'],
+  red:{n:'悪性腫瘍（転移性脊椎腫瘍）の疑い', why:'癌の既往＋説明のつかない体重減少＋夜間痛＋安静で軽快しない持続痛は、典型的なレッドフラッグの組み合わせ', action:'施術せず、ただちに医師へ紹介'},
+  yellow:null, target:'T12', restriction:'—',
+  techBest:'mob', techOk:[],
+  contact:'sp', drive:270, driveHint:'—',
+  advice:['neurowatch','ergo'], pool:['neurowatch','ergo','bedrest','corset','massageonly'],
+  lines:{greet:'マッサージじゃ全然よくならなくて……', good:'', mid:'', bad:'', hurt:'ぐっ……！ものすごく痛みます！'} },
+
+{ id:'p7', av:'👩‍🎓', name:'中村 涼', age:22, sex:'女性', job:'大学生',
+  complaint:'首を回すとフラッとして、一瞬だけ物が二重に見えることがあって。',
+  history:['2週間前から','特に上を向いて首を回した時','一度、しゃべりにくくなったことがある','片頭痛の既往なし、外傷歴なし'],
+  exam:['頸椎回旋でめまい・眼振が誘発される','一過性の複視と構音障害のエピソード','後頭部の拍動性の痛み','血圧に左右差なし'],
+  red:{n:'椎骨脳底動脈不全（VBI）の疑い', why:'めまい・複視・構音障害という「5D」に該当する症状が頸椎回旋で誘発されている。頸椎への回旋HVLAは椎骨動脈解離を起こしうる', action:'頸椎スラストは行わず、ただちに医師へ紹介'},
+  yellow:null, target:'C2', restriction:'—',
+  techBest:'mob', techOk:[],
+  contact:'pil_L', drive:290, driveHint:'—',
+  advice:['neurowatch','sleep'], pool:['neurowatch','sleep','selfcrack','stretchmax','massageonly'],
+  lines:{greet:'首が原因だと思うので、鳴らしてもらえますか？', good:'', mid:'', bad:'', hurt:'……あっ、頭が……気持ち悪いです……！'} },
+
+{ id:'p8', av:'👨‍🔧', name:'小林 誠', age:39, sex:'男性', job:'設備工事',
+  complaint:'腰がめちゃくちゃ痛くて、しかも今朝から尿が出しにくいんです。',
+  history:['2日前に急激に発症','両脚に力が入りにくい','昨日から股間まわりの感覚が鈍い','今朝から排尿困難、尿意もはっきりしない'],
+  exam:['サドル領域（会陰部）の感覚脱失','両下肢の進行性の筋力低下','アキレス腱反射 両側消失','膀胱直腸障害あり'],
+  red:{n:'馬尾症候群（Cauda Equina Syndrome）', why:'サドル麻痺＋膀胱直腸障害＋両下肢の進行性筋力低下は外科的緊急症。数時間の遅れが永久的な障害につながる', action:'施術は絶対禁忌。緊急で医療機関へ搬送'},
+  yellow:null, target:'L4', restriction:'—',
+  techBest:'mob', techOk:[],
+  contact:'sp', drive:270, driveHint:'—',
+  advice:['neurowatch','lift'], pool:['neurowatch','lift','bedrest','corset','stretchmax'],
+  lines:{greet:'とにかく腰をなんとかしてください、明日も現場なんで。', good:'', mid:'', bad:'', hurt:'あああっ！脚の感覚が……！'} },
+
+{ id:'p9', av:'👨‍💼', name:'渡辺 修', age:50, sex:'男性', job:'経理',
+  complaint:'肩甲骨の間が凝って、深く息を吸えない感じがずっとあります。',
+  history:['半年以上、慢性的に','長時間の座位で増悪','ストレッチでは一時的にしか改善しない','夜間痛・発熱・体重減少なし'],
+  exam:['中位胸椎の伸展・回旋制限','胸椎後彎の増強と円背姿勢','傍脊柱筋の索状硬結','神経学的所見なし・心電図に異常なし'],
+  red:null, yellow:null,
+  target:'T7', restriction:'伸展の制限',
+  techBest:'diversified', techOk:['gonstead','drop','mob'],
+  contact:'lam_L', drive:100, driveHint:'左の椎弓板に触れ、やや下方（尾側）へ',
+  advice:['breath','microbrk'], pool:['breath','microbrk','corset','selfcrack','bedrest'],
+  lines:{greet:'ずっと背中が固まってる感じで。', good:'おお、背筋が伸びる。息が深く入りますね。',
+         mid:'ちょっと楽になりました。', bad:'うーん、まだ重いですね。', hurt:'うっ、痛っ……！'} },
+
+{ id:'p10', av:'👩‍⚕️', name:'加藤 志穂', age:41, sex:'女性', job:'看護師',
+  complaint:'右のお尻の付け根が痛くて、患者さんの移乗介助がつらいです。',
+  history:['2ヶ月前から','片脚立ち・階段で増悪','夜間痛なし、朝のこわばりは30分未満','出産歴2回'],
+  exam:['右仙腸関節の圧痛（PSIS直下）','ファーバーテスト 右陽性','立位屈曲テスト 右陽性','見かけ上の下肢長差10mm（右短縮）'],
+  red:null, yellow:null,
+  target:'SAC', restriction:'右仙腸関節の後方回旋固着',
+  techBest:'drop', techOk:['diversified','gonstead','activator'],
+  contact:'psis_R', drive:245, driveHint:'右PSISに触れ、上方＋やや内側へ（後方回旋した腸骨を戻す）',
+  advice:['core','lift'], pool:['core','lift','corset','bedrest','massageonly'],
+  lines:{greet:'職業柄、腰は覚悟してるんですけどね。', good:'すごい、片脚立ちが安定してます！',
+         mid:'少し軽いです。', bad:'まだ引っかかりますね。', hurt:'いたっ！そこは強すぎます！'} },
+
+{ id:'p11', av:'👴', name:'松本 剛', age:66, sex:'男性', job:'農業',
+  complaint:'腰が痛くて、ここ数日は熱っぽくてだるいんです。',
+  history:['10日前から持続的に増悪','安静にしても軽快しない','37.8〜38.5℃の発熱が続いている','糖尿病でインスリン治療中、3週間前に歯科処置'],
+  exam:['L2-L3棘突起に強い限局性叩打痛','発熱と悪寒、炎症を疑わせる全身症状','体動に関係なく持続する深部痛','免疫抑制状態（コントロール不良の糖尿病）'],
+  red:{n:'脊椎感染症（化膿性脊椎炎・硬膜外膿瘍）の疑い', why:'発熱＋限局した棘突起叩打痛＋免疫抑制状態＋安静で軽快しない痛みは感染を強く示唆する', action:'施術せず、緊急で医師へ紹介'},
+  yellow:null, target:'L2', restriction:'—',
+  techBest:'mob', techOk:[],
+  contact:'sp', drive:270, driveHint:'—',
+  advice:['neurowatch','ergo'], pool:['neurowatch','ergo','bedrest','heat','massageonly'],
+  lines:{greet:'畑仕事のせいだと思うんだが、腰をひとつ頼むよ。', good:'', mid:'', bad:'', hurt:'ぐああっ！響く……！'} },
+
+{ id:'p12', av:'👩', name:'森 陽子', age:30, sex:'女性', job:'カスタマーサポート',
+  complaint:'後頭部から目の奥にかけて、片側だけ痛くなる頭痛があって。',
+  history:['1年前から、週2〜3回','首を長時間同じ向きにしていると出る','鎮痛薬の効きが悪い','光過敏・嘔吐なし、外傷歴なし'],
+  exam:['上位頸椎（C1-C2）の左回旋制限','後頭下筋群の圧痛で頭痛が再現される','屈曲回旋テスト 左陽性','神経学的検査 陰性、めまい・複視なし'],
+  red:null, yellow:null,
+  target:'C2', restriction:'左回旋の制限',
+  techBest:'diversified', techOk:['gonstead','activator','mob'],
+  contact:'pil_L', drive:240, driveHint:'左の関節柱に触れ、やや上方＋外側へ',
+  advice:['deepflex','sleep'], pool:['deepflex','sleep','selfcrack','stretchmax','massageonly'],
+  lines:{greet:'頭痛が首から来てるって言われて来ました。', good:'あ……目の奥の重さが消えました！すごい。',
+         mid:'頭が少し軽い気がします。', bad:'頭痛は変わらないですね……', hurt:'いたっ！首がビリッとしました！'} }
+];
+
+/* ─────────────── 難易度 ─────────────── */
+const DIFF = [
+  {n:'初級', noise:.05, palpTime:34, band:[48,86], timeWin:260, ampGood:170, ampBad:340, driveTol:40, hints:true},
+  {n:'標準', noise:.11, palpTime:26, band:[56,80], timeWin:180, ampGood:125, ampBad:250, driveTol:26, hints:false},
+  {n:'上級', noise:.18, palpTime:20, band:[62,75], timeWin:120, ampGood:100, ampBad:190, driveTol:16, hints:false}
+];
+
+/* ─────────────── 状態 ─────────────── */
+const S = { diff:1, day:1, idx:0, queue:[], score:0, rep:100, results:[], p:null, cur:null, best:0 };
+const D = () => DIFF[S.diff];
+
+/* ─────────────── 描画ループ ─────────────── */
+let drawFn = null;
+const setDraw = fn => { drawFn = fn; };
+(function loop(){ if(drawFn){ try{ drawFn(now()); }catch(e){ console.error(e); drawFn=null; } } requestAnimationFrame(loop); })();
+
+function go(id){
+  $$('.screen').forEach(s=>s.classList.remove('on'));
+  $('#s-'+id).classList.add('on');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function toast(msg,ms=1900){
+  const t=$('#toast'); t.textContent=msg; t.classList.add('on');
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),ms);
+}
+
+/* ─────────────── Canvas ヘルパ ─────────────── */
+function fit(cv,w,h){
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr);
+  cv.style.width=w+'px'; cv.style.height=h+'px';
+  cv.dataset.lw=w; cv.dataset.lh=h;
+  const c=cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0); return c;
+}
+function ptr(cv,e){
+  const r=cv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)*(+cv.dataset.lw/r.width), y:(e.clientY-r.top)*(+cv.dataset.lh/r.height) };
+}
+function rr(c,x,y,w,h,r){
+  r=Math.max(0,Math.min(r,w/2,h/2));
+  c.beginPath();
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath();
+}
+
+/* ─────────────── 脊柱レイアウト & 描画 ─────────────── */
+function spineLayout(W,H,padTop,padBot){
+  const total = SPINE.reduce((a,s)=>a+s.h,0) + (SPINE.length-1)*2.4;
+  const k = (H-padTop-padBot)/total;
+  const cx = W/2;
+  let y = padTop, out=[];
+  SPINE.forEach((s,i)=>{
+    const h=s.h*k, w=s.w*k*1.02;
+    const curve = Math.sin(i/SPINE.length*Math.PI*1.4)*2.0;  // 生理的弯曲の揺らぎ
+    out.push({...s, i, x:cx+curve, y:y+h/2, w, h});
+    y += h + 2.4*k;
+  });
+  return out;
+}
+function drawVertebra(c, v, opt){
+  opt = opt||{};
+  const {x,y,w,h} = v;
+  const glow = opt.glow||0;
+  c.save();
+  if(glow>0){
+    c.shadowColor = opt.glowColor || 'rgba(240,110,80,'+(.35+glow*.5)+')';
+    c.shadowBlur = 12+glow*22;
+  }
+  const g=c.createLinearGradient(x-w/2,y-h/2,x+w/2,y+h/2);
+  const base = opt.sel? ['#ffe7bd','#e0b476'] : opt.hov? ['#f2ece0','#c9bda8'] : ['#ded4c4','#b3a894'];
+  g.addColorStop(0,base[0]); g.addColorStop(1,base[1]);
+  c.fillStyle=g;
+  rr(c, x-w*.30, y-h*.40, w*.60, h*.80, h*.22); c.fill();          // 椎体・椎弓
+  c.fillStyle = opt.sel? '#f0d5a5' : '#c3b8a4';
+  rr(c, x-w*.50, y-h*.16, w*.24, h*.30, h*.12); c.fill();          // 左横突起
+  rr(c, x+w*.26, y-h*.16, w*.24, h*.30, h*.12); c.fill();          // 右横突起
+  c.fillStyle = opt.sel? '#ffeccb' : '#cdc2ae';
+  rr(c, x-w*.075, y+h*.16, w*.15, h*.44, w*.06); c.fill();         // 棘突起
+  c.fillStyle='rgba(70,55,40,.35)';
+  [[-.22,-.34],[.22,-.34],[-.22,.30],[.22,.30]].forEach(function(p){
+    c.beginPath(); c.ellipse(x+w*p[0], y+h*p[1], w*.055, h*.09, 0,0,Math.PI*2); c.fill();
+  });
+  c.restore();
+  if(glow>0 && !opt.noHalo){
+    c.save(); c.globalAlpha=.26+glow*.4;
+    c.fillStyle= opt.glowColor2 || '#ff6a4d';
+    c.beginPath(); c.ellipse(x,y,w*.72,h*.78,0,0,Math.PI*2); c.fill(); c.restore();
+  }
+}
+function drawTorso(c,W,lay){
+  const top=lay[0].y-lay[0].h, bot=lay[lay.length-1].y+lay[lay.length-1].h*.6;
+  const cx=W/2;
+  const g=c.createLinearGradient(0,top,0,bot);
+  g.addColorStop(0,'rgba(226,178,148,.16)'); g.addColorStop(.5,'rgba(226,178,148,.10)');
+  g.addColorStop(1,'rgba(226,178,148,.16)');
+  c.fillStyle=g; c.strokeStyle='rgba(255,205,175,.14)'; c.lineWidth=1.5;
+  c.beginPath();
+  c.moveTo(cx-32, top-4);
+  c.bezierCurveTo(cx-118, top+42, cx-116, top+180, cx-94, top+266);
+  c.bezierCurveTo(cx-82, top+336, cx-102, bot-26, cx-90, bot+22);
+  c.lineTo(cx+90, bot+22);
+  c.bezierCurveTo(cx+102, bot-26, cx+82, top+336, cx+94, top+266);
+  c.bezierCurveTo(cx+116, top+180, cx+118, top+42, cx+32, top-4);
+  c.closePath(); c.fill(); c.stroke();
+  c.beginPath(); c.ellipse(cx, top-44, 38, 40, 0,0,Math.PI*2); c.fill(); c.stroke();  // 後頭部
+}
+
+/* 手（触診用） */
+function drawHand(c,x,y,press,t){
+  c.save();
+  c.translate(x,y); c.scale(press?1.06:1, press?1.06:1);
+  c.globalAlpha = press? .93 : .6;
+  const g=c.createRadialGradient(0,-6,4,0,0,52);
+  g.addColorStop(0,'rgba(255,222,200,.95)'); g.addColorStop(1,'rgba(214,160,132,.5)');
+  c.fillStyle=g; c.strokeStyle='rgba(255,235,220,.45)'; c.lineWidth=1.2;
+  c.beginPath(); c.ellipse(0,0,46,31,0,0,Math.PI*2); c.fill(); c.stroke();
+  c.fillStyle='rgba(255,240,225,.9)';
+  c.beginPath(); c.ellipse(-2,4,13,11,0,0,Math.PI*2); c.fill();      // 豆状骨（接触点）
+  for(let i=0;i<4;i++){
+    c.beginPath();
+    c.ellipse(-30+i*20, -33-Math.sin(t/400+i)*1.5, 8, 15, 0,0,Math.PI*2);
+    c.fillStyle='rgba(240,198,172,.7)'; c.fill();
+  }
+  if(press){
+    c.strokeStyle='rgba(63,216,194,.85)'; c.lineWidth=2;
+    c.beginPath(); c.arc(0,2,18+Math.sin(t/120)*3,0,Math.PI*2); c.stroke();
+  }
+  c.restore();
+}
+
+/* ═══════════ タイトル演出（横倒しの脊柱） ═══════════ */
+let titleDraw = null;
+(function(){
+  const cv=$('#cv-title'), W=440, H=96;
+  const c=fit(cv,W,H);
+  const lay=spineLayout(H, W, 14, 14);   // 交差幅=H, 長さ=W の座標系で組む
+  titleDraw = function(t){
+    c.clearRect(0,0,W,H);
+    c.save();
+    c.translate(0,H); c.rotate(-Math.PI/2);   // 局所(x,y) → 画面(y, H-x)
+    lay.forEach((v,i)=>{
+      const glow = Math.max(0, Math.sin(t/620 + i*.24))*.6;
+      drawVertebra(c,{x:v.x+Math.sin(t/900+i*.3)*1.6, y:v.y, w:v.w, h:v.h},
+        {glow:glow, glowColor:'rgba(63,216,194,.5)', glowColor2:'#3fd8c2'});
+    });
+    c.restore();
+  };
+})();
+
+/* ═══════════ PHASE 1 : 問診 ═══════════ */
+const Intake = {
+  open(){
+    const p=S.p;
+    $('#in-av').textContent=p.av;
+    $('#in-name').textContent=p.name;
+    $('#in-meta').textContent=p.age+'歳 '+p.sex+' ／ '+p.job;
+    $('#in-complaint').textContent='「'+p.complaint+'」';
+    $('#in-history').innerHTML = p.history.map(h=>'<li>'+h+'</li>').join('');
+    $('#in-exam').innerHTML    = p.exam.map(h=>'<li>'+h+'</li>').join('');
+    const opts=[
+      {k:'treat',   b:'施術を行う',                        s:'通常のアジャストメントに進む'},
+      {k:'careful', b:'施術するが、低刺激テクニックに限定する', s:'イエローフラッグあり。刺激量を落として慎重に進める'},
+      {k:'refer',   b:'施術せず、医師へ紹介する',            s:'レッドフラッグを疑う。専門的な精査が必要'}
+    ];
+    $('#in-opts').innerHTML = opts.map(o=>
+      '<button class="opt" data-k="'+o.k+'"><b>'+o.b+'</b><span>'+o.s+'</span></button>').join('');
+    $$('#in-opts .opt').forEach(b=> b.onclick=()=>this.pick(b.dataset.k));
+    setDraw(null);
+    go('intake');
+  },
+  pick(k){
+    const p=S.p, c=S.cur;
+    $$('#in-opts .opt').forEach(b=>b.disabled=true);
+    Snd.blip();
+    if(p.red){
+      if(k==='refer'){
+        c.intake=100; c.referred=true;
+        c.log.push('✔ レッドフラッグを正しく検出し、医師へ紹介した');
+        Snd.great();
+        this.reveal(true, '<b>正解。</b>'+p.red.n+'<br>'+p.red.why+'<br><b>→ '+p.red.action+'</b>');
+        setTimeout(()=>Result.show(), 3000);
+      }else{
+        c.intake=0; c.rep=-30; c.referred=true; c.wrongTreat=true; c.hurt=true;
+        c.log.push('✘ レッドフラッグを見逃し、施術しようとした（重大な判断ミス）');
+        Snd.alarm(); setTimeout(()=>Snd.crack(1.2),400);
+        this.reveal(false, '<b>危険な判断です。</b>'+p.red.n+'を見逃しました。<br>'+p.red.why+
+          '<br><b>→ 本来は「'+p.red.action+'」が正解</b>');
+        setTimeout(()=>Result.show(), 4200);
+      }
+      return;
+    }
+    if(p.yellow){
+      if(k==='careful'){
+        c.intake=100; c.lowForceOnly=true;
+        c.log.push('✔ イエローフラッグを検出し、刺激量を制限した');
+        Snd.ok();
+        this.reveal(true,'<b>良い判断。</b>'+p.yellow.n+'あり。<br>'+p.yellow.why+'<br><b>→ '+p.yellow.need+'</b>');
+      }else if(k==='treat'){
+        c.intake=45;
+        c.log.push('△ イエローフラッグに気づかず、通常の施術に進んだ');
+        this.reveal(false,'<b>注意。</b>'+p.yellow.n+'を見落としています。<br>'+p.yellow.why+
+          '<br>テクニック選択で挽回してください。');
+      }else{
+        c.intake=25; c.referred=true;
+        c.log.push('△ 施術可能な患者を過剰に紹介した');
+        this.reveal(false,'この患者は注意すれば施術可能でした。過剰な紹介は患者の機会損失になります。');
+        setTimeout(()=>Result.show(),2800); return;
+      }
+    }else{
+      if(k==='treat'){
+        c.intake=100; c.log.push('✔ 適切に施術可能と判断した'); Snd.ok();
+        this.reveal(true,'<b>問題なし。</b>レッドフラッグは認められません。施術に進みましょう。');
+      }else if(k==='careful'){
+        c.intake=70; c.lowForceOnly=true; c.log.push('△ 過度に慎重（低刺激に限定）');
+        this.reveal(true,'慎重すぎますが安全な判断です。低刺激テクニックで進めます。');
+      }else{
+        c.intake=20; c.referred=true; c.log.push('△ 施術可能な患者を過剰に紹介した');
+        this.reveal(false,'レッドフラッグはありませんでした。過剰な紹介は患者の機会損失になります。');
+        setTimeout(()=>Result.show(),2800); return;
+      }
+    }
+    setTimeout(()=>Palp.open(), 2600);
+  },
+  reveal(good,html){
+    const el=document.createElement('div');
+    el.className='banner '+(good?'info':'warn');
+    el.style.marginTop='14px'; el.innerHTML=html;
+    $('#in-opts').appendChild(el);
+    const card=$('#in-opts').closest('.card');
+    if(!good){ card.classList.add('shake'); setTimeout(()=>card.classList.remove('shake'),500); }
+  }
+};
+
+/* ═══════════ PHASE 2 : 触診 ═══════════ */
+const Palp = {
+  cv:null,c:null,lay:null,W:340,H:640,
+  hoverY:null, pressing:false, done:false, patience:100,
+  reading:{mob:0,ten:0,tnd:0}, target:0, lastSeg:null, marked:null,
+  open(){
+    this.done=false; this.marked=null; this.lastSeg=null;
+    this.patience=100; this.pressing=false; this.hoverY=null;
+    this.reading={mob:0,ten:0,tnd:0};
+    this.target = SEG_INDEX[S.p.target];
+    this.cv=$('#cv-spine');
+    this.c=fit(this.cv,this.W,this.H);
+    this.lay=spineLayout(this.W,this.H,72,52);
+    $('#palp-hint').textContent = D().hints
+      ? 'ヒント：'+REG_NAME[SPINE[this.target].reg]+'のあたりに固着があります'
+      : '押しながら上下に動かす';
+    $('#palp-seg').textContent='—';
+    $('#palp-mark').disabled=true;
+    $('#palp-mark').textContent='ここを固着と判断する';
+    ['#b-mob','#b-ten','#b-tnd'].forEach(s=>$(s).style.width='0%');
+    $('#m-mob').textContent=$('#m-ten').textContent=$('#m-tnd').textContent='--';
+    $('#b-pat').style.width='100%'; $('#b-pat').className=''; $('#m-pat').textContent='100';
+    this.bind();
+    setDraw(t=>this.draw(t));
+    go('palp');
+  },
+  bind(){
+    const cv=this.cv;
+    if(cv._bound) return; cv._bound=true;
+    const at=e=>{ const q=ptr(cv,e); this.hoverY=q.y; };
+    cv.addEventListener('pointerdown',e=>{ e.preventDefault(); Snd.resume();
+      try{cv.setPointerCapture(e.pointerId);}catch(_){}
+      this.pressing=true; at(e); });
+    cv.addEventListener('pointermove',at);
+    cv.addEventListener('pointerup',()=>{ this.pressing=false; });
+    cv.addEventListener('pointercancel',()=>{ this.pressing=false; });
+    cv.addEventListener('pointerleave',()=>{ this.pressing=false; });
+  },
+  segAt(y){
+    if(y==null) return -1;
+    let best=-1,bd=1e9;
+    this.lay.forEach((v,i)=>{ const d=Math.abs(v.y-y); if(d<bd){bd=d;best=i;} });
+    return (best>=0 && bd < this.lay[best].h*1.5) ? best : -1;
+  },
+  feel(i){
+    const d=Math.abs(i-this.target);
+    const g=Math.exp(-(d*d)/2.1);
+    const n=()=> (Math.random()-.5)*2*D().noise*100;
+    return {
+      mob: clamp(78 - g*64 + n() - Math.abs(Math.sin(i*2.7))*5, 2, 100),
+      ten: clamp(14 + g*74 + n() + Math.abs(Math.cos(i*1.9))*6, 0, 100),
+      tnd: clamp(6  + g*72 + n()*.7, 0, 100)
+    };
+  },
+  mark(){
+    if(this.done || this.lastSeg==null) return;
+    this.finish(this.lastSeg);
+  },
+  finish(i){
+    this.done=true; this.marked=i; this.pressing=false;
+    $('#palp-mark').disabled=true;
+    const d=Math.abs(i-this.target), c=S.cur;
+    c.marked=SPINE[i].id; c.segOff=d;
+    c.palp = d===0?100 : d===1?62 : d===2?26 : 0;
+    if(d===0){ Snd.great(); toast('的中！ '+SPINE[i].name+' の固着を捉えた',2300);
+      c.log.push('✔ 固着セグメント '+SPINE[this.target].name+' を正確に特定'); }
+    else if(d===1){ Snd.ok(); toast('惜しい — 隣接セグメント（'+SPINE[i].name+'）',2300);
+      c.log.push('△ 隣接セグメントを選択（'+SPINE[i].name+' ／ 正解 '+SPINE[this.target].name+'）'); }
+    else { Snd.bad(); toast('外した — '+SPINE[i].name,2300);
+      c.log.push('✘ 固着の特定に失敗（'+SPINE[i].name+' ／ 正解 '+SPINE[this.target].name+'）'); }
+    setTimeout(()=>Tech.open(), 1700);
+  },
+  draw(t){
+    const c=this.c, W=this.W, H=this.H;
+    c.clearRect(0,0,W,H);
+    drawTorso(c,W,this.lay);
+
+    if(this.pressing && !this.done){
+      this.patience = clamp(this.patience - 100/(D().palpTime*60), 0, 100);
+      $('#b-pat').style.width=this.patience+'%';
+      $('#m-pat').textContent=Math.round(this.patience);
+      $('#b-pat').className = this.patience<30?'hot':this.patience<60?'warm':'';
+      if(this.patience<=0){
+        const c2=S.cur;
+        c2.log.push('✘ 触診に時間をかけすぎ、患者の忍耐が尽きた');
+        toast('患者が限界です。触診を打ち切りました',2400);
+        this.finish(this.lastSeg!=null? this.lastSeg : (this.target+4)%SPINE.length);
+        return;
+      }
+    }
+
+    const hi=this.segAt(this.hoverY);
+    if(this.pressing && !this.done && hi>=0){
+      this.lastSeg=hi;
+      $('#palp-mark').disabled=false;
+      $('#palp-mark').textContent=SPINE[hi].name+' を固着と判断する';
+    }
+
+    this.lay.forEach((v,i)=>{
+      let glow=0, gc=null, gc2=null;
+      if(this.done && i===this.marked){ glow=1; gc='rgba(63,216,194,.6)'; gc2='#3fd8c2'; }
+      else if(this.done && i===this.target){ glow=.8; gc='rgba(240,160,75,.55)'; gc2='#f0a04b'; }
+      else if(this.pressing && !this.done){
+        const dd=Math.abs(i-this.target);
+        const g=Math.exp(-(dd*dd)/2.1);
+        const prox=Math.max(0,1-Math.abs(v.y-this.hoverY)/72);
+        glow=g*prox*.9;
+        if(glow>0){ gc='rgba(255,110,80,.5)'; gc2='#ff6a4d'; }
+      }
+      drawVertebra(c,v,{glow:glow, glowColor:gc, glowColor2:gc2,
+        sel:(this.done&&i===this.marked), hov:(!this.done&&i===hi)});
+    });
+
+    if(this.hoverY!=null && !this.done) drawHand(c, W/2, this.hoverY, this.pressing, t);
+
+    if(!this.done){
+      if(this.pressing && hi>=0){
+        const f=this.feel(hi);
+        this.reading.mob = lerp(this.reading.mob, f.mob, .16);
+        this.reading.ten = lerp(this.reading.ten, f.ten, .16);
+        this.reading.tnd = lerp(this.reading.tnd, f.tnd, .16);
+        $('#palp-seg').textContent = SPINE[hi].name;
+        if(Math.random()<.05) Snd.creak(this.reading.ten);
+      }else{
+        this.reading.mob=lerp(this.reading.mob,0,.12);
+        this.reading.ten=lerp(this.reading.ten,0,.12);
+        this.reading.tnd=lerp(this.reading.tnd,0,.12);
+        if(hi>=0) $('#palp-seg').textContent = SPINE[hi].name;
+      }
+      $('#b-mob').style.width=this.reading.mob+'%'; $('#m-mob').textContent=Math.round(this.reading.mob);
+      $('#b-ten').style.width=this.reading.ten+'%'; $('#m-ten').textContent=Math.round(this.reading.ten);
+      $('#b-tnd').style.width=this.reading.tnd+'%'; $('#m-tnd').textContent=Math.round(this.reading.tnd);
+    }
+  }
+};
+
+/* ═══════════ PHASE 3 : テクニック ═══════════ */
+const Tech = {
+  open(){
+    const p=S.p, c=S.cur;
+    const seg = c.marked||p.target;
+    const v = SPINE[SEG_INDEX[seg]];
+    let brief = '対象：<b>'+v.name+'（'+REG_NAME[v.reg]+'）</b> ／ 所見：<b>'+p.restriction+'</b>';
+    if(c.lowForceOnly) brief += '<br>※ 低刺激に限定する方針で進めています。';
+    if(p.yellow && c.intake<60) brief += '<br>※ カルテを読み直しましょう — この患者には注意点があります。';
+    $('#tech-brief').innerHTML=brief;
+    $('#tech-opts').innerHTML = Object.keys(TECH).map(k=>
+      '<button class="opt" data-k="'+k+'"><b>'+TECH[k].n+'</b><span>'+TECH[k].d+'</span></button>').join('');
+    $$('#tech-opts .opt').forEach(b=> b.onclick=()=>this.pick(b.dataset.k));
+    setDraw(null);
+    go('tech');
+  },
+  pick(k){
+    const p=S.p, c=S.cur;
+    $$('#tech-opts .opt').forEach(b=>b.disabled=true);
+    c.tech=k;
+    const el=$$('#tech-opts .opt').find(b=>b.dataset.k===k);
+    if(k===p.techBest){
+      c.techScore=100; el.classList.add('good'); Snd.great();
+      c.log.push('✔ 最適なテクニックを選択（'+TECH[k].n+'）');
+    }else if(p.techOk.indexOf(k)>=0){
+      c.techScore=68; el.classList.add('sel'); Snd.ok();
+      c.log.push('△ 妥当だが最適ではないテクニック（'+TECH[k].n+'）');
+    }else{
+      c.techScore=12; el.classList.add('bad'); Snd.bad(); c.riskyTech=true;
+      c.log.push('✘ 不適切なテクニック（'+TECH[k].n+'）— 患者の状態に合っていない');
+      if(p.yellow) c.log.push('　 → '+p.yellow.why);
+    }
+    if(k!==p.techBest){
+      const best=$$('#tech-opts .opt').find(b=>b.dataset.k===p.techBest);
+      if(best) best.classList.add('good');
+    }
+    const noThrust = (k==='fd'||k==='mob');
+    setTimeout(()=>Contact.open(noThrust), 1400);
+  }
+};
+
+/* ═══════════ PHASE 4 : コンタクト & ドライブライン ═══════════ */
+const Contact = {
+  cv:null,c:null,W:430,H:430, lms:[], pick:null, angle:270, dragging:false,
+  noThrust:false, hover:null, vw:0, vh:0,
+  open(noThrust){
+    const p=S.p, c0=S.cur;
+    this.noThrust=noThrust; this.pick=null; this.angle=270; this.dragging=false; this.hover=null;
+    const seg = c0.marked||p.target;
+    const v = SPINE[SEG_INDEX[seg]];
+    this.lms = LM[v.reg];
+    this.cv=$('#cv-vert'); this.c=fit(this.cv,this.W,this.H);
+    this.vw = this.W*.54;
+    this.vh = this.vw*(v.h/v.w);
+    $('#ct-brief').innerHTML =
+      '<b>'+v.name+'</b> に <b>'+TECH[c0.tech].n+'</b> を行います。<br>'+
+      '触れる骨のランドマークを選び、力を加える方向（ドライブライン）を矢印で合わせてください。';
+    $('#ct-tip').innerHTML = D().hints
+      ? 'ヒント：<b style="color:var(--acc)">'+p.driveHint+'</b>'
+      : '所見「'+p.restriction+'」から、どこに触れてどちらへ押すかを考えましょう。ランドマークを選ぶと矢印が出ます（ドラッグで回転）。';
+    $('#ct-pick').textContent='—'; $('#ct-angle').textContent='—';
+    $('#ct-go').disabled=true;
+    this.bind();
+    setDraw(t=>this.draw(t));
+    go('contact');
+  },
+  lmPos(l){ return { x:this.W/2 + l.x*this.vw, y:this.H*.50 + l.y*this.vh }; },
+  bind(){
+    const cv=this.cv; if(cv._bound) return; cv._bound=true;
+    const hit=q=>{
+      let b=null,bd=1e9;
+      this.lms.forEach(l=>{ const pos=this.lmPos(l); const d=Math.hypot(pos.x-q.x,pos.y-q.y); if(d<bd){bd=d;b=l;} });
+      return bd<34? b : null;
+    };
+    cv.addEventListener('pointerdown',e=>{
+      e.preventDefault(); Snd.resume();
+      try{cv.setPointerCapture(e.pointerId);}catch(_){}
+      const q=ptr(cv,e);
+      if(this.pick){
+        const pos=this.lmPos(this.pick);
+        if(Math.hypot(q.x-pos.x,q.y-pos.y)>30){ this.dragging=true; this.setAngle(q); return; }
+      }
+      const l=hit(q);
+      if(l){ this.pick=l; Snd.blip(); $('#ct-pick').textContent=l.n;
+             $('#ct-go').disabled=false; $('#ct-angle').textContent=Math.round(this.angle)+'°'; }
+    });
+    cv.addEventListener('pointermove',e=>{ this.hover=ptr(cv,e); if(this.dragging) this.setAngle(this.hover); });
+    cv.addEventListener('pointerup',()=>{ this.dragging=false; });
+    cv.addEventListener('pointercancel',()=>{ this.dragging=false; });
+    cv.addEventListener('pointerleave',()=>{ this.dragging=false; this.hover=null; });
+  },
+  setAngle(q){
+    if(!this.pick) return;
+    const pos=this.lmPos(this.pick);
+    this.angle=(Math.atan2(q.y-pos.y, q.x-pos.x)*180/Math.PI+360)%360;
+    $('#ct-angle').textContent=Math.round(this.angle)+'°';
+  },
+  confirm(){
+    const p=S.p, c=S.cur;
+    if(!this.pick || $('#ct-go').disabled) return;
+    const want=p.contact, got=this.pick.id;
+    let cs;
+    if(got===want) cs=100;
+    else if(LM_SIDE(got)!=='M' && LM_SIDE(got)===LM_SIDE(want)) cs=55;
+    else if(LM_SIDE(got)==='M' || LM_SIDE(want)==='M') cs=38;
+    else cs=14;                                       // 反対側に触れた
+    c.contact=cs; c.contactPick=this.pick.n;
+
+    let dd=Math.abs(((this.angle-p.drive)%360+360)%360);
+    if(dd>180) dd=360-dd;
+    const tol=D().driveTol;
+    c.drive = dd<=tol ? Math.round(100-(dd/tol)*22)
+            : dd<=tol*2.2 ? Math.round(78-((dd-tol)/(tol*1.2))*54)
+            : Math.max(0, Math.round(24-(dd-tol*2.2)*.35));
+    c.driveErr=Math.round(dd);
+
+    c.log.push((cs===100?'✔':cs>=38?'△':'✘')+' コンタクト：'+this.pick.n+'（正解 '+LM_NAME(want)+'）');
+    c.log.push((c.drive>=78?'✔':c.drive>=45?'△':'✘')+' ドライブライン：誤差 '+c.driveErr+'°');
+    if(cs===100&&c.drive>=78) Snd.great(); else if(cs>=38&&c.drive>=45) Snd.ok(); else Snd.bad();
+    $('#ct-go').disabled=true;
+    setTimeout(()=> this.noThrust ? this.gentle() : Thrust.open(), 1200);
+  },
+  gentle(){
+    const c=S.cur;
+    c.noThrust=true; c.preload=82; c.timing=82; c.amp=88; c.cav=false;
+    c.log.push('◇ スラストを伴わないテクニックのため、可動域内の緩徐な反復運動を行った');
+    Snd.ok();
+    After.open();
+  },
+  draw(){
+    const c=this.c,W=this.W,H=this.H;
+    c.clearRect(0,0,W,H);
+    const seg=S.cur.marked||S.p.target;
+    const v=SPINE[SEG_INDEX[seg]];
+    const cx=W/2, cy=H*.50, vw=this.vw, vh=this.vh;
+
+    c.save(); c.globalAlpha=.22;
+    drawVertebra(c,{x:cx,y:cy-vh*1.30,w:vw*.92,h:vh*.92});
+    drawVertebra(c,{x:cx,y:cy+vh*1.34,w:vw*.92,h:vh*.92});
+    c.restore();
+
+    drawVertebra(c,{x:cx,y:cy,w:vw,h:vh},
+      {glow:.6, glowColor:'rgba(63,216,194,.55)', noHalo:true});
+
+    c.fillStyle='rgba(63,216,194,.9)'; c.font='700 15px '+FONT(); c.textAlign='left';
+    c.fillText(v.name, 14, 24);
+    c.fillStyle='rgba(139,164,177,.55)'; c.font='11px '+FONT();
+    c.fillText('後面観', 14, 40);
+    c.textAlign='left';  c.fillText('◀ 患者の左', 10, cy+4);
+    c.textAlign='right'; c.fillText('患者の右 ▶', W-10, cy+4);
+
+    this.lms.forEach(l=>{
+      const pos=this.lmPos(l);
+      const on = this.pick && this.pick.id===l.id;
+      const hov = this.hover && Math.hypot(this.hover.x-pos.x,this.hover.y-pos.y)<30;
+      c.beginPath(); c.arc(pos.x,pos.y, on?13:hov?11:8, 0,Math.PI*2);
+      c.fillStyle = on? 'rgba(63,216,194,.92)' : hov? 'rgba(240,160,75,.8)' : 'rgba(255,255,255,.22)';
+      c.fill();
+      c.lineWidth=1.6; c.strokeStyle= on?'#9ff5e6':'rgba(255,255,255,.45)'; c.stroke();
+      if(on||hov){
+        c.font='700 12px '+FONT();
+        c.textAlign = pos.x<cx? 'right':'left';
+        c.fillStyle = on? '#9ff5e6':'#f0c48b';
+        c.fillText(l.n, pos.x + (pos.x<cx?-18:18), pos.y+4);
+      }
+    });
+
+    if(this.pick){
+      const pos=this.lmPos(this.pick);
+      const a=this.angle*Math.PI/180, L=72;
+      if(D().hints){
+        const ta=S.p.drive*Math.PI/180, tol=D().driveTol*Math.PI/180;
+        c.save(); c.globalAlpha=.15; c.fillStyle='#7ddf64';
+        c.beginPath(); c.moveTo(pos.x,pos.y); c.arc(pos.x,pos.y,L+16,ta-tol,ta+tol); c.closePath(); c.fill(); c.restore();
+      }
+      c.save();
+      c.strokeStyle='#f0a04b'; c.lineWidth=4; c.lineCap='round';
+      c.shadowColor='rgba(240,160,75,.6)'; c.shadowBlur=10;
+      c.beginPath(); c.moveTo(pos.x,pos.y); c.lineTo(pos.x+Math.cos(a)*L, pos.y+Math.sin(a)*L); c.stroke();
+      c.translate(pos.x+Math.cos(a)*L, pos.y+Math.sin(a)*L); c.rotate(a);
+      c.fillStyle='#f0a04b'; c.beginPath();
+      c.moveTo(12,0); c.lineTo(-8,-8); c.lineTo(-8,8); c.closePath(); c.fill();
+      c.restore();
+    }
+  }
+};
+
+/* ═══════════ PHASE 5 : プリロード & スラスト ═══════════ */
+const Thrust = {
+  cv:null,c:null,W:640,H:236, BP:4.0,
+  stage:0, hold:false, holdT0:0, pre:0, preLocked:0, guard:0,
+  tapT0:0, tapPhase:0, tries:0, t0:0, resolved:false, flash:0, shakeT:0,
+  open(){
+    this.stage=0; this.hold=false; this.pre=0; this.preLocked=0; this.guard=0;
+    this.tries=0; this.resolved=false; this.flash=0; this.shakeT=0; this.tapT0=0;
+    this.t0=now();
+    this.cv=$('#cv-thrust'); this.c=fit(this.cv,this.W,this.H);
+    $('#th-pre').textContent='--'; $('#th-tim').textContent='--';
+    $('#th-amp').textContent='--'; $('#th-guard').textContent='0';
+    $('#th-step').innerHTML='STEP 1 — <b>長押し</b>で組織の遊び（スラック）を取る。緑の帯に入ったら<b>離す</b>。';
+    this.bind();
+    setDraw(t=>this.draw(t));
+    go('thrust');
+  },
+  active(){ return $('#s-thrust').classList.contains('on') && !this.resolved; },
+  bind(){
+    if(this._b) return; this._b=true;
+    this.cv.addEventListener('pointerdown',e=>{ if(!this.active())return; e.preventDefault(); Snd.resume(); this.down(); });
+    window.addEventListener('pointerup',()=>{ if($('#s-thrust').classList.contains('on')) this.up(); });
+    window.addEventListener('keydown',e=>{ if(e.code==='Space'&&!e.repeat&&this.active()){ e.preventDefault(); Snd.resume(); this.down(); } });
+    window.addEventListener('keyup',  e=>{ if(e.code==='Space'&&$('#s-thrust').classList.contains('on')){ e.preventDefault(); this.up(); } });
+  },
+  down(){
+    if(this.resolved) return;
+    if(this.stage===0){ this.hold=true; this.holdT0=now(); }
+    else if(this.stage===1 && !this.tapT0){ this.tapT0=now(); this.tapPhase=this.phase(); }
+  },
+  up(){
+    if(this.resolved) return;
+    const band=D().band, lo=band[0], hi=band[1];
+    if(this.stage===0 && this.hold){
+      this.hold=false;
+      const v=this.pre;
+      if(v>=lo && v<=hi){
+        this.preLocked=v;
+        const mid=(lo+hi)/2, half=(hi-lo)/2;
+        S.cur.preload = Math.round(100 - Math.abs(v-mid)/half*24);
+        this.stage=1;
+        Snd.tone(520,.12,'triangle',.16);
+        $('#th-pre').textContent=S.cur.preload;
+        $('#th-step').innerHTML='STEP 2 — <b style="color:#7ddf64">呼気の終わり</b>（波の谷）で <b>短く鋭く</b> タップ！';
+      }else{
+        this.tries++;
+        Snd.bad(); this.shakeT=now();
+        if(this.tries>=3){
+          S.cur.preload=Math.max(15, Math.round(55-Math.abs(v-(lo+hi)/2)));
+          this.preLocked=v; this.stage=1;
+          $('#th-pre').textContent=S.cur.preload;
+          $('#th-step').innerHTML='STEP 2 — プリロードは不十分ですが続行。<b style="color:#7ddf64">呼気の終わり</b>に <b>短く鋭く</b> タップ！';
+          toast('プリロードが決まりませんでした。そのまま進みます',2200);
+        }else{
+          toast(v>hi ? '押し込みすぎ！ 患者が力みました' : 'まだ遊びが残っています。緑の帯で離して',1700);
+          if(v>hi) this.guard=Math.min(60,this.guard+14);
+          this.pre=0;
+        }
+      }
+    }else if(this.stage===1 && this.tapT0){
+      const dur = now()-this.tapT0;
+      const ph  = this.tapPhase;
+      this.tapT0=0;
+      this.resolve(ph, dur);
+    }
+  },
+  phase(){ return ((now()-this.t0)/1000/this.BP)%1; },
+  /* 呼吸曲線 : -0.5 〜 +0.5。0–0.4 吸気で上昇、0.4–1.0 呼気で下降し谷（＝呼気終末） */
+  breathY(p){
+    if(p<.4) return -0.5 + Math.sin(p/.4*Math.PI/2);
+    return 0.5 - (1-Math.cos((p-.4)/.6*Math.PI))/2;
+  },
+  resolve(ph, dur){
+    this.resolved=true; this.stage=2;
+    const c=S.cur, p=S.p;
+    let dp=Math.abs(ph-0.97); dp=Math.min(dp,1-dp);
+    const errMs=dp*this.BP*1000, win=D().timeWin;
+    c.timing = errMs<=win ? Math.round(100-(errMs/win)*28)
+             : errMs<=win*2.4 ? Math.round(72-((errMs-win)/(win*1.4))*52)
+             : Math.max(0,Math.round(20-(errMs-win*2.4)/25));
+    const ag=D().ampGood, ab=D().ampBad;
+    c.amp = dur<=ag ? Math.round(100-(dur/ag)*12)
+          : dur<=ab ? Math.round(88-((dur-ag)/(ab-ag))*46)
+          : Math.max(0,Math.round(42-(dur-ab)/9));
+    c.ampMs=Math.round(dur); c.timingMs=Math.round(errMs); c.guard=Math.round(this.guard);
+    $('#th-tim').textContent=c.timing; $('#th-amp').textContent=c.amp; $('#th-guard').textContent=c.guard;
+
+    const good = c.preload>=55 && c.timing>=52 && c.amp>=50 && c.palp>=50 && c.techScore>=50;
+    c.cav = good;
+    const forceLv = TECH[c.tech].force;
+    const tooDeep = dur>ab*1.25;
+    c.hurt = !!((c.riskyTech && forceLv>=2) || (tooDeep && forceLv>=2) || (p.yellow && c.riskyTech));
+
+    if(c.hurt){
+      Snd.crack(1.15); setTimeout(()=>Snd.alarm(),140);
+      this.flash=now(); this.shakeT=now();
+      c.log.push('✘ 患者に痛みが出た — 力量または振幅が過大');
+      toast('患者が痛みを訴えています！',2400);
+    }else if(good){
+      Snd.crack(1); this.flash=now();
+      c.log.push('✔ 明瞭なキャビテーション（ポキッ）— 良好なアジャストメント');
+      toast('ポキッ！ — キャビテーション成功',2200);
+    }else{
+      Snd.dud();
+      c.log.push('△ キャビテーションなし — スラストが関節に届いていない');
+      toast('空振り — 関節音は出ませんでした',2200);
+    }
+    setTimeout(()=>After.open(), 2200);
+  },
+  draw(t){
+    const c=this.c,W=this.W,H=this.H;
+    c.save();
+    if(now()-this.shakeT<380){ const k=1-(now()-this.shakeT)/380; c.translate(rnd(-6,6)*k, rnd(-4,4)*k); }
+    c.clearRect(-12,-12,W+24,H+24);
+    c.strokeStyle='rgba(255,255,255,.04)'; c.lineWidth=1;
+    for(let x=0;x<W;x+=32){ c.beginPath(); c.moveTo(x,0); c.lineTo(x,H); c.stroke(); }
+
+    /* 呼吸波 */
+    const baseY=66, amp=34, zoneA=.88, ph=this.phase();
+    const xOf = p => 40 + p*(W-80);
+    c.fillStyle='rgba(125,223,100,.13)';
+    c.fillRect(xOf(zoneA), baseY-amp-12, xOf(1)-xOf(zoneA), amp*2+24);
+    c.strokeStyle='rgba(125,223,100,.5)'; c.setLineDash([4,4]);
+    c.beginPath(); c.moveTo(xOf(.97),baseY-amp-12); c.lineTo(xOf(.97),baseY+amp+12); c.stroke();
+    c.setLineDash([]);
+    c.beginPath();
+    for(let i=0;i<=240;i++){
+      const p2=i/240, y=baseY - this.breathY(p2)*amp*2;
+      i? c.lineTo(xOf(p2),y) : c.moveTo(xOf(p2),y);
+    }
+    c.strokeStyle='rgba(63,216,194,.75)'; c.lineWidth=2.4; c.stroke();
+    const cxp=xOf(ph), cyp=baseY-this.breathY(ph)*amp*2;
+    c.fillStyle = (ph>=zoneA)? '#7ddf64':'#f0a04b';
+    c.shadowColor=c.fillStyle; c.shadowBlur=14;
+    c.beginPath(); c.arc(cxp,cyp,7,0,Math.PI*2); c.fill();
+    c.shadowBlur=0;
+    c.font='11px '+FONT(); c.textAlign='left';
+    c.fillStyle='rgba(139,164,177,.8)';
+    c.fillText('吸気',xOf(.10),baseY-amp-18);
+    c.fillText('呼気',xOf(.58),baseY-amp-18);
+    c.fillStyle='rgba(125,223,100,.95)';
+    c.fillText('呼気終末＝スラスト',xOf(.74),baseY+amp+30);
+
+    /* プリロードゲージ */
+    const gx=44, gy=H-52, gw=W-88, gh=22;
+    if(this.hold && this.stage===0){
+      const dt=(now()-this.holdT0)/1000;
+      this.pre = clamp(100*(1-Math.exp(-dt*1.15)) + Math.sin(now()/90)*1.1, 0,100);
+      if(this.pre>D().band[1]+6) this.guard = Math.min(60,this.guard+.35);
+      if(Math.random()<.09) Snd.creak(this.pre);
+    }
+    if(this.stage<=1) this.guard = Math.min(60, this.guard+.02);
+    $('#th-guard').textContent=Math.round(this.guard);
+
+    c.fillStyle='#0e171d'; rr(c,gx,gy,gw,gh,8); c.fill();
+    c.strokeStyle='rgba(255,255,255,.10)'; c.lineWidth=1; c.stroke();
+    const band=D().band;
+    c.fillStyle='rgba(125,223,100,.20)';
+    c.fillRect(gx+gw*band[0]/100, gy, gw*(band[1]-band[0])/100, gh);
+    const val = this.stage===0? this.pre : this.preLocked;
+    const gr=c.createLinearGradient(gx,0,gx+gw,0);
+    gr.addColorStop(0,'#2f9d8c'); gr.addColorStop(.7,'#3fd8c2'); gr.addColorStop(1,'#ef5b57');
+    c.fillStyle=gr; rr(c,gx+2,gy+3,Math.max(0,gw*val/100-4),gh-6,6); c.fill();
+    // 目標帯の枠はフィルの上に描いて常に見えるようにする
+    c.strokeStyle='rgba(190,255,170,.9)'; c.lineWidth=2;
+    c.strokeRect(gx+gw*band[0]/100, gy-2, gw*(band[1]-band[0])/100, gh+4);
+    c.font='11px '+FONT(); c.textAlign='left'; c.fillStyle='rgba(139,164,177,.85)';
+    c.fillText('プリロード（組織の遊びを取る）',gx,gy-8);
+    c.textAlign='right'; c.fillStyle='#dde9ef';
+    c.fillText(Math.round(val)+' / 100', gx+gw, gy-8);
+
+    /* 中央プロンプト */
+    c.textAlign='center'; c.font='800 19px '+FONT();
+    if(this.stage===0){
+      c.fillStyle= this.hold? '#3fd8c2':'rgba(221,233,239,.75)';
+      c.fillText(this.hold? 'スラックを取っています… 緑の帯で離す' : '長押ししてプリロード開始', W/2, H-84);
+    }else if(this.stage===1){
+      const inZone = ph>=zoneA;
+      c.fillStyle= inZone? '#7ddf64':'rgba(240,160,75,.85)';
+      c.fillText(inZone? '今！ 短く鋭くタップ！' : '呼気を待つ…', W/2, H-84);
+    }else{
+      const cc=S.cur;
+      c.fillStyle= cc.hurt? '#ef5b57' : cc.cav? '#7ddf64':'rgba(221,233,239,.7)';
+      c.fillText(cc.hurt? '⚠ 患者が痛みを訴えた' : cc.cav? '✔ ポキッ！ キャビテーション' : '… 空振り（関節音なし）', W/2, H-84);
+    }
+
+    if(now()-this.flash<300){
+      const k=1-(now()-this.flash)/300;
+      c.fillStyle= S.cur.hurt? 'rgba(239,91,87,'+(k*.35)+')' : 'rgba(125,223,100,'+(k*.28)+')';
+      c.fillRect(0,0,W,H);
+    }
+    c.restore();
+  }
+};
+
+/* ═══════════ PHASE 6 : アフターケア ═══════════ */
+const After = {
+  sel:null,
+  open(){
+    const p=S.p, c=S.cur;
+    this.sel=new Set();
+    let msg, cls;
+    if(c.hurt){ msg=p.lines.hurt; cls='warn'; }
+    else if(c.noThrust){ msg=p.lines.mid||'少し楽になりました。'; cls='info'; }
+    else if(c.cav && c.palp>=90){ msg=p.lines.good; cls='gold'; }
+    else if(c.cav){ msg=p.lines.mid; cls='info'; }
+    else { msg=p.lines.bad; cls='info'; }
+    $('#af-react').className='banner '+cls;
+    $('#af-react').innerHTML='<b>'+p.name+'</b>：'+msg;
+    const pool=[...p.pool].sort(()=>Math.random()-.5);
+    $('#af-opts').innerHTML=pool.map(k=>'<button class="opt" data-k="'+k+'"><b>'+ADVICE[k]+'</b></button>').join('');
+    $$('#af-opts .opt').forEach(b=> b.onclick=()=>this.toggle(b));
+    $('#af-go').disabled=true;
+    setDraw(null);
+    go('after');
+  },
+  toggle(b){
+    const k=b.dataset.k;
+    if(this.sel.has(k)){ this.sel.delete(k); b.classList.remove('sel'); }
+    else{
+      if(this.sel.size>=2){ toast('選べるのは2つまでです',1400); return; }
+      this.sel.add(k); b.classList.add('sel'); Snd.blip();
+    }
+    $('#af-go').disabled = this.sel.size!==2;
+  },
+  confirm(){
+    const p=S.p,c=S.cur;
+    if($('#af-go').disabled) return;
+    const hit=[...this.sel].filter(k=>p.advice.indexOf(k)>=0).length;
+    c.after = hit===2?100 : hit===1?58 : 12;
+    $$('#af-opts .opt').forEach(b=>{
+      b.disabled=true;
+      if(p.advice.indexOf(b.dataset.k)>=0) b.classList.add('good');
+      else if(this.sel.has(b.dataset.k)) b.classList.add('bad');
+    });
+    $('#af-go').disabled=true;
+    c.log.push((hit===2?'✔':hit===1?'△':'✘')+' アフターケア指導 '+hit+'/2 正解');
+    if(hit===2) Snd.great(); else if(hit===1) Snd.ok(); else Snd.bad();
+    setTimeout(()=>Result.show(),1600);
+  }
+};
+
+/* ═══════════ 結果 ═══════════ */
+const WEIGHT = {intake:14, palp:20, techScore:14, contact:9, drive:9, preload:8, timing:9, amp:8, after:9};
+const LABEL = {intake:'問診・スクリーニング', palp:'固着セグメントの特定', techScore:'テクニック選択',
+  contact:'コンタクトポイント', drive:'ドライブライン', preload:'プリロード',
+  timing:'スラストのタイミング', amp:'振幅（低いほど良い）', after:'アフターケア指導'};
+
+const Result = {
+  show(){
+    const c=S.cur, p=S.p;
+    let total, keys;
+    if(c.referred){
+      keys=['intake']; total=c.wrongTreat? 0 : c.intake;
+    }else{
+      keys=Object.keys(WEIGHT).filter(k=>c[k]!=null);
+      let wsum=0, acc=0;
+      keys.forEach(k=>{ wsum+=WEIGHT[k]; acc+=WEIGHT[k]*c[k]; });
+      total=wsum? acc/wsum : 0;
+      if(c.hurt)     total*=.55;
+      if(c.guard>35) total*=.94;
+    }
+    c.total=clamp(Math.round(total),0,100);
+
+    let rep;
+    if(c.rep!=null) rep=c.rep;
+    else{
+      rep = c.total>=85? 5 : c.total>=70? 2 : c.total>=50? 0 : c.total>=30? -5 : -10;
+      if(c.hurt) rep-=12;
+    }
+    S.rep=clamp(S.rep+rep,0,150);
+    S.score+=c.total;
+
+    const stars = c.total>=90?5:c.total>=78?4:c.total>=62?3:c.total>=40?2:c.total>=15?1:0;
+    $('#rs-stars').textContent='★★★★★'.slice(0,stars)+'☆☆☆☆☆'.slice(0,5-stars);
+    const vd=$('#rs-verdict');
+    if(c.wrongTreat){ vd.textContent='重大インシデント'; vd.className='verdict bad'; }
+    else if(c.referred){
+      if(c.intake>=70){ vd.textContent='適切なトリアージ'; vd.className='verdict good'; }
+      else{ vd.textContent='判断に改善の余地あり'; vd.className='verdict mid'; }
+    }
+    else if(c.hurt){ vd.textContent='患者に有害事象'; vd.className='verdict bad'; }
+    else if(stars>=5){ vd.textContent='完璧なアジャストメント'; vd.className='verdict good'; }
+    else if(stars>=4){ vd.textContent='良好'; vd.className='verdict good'; }
+    else if(stars>=3){ vd.textContent='まずまず'; vd.className='verdict mid'; }
+    else if(stars>=2){ vd.textContent='要改善'; vd.className='verdict mid'; }
+    else { vd.textContent='不十分'; vd.className='verdict bad'; }
+    $('#rs-score').textContent=c.total;
+
+    let html = keys.map(k=>
+      '<div class="scoreline"><span>'+LABEL[k]+'</span>'+
+      '<span class="sbar"><i style="width:'+c[k]+'%"></i></span><b>'+Math.round(c[k])+'</b></div>').join('');
+    if(!c.referred){
+      html += '<div class="scoreline"><span>関節音（キャビテーション）</span><span style="flex:1"></span>'+
+        '<b style="color:'+(c.cav?'var(--ok)':'var(--dim)')+'">'+(c.noThrust?'—':c.cav?'あり':'なし')+'</b></div>';
+    }
+    $('#rs-lines').innerHTML=html;
+
+    let q;
+    if(c.wrongTreat) q=p.lines.hurt||'……';
+    else if(c.referred) q='わかりました、病院で診てもらいます。ありがとうございます。';
+    else if(c.hurt) q=p.lines.hurt;
+    else if(c.cav&&c.palp>=90) q=p.lines.good;
+    else if(c.cav||c.noThrust) q=p.lines.mid;
+    else q=p.lines.bad;
+    $('#rs-quote').textContent='「'+q+'」';
+
+    let note='';
+    if(p.red){
+      note += '<div class="banner '+(c.wrongTreat?'warn':'info')+'" style="margin-top:12px">'+
+              '<b>レッドフラッグ：'+p.red.n+'</b><br>'+p.red.why+
+              '<br><b>→ 正しい対応：'+p.red.action+'</b></div>';
+    }else if(p.yellow){
+      note += '<div class="banner '+(c.intake>=100?'info':'warn')+'" style="margin-top:12px">'+
+              '<b>イエローフラッグ：'+p.yellow.n+'</b><br>'+p.yellow.why+
+              '<br><b>→ '+p.yellow.need+'</b></div>';
+    }
+    note += '<div class="tiny" style="margin-top:12px">'+c.log.map(l=>'<div>'+l+'</div>').join('')+
+            '<div style="margin-top:8px;color:'+(rep>=0?'var(--ok)':'var(--red)')+'">信頼度 '+(rep>=0?'+':'')+rep+'</div></div>';
+    if(!c.referred && c.timingMs!=null){
+      note += '<div class="tiny" style="margin-top:6px">タイミング誤差 '+c.timingMs+'ms ／ 接触時間 '+c.ampMs+
+              'ms ／ ドライブ誤差 '+c.driveErr+'°</div>';
+    }
+    $('#rs-note').innerHTML=note;
+
+    S.results.push({name:p.name, total:c.total, stars:stars,
+      hurt:!!c.hurt, wrong:!!c.wrongTreat, referred:!!c.referred});
+    Game.hud();
+    setDraw(null);
+    go('result');
+    if(c.total>=90) Snd.great(); else if(c.total>=60) Snd.ok();
+  }
+};
+
+/* ═══════════ ゲーム制御 ═══════════ */
+const Game = {
+  start(){
+    Snd.resume();
+    S.day=1; S.score=0; S.rep=100; S.results=[];
+    this.buildQueue();
+    $('#hud').classList.remove('hide');
+    this.openPatient();
+  },
+  buildQueue(){
+    const sh = a => [...a].sort(()=>Math.random()-.5);
+    const reds = PATIENTS.filter(p=>p.red);
+    const rest = PATIENTS.filter(p=>!p.red);
+    const nRed = S.day===1 ? 1 : (Math.random()<.5?1:2);
+    S.queue = sh([...sh(reds).slice(0,nRed), ...sh(rest).slice(0,5-nRed)]);
+    S.idx=0;
+  },
+  openPatient(){
+    S.p=S.queue[S.idx];
+    S.cur={ log:[], intake:null, palp:null, techScore:null, contact:null, drive:null,
+            preload:null, timing:null, amp:null, after:null,
+            cav:false, hurt:false, rep:null, referred:false, wrongTreat:false, noThrust:false };
+    this.hud();
+    Intake.open();
+  },
+  nextPatient(){
+    S.idx++;
+    if(S.idx>=S.queue.length) this.dayEnd(); else this.openPatient();
+  },
+  dayEnd(){
+    const avg=Math.round(S.results.reduce((a,r)=>a+r.total,0)/S.results.length);
+    $('#dy-title').textContent='DAY '+S.day+' 終了';
+    $('#dy-score').textContent=S.score;
+    $('#dy-list').innerHTML=S.results.map(r=>{
+      const tag = r.wrong? '<span style="color:var(--red)">重大ミス</span>'
+                : r.hurt? '<span style="color:var(--red)">有害事象</span>'
+                : r.referred? '<span style="color:var(--acc)">紹介</span>'
+                : '<span style="color:var(--dim2)">施術</span>';
+      return '<div class="scoreline"><span>'+r.name+'　'+tag+'</span>'+
+        '<span class="sbar"><i style="width:'+r.total+'%"></i></span><b>'+r.total+'</b></div>';
+    }).join('');
+    const rank = (S.rep>=120&&avg>=88)?'S' : avg>=78?'A' : avg>=62?'B' : avg>=45?'C' : 'D';
+    $('#dy-rank').textContent='RANK '+rank+' ／ 平均 '+avg+'点 ／ 信頼度 '+S.rep;
+    $('#dy-rank').className='verdict '+((rank==='S'||rank==='A')?'good':rank==='B'?'mid':'bad');
+    $('#dy-msg').textContent={
+      S:'完璧です。判断も手技も申し分ありません。院の評判は地域随一。',
+      A:'安定した診療。危険な患者を止め、必要な人を的確に治せています。',
+      B:'悪くありません。触診の精度とスラストのタイミングを詰めましょう。',
+      C:'判断か手技のどちらかが不安定です。レッドフラッグの見落としに注意。',
+      D:'一度、基本のステップを見直しましょう。まずは安全第一です。'
+    }[rank];
+    if(S.score>S.best){
+      S.best=S.score;
+      $('#best-score').textContent=S.best;
+      try{ localStorage.setItem('bokiboki_best', String(S.best)); }catch(e){}
+    }
+    setDraw(null);
+    (rank==='S'||rank==='A')? Snd.great() : Snd.ok();
+    go('day');
+  },
+  nextDay(){ S.day++; S.results=[]; this.buildQueue(); this.openPatient(); },
+  hud(){
+    $('#hud-day').textContent=S.day;
+    $('#hud-pt').textContent=(S.idx+1)+'/'+S.queue.length;
+    $('#hud-score').textContent=S.score;
+    $('#hud-rep').textContent=S.rep;
+  },
+  help(){ $('#modal').classList.add('on'); },
+  closeHelp(){ $('#modal').classList.remove('on'); }
+};
+
+/* ═══════════ 初期化 ═══════════ */
+$$('#diffrow .chip').forEach(b=> b.onclick=()=>{
+  $$('#diffrow .chip').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); S.diff=+b.dataset.d; Snd.resume(); Snd.blip();
+});
+$('#modal').addEventListener('click',e=>{ if(e.target===$('#modal')) Game.closeHelp(); });
+try{ const v=localStorage.getItem('bokiboki_best'); if(v){ S.best=+v; $('#best-score').textContent=v; } }catch(e){}
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape') Game.closeHelp();
+  if(e.key==='Enter'){
+    if($('#s-result').classList.contains('on')) Game.nextPatient();
+    else if($('#s-title').classList.contains('on')) Game.start();
+  }
+});
+document.addEventListener('pointerdown',()=>Snd.resume(),{once:true});
+setDraw(t=>{ if(titleDraw) titleDraw(t); });
+</script>
+</body>
+</html>
