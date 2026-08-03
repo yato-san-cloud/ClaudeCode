@@ -174,6 +174,30 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
   font-weight:700;opacity:0;transition:.3s;pointer-events:none;z-index:60;box-shadow:var(--shadow);
   max-width:88vw;text-align:center}
 .toast.on{opacity:1;transform:translateX(-50%)}
+.pracbar{position:fixed;left:50%;bottom:0;transform:translateX(-50%) translateY(105%);
+  width:min(720px,96vw);background:linear-gradient(180deg,#1b2a34,#132029);
+  border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0;
+  padding:16px 20px 18px;box-shadow:0 -12px 40px rgba(0,0,0,.55);z-index:55;transition:.28s}
+.pracbar.on{transform:translateX(-50%)}
+.pracbar h3{font-size:19px;margin-bottom:4px}
+.pracbar .pb-lines{margin:8px 0 0}
+.pracbar .pb-lines div{padding:3px 0 3px 18px;position:relative;font-size:12.5px;line-height:1.6}
+.pracbar .pb-lines div::before{content:"›";position:absolute;left:4px;color:var(--acc2)}
+.pracbar .pb-lines div.ok::before{content:"✔";color:var(--ok)}
+.pracbar .pb-lines div.ng::before{content:"✘";color:var(--red)}
+.pracbar .pb-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.pracbar .pb-foot .sp{flex:1}
+.pracchip{position:fixed;top:10px;right:12px;z-index:56;display:flex;gap:6px;align-items:center;
+  background:rgba(19,30,38,.94);border:1px solid var(--line);border-radius:999px;padding:5px 8px 5px 14px;
+  font-size:11.5px;font-weight:700;letter-spacing:.08em;color:var(--pur);box-shadow:var(--shadow)}
+.pracchip.hide{display:none}
+.pracchip button{border:0;background:#22323c;border-radius:999px;padding:5px 12px;font-size:11.5px;font-weight:700;color:var(--tx)}
+.drill{display:block;width:100%;text-align:left;padding:14px 16px;margin-bottom:10px;border-radius:12px;
+  border:1px solid var(--line);background:#16222b;transition:.14s}
+.drill:hover{border-color:var(--acc);background:#1a2b35;transform:translateX(3px)}
+.drill b{display:block;font-size:15px}
+.drill span{display:block;font-size:12px;color:var(--dim);margin-top:3px}
+.drill i{float:right;font-style:normal;font-family:var(--mono);font-size:12px;color:var(--acc2)}
 .shake{animation:shake .4s}
 @keyframes shake{0%,100%{transform:none}20%{transform:translateX(-9px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(3px)}}
 </style>
@@ -215,6 +239,7 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
     </div>
     <div class="btnrow center">
       <button class="btn primary" onclick="Game.start()">診療を開始する</button>
+      <button class="btn" onclick="Practice.menu()">練習モード</button>
       <button class="btn" onclick="Game.help()">遊びかた</button>
     </div>
     <div class="tiny" style="text-align:center;margin-top:14px">
@@ -454,6 +479,41 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
   </div>
 </section>
 
+<!-- ══════════ 練習モード ══════════ -->
+<section id="s-practice" class="screen">
+  <div class="card">
+    <div class="eyebrow">練習モード</div>
+    <h2 style="margin-bottom:6px">好きな工程だけ、何度でも</h2>
+    <p class="muted" style="margin-top:0">
+      本番のスコアにも信頼度にも影響しません。失敗するたび、<b style="color:var(--tx)">どこがどう足りなかったかを数値で</b>返します。
+    </p>
+    <hr class="sep">
+    <div class="grid2">
+      <div>
+        <div class="eyebrow">難易度</div>
+        <div class="diffrow" id="prac-diff" style="justify-content:flex-start">
+          <button class="chip" data-d="0">初級</button>
+          <button class="chip on" data-d="1">標準</button>
+          <button class="chip" data-d="2">上級</button>
+        </div>
+      </div>
+      <div>
+        <div class="eyebrow">補助</div>
+        <div class="diffrow" id="prac-aid" style="justify-content:flex-start">
+          <button class="chip on" data-a="guide">正解ガイドを表示</button>
+          <button class="chip" data-a="slow">呼吸をゆっくりに</button>
+        </div>
+      </div>
+    </div>
+    <hr class="sep">
+    <div class="eyebrow">練習する工程</div>
+    <div id="prac-menu"></div>
+    <div class="btnrow center">
+      <button class="btn ghost" onclick="Practice.exit()">タイトルへ戻る</button>
+    </div>
+  </div>
+</section>
+
 <!-- ══════════ 一日の終わり ══════════ -->
 <section id="s-day" class="screen">
   <div class="card" style="text-align:center">
@@ -468,6 +528,7 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
     <p class="muted" id="dy-msg" style="margin-top:0"></p>
     <div class="btnrow center">
       <button class="btn primary" onclick="Game.nextDay()">翌日を開始</button>
+      <button class="btn" onclick="Practice.menu()">練習モード</button>
       <button class="btn ghost" onclick="location.reload()">タイトルへ</button>
     </div>
   </div>
@@ -538,6 +599,24 @@ ol.howto li{margin-bottom:7px;font-size:13.5px}
       内容は娯楽目的で単純化・脚色されており、医学的助言ではありません。体の不調は必ず医療機関にご相談ください。
     </div>
     <div class="btnrow center"><button class="btn primary" onclick="Game.closeHelp()">閉じる</button></div>
+  </div>
+</div>
+
+<div class="pracchip hide" id="prac-chip">
+  練習モード
+  <button onclick="Practice.retry()">もう一度</button>
+  <button onclick="Practice.menu()">メニュー</button>
+</div>
+
+<div class="pracbar" id="prac-bar">
+  <h3 id="pb-verdict">—</h3>
+  <div class="tiny" id="pb-sub">—</div>
+  <div class="pb-lines" id="pb-lines"></div>
+  <div class="pb-foot">
+    <div class="tiny" id="pb-streak"></div>
+    <div class="sp"></div>
+    <button class="btn ghost" onclick="Practice.menu()">別の練習</button>
+    <button class="btn primary" onclick="Practice.retry()">もう一度　<span style="opacity:.7">(Enter)</span></button>
   </div>
 </div>
 
@@ -789,7 +868,7 @@ const PATIENTS = [
   history:['2週間前から','特に上を向いて首を回した時','一度、しゃべりにくくなったことがある','片頭痛の既往なし、外傷歴なし'],
   exam:['頸椎回旋でめまい・眼振が誘発される','一過性の複視と構音障害のエピソード','後頭部の拍動性の痛み','血圧に左右差なし'],
   red:{n:'椎骨脳底動脈不全（VBI）の疑い', why:'めまい・複視・構音障害という「5D」に該当する症状が頸椎回旋で誘発されている。頸椎への回旋HVLAは椎骨動脈解離を起こしうる', action:'頸椎スラストは行わず、ただちに医師へ紹介'},
-  yellow:null, target:'C2', restriction:'—',
+  yellow:null, atlas:{lat:'R', si:'S'}, target:'C2', restriction:'—',
   techBest:'mob', techOk:[],
   contact:'pil_L', drive:290, driveHint:'—',
   advice:['neurowatch','sleep'], pool:['neurowatch','sleep','selfcrack','stretchmax','massageonly'],
@@ -853,6 +932,7 @@ const PATIENTS = [
   red:null, yellow:null,
   gs:{sp:'R', wedge:'I', suffix:'m'},
   gs:{sp:'L', wedge:'I', suffix:'pil'},
+  atlas:{lat:'L', si:'I'},
   target:'C2', restriction:'左回旋の制限',
   techBest:'diversified', techOk:['gonstead','activator','mob'],
   contact:'pil_L', drive:240, driveHint:'左の関節柱に触れ、やや上方＋外側へ',
@@ -888,11 +968,24 @@ const DIFF = [
 /* ─────────────── 状態 ─────────────── */
 const S = { diff:1, day:1, idx:0, queue:[], score:0, rep:100, results:[], p:null, cur:null, best:0 };
 const D = () => DIFF[S.diff];
+/* ヒント表示は難易度設定、または練習モードのガイド補助で有効になる */
+const HINT = () => DIFF[S.diff].hints || (typeof Practice!=='undefined' && Practice.on && Practice.aid.guide);
 
 /* ─────────────── 描画ループ ─────────────── */
 let drawFn = null;
 const setDraw = fn => { drawFn = fn; };
-(function loop(){ if(drawFn){ try{ drawFn(now()); }catch(e){ console.error(e); drawFn=null; } } requestAnimationFrame(loop); })();
+let drawFails=0;
+(function loop(){
+  if(drawFn){
+    try{ drawFn(now()); drawFails=0; }
+    catch(e){
+      console.error(e);
+      // 一過性の失敗で画面を殺さない。連続したときだけ描画を止める
+      if(++drawFails>8){ drawFn=null; drawFails=0; }
+    }
+  }
+  requestAnimationFrame(loop);
+})();
 
 function go(id){
   $$('.screen').forEach(s=>s.classList.remove('on'));
@@ -1124,7 +1217,7 @@ const Palp = {
     this.cv=$('#cv-spine');
     this.c=fit(this.cv,this.W,this.H);
     this.lay=spineLayout(this.W,this.H,72,52);
-    $('#palp-hint').textContent = D().hints
+    $('#palp-hint').textContent = HINT()
       ? 'ヒント：'+REG_NAME[SPINE[this.target].reg]+'のあたりに固着があります'
       : '押しながら上下に動かす';
     $('#palp-seg').textContent='—';
@@ -1181,7 +1274,7 @@ const Palp = {
       c.log.push('△ 隣接セグメントを選択（'+SPINE[i].name+' ／ 正解 '+SPINE[this.target].name+'）'); }
     else { Snd.bad(); toast('外した — '+SPINE[i].name,2300);
       c.log.push('✘ 固着の特定に失敗（'+SPINE[i].name+' ／ 正解 '+SPINE[this.target].name+'）'); }
-    setTimeout(()=>Tech.open(), 1700);
+    setTimeout(()=>Practice.next(()=>Tech.open(),'palp'), 1700);
   },
   draw(t){
     const c=this.c, W=this.W, H=this.H;
@@ -1317,7 +1410,7 @@ const Nervo = {
     $('#nv-spd').textContent='--'; $('#b-spd').style.width='0%';
     $('#b-nvpat').style.width='100%'; $('#nv-pat').textContent='100';
     $('#nv-msg').textContent='プローブを上端に置いてドラッグを開始してください。';
-    $('#nv-hint').textContent = D().hints
+    $('#nv-hint').textContent = HINT()
       ? 'ヒント：'+REG_NAME[SPINE[this.trueTarget].reg]+'領域でブレイクが出ます'
       : '上端からドラッグして下へ滑らせる';
     this.bind();
@@ -1542,7 +1635,7 @@ const Listing = {
       else if(b.classList.contains('sel')) b.classList.add('bad'); });
     c.gsCorrect? Snd.great() : Snd.bad();
     $('#ls-go').disabled=true;
-    setTimeout(()=>Contact.open(false,'gonstead'), 1900);
+    setTimeout(()=>Practice.next(()=>Contact.open(false,'gonstead'),'gonstead'), 1900);
   },
   /* 正面像＋側面像の模式レントゲン */
   draw(){
@@ -1621,6 +1714,11 @@ const Atlas = {
   cv:null,c:null,W:560,H:272, lat:null, si:null,
   open(){
     this.lat=null; this.si=null;
+    // 上位頸椎の患者に atlas が無い場合でも読影できるよう、ガンステッド所見から補う
+    if(!S.p.atlas){
+      const g=S.p.gs||{};
+      S.p.atlas = { lat: g.sp==='R'?'R':'L', si: g.wedge==='I'?'I':'S' };
+    }
     this.cv=$('#cv-atlas'); this.c=fit(this.cv,this.W,this.H);
     $('#at-lat').innerHTML='<button class="opt" data-v="R"><b>右（R）</b></button>'+
                            '<button class="opt" data-v="L"><b>左（L）</b></button>';
@@ -1656,7 +1754,7 @@ const Atlas = {
       else if(b.classList.contains('sel')) b.classList.add('bad'); });
     ok? Snd.great() : Snd.bad();
     $('#at-go').disabled=true;
-    setTimeout(()=>Contact.open(false,'toggle'), 1900);
+    setTimeout(()=>Practice.next(()=>Contact.open(false,'toggle'),'atlas'), 1900);
   },
   /* 開口位正面像：環椎・歯突起・外側塊 */
   draw(t){
@@ -1764,7 +1862,7 @@ const Contact = {
       $('#ct-brief').innerHTML =
         '<b>'+v.name+'</b> に <b>'+TECH[c0.tech].n+'</b> を行います。<br>'+
         '触れる骨のランドマークを選び、力を加える方向（ドライブライン）を矢印で合わせてください。';
-      $('#ct-tip').innerHTML = D().hints
+      $('#ct-tip').innerHTML = HINT()
         ? 'ヒント：<b style="color:var(--acc)">'+p.driveHint+'</b>'
         : '所見「'+p.restriction+'」から、どこに触れてどちらへ押すかを考えましょう。ランドマークを選ぶと矢印が出ます（ドラッグで回転）。';
     }
@@ -1809,7 +1907,9 @@ const Contact = {
     const p=S.p, c=S.cur;
     if(!this.pick || $('#ct-go').disabled) return;
     // ガンステッドでは正解はリスティングから導かれる（＝自分の読影が誤れば設定も誤る）
-    const truth = this.mode==='gonstead' ? c.gsTruth : {contact:p.contact, drive:p.drive};
+    const truth = this.mode==='gonstead' ? c.gsTruth
+                : this.mode==='toggle'   ? c.atTruth
+                : {contact:p.contact, drive:p.drive};
     const want=truth.contact, got=this.pick.id;
     let cs;
     if(got===want) cs=100;
@@ -1831,7 +1931,7 @@ const Contact = {
     if(cs===100&&c.drive>=78) Snd.great(); else if(cs>=38&&c.drive>=45) Snd.ok(); else Snd.bad();
     $('#ct-go').disabled=true;
     const mode=this.mode;
-    setTimeout(()=> this.noThrust ? this.gentle() : Thrust.open(mode), 1200);
+    setTimeout(()=> Practice.next(()=> this.noThrust ? this.gentle() : Thrust.open(mode), 'contact'), 1200);
   },
   gentle(){
     const c=S.cur;
@@ -1881,8 +1981,9 @@ const Contact = {
     if(this.pick){
       const pos=this.lmPos(this.pick);
       const a=this.angle*Math.PI/180, L=72;
-      if(D().hints){
-        const td = this.mode==='gonstead' ? S.cur.gsTruth.drive : S.p.drive;
+      if(HINT()){
+        const td = this.mode==='gonstead' ? S.cur.gsTruth.drive
+                 : this.mode==='toggle'   ? S.cur.atTruth.drive : S.p.drive;
         const ta=td*Math.PI/180, tol=D().driveTol*(this.mode==='gonstead'?.75:1)*Math.PI/180;
         c.save(); c.globalAlpha=.15; c.fillStyle='#7ddf64';
         c.beginPath(); c.moveTo(pos.x,pos.y); c.arc(pos.x,pos.y,L+16,ta-tol,ta+tol); c.closePath(); c.fill(); c.restore();
@@ -2400,7 +2501,7 @@ const Thrust = {
         toast('空振り — 関節音は出ませんでした',2200);
       }
     }
-    setTimeout(()=>After.open(), 2400);
+    setTimeout(()=>Practice.next(()=>After.open(),'thrust'), 2400);
   },
 
   draw(t){
@@ -2731,10 +2832,215 @@ const Result = {
   }
 };
 
+/* ═══════════ 練習モード ═══════════
+   本編の各フェーズをそのまま単体で回す。採点は本編と同じ計算だが、
+   結果は「何がどう足りなかったか」を数値付きで返し、その場でやり直せる。 */
+const DRILLS = {
+  palp: {
+    n:'触診 — 固着セグメントを見つける',
+    d:'押しながら脊柱をなぞり、可動性が低く緊張が高い一点を当てる。的中で合格。',
+    pass:'ズバリ的中'
+  },
+  contact: {
+    n:'コンタクト & ドライブライン',
+    d:'ランドマークを選び、力を加える向きを合わせる。両方そろって合格。',
+    pass:'コンタクトも角度も正確'
+  },
+  thrust: {
+    n:'スラスト — 施術台で実際に弾く',
+    d:'遊びを取り、呼気の終わりに短く鋭く弾く。キャビテーションが出れば合格。',
+    pass:'ポキッと入った'
+  },
+  gonstead: {
+    n:'ガンステッド分析 — ノビスコープ & 読影',
+    d:'走査してブレイクを読み、正面像と側面像からリスティングを確定する。',
+    pass:'ブレイクもリスティングも正解'
+  },
+  toggle: {
+    n:'トグルリコイル — 上位頸椎',
+    d:'アトラスを読影し、環椎を極浅・極速で弾いて即座に戻す。貫通させたら不合格。',
+    pass:'トッ、と抜けた'
+  }
+};
+
+const Practice = {
+  on:false, drill:null, tries:0, streak:0, best:{},
+  aid:{guide:true, slow:false},
+
+  /* ── メニュー ── */
+  menu(){
+    this.on=false; this.hideBar(); $('#prac-chip').classList.add('hide');
+    setDraw(null);
+    try{ this.best = JSON.parse(localStorage.getItem('bokiboki_prac')||'{}'); }catch(e){ this.best={}; }
+    $('#prac-menu').innerHTML = Object.keys(DRILLS).map(k=>{
+      const b=this.best[k];
+      return '<button class="drill" data-k="'+k+'">'+
+             (b? '<i>最高 '+b+' 連続</i>':'')+
+             '<b>'+DRILLS[k].n+'</b><span>'+DRILLS[k].d+'</span></button>';
+    }).join('');
+    $$('#prac-menu .drill').forEach(b=> b.onclick=()=>this.start(b.dataset.k));
+    $$('#prac-diff .chip').forEach(b=>{
+      b.classList.toggle('on', +b.dataset.d===S.diff);
+      b.onclick=()=>{ S.diff=+b.dataset.d; Snd.resume(); Snd.blip();
+        $$('#prac-diff .chip').forEach(x=>x.classList.toggle('on',x===b)); };
+    });
+    $$('#prac-aid .chip').forEach(b=>{
+      b.classList.toggle('on', !!this.aid[b.dataset.a]);
+      b.onclick=()=>{ this.aid[b.dataset.a]=!this.aid[b.dataset.a];
+        b.classList.toggle('on', this.aid[b.dataset.a]); Snd.resume(); Snd.blip(); };
+    });
+    $('#hud').classList.add('hide');
+    go('practice');
+  },
+  exit(){ location.reload(); },
+
+  /* ── 開始 ── */
+  start(drill){
+    Snd.resume();
+    this.on=true; this.drill=drill; this.tries=0;
+    if(this.streakDrill!==drill){ this.streak=0; this.streakDrill=drill; }
+    $('#prac-chip').classList.remove('hide');
+    $('#hud').classList.add('hide');
+    this.attempt();
+  },
+  retry(){ if(this.on) this.attempt(); },
+
+  /* 練習用の患者と、そこまでの工程を通過済みとして仕立てる */
+  attempt(){
+    this.hideBar();
+    this.tries++;
+    const drill=this.drill;
+    const pool = PATIENTS.filter(p=>!p.red);
+    let p;
+    if(drill==='toggle') p = PATIENTS.find(x=>x.id==='p13');
+    else p = pool[Math.floor(Math.random()*pool.length)];
+    S.p = p;
+    S.cur = { log:[], intake:100, palp:null, nervo:null, listing:null, techScore:null,
+              contact:null, drive:null, preload:null, timing:null, vel:null, amp:null,
+              recoil:null, after:null, contactId:null, driveAngle:null,
+              cav:false, hurt:false, severe:false, rep:null,
+              referred:false, wrongTreat:false, noThrust:false };
+    Thrust.BP = this.aid.slow? 6.6 : 4.0;
+
+    if(drill==='palp'){ Palp.open(); return; }
+
+    S.cur.marked = p.target; S.cur.palp = 100; S.cur.segOff = 0;
+
+    if(drill==='contact'){ S.cur.tech='diversified'; S.cur.techScore=100;
+      Contact.open(false,'normal'); return; }
+
+    if(drill==='gonstead'){ S.cur.tech='gonstead'; S.cur.techScore=100; Nervo.open(); return; }
+
+    if(drill==='toggle'){ S.cur.tech='toggle'; S.cur.techScore=100; Atlas.open(); return; }
+
+    // スラスト単体：コンタクトまでは正解済みとして施術台へ
+    S.cur.tech='diversified'; S.cur.techScore=100;
+    S.cur.contactId = p.contact; S.cur.driveAngle = p.drive;
+    S.cur.contact = 100; S.cur.drive = 100; S.cur.driveErr = 0;
+    Thrust.open('normal');
+  },
+
+  /* 各フェーズの完了フック。練習中でなければ本編どおり次へ進む */
+  next(fn, kind){
+    if(!this.on) return fn();
+    if(this.drill==='toggle' && kind==='atlas'){
+      // 読影の続き：コンタクトは正解を当てた状態で施術台へ
+      const t=S.cur.atTruth;
+      S.cur.contactId=t.contact; S.cur.driveAngle=t.drive;
+      S.cur.contact=100; S.cur.drive=100; S.cur.driveErr=0;
+      Thrust.open('toggle'); return;
+    }
+    this.report(kind);
+  },
+
+  /* ── 講評 ── */
+  report(kind){
+    const c=S.cur, p=S.p, d=this.drill;
+    const L=[], add=(cls,t)=>L.push('<div class="'+cls+'">'+t+'</div>');
+    let pass=false, sub='';
+
+    if(d==='palp'){
+      const off=c.segOff;
+      pass = off===0;
+      sub = '正解は '+SPINE[SEG_INDEX[p.target]].name+'　／　あなたの判断は '+SPINE[SEG_INDEX[c.marked]].name;
+      if(off===0) add('ok','的中。可動性の谷と緊張の山が重なる一点を拾えています');
+      else if(off===1) add('ng','1つ隣です。バーが動くところで止めず、<b>可動性が最も低い高さ</b>まで詰めてください');
+      else add('ng',off+'つ離れています。まず領域（頸椎・胸椎・腰椎）を絞ってから1椎ずつ確かめましょう');
+      add('', '押している間だけ計測されます。ゆっくり往復して、可動性バーが最も低くなる高さを探すのが近道です');
+    }
+
+    else if(d==='contact'){
+      const okC=c.contact===100, okD=c.drive>=78;
+      pass = okC && okD;
+      sub = '正解：'+LM_NAME(p.contact)+' ／ '+p.drive+'°';
+      add(okC?'ok':'ng','コンタクト '+c.contact+'点 — '+(okC?'正しいランドマーク'
+        : (c.contact<=14? '<b>反対側</b>に触れています。所見の左右を読み直しましょう':'狙いは合っていますが構造が違います')));
+      add(okD?'ok':'ng','ドライブライン 誤差 '+c.driveErr+'°（許容 ±'+Math.round(D().driveTol)+'°）'+
+        (okD?'':' — 矢印はコンタクト点から離した位置をドラッグすると回せます'));
+      if(!okC||!okD) add('','所見「'+p.restriction+'」→ '+p.driveHint);
+    }
+
+    else if(d==='gonstead'){
+      const okN=c.nervo>=80, okL=!!c.gsCorrect;
+      pass = okN && okL;
+      sub = '正解リスティング：'+c.gsTruth.listing+'　／　ブレイクは '+SPINE[SEG_INDEX[p.target]].name;
+      add(okN?'ok':'ng','ノビスコープ '+c.nervo+'点 — '+(okN?'走査もブレイクの読みも十分'
+        :'カバー率かブレイクの位置が不足。上限速度を超えた区間は記録されません'));
+      add(okL?'ok':'ng','リスティング '+(okL?'正解':'誤り')+'（あなた：'+c.gsGuide.listing+'）');
+      if(!okL) add('','正面像は<b>棘突起が正中線のどちら側にあるか</b>、側面像は<b>棘突起の先端が中間位より上か下か</b>だけを見ます');
+      if(okL) add('','この読みなら → '+c.gsTruth.text);
+    }
+
+    else if(d==='thrust' || d==='toggle'){
+      const V=Thrust.VEL(), A=Thrust.AMP(), band=Thrust.band(), win=Thrust.win();
+      pass = !!c.cav && !c.severe && !c.hurt;
+      sub = (d==='toggle'?'トグルリコイル':'ディバーシファイド')+
+            '　／　'+SPINE[SEG_INDEX[c.marked]].name;
+      if(c.severe){ add('ng','<b>貫通しました。</b>'+c.ampPx+'px まで押し込んでいます（限界 '+
+        Thrust.DANGER()+'px）。弾いたら<b>止める</b>のが先で、深さは要りません'); }
+      const preOK = c.preload>=70;
+      add(preOK?'ok':'ng','プリロード '+c.preload+'点 — '+
+        (preOK?'遊びは取れています':'緑の帯（'+Math.round(band[0])+'〜'+Math.round(band[1])+'）で止めてから弾いてください'));
+      const timOK = c.timing>=70;
+      add(timOK?'ok':'ng','タイミング 呼気終末から '+c.timingMs+'ms（許容 ±'+Math.round(win)+'ms）'+
+        (timOK?'':' — 波が谷に落ちきる直前を狙います'+(this.aid.slow?'':'。「呼吸をゆっくりに」で練習できます')));
+      const velOK = c.vel>=70;
+      add(velOK?'ok':'ng','スラスト速度 '+c.velPx+'px/秒（'+V[0]+'未満はスラスト不成立、'+V[1]+'で満点）'+
+        (velOK?'':' — <b>もっと鋭く</b>。ゆっくり押しても関節は動きません'));
+      const ampOK = c.amp>=70;
+      add(ampOK?'ok':'ng','振幅 '+c.ampPx+'px（'+Math.round(A[0])+'px 以内が満点）'+
+        (ampOK?'':' — <b>浅く</b>。弾いたらすぐ止めます'));
+      if(d==='toggle') add(c.recoil>=70?'ok':'ng','リコイル '+c.recoil+'点 — '+
+        (c.recoil>=70?'ちゃんと跳ね返せています':'弾いたあと<b>手を引き戻す</b>ところまでが1動作です'));
+      if(!c.cav && !c.severe && velOK && ampOK && !preOK)
+        add('','速さと浅さは合格です。あとは遊びを取り切るだけ');
+    }
+
+    // 連続記録
+    if(pass){ this.streak++; Snd.great();
+      if(!this.best[d] || this.streak>this.best[d]){
+        this.best[d]=this.streak;
+        try{ localStorage.setItem('bokiboki_prac', JSON.stringify(this.best)); }catch(e){}
+      }
+    } else { this.streak=0; Snd.bad(); }
+
+    $('#pb-verdict').textContent = pass? '合格 — '+DRILLS[d].pass : 'もう一度';
+    $('#pb-verdict').style.color = pass? 'var(--ok)':'var(--acc2)';
+    $('#pb-sub').textContent = sub;
+    $('#pb-lines').innerHTML = L.join('');
+    $('#pb-streak').innerHTML = '試行 '+this.tries+' 回　／　連続合格 <b style="color:var(--acc)">'+this.streak+'</b>'+
+      (this.best[d]? '　／　自己最高 '+this.best[d]:'');
+    setTimeout(()=>$('#prac-bar').classList.add('on'), 380);
+  },
+  hideBar(){ $('#prac-bar').classList.remove('on'); }
+};
+
 /* ═══════════ ゲーム制御 ═══════════ */
 const Game = {
   start(){
     Snd.resume();
+    Practice.on=false; Practice.hideBar(); $('#prac-chip').classList.add('hide');
+    Thrust.BP=4.0;
     S.day=1; S.score=0; S.rep=100; S.results=[];
     this.buildQueue();
     $('#hud').classList.remove('hide');
@@ -2815,6 +3121,7 @@ try{ const v=localStorage.getItem('bokiboki_best'); if(v){ S.best=+v; $('#best-s
 window.addEventListener('keydown',e=>{
   if(e.key==='Escape') Game.closeHelp();
   if(e.key==='Enter'){
+    if(Practice.on && $('#prac-bar').classList.contains('on')){ Practice.retry(); return; }
     if($('#s-result').classList.contains('on')) Game.nextPatient();
     else if($('#s-title').classList.contains('on')) Game.start();
   }

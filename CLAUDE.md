@@ -49,9 +49,16 @@ No external assets or network requests, so it works offline and from `file://`.
   width/height, so they stay aligned at any scale.
 - **`Snd`** synthesizes every sound at call time — no audio files. It must be resumed from a user
   gesture before it will play.
+- **`Practice`** re-runs individual phases standalone. Every phase hand-off goes through
+  `Practice.next(continueFn, stepName)`, which calls `continueFn()` verbatim when practice is off —
+  so adding a phase means adding one more hook, not branching inside the phase.
 - **Patient data** lives in the `PATIENTS` array; adding a case means adding one object there
   (target segment, correct technique, correct contact landmark, drive angle, red/yellow flag, dialogue).
-  Every patient also needs a `gs` listing for the Gonstead route; C1/C2 cases additionally need `atlas`.
+  Every patient also needs a `gs` listing for the Gonstead route; **any patient whose target is C1 or
+  C2 additionally needs `atlas`**, because `Tech.open()` offers toggle recoil based on region alone.
+  A C2 patient shipped without it, and `Atlas.draw()` threw every frame while `Atlas.confirm()` threw
+  on click, leaving the phase unfinishable. `Atlas.open()` now derives a fallback listing, but the
+  data should still be present.
 - **Sample pointer motion on a fixed cadence, and size the measurement window to the gesture.**
   Pointer event cadence varies by device, so deriving velocity from event deltas makes the result
   depend on the device rather than on the user. Both input bugs shipped in this file came from
