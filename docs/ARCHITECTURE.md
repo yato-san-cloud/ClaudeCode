@@ -52,6 +52,9 @@
 
 ### 取込 / ETL（寛容）
 - `importer.py` — ZIP→subtree deep-merge。`mapcsv.py` / `rmpm.py`（MapMaker地図CSV / ネイティブ.rmpm.json）/ `tabular.py`（汎用CSV/Excel）/ `cad.py`（DXF）。各々 `/api/.../import-*` ルート。
+- `mapmaker_kpi.py` — **MapMaker カスタム版 v4.5+ の 3D/KPI JSON**。実サンプルが無いので**意味ベースの別名表**（`FIELD_ALIASES`/`CONTAINER_ALIASES`）でキーを受け、当てられなかったキーを `probe` に全件列挙する（`?probe=true` / `whsim probe-kpi` は**書き込まずに**答え合わせだけ）。段数は **v4.9 統一規約**（段数=パレット段数、逆ネス 基数=段数−1、有効ロケ数=間口×段数）で、段×間口の展開規則は `locmaster`/`design.materialize_racks` と同一。段数が載っている以上 MapMaker の数え方が正なので `materialize_racks` では上書きしない。想定キー表は `docs/mapmaker-v5-import.md`。
+- `locmaster.py` — ロケマスタ。図面の棚に載せる既定経路に加え、**MapMaker 出力列**（`エリア,列,棚,段,間口,フルロケ,X,Y,什器種別,什器名,面積[,ゾーン]`）を認識して **X/Y(mm) から直接配置**する経路（`build_layout` / `place=direct`）を持つ。「面積」「ゾーン」は部分一致で「エリア」に食われるため**先に確定**してから残りを解決する。
+- `cad.py` — DXF。**CONVEYOR レイヤ→`resources.conveyors`（壁にはしない＝二重計上しない）**、**SHELF レイヤ→`zone.shelves`**、その他は従来どおり壁。
 - `distances.py` — 実測 棚間距離行列（最大級ファイル；`engine/graph.py` と距離で概念重複）。
 - `rackgeom.py` — **描かれたラック＝ジオメトリの唯一の真実**。`rack_rects`（描画と routing 障害物の共通元; `(x,y,w,h)` であって `(x0,y0,x1,y1)` ではない）＋`aisle_block`/`aisle_detour`/`aisle_escape_m`（通路travel の閉形式＝解析側の補正; `analytic.py` が消費。`aisle_escape_m` は1点分だけを再利用するための切り出し＝ベルト境界点ごとの評価に使う）。
 - `provenance.py` — 出所追跡。

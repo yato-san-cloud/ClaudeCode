@@ -10,8 +10,14 @@ blocking on bad data. To that end this module is deliberately *tolerant*:
   drawing extent when the header is missing/unitless;
 - only the file-not-found / file-unopenable case is allowed to raise.
 
+Layers carry meaning when the drawing came out of MapMaker's CAD(DXF) export
+(棚=SHELF / 壁=WALL / コンベア=CONVEYOR, the last added by the custom build v4.9):
+SHELF becomes authored shelves, CONVEYOR becomes conveyors, everything else stays
+a wall so an arbitrary customer drawing still works. See `_CONVEYOR_LAYERS` for
+why a belt must not also be emitted as a wall, and docs/mapmaker-v5-import.md §3.
+
 The output is a plain dict shaped to feed directly into whsim's `Layout`:
-`{bounds, walls, zones, warnings, stats}` (see `whsim.schema.model`).
+`{bounds, walls, zones, conveyors, warnings, stats}` (see `whsim.schema.model`).
 All distances are emitted in METERS, with the drawing's min corner translated
 to the origin (0, 0).
 """
@@ -42,6 +48,19 @@ _INSUNITS: dict[int, tuple[str, float]] = {
 
 # Layer-name keyword -> whsim ZoneType. Matched case-insensitively as a
 # substring, so "RECEIVING-AREA" or "保管エリア" both hit. Best-effort only.
+# --- Layer roles (MapMaker CAD(DXF)エクスポート の仕分けに合わせる) ------------
+# MapMaker writes 棚 → "SHELF", 壁 → "WALL", and (custom build v4.9+) コンベア →
+# "CONVEYOR". Anything else keeps the historical behaviour of becoming a wall
+# polyline, which is what makes an arbitrary customer drawing still usable.
+#
+# CONVEYOR is deliberately NOT also a wall. The custom build auto-generates a
+# real 壁 object under every belt so MapMaker's own routing walks around it
+# (v4.10), and it says so explicitly: 「自社の集計・DXFでは『コンベア(壁)』
+# 『CONVEYORレイヤ』として扱い二重計上しません」. Emitting the belt as both a
+# conveyor and a wall here would put two obstacles on one footprint.
+_CONVEYOR_LAYERS = ("conveyor", "コンベア", "コンベヤ")
+_SHELF_LAYERS = ("shelf", "棚")
+
 _ZONE_KEYWORDS: list[tuple[str, str]] = [
     ("receiving", "receiving"),
     ("入荷", "receiving"),
@@ -100,6 +119,16 @@ def _points_from_entity(entity: Any) -> list[list[float]]:
     raise TypeError(dxftype)
 
 
+def _layer_role(layer: str) -> str:
+    """"conveyor" / "shelf" / "wall" for a DXF layer name (substring, folded)."""
+    low = str(layer or "").lower()
+    if any(k in low if k.isascii() else k in layer for k in _CONVEYOR_LAYERS):
+        return "conveyor"
+    if any(k in low if k.isascii() else k in layer for k in _SHELF_LAYERS):
+        return "shelf"
+    return "wall"
+
+
 def _zone_type_for_layer(layer: str) -> str | None:
     """Map a layer name to a whsim ZoneType by keyword, or None if no hint."""
     low = layer.lower()
@@ -141,8 +170,10 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
             "bounds": {"width": 0.0, "depth": 0.0},
             "walls": [],
             "zones": [],
+            "conveyors": [],
             "warnings": [msg],
-            "stats": {"entities": 0, "walls": 0, "scale": 1.0, "units": "unknown"},
+            "stats": {"entities": 0, "walls": 0, "conveyors": 0, "shelves": 0,
+                      "scale": 1.0, "units": "unknown"},
         }
 
     # A ".dxf" that is actually a DWG (binary AutoCAD save) is a common
@@ -179,6 +210,8 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
     # closed polylines tagged with a recognised zone layer.
     raw_walls: list[list[list[float]]] = []
     raw_zones: list[tuple[str, list[list[float]]]] = []  # (zone_type, points)
+    raw_conveyors: list[list[list[float]]] = []          # CONVEYOR layer polylines
+    raw_shelves: list[list[list[float]]] = []            # SHELF layer rectangles
     entity_count = 0
     truncated = False
 
@@ -195,13 +228,24 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
             if len(points) < 2:
                 continue
 
+            layer = str(getattr(entity.dxf, "layer", "") or "")
+            role = _layer_role(layer)
+            if role == "conveyor":
+                # The belt centre-line, verbatim. It is NOT also a wall (see
+                # _CONVEYOR_LAYERS): the auto-generated 壁 under the belt and the
+                # CONVEYOR polyline are the same physical object.
+                raw_conveyors.append(points)
+                continue
+            if role == "shelf":
+                raw_shelves.append(points)
+                continue
+
             if len(raw_walls) >= MAX_WALLS:
                 truncated = True
                 continue
             raw_walls.append(points)
 
             # Best-effort zone detection: a closed polyline on a known layer.
-            layer = str(getattr(entity.dxf, "layer", "") or "")
             ztype = _zone_type_for_layer(layer)
             is_closed = (
                 dxftype in ("LWPOLYLINE", "POLYLINE")
@@ -221,7 +265,7 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
 
     # Resolve a unitless drawing by guessing from the overall extent: a plan
     # whose largest dimension exceeds 2000 is almost certainly in millimetres.
-    all_points = [p for poly in raw_walls for p in poly]
+    all_points = [p for poly in raw_walls + raw_conveyors + raw_shelves for p in poly]
     if units == "unitless":
         if all_points:
             minx, miny, maxx, maxy = _bbox(all_points)
@@ -256,6 +300,18 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
             }
         )
 
+    # CONVEYOR レイヤ → model.resources.conveyors。mm→m は壁と同じ換算・同じ原点。
+    # 速度は DXF に載らないので whsim の既定 (0.5 m/s) を置き、設計タブで直せる。
+    conveyors: list[dict] = []
+    for i, poly in enumerate(raw_conveyors):
+        pts = [to_m(p) for p in poly]
+        # drop consecutive duplicates (a closed belt outline can repeat its first
+        # point); a degenerate 1-point belt is not a belt.
+        dedup = [p for j, p in enumerate(pts) if j == 0 or p != pts[j - 1]]
+        if len(dedup) < 2:
+            continue
+        conveyors.append({"id": f"cv{i}", "points": dedup, "speed_mps": 0.5})
+
     zones: list[dict] = []
     for i, (ztype, poly) in enumerate(raw_zones):
         bx0, by0, bx1, by1 = _bbox(poly)
@@ -282,14 +338,49 @@ def import_dxf(path: str | Path, target_units: str = "m") -> dict:
     else:
         width = depth = 0.0
 
+    # SHELF レイヤ → 保管ゾーンの authored shelves（壁ではなく棚として扱う）。
+    # 棚は経路の障害物として zone.shelves から直読されるので、壁に混ぜると
+    # 同じ矩形が二重に障害物化する。DXF には棚名が TEXT で別に入るだけなので、
+    # 名前は付かない（棚名が要るときは rmpm / ロケマスタ経路が正）。
+    if raw_shelves:
+        shelves = []
+        for i, poly in enumerate(raw_shelves):
+            bx0, by0, bx1, by1 = _bbox(poly)
+            x0, y0 = to_m([bx0, by0])
+            x1, y1 = to_m([bx1, by1])
+            w = round(abs(x1 - x0), 4)
+            h = round(abs(y1 - y0), 4)
+            if w <= 0 or h <= 0:
+                continue
+            shelves.append({"id": f"s{i}", "name": "",
+                            "x": round(min(x0, x1), 4), "y": round(min(y0, y1), 4),
+                            "w": w, "h": h, "rack_type": "medium",
+                            "facing": "down" if w >= h else "left"})
+        if shelves:
+            zones.append({"id": "storage", "type": "storage", "x": 0.0, "y": 0.0,
+                          "w": max(width, 1.0), "h": max(depth, 1.0),
+                          "color": None, "rack": None, "shelves": shelves})
+
+    if conveyors:
+        warnings.append(f"CONVEYOR レイヤから {len(conveyors)} 本のコンベアを"
+                        "取り込みました（壁には計上していません＝二重計上なし）。"
+                        "速度は既定 0.5 m/s です。")
+    if raw_shelves:
+        warnings.append(f"SHELF レイヤの {len(raw_shelves)} 図形を棚として"
+                        "取り込みました（壁ではありません）。棚名は DXF に"
+                        "座標付きで載らないため空です。")
+
     return {
         "bounds": {"width": width, "depth": depth},
         "walls": walls,
         "zones": zones,
+        "conveyors": conveyors,
         "warnings": warnings,
         "stats": {
             "entities": entity_count,
             "walls": len(walls),
+            "conveyors": len(conveyors),
+            "shelves": sum(len(z.get("shelves", [])) for z in zones),
             "scale": scale,
             "units": units,
         },

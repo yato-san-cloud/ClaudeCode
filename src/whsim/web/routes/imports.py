@@ -53,13 +53,22 @@ async def api_import_cad(name: str, file: UploadFile):
         md["layout"]["walls"] = res["walls"]
     if res.get("zones"):
         md["layout"]["zones"] = res["zones"]
+    # CONVEYOR レイヤ（MapMaker カスタム版 v4.9+）→ 搬送設備。壁には入っていない。
+    if res.get("conveyors"):
+        md.setdefault("resources", {})["conveyors"] = res["conveyors"]
     model = WarehouseModel.model_validate(md)
+    if any(z.shelves for z in model.layout.zones):
+        from whsim import design
+        design.materialize_racks(model)   # SHELF レイヤの棚 → ロケーション
     proj.save_model(model)
     prov = proj.load_provenance()
     prov.mark("layout", Source.IMPORTED)
     proj.save_provenance(prov)
     return {"bounds": res.get("bounds"), "walls": len(res.get("walls", [])),
-            "zones": len(res.get("zones", [])), "warnings": res.get("warnings", []),
+            "zones": len(res.get("zones", [])),
+            "conveyors": len(res.get("conveyors", [])),
+            "locations": len(model.locations),
+            "warnings": res.get("warnings", []),
             "stats": res.get("stats", {})}
 
 
@@ -139,35 +148,112 @@ async def api_import_rmpm(name: str, file: UploadFile):
             "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
 
 
+@router.post("/api/projects/{name}/import-mapmaker-kpi")
+async def api_import_mapmaker_kpi(name: str, file: UploadFile, probe: bool = False):
+    """Import MapMaker カスタム版 の「3D/KPI用データ書き出し（JSON）」.
+
+    Unlike the rmpm/CAD paths, this file states 段数・間口数・什器種別 per shelf, so
+    the locations it produces are MapMaker's own count — not a guess re-derived
+    from a whsim rack preset. 段数 follows the v4.9 統一規約 (段数=パレット段数,
+    逆ネスは 基数=段数−1).
+
+    `probe=true` parses and returns the key census WITHOUT writing anything —
+    the answer sheet for "which key names does your build actually write?"."""
+    from whsim import design, mapmaker_kpi
+    from whsim.schema.model import WarehouseModel
+    proj = _open(name)
+    data = await _read_upload(file)
+    try:
+        res = mapmaker_kpi.import_kpi_bytes(data)
+    except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad export
+        raise HTTPException(400, f"3D/KPI JSON を解析できませんでした: {e}")
+    if probe:
+        return {"probe": res.get("probe", {}), "stats": res.get("stats", {}),
+                "warnings": res.get("warnings", []), "written": False}
+    md = json.loads(proj.model_file.read_text("utf-8"))
+    if res.get("bounds"):
+        md["layout"]["bounds"] = res["bounds"]
+    if res.get("walls"):
+        md["layout"]["walls"] = res["walls"]
+    if res.get("zones"):
+        md["layout"]["zones"] = res["zones"]
+    if res.get("stations"):
+        md.setdefault("resources", {})["stations"] = res["stations"]
+    if res.get("conveyors"):
+        md.setdefault("resources", {})["conveyors"] = res["conveyors"]
+    model = WarehouseModel.model_validate(md)
+    if res.get("locations"):
+        mapmaker_kpi.apply_to_model(model, res)   # MapMaker の段数/間口が正
+    else:
+        design.materialize_racks(model)           # 段数が無ければ従来どおり派生
+    design.synthesize_items(model)    # ensure demand so the sim stays runnable
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("layout", Source.IMPORTED)
+    if res.get("locations"):
+        prov.mark("locations", Source.IMPORTED)
+    proj.save_provenance(prov)
+    return {"bounds": res.get("bounds"),
+            "shelves": res.get("stats", {}).get("shelves", 0),
+            "walls": len(res.get("walls", [])), "zones": len(res.get("zones", [])),
+            "stations": len(res.get("stations", [])),
+            "conveyors": len(res.get("conveyors", [])),
+            "locations": len(model.locations), "written": True,
+            "warnings": res.get("warnings", []), "stats": res.get("stats", {}),
+            "probe": res.get("probe", {})}
+
+
 @router.post("/api/projects/{name}/import-locmaster")
-async def api_import_locmaster(name: str, file: UploadFile):
+async def api_import_locmaster(name: str, file: UploadFile, place: str = "drawing"):
     """Import a WMS ロケーションマスタ → locations pegged onto the drawn shelves.
 
     This is the piece that turns an imported drawing from furniture into a
     warehouse: the drawing knows where shelf `AAA-00-02` is, a shipment history
     knows a line was picked from `AAA-00-02-3-01`, and until this ran nothing
     knew those were the same place. Import the layout FIRST — locations can only
-    be placed on shelves that exist."""
-    from whsim import locmaster
+    be placed on shelves that exist.
+
+    `place=direct` takes the SECOND path: MapMaker's own ロケーションマスタ出力
+    carries real X/Y (mm), so the master alone draws the floor — no drawing
+    needed. Use it when the customer sent only the CSV."""
+    from whsim import design, locmaster
     proj = _open(name)
     data = await _read_upload(file)
     model = proj.load_model()
     names = {str(s.name).strip() for z in model.layout.zones for s in z.shelves
              if str(s.name).strip()}
-    if not names:
+    direct = str(place).lower() in ("direct", "xy", "coord")
+    if not names and not direct:
         raise HTTPException(400, "先にレイアウト（MapMaker/CAD）を取り込んでください。"
-                                 "ロケーションは図面の棚にしか置けません。")
+                                 "ロケーションは図面の棚にしか置けません"
+                                 "（マスタの X/Y から直接置くなら place=direct）。")
     try:
         res = locmaster.import_locmaster_bytes(data, file.filename or "loc.csv",
-                                               shelf_names=names)
+                                               shelf_names=None if direct else names)
     except Exception as e:  # noqa: BLE001 — tolerant: never 500 on a bad export
         raise HTTPException(400, f"ロケーションマスタを解析できませんでした: {e}")
+    warnings = list(res["warnings"])
+    if direct:
+        lay = locmaster.build_layout(res["locations"])
+        warnings += lay["warnings"]
+        if lay.get("zones"):
+            md = json.loads(proj.model_file.read_text("utf-8"))
+            md["layout"]["bounds"] = lay["bounds"]
+            md["layout"]["zones"] = lay["zones"]
+            from whsim.schema.model import WarehouseModel
+            model = WarehouseModel.model_validate(md)
+            prov = proj.load_provenance()
+            prov.mark("layout", Source.IMPORTED)
+            proj.save_provenance(prov)
     applied = locmaster.apply_to_model(model, res["locations"])
+    if not applied.get("locations"):
+        design.materialize_racks(model)   # never leave the model without slots
     proj.save_model(model)
     prov = proj.load_provenance()
     prov.mark("locations", Source.IMPORTED)
     proj.save_provenance(prov)
-    return {**applied, "warnings": res["warnings"], "stats": res["stats"]}
+    return {**applied, "place": "direct" if direct else "drawing",
+            "warnings": warnings, "stats": res["stats"]}
 
 
 # 在庫(master) maps the inventory schema; 商品マスタ(items) maps the item-master

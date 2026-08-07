@@ -41,6 +41,13 @@ def _run_rect(run: dict) -> tuple[float, float, float, float] | None:
     return (x, y, w, h)
 
 
+# Public alias: a caller that needs the rect of ONE run it already holds (and the
+# run's other fields alongside it) would otherwise have to re-derive this
+# projection — and a second copy of it is exactly how two views of the same
+# warehouse drift apart. `mapmaker_export.shelves_csv` uses it.
+run_rect = _run_rect
+
+
 def rack_rects(model) -> list[tuple[float, float, float, float]]:
     """Every drawn rack run as an ``(x, y, w, h)`` rectangle in floor metres.
 
