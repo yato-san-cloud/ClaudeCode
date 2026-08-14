@@ -992,3 +992,6 @@ pre.code.d-syntax, pre.code.d-ex { margin: 6px 0; padding: 8px 12px; font-size: 
   .track-head { font-size: 0.95rem; }
   .ghost-info { margin-left: 0; }
 }
+
+/* iOS PWA: セーフエリア対応(ノッチ・ホームバー) */
+body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }

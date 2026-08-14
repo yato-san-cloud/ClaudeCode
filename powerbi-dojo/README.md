@@ -35,6 +35,17 @@ Power BI の M言語(Power Query)と DAX を、網羅的な一般カリキュラ
 - 🎓 **認定証** — 卒業試験+全トラック制覇でPNGダウンロード可能な認定証を発行
 - 🥋 帯システム / 🐕‍🦺 ロジ柴 / 効果音・紙吹雪 / オンボーディング / v1・v2からの進捗自動引き継ぎ
 
+## 📲 iPhoneにアプリとして入れる
+
+GitHub Pages で PWA(ホーム画面アプリ)として配信しています。
+
+1. iPhoneの **Safari** で https://yato-san-cloud.github.io/ClaudeCode/ を開く
+2. 共有ボタン(□↑)→「**ホーム画面に追加**」
+3. ホーム画面の 🥋 アイコンから起動 — 全画面表示・オフラインでも動作(初回表示後)
+
+- 進捗は端末ごとに保存されます(PCとiPhoneでは別進捗)
+- `powerbi-dojo/pwa/` が配信物一式(manifest / service worker / アイコン)。ブランチにpushすると `.github/workflows/deploy-pages.yml` が自動で再デプロイします
+
 ## 開発
 
 ```
