@@ -1,0 +1,2655 @@
+<title>タリフ番長</title>
+<style>
+  :root {
+    --bg: #F6F7F9;
+    --surface: #FFFFFF;
+    --surface-2: #EEF1F5;
+    --ink: #1C2430;
+    --muted: #5A6675;
+    --accent: #1F4E8C;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #E8EEF7;
+    --kraft: #A96A2E;
+    --kraft-soft: #F6EDE2;
+    --line: #D8DDE4;
+    --chart-c1: #2A5CA0;
+    --chart-c2: #A96A2E;
+    --ok-ink: #1E6B3C;
+    --ok-soft: #E2F2E7;
+    --bad-ink: #A33025;
+    --bad-soft: #F9E7E4;
+    --focus: #1F4E8C;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161C;
+      --surface: #1A2028;
+      --surface-2: #222A34;
+      --ink: #E7EAEF;
+      --muted: #9AA5B1;
+      --accent: #7FA9E0;
+      --accent-ink: #10151C;
+      --accent-soft: #1E2A3B;
+      --kraft: #D19A5F;
+      --kraft-soft: #2B241B;
+      --line: #2A323D;
+      --chart-c1: #4C7FCB;
+      --chart-c2: #C08145;
+      --ok-ink: #7FCB98;
+      --ok-soft: #1B2E22;
+      --bad-ink: #E8917F;
+      --bad-soft: #331E1A;
+      --focus: #7FA9E0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161C;
+    --surface: #1A2028;
+    --surface-2: #222A34;
+    --ink: #E7EAEF;
+    --muted: #9AA5B1;
+    --accent: #7FA9E0;
+    --accent-ink: #10151C;
+    --accent-soft: #1E2A3B;
+    --kraft: #D19A5F;
+    --kraft-soft: #2B241B;
+    --line: #2A323D;
+    --chart-c1: #4C7FCB;
+    --chart-c2: #C08145;
+    --ok-ink: #7FCB98;
+    --ok-soft: #1B2E22;
+    --bad-ink: #E8917F;
+    --bad-soft: #331E1A;
+    --focus: #7FA9E0;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic Medium", "Yu Gothic", "Noto Sans JP", "Meiryo", sans-serif;
+    font-size: 14.5px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1020px; margin: 0 auto; padding: 28px 20px 80px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* ---------- header ---------- */
+  .app-head { display: flex; align-items: center; gap: 16px; padding-bottom: 18px; border-bottom: 3px solid var(--accent); margin-bottom: 18px; flex-wrap: wrap; }
+  .seal { flex: none; width: 52px; height: 52px; }
+  .seal rect { fill: none; stroke: var(--kraft); stroke-width: 3; }
+  .seal text { fill: var(--kraft); font-weight: 800; font-size: 19px; }
+  .app-title h1 { margin: 0; font-size: 26px; font-weight: 800; line-height: 1.3; letter-spacing: 0.02em; }
+  .app-title .tagline { color: var(--muted); font-size: 12.5px; }
+  .head-note { margin-left: auto; text-align: right; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+  .chip-demo {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    color: var(--kraft); background: var(--kraft-soft); border: 1px solid var(--kraft);
+    border-radius: 999px; padding: 0 9px;
+  }
+
+  /* ---------- tabs ---------- */
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 22px; }
+  .tabs button {
+    border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+    padding: 7px 16px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 13.5px;
+  }
+  .tabs button:hover { border-color: var(--accent); color: var(--accent); }
+  .tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  section.view { display: none; }
+  section.view.active { display: block; }
+
+  h2 { font-size: 17px; font-weight: 800; margin: 0 0 4px; }
+  .lead { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
+  h3 { font-size: 14px; font-weight: 700; margin: 22px 0 8px; }
+
+  /* ---------- panels & forms ---------- */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px 20px; margin-bottom: 18px; }
+  .form-grid { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field > label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted); }
+  .field input[type="number"], .field input[type="date"], .field input[type="text"], .field select {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 9px; min-width: 110px;
+  }
+  .field.check { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 7px; }
+  .field.check label { font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--ink); }
+  textarea {
+    width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+    padding: 8px 10px; font-family: "SF Mono", "Consolas", "Menlo", monospace; font-size: 12px; line-height: 1.7;
+  }
+  .btn {
+    border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+    padding: 7px 18px; border-radius: 4px; cursor: pointer; font-weight: 700;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost { background: var(--surface); color: var(--accent); }
+  .btn.subtle { background: var(--surface); color: var(--muted); border-color: var(--line); }
+  .btn.danger { background: var(--surface); color: var(--bad-ink); border-color: var(--bad-ink); }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  .hint { font-size: 11.5px; color: var(--muted); }
+
+  /* ---------- quote results ---------- */
+  .quote-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+  .quote-card {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px;
+    background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line);
+    border-radius: 4px; padding: 12px 16px;
+  }
+  .quote-card.best { border-left-color: var(--kraft); background: var(--surface); }
+  .quote-card .cname { font-weight: 800; min-width: 6em; }
+  .quote-card .total { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .quote-card .total small { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .quote-card .diff { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .quote-card .detail { flex-basis: 100%; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .quote-card .na { color: var(--muted); font-size: 13px; }
+  .chip-best {
+    font-size: 11px; font-weight: 700; color: var(--kraft); background: var(--kraft-soft);
+    border: 1px solid var(--kraft); border-radius: 999px; padding: 0 8px;
+  }
+
+  /* ---------- stat tiles ---------- */
+  .tiles { display: flex; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 16px; min-width: 150px; flex: 1; }
+  .tile .t-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: var(--muted); }
+  .tile .t-value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.4; }
+  .tile .t-sub { font-size: 11.5px; color: var(--muted); }
+  .tile.hero { border-top: 3px solid var(--kraft); }
+  .tile.hero .t-value { color: var(--kraft); }
+
+  /* ---------- chart ---------- */
+  .chart-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 18px 8px; margin: 14px 0; }
+  .chart-title { font-size: 12.5px; font-weight: 700; margin-bottom: 2px; }
+  .chart-sub { font-size: 11.5px; color: var(--muted); margin-bottom: 8px; }
+  .legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--muted); margin: 4px 0 2px; }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .chart-wrap { overflow-x: auto; }
+  .bar-label { font-size: 12px; fill: var(--ink); }
+  .bar-value { font-size: 12px; font-weight: 700; fill: var(--ink); }
+  .bar-note { font-size: 10.5px; fill: var(--muted); }
+  .gridline { stroke: var(--line); stroke-width: 1; }
+  .axis-label { font-size: 10px; fill: var(--muted); }
+
+  #tooltip {
+    position: fixed; display: none; z-index: 50; pointer-events: none;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 4px; padding: 6px 10px; font-size: 12px; line-height: 1.6;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18); max-width: 260px;
+  }
+
+  /* ---------- tables ---------- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); margin: 10px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td.num, th.num { text-align: right; }
+  thead th { font-size: 11px; letter-spacing: 0.08em; font-weight: 700; color: var(--muted); background: var(--accent-soft); position: sticky; top: 0; }
+  tbody tr:last-child td { border-bottom: none; }
+  td .best-mark { font-weight: 800; color: var(--kraft); }
+
+  .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 9px; }
+  .pill.ok { color: var(--ok-ink); background: var(--ok-soft); }
+  .pill.bad { color: var(--bad-ink); background: var(--bad-soft); }
+  .pill.na { color: var(--muted); background: var(--surface-2); }
+
+  /* ---------- master ---------- */
+  .carrier-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .carrier-chips button {
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    padding: 5px 14px; border-radius: 999px; cursor: pointer; font-weight: 700; font-size: 13px;
+  }
+  .carrier-chips button.sel { border-color: var(--kraft); color: var(--kraft); background: var(--kraft-soft); }
+  .sur-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+
+  footer { margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    background: var(--ink); color: var(--bg); padding: 8px 20px; border-radius: 999px;
+    font-size: 13px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity 0.25s;
+  }
+  @media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+  #toast.show { opacity: 1; }
+</style>
+
+<main>
+  <header class="app-head">
+    <svg class="seal" viewBox="0 0 52 52" role="img" aria-label="タリフ番長ロゴ">
+      <rect x="3" y="3" width="46" height="46" rx="6"></rect>
+      <text x="26" y="24" text-anchor="middle">番</text>
+      <text x="26" y="44" text-anchor="middle">長</text>
+    </svg>
+    <div class="app-title">
+      <h1>タリフ番長</h1>
+      <div class="tagline">路線便運賃の計算・複数社比較・一括見積り・請求照合 — ぜんぶブラウザの中だけで</div>
+    </div>
+    <div class="head-note">
+      <span class="chip-demo" id="demo-chip">ダミータリフ使用中</span><br>
+      データは端末内保存・外部送信なし
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="機能">
+    <button role="tab" aria-selected="true" data-view="quote">単発計算</button>
+    <button role="tab" aria-selected="false" data-view="batch">一括見積り</button>
+    <button role="tab" aria-selected="false" data-view="audit">請求照合</button>
+    <button role="tab" aria-selected="false" data-view="master">タリフマスタ</button>
+    <button role="tab" aria-selected="false" data-view="data">データ管理</button>
+  </nav>
+
+  <!-- ============ 単発計算 ============ -->
+  <section class="view active" id="view-quote">
+    <h2>単発計算</h2>
+    <p class="lead">発着・重量・容積を入れると、登録済みの全社で運賃を計算して安い順に並べます。</p>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="field"><label for="q-from">発地（都道府県）</label><select id="q-from"></select></div>
+        <div class="field"><label for="q-to">着地（都道府県）</label><select id="q-to"></select></div>
+        <div class="field"><label for="q-weight">実重量 kg</label><input type="number" id="q-weight" min="0" step="0.1" value="80"></div>
+        <div class="field"><label for="q-volume">容積 m³</label><input type="number" id="q-volume" min="0" step="0.001" value="0.4"></div>
+        <div class="field"><label for="q-date">出荷日</label><input type="date" id="q-date"></div>
+        <div class="field check"><input type="checkbox" id="q-timed"><label for="q-timed">時間指定あり</label></div>
+        <button class="btn" id="q-run">計算する</button>
+      </div>
+      <div class="btn-row">
+        <span class="hint">容積を寸法から出す：</span>
+        <div class="field"><label for="q-w">縦 cm</label><input type="number" id="q-w" min="0" style="min-width:70px"></div>
+        <div class="field"><label for="q-d">横 cm</label><input type="number" id="q-d" min="0" style="min-width:70px"></div>
+        <div class="field"><label for="q-h">高さ cm</label><input type="number" id="q-h" min="0" style="min-width:70px"></div>
+        <div class="field"><label for="q-qty">個数</label><input type="number" id="q-qty" min="1" value="1" style="min-width:60px"></div>
+        <button class="btn ghost" id="q-vol-apply">容積欄へ反映</button>
+      </div>
+    </div>
+    <div class="quote-list" id="q-results"></div>
+  </section>
+
+  <!-- ============ 一括見積り ============ -->
+  <section class="view" id="view-batch">
+    <h2>一括見積り・削減シミュレーション</h2>
+    <p class="lead">出荷リストを貼り付けると全行×全社で計算し、「全部いまの1社」対「行ごとに最安社」の差額を出します。Excelからのコピペ（タブ区切り）対応。</p>
+    <div class="panel">
+      <label class="hint" for="batch-input">列: 発, 着, 重量kg, 容積m³, 時間指定(○/1), 出荷日 — 1行目に見出しがあれば列順は自由</label>
+      <textarea id="batch-input" rows="8" placeholder="発&#9;着&#9;重量&#9;容積&#9;時間指定&#9;出荷日
+東京&#9;大阪&#9;80&#9;0.4&#9;&#9;2026-08-14
+埼玉&#9;福岡&#9;450&#9;&#9;○&#9;2026-08-14"></textarea>
+      <div class="btn-row">
+        <button class="btn" id="batch-run">一括計算する</button>
+        <button class="btn ghost" id="batch-sample">サンプルを読み込む</button>
+        <button class="btn subtle" id="batch-copy" hidden>結果をコピー（TSV）</button>
+      </div>
+    </div>
+    <div id="batch-out"></div>
+  </section>
+
+  <!-- ============ 請求照合 ============ -->
+  <section class="view" id="view-audit">
+    <h2>請求照合</h2>
+    <p class="lead">請求明細を貼り付けると、契約条件から計算した理論値と突き合わせて差異を洗い出します。</p>
+    <div class="panel">
+      <label class="hint" for="audit-input">列: 会社, 発, 着, 重量kg, 容積m³, 時間指定, 出荷日, 請求額 — 1行目に見出しがあれば列順は自由</label>
+      <textarea id="audit-input" rows="8" placeholder="会社&#9;発&#9;着&#9;重量&#9;容積&#9;時間指定&#9;出荷日&#9;請求額
+A運輸&#9;東京&#9;大阪&#9;80&#9;0.4&#9;&#9;2026-08-14&#9;4000"></textarea>
+      <div class="btn-row">
+        <button class="btn" id="audit-run">照合する</button>
+        <button class="btn ghost" id="audit-sample">サンプルを読み込む</button>
+        <div class="field"><label for="audit-tol">許容差 円</label><input type="number" id="audit-tol" min="0" value="0" style="min-width:80px"></div>
+        <button class="btn subtle" id="audit-copy" hidden>結果をコピー（TSV）</button>
+      </div>
+    </div>
+    <div id="audit-out"></div>
+  </section>
+
+  <!-- ============ タリフマスタ ============ -->
+  <section class="view" id="view-master">
+    <h2>タリフマスタ</h2>
+    <p class="lead">会社ごとの契約条件・地帯区分・運賃表を管理します。編集後は「この会社を保存」を押してください。</p>
+    <div class="carrier-chips" id="m-chips"></div>
+    <div class="btn-row" style="margin-bottom:14px">
+      <button class="btn ghost" id="m-add">会社を追加</button>
+      <button class="btn ghost" id="m-dup">選択中を複製</button>
+      <button class="btn danger" id="m-del">選択中を削除</button>
+    </div>
+    <div id="m-editor"></div>
+  </section>
+
+  <!-- ============ データ管理 ============ -->
+  <section class="view" id="view-data">
+    <h2>データ管理</h2>
+    <p class="lead">全データはこのブラウザの localStorage にだけ保存されます。バックアップや別端末への移動はJSONのコピペで。</p>
+    <div class="split">
+      <div class="panel">
+        <h3 style="margin-top:0">エクスポート</h3>
+        <textarea id="data-export" rows="10" readonly></textarea>
+        <div class="btn-row">
+          <button class="btn ghost" id="data-export-fill">JSONを生成</button>
+          <button class="btn" id="data-export-copy">コピー</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-top:0">インポート</h3>
+        <textarea id="data-import" rows="10" placeholder="エクスポートしたJSONを貼り付け"></textarea>
+        <div class="btn-row">
+          <button class="btn" id="data-import-run">読み込む（上書き）</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">リセット</h3>
+      <div class="btn-row">
+        <button class="btn ghost" id="data-demo">デモデータを再読込</button>
+        <button class="btn danger" id="data-clear">全データ削除</button>
+      </div>
+      <p class="hint" style="margin-top:8px">同梱のデモタリフ（A運輸・B急便・C物流）は完全な架空データです。実在の運送会社・運賃とは関係ありません。</p>
+    </div>
+  </section>
+
+  <footer>
+    タリフ番長 v1.0 — 単一HTMLで動くローカル完結ツール。運賃計算ロジックはPython版PoC（poc/tariff_calc.py）と同一。
+    計算順序・端数処理は「割引 → 時間指定割増 → 燃料サーチャージ → 10円単位切り上げ → 最低運賃フロア」。実契約に合わせて要調整。
+  </footer>
+</main>
+<div id="toast" role="status"></div>
+<div id="tooltip"></div>
+
+<script>
+"use strict";
+
+/* =================== 定数 =================== */
+const PREFS = ["北海道","青森","岩手","宮城","秋田","山形","福島","茨城","栃木","群馬","埼玉","千葉","東京","神奈川","新潟","富山","石川","福井","山梨","長野","岐阜","静岡","愛知","三重","滋賀","京都","大阪","兵庫","奈良","和歌山","鳥取","島根","岡山","広島","山口","徳島","香川","愛媛","高知","福岡","佐賀","長崎","熊本","大分","宮崎","鹿児島","沖縄"];
+const REGIONS = {
+  "北海道": ["北海道"],
+  "東北": ["青森","岩手","宮城","秋田","山形","福島"],
+  "北関東": ["茨城","栃木","群馬"],
+  "南関東": ["埼玉","千葉","東京","神奈川"],
+  "中部": ["新潟","富山","石川","福井","山梨","長野","岐阜","静岡","愛知","三重"],
+  "関西": ["滋賀","京都","大阪","兵庫","奈良","和歌山"],
+  "中四国": ["鳥取","島根","岡山","広島","山口","徳島","香川","愛媛","高知"],
+  "九州": ["福岡","佐賀","長崎","熊本","大分","宮崎","鹿児島"],
+  "沖縄": ["沖縄"],
+};
+const STORE_KEY = "taribancho.v1";
+
+/* =================== 計算エンジン（Python版 poc/tariff_calc.py と等価） =================== */
+//<engine>
+function ceil10(x) { return Math.ceil(x / 10) * 10; }
+
+function normalizePref(s) {
+  let v = String(s || "").trim().replace(/[\s　]/g, "");
+  if (v === "北海道") return v;
+  return v.replace(/[都府県]$/, "");
+}
+
+function surchargeRateFor(surcharges, dateStr) {
+  let rate = 0, best = "";
+  for (const s of surcharges || []) {
+    if (s.date <= dateStr && s.date >= best) { best = s.date; rate = s.rate; }
+  }
+  return rate;
+}
+
+// carrier: {name, discountRate, volumeKgPerM3, minFare, timedFee, surcharges:[{date,rate}], zoneByPref:{}, tariff:[{from,to,maxKg,fare}]}
+// inp: {fromPref, toPref, weightKg, volumeM3, timed, date}
+function quoteCarrier(carrier, inp) {
+  const fz = carrier.zoneByPref[normalizePref(inp.fromPref)];
+  const tz = carrier.zoneByPref[normalizePref(inp.toPref)];
+  if (!fz || !tz) return { ok: false, name: carrier.name, reason: "地帯対象外（要個別見積り）" };
+
+  const volKg = inp.volumeM3 > 0 ? Math.ceil(inp.volumeM3 * carrier.volumeKgPerM3) : 0;
+  const chargeable = Math.max(inp.weightKg, volKg);
+  const basis = volKg > inp.weightKg ? "容積" : "実重量";
+
+  const bands = carrier.tariff
+    .filter(r => r.from === fz && r.to === tz)
+    .sort((a, b) => a.maxKg - b.maxKg);
+  if (!bands.length) return { ok: false, name: carrier.name, reason: "タリフ未登録レーン" };
+
+  const band = bands.find(b => chargeable <= b.maxKg);
+  if (!band) return { ok: false, name: carrier.name, reason: "重量帯超過 " + chargeable + "kg（貸切見積りへ）" };
+
+  const discounted = band.fare * (1 - carrier.discountRate);
+  const timedFee = inp.timed ? carrier.timedFee : 0;
+  const rate = surchargeRateFor(carrier.surcharges, inp.date || "9999-12-31");
+  const surcharge = (discounted + timedFee) * rate;
+  const total = Math.max(ceil10(discounted + timedFee + surcharge), carrier.minFare);
+
+  return {
+    ok: true, name: carrier.name, lane: fz + "→" + tz, chargeable, basis,
+    band: band.maxKg, listFare: band.fare,
+    discounted: Math.floor(discounted), timedFee, surcharge: Math.floor(surcharge),
+    surchargeRate: rate, total, reason: "",
+  };
+}
+
+function quoteAll(carriers, inp) {
+  const rs = carriers.map(c => quoteCarrier(c, inp));
+  rs.sort((a, b) => (a.ok === b.ok) ? ((a.total || 0) - (b.total || 0)) : (a.ok ? -1 : 1));
+  return rs;
+}
+
+// 表（CSV/TSV）テキスト → 行列。区切りはタブ優先、なければカンマ。
+function parseTable(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n").filter(l => l.trim() !== "");
+  return lines.map(l => (l.includes("\t") ? l.split("\t") : l.split(",")).map(c => c.trim()));
+}
+
+function parseNum(s) {
+  const v = parseFloat(String(s || "").replace(/[,，円\s]/g, ""));
+  return isNaN(v) ? 0 : v;
+}
+
+function parseTruthy(s) {
+  const v = String(s || "").trim().toLowerCase();
+  return ["1", "○", "〇", "◯", "はい", "あり", "y", "yes", "true", "時間指定"].includes(v);
+}
+//</engine>
+
+/* =================== 埋め込みデモデータ（poc/data/*.csv と同一・完全に架空） =================== */
+const DEMO_ZONES_CSV = `carrier,prefecture,zone
+A運輸,北海道,北海道
+A運輸,青森,東北
+A運輸,岩手,東北
+A運輸,宮城,東北
+A運輸,秋田,東北
+A運輸,山形,東北
+A運輸,福島,東北
+A運輸,茨城,関東
+A運輸,栃木,関東
+A運輸,群馬,関東
+A運輸,埼玉,関東
+A運輸,千葉,関東
+A運輸,東京,関東
+A運輸,神奈川,関東
+A運輸,新潟,中部
+A運輸,富山,中部
+A運輸,石川,中部
+A運輸,福井,中部
+A運輸,山梨,中部
+A運輸,長野,中部
+A運輸,岐阜,中部
+A運輸,静岡,中部
+A運輸,愛知,中部
+A運輸,三重,中部
+A運輸,滋賀,関西
+A運輸,京都,関西
+A運輸,大阪,関西
+A運輸,兵庫,関西
+A運輸,奈良,関西
+A運輸,和歌山,関西
+A運輸,鳥取,中四国
+A運輸,島根,中四国
+A運輸,岡山,中四国
+A運輸,広島,中四国
+A運輸,山口,中四国
+A運輸,徳島,中四国
+A運輸,香川,中四国
+A運輸,愛媛,中四国
+A運輸,高知,中四国
+A運輸,福岡,九州
+A運輸,佐賀,九州
+A運輸,長崎,九州
+A運輸,熊本,九州
+A運輸,大分,九州
+A運輸,宮崎,九州
+A運輸,鹿児島,九州
+B急便,北海道,北海道
+B急便,青森,東北
+B急便,岩手,東北
+B急便,宮城,東北
+B急便,秋田,東北
+B急便,山形,東北
+B急便,福島,東北
+B急便,茨城,北関東
+B急便,栃木,北関東
+B急便,群馬,北関東
+B急便,埼玉,南関東
+B急便,千葉,南関東
+B急便,東京,南関東
+B急便,神奈川,南関東
+B急便,新潟,中部
+B急便,富山,中部
+B急便,石川,中部
+B急便,福井,中部
+B急便,山梨,中部
+B急便,長野,中部
+B急便,岐阜,中部
+B急便,静岡,中部
+B急便,愛知,中部
+B急便,三重,中部
+B急便,滋賀,関西
+B急便,京都,関西
+B急便,大阪,関西
+B急便,兵庫,関西
+B急便,奈良,関西
+B急便,和歌山,関西
+B急便,鳥取,中四国
+B急便,島根,中四国
+B急便,岡山,中四国
+B急便,広島,中四国
+B急便,山口,中四国
+B急便,徳島,中四国
+B急便,香川,中四国
+B急便,愛媛,中四国
+B急便,高知,中四国
+B急便,福岡,九州
+B急便,佐賀,九州
+B急便,長崎,九州
+B急便,熊本,九州
+B急便,大分,九州
+B急便,宮崎,九州
+B急便,鹿児島,九州
+C物流,北海道,東日本
+C物流,青森,東日本
+C物流,岩手,東日本
+C物流,宮城,東日本
+C物流,秋田,東日本
+C物流,山形,東日本
+C物流,福島,東日本
+C物流,茨城,関東
+C物流,栃木,関東
+C物流,群馬,関東
+C物流,埼玉,関東
+C物流,千葉,関東
+C物流,東京,関東
+C物流,神奈川,関東
+C物流,新潟,中部
+C物流,富山,中部
+C物流,石川,中部
+C物流,福井,中部
+C物流,山梨,中部
+C物流,長野,中部
+C物流,岐阜,中部
+C物流,静岡,中部
+C物流,愛知,中部
+C物流,三重,中部
+C物流,滋賀,西日本
+C物流,京都,西日本
+C物流,大阪,西日本
+C物流,兵庫,西日本
+C物流,奈良,西日本
+C物流,和歌山,西日本
+C物流,鳥取,西日本
+C物流,島根,西日本
+C物流,岡山,西日本
+C物流,広島,西日本
+C物流,山口,西日本
+C物流,徳島,西日本
+C物流,香川,西日本
+C物流,愛媛,西日本
+C物流,高知,西日本
+C物流,福岡,九州
+C物流,佐賀,九州
+C物流,長崎,九州
+C物流,熊本,九州
+C物流,大分,九州
+C物流,宮崎,九州
+C物流,鹿児島,九州`;
+const DEMO_TARIFF_CSV = `carrier,from_zone,to_zone,max_kg,fare
+A運輸,北海道,北海道,30,1400
+A運輸,北海道,北海道,50,1820
+A運輸,北海道,北海道,100,2660
+A運輸,北海道,北海道,150,3360
+A運輸,北海道,北海道,200,3920
+A運輸,北海道,北海道,300,5040
+A運輸,北海道,北海道,500,7000
+A運輸,北海道,北海道,1000,11200
+A運輸,北海道,北海道,1500,14700
+A運輸,北海道,北海道,2000,17500
+A運輸,北海道,東北,30,2100
+A運輸,北海道,東北,50,2730
+A運輸,北海道,東北,100,3990
+A運輸,北海道,東北,150,5040
+A運輸,北海道,東北,200,5880
+A運輸,北海道,東北,300,7560
+A運輸,北海道,東北,500,10500
+A運輸,北海道,東北,1000,16800
+A運輸,北海道,東北,1500,22050
+A運輸,北海道,東北,2000,26250
+A運輸,北海道,関東,30,2800
+A運輸,北海道,関東,50,3640
+A運輸,北海道,関東,100,5320
+A運輸,北海道,関東,150,6720
+A運輸,北海道,関東,200,7840
+A運輸,北海道,関東,300,10080
+A運輸,北海道,関東,500,14000
+A運輸,北海道,関東,1000,22400
+A運輸,北海道,関東,1500,29400
+A運輸,北海道,関東,2000,35000
+A運輸,北海道,中部,30,3500
+A運輸,北海道,中部,50,4550
+A運輸,北海道,中部,100,6650
+A運輸,北海道,中部,150,8400
+A運輸,北海道,中部,200,9800
+A運輸,北海道,中部,300,12600
+A運輸,北海道,中部,500,17500
+A運輸,北海道,中部,1000,28000
+A運輸,北海道,中部,1500,36750
+A運輸,北海道,中部,2000,43750
+A運輸,北海道,関西,30,4200
+A運輸,北海道,関西,50,5460
+A運輸,北海道,関西,100,7980
+A運輸,北海道,関西,150,10080
+A運輸,北海道,関西,200,11760
+A運輸,北海道,関西,300,15120
+A運輸,北海道,関西,500,21000
+A運輸,北海道,関西,1000,33600
+A運輸,北海道,関西,1500,44100
+A運輸,北海道,関西,2000,52500
+A運輸,北海道,中四国,30,4900
+A運輸,北海道,中四国,50,6370
+A運輸,北海道,中四国,100,9310
+A運輸,北海道,中四国,150,11760
+A運輸,北海道,中四国,200,13720
+A運輸,北海道,中四国,300,17640
+A運輸,北海道,中四国,500,24500
+A運輸,北海道,中四国,1000,39200
+A運輸,北海道,中四国,1500,51450
+A運輸,北海道,中四国,2000,61250
+A運輸,北海道,九州,30,5600
+A運輸,北海道,九州,50,7280
+A運輸,北海道,九州,100,10640
+A運輸,北海道,九州,150,13440
+A運輸,北海道,九州,200,15680
+A運輸,北海道,九州,300,20160
+A運輸,北海道,九州,500,28000
+A運輸,北海道,九州,1000,44800
+A運輸,北海道,九州,1500,58800
+A運輸,北海道,九州,2000,70000
+A運輸,東北,北海道,30,2100
+A運輸,東北,北海道,50,2730
+A運輸,東北,北海道,100,3990
+A運輸,東北,北海道,150,5040
+A運輸,東北,北海道,200,5880
+A運輸,東北,北海道,300,7560
+A運輸,東北,北海道,500,10500
+A運輸,東北,北海道,1000,16800
+A運輸,東北,北海道,1500,22050
+A運輸,東北,北海道,2000,26250
+A運輸,東北,東北,30,1400
+A運輸,東北,東北,50,1820
+A運輸,東北,東北,100,2660
+A運輸,東北,東北,150,3360
+A運輸,東北,東北,200,3920
+A運輸,東北,東北,300,5040
+A運輸,東北,東北,500,7000
+A運輸,東北,東北,1000,11200
+A運輸,東北,東北,1500,14700
+A運輸,東北,東北,2000,17500
+A運輸,東北,関東,30,2100
+A運輸,東北,関東,50,2730
+A運輸,東北,関東,100,3990
+A運輸,東北,関東,150,5040
+A運輸,東北,関東,200,5880
+A運輸,東北,関東,300,7560
+A運輸,東北,関東,500,10500
+A運輸,東北,関東,1000,16800
+A運輸,東北,関東,1500,22050
+A運輸,東北,関東,2000,26250
+A運輸,東北,中部,30,2800
+A運輸,東北,中部,50,3640
+A運輸,東北,中部,100,5320
+A運輸,東北,中部,150,6720
+A運輸,東北,中部,200,7840
+A運輸,東北,中部,300,10080
+A運輸,東北,中部,500,14000
+A運輸,東北,中部,1000,22400
+A運輸,東北,中部,1500,29400
+A運輸,東北,中部,2000,35000
+A運輸,東北,関西,30,3500
+A運輸,東北,関西,50,4550
+A運輸,東北,関西,100,6650
+A運輸,東北,関西,150,8400
+A運輸,東北,関西,200,9800
+A運輸,東北,関西,300,12600
+A運輸,東北,関西,500,17500
+A運輸,東北,関西,1000,28000
+A運輸,東北,関西,1500,36750
+A運輸,東北,関西,2000,43750
+A運輸,東北,中四国,30,4200
+A運輸,東北,中四国,50,5460
+A運輸,東北,中四国,100,7980
+A運輸,東北,中四国,150,10080
+A運輸,東北,中四国,200,11760
+A運輸,東北,中四国,300,15120
+A運輸,東北,中四国,500,21000
+A運輸,東北,中四国,1000,33600
+A運輸,東北,中四国,1500,44100
+A運輸,東北,中四国,2000,52500
+A運輸,東北,九州,30,4900
+A運輸,東北,九州,50,6370
+A運輸,東北,九州,100,9310
+A運輸,東北,九州,150,11760
+A運輸,東北,九州,200,13720
+A運輸,東北,九州,300,17640
+A運輸,東北,九州,500,24500
+A運輸,東北,九州,1000,39200
+A運輸,東北,九州,1500,51450
+A運輸,東北,九州,2000,61250
+A運輸,関東,北海道,30,2800
+A運輸,関東,北海道,50,3640
+A運輸,関東,北海道,100,5320
+A運輸,関東,北海道,150,6720
+A運輸,関東,北海道,200,7840
+A運輸,関東,北海道,300,10080
+A運輸,関東,北海道,500,14000
+A運輸,関東,北海道,1000,22400
+A運輸,関東,北海道,1500,29400
+A運輸,関東,北海道,2000,35000
+A運輸,関東,東北,30,2100
+A運輸,関東,東北,50,2730
+A運輸,関東,東北,100,3990
+A運輸,関東,東北,150,5040
+A運輸,関東,東北,200,5880
+A運輸,関東,東北,300,7560
+A運輸,関東,東北,500,10500
+A運輸,関東,東北,1000,16800
+A運輸,関東,東北,1500,22050
+A運輸,関東,東北,2000,26250
+A運輸,関東,関東,30,1400
+A運輸,関東,関東,50,1820
+A運輸,関東,関東,100,2660
+A運輸,関東,関東,150,3360
+A運輸,関東,関東,200,3920
+A運輸,関東,関東,300,5040
+A運輸,関東,関東,500,7000
+A運輸,関東,関東,1000,11200
+A運輸,関東,関東,1500,14700
+A運輸,関東,関東,2000,17500
+A運輸,関東,中部,30,2100
+A運輸,関東,中部,50,2730
+A運輸,関東,中部,100,3990
+A運輸,関東,中部,150,5040
+A運輸,関東,中部,200,5880
+A運輸,関東,中部,300,7560
+A運輸,関東,中部,500,10500
+A運輸,関東,中部,1000,16800
+A運輸,関東,中部,1500,22050
+A運輸,関東,中部,2000,26250
+A運輸,関東,関西,30,2800
+A運輸,関東,関西,50,3640
+A運輸,関東,関西,100,5320
+A運輸,関東,関西,150,6720
+A運輸,関東,関西,200,7840
+A運輸,関東,関西,300,10080
+A運輸,関東,関西,500,14000
+A運輸,関東,関西,1000,22400
+A運輸,関東,関西,1500,29400
+A運輸,関東,関西,2000,35000
+A運輸,関東,中四国,30,3500
+A運輸,関東,中四国,50,4550
+A運輸,関東,中四国,100,6650
+A運輸,関東,中四国,150,8400
+A運輸,関東,中四国,200,9800
+A運輸,関東,中四国,300,12600
+A運輸,関東,中四国,500,17500
+A運輸,関東,中四国,1000,28000
+A運輸,関東,中四国,1500,36750
+A運輸,関東,中四国,2000,43750
+A運輸,関東,九州,30,4200
+A運輸,関東,九州,50,5460
+A運輸,関東,九州,100,7980
+A運輸,関東,九州,150,10080
+A運輸,関東,九州,200,11760
+A運輸,関東,九州,300,15120
+A運輸,関東,九州,500,21000
+A運輸,関東,九州,1000,33600
+A運輸,関東,九州,1500,44100
+A運輸,関東,九州,2000,52500
+A運輸,中部,北海道,30,3500
+A運輸,中部,北海道,50,4550
+A運輸,中部,北海道,100,6650
+A運輸,中部,北海道,150,8400
+A運輸,中部,北海道,200,9800
+A運輸,中部,北海道,300,12600
+A運輸,中部,北海道,500,17500
+A運輸,中部,北海道,1000,28000
+A運輸,中部,北海道,1500,36750
+A運輸,中部,北海道,2000,43750
+A運輸,中部,東北,30,2800
+A運輸,中部,東北,50,3640
+A運輸,中部,東北,100,5320
+A運輸,中部,東北,150,6720
+A運輸,中部,東北,200,7840
+A運輸,中部,東北,300,10080
+A運輸,中部,東北,500,14000
+A運輸,中部,東北,1000,22400
+A運輸,中部,東北,1500,29400
+A運輸,中部,東北,2000,35000
+A運輸,中部,関東,30,2100
+A運輸,中部,関東,50,2730
+A運輸,中部,関東,100,3990
+A運輸,中部,関東,150,5040
+A運輸,中部,関東,200,5880
+A運輸,中部,関東,300,7560
+A運輸,中部,関東,500,10500
+A運輸,中部,関東,1000,16800
+A運輸,中部,関東,1500,22050
+A運輸,中部,関東,2000,26250
+A運輸,中部,中部,30,1400
+A運輸,中部,中部,50,1820
+A運輸,中部,中部,100,2660
+A運輸,中部,中部,150,3360
+A運輸,中部,中部,200,3920
+A運輸,中部,中部,300,5040
+A運輸,中部,中部,500,7000
+A運輸,中部,中部,1000,11200
+A運輸,中部,中部,1500,14700
+A運輸,中部,中部,2000,17500
+A運輸,中部,関西,30,2100
+A運輸,中部,関西,50,2730
+A運輸,中部,関西,100,3990
+A運輸,中部,関西,150,5040
+A運輸,中部,関西,200,5880
+A運輸,中部,関西,300,7560
+A運輸,中部,関西,500,10500
+A運輸,中部,関西,1000,16800
+A運輸,中部,関西,1500,22050
+A運輸,中部,関西,2000,26250
+A運輸,中部,中四国,30,2800
+A運輸,中部,中四国,50,3640
+A運輸,中部,中四国,100,5320
+A運輸,中部,中四国,150,6720
+A運輸,中部,中四国,200,7840
+A運輸,中部,中四国,300,10080
+A運輸,中部,中四国,500,14000
+A運輸,中部,中四国,1000,22400
+A運輸,中部,中四国,1500,29400
+A運輸,中部,中四国,2000,35000
+A運輸,中部,九州,30,3500
+A運輸,中部,九州,50,4550
+A運輸,中部,九州,100,6650
+A運輸,中部,九州,150,8400
+A運輸,中部,九州,200,9800
+A運輸,中部,九州,300,12600
+A運輸,中部,九州,500,17500
+A運輸,中部,九州,1000,28000
+A運輸,中部,九州,1500,36750
+A運輸,中部,九州,2000,43750
+A運輸,関西,北海道,30,4200
+A運輸,関西,北海道,50,5460
+A運輸,関西,北海道,100,7980
+A運輸,関西,北海道,150,10080
+A運輸,関西,北海道,200,11760
+A運輸,関西,北海道,300,15120
+A運輸,関西,北海道,500,21000
+A運輸,関西,北海道,1000,33600
+A運輸,関西,北海道,1500,44100
+A運輸,関西,北海道,2000,52500
+A運輸,関西,東北,30,3500
+A運輸,関西,東北,50,4550
+A運輸,関西,東北,100,6650
+A運輸,関西,東北,150,8400
+A運輸,関西,東北,200,9800
+A運輸,関西,東北,300,12600
+A運輸,関西,東北,500,17500
+A運輸,関西,東北,1000,28000
+A運輸,関西,東北,1500,36750
+A運輸,関西,東北,2000,43750
+A運輸,関西,関東,30,2800
+A運輸,関西,関東,50,3640
+A運輸,関西,関東,100,5320
+A運輸,関西,関東,150,6720
+A運輸,関西,関東,200,7840
+A運輸,関西,関東,300,10080
+A運輸,関西,関東,500,14000
+A運輸,関西,関東,1000,22400
+A運輸,関西,関東,1500,29400
+A運輸,関西,関東,2000,35000
+A運輸,関西,中部,30,2100
+A運輸,関西,中部,50,2730
+A運輸,関西,中部,100,3990
+A運輸,関西,中部,150,5040
+A運輸,関西,中部,200,5880
+A運輸,関西,中部,300,7560
+A運輸,関西,中部,500,10500
+A運輸,関西,中部,1000,16800
+A運輸,関西,中部,1500,22050
+A運輸,関西,中部,2000,26250
+A運輸,関西,関西,30,1400
+A運輸,関西,関西,50,1820
+A運輸,関西,関西,100,2660
+A運輸,関西,関西,150,3360
+A運輸,関西,関西,200,3920
+A運輸,関西,関西,300,5040
+A運輸,関西,関西,500,7000
+A運輸,関西,関西,1000,11200
+A運輸,関西,関西,1500,14700
+A運輸,関西,関西,2000,17500
+A運輸,関西,中四国,30,2100
+A運輸,関西,中四国,50,2730
+A運輸,関西,中四国,100,3990
+A運輸,関西,中四国,150,5040
+A運輸,関西,中四国,200,5880
+A運輸,関西,中四国,300,7560
+A運輸,関西,中四国,500,10500
+A運輸,関西,中四国,1000,16800
+A運輸,関西,中四国,1500,22050
+A運輸,関西,中四国,2000,26250
+A運輸,関西,九州,30,2800
+A運輸,関西,九州,50,3640
+A運輸,関西,九州,100,5320
+A運輸,関西,九州,150,6720
+A運輸,関西,九州,200,7840
+A運輸,関西,九州,300,10080
+A運輸,関西,九州,500,14000
+A運輸,関西,九州,1000,22400
+A運輸,関西,九州,1500,29400
+A運輸,関西,九州,2000,35000
+A運輸,中四国,北海道,30,4900
+A運輸,中四国,北海道,50,6370
+A運輸,中四国,北海道,100,9310
+A運輸,中四国,北海道,150,11760
+A運輸,中四国,北海道,200,13720
+A運輸,中四国,北海道,300,17640
+A運輸,中四国,北海道,500,24500
+A運輸,中四国,北海道,1000,39200
+A運輸,中四国,北海道,1500,51450
+A運輸,中四国,北海道,2000,61250
+A運輸,中四国,東北,30,4200
+A運輸,中四国,東北,50,5460
+A運輸,中四国,東北,100,7980
+A運輸,中四国,東北,150,10080
+A運輸,中四国,東北,200,11760
+A運輸,中四国,東北,300,15120
+A運輸,中四国,東北,500,21000
+A運輸,中四国,東北,1000,33600
+A運輸,中四国,東北,1500,44100
+A運輸,中四国,東北,2000,52500
+A運輸,中四国,関東,30,3500
+A運輸,中四国,関東,50,4550
+A運輸,中四国,関東,100,6650
+A運輸,中四国,関東,150,8400
+A運輸,中四国,関東,200,9800
+A運輸,中四国,関東,300,12600
+A運輸,中四国,関東,500,17500
+A運輸,中四国,関東,1000,28000
+A運輸,中四国,関東,1500,36750
+A運輸,中四国,関東,2000,43750
+A運輸,中四国,中部,30,2800
+A運輸,中四国,中部,50,3640
+A運輸,中四国,中部,100,5320
+A運輸,中四国,中部,150,6720
+A運輸,中四国,中部,200,7840
+A運輸,中四国,中部,300,10080
+A運輸,中四国,中部,500,14000
+A運輸,中四国,中部,1000,22400
+A運輸,中四国,中部,1500,29400
+A運輸,中四国,中部,2000,35000
+A運輸,中四国,関西,30,2100
+A運輸,中四国,関西,50,2730
+A運輸,中四国,関西,100,3990
+A運輸,中四国,関西,150,5040
+A運輸,中四国,関西,200,5880
+A運輸,中四国,関西,300,7560
+A運輸,中四国,関西,500,10500
+A運輸,中四国,関西,1000,16800
+A運輸,中四国,関西,1500,22050
+A運輸,中四国,関西,2000,26250
+A運輸,中四国,中四国,30,1400
+A運輸,中四国,中四国,50,1820
+A運輸,中四国,中四国,100,2660
+A運輸,中四国,中四国,150,3360
+A運輸,中四国,中四国,200,3920
+A運輸,中四国,中四国,300,5040
+A運輸,中四国,中四国,500,7000
+A運輸,中四国,中四国,1000,11200
+A運輸,中四国,中四国,1500,14700
+A運輸,中四国,中四国,2000,17500
+A運輸,中四国,九州,30,2100
+A運輸,中四国,九州,50,2730
+A運輸,中四国,九州,100,3990
+A運輸,中四国,九州,150,5040
+A運輸,中四国,九州,200,5880
+A運輸,中四国,九州,300,7560
+A運輸,中四国,九州,500,10500
+A運輸,中四国,九州,1000,16800
+A運輸,中四国,九州,1500,22050
+A運輸,中四国,九州,2000,26250
+A運輸,九州,北海道,30,5600
+A運輸,九州,北海道,50,7280
+A運輸,九州,北海道,100,10640
+A運輸,九州,北海道,150,13440
+A運輸,九州,北海道,200,15680
+A運輸,九州,北海道,300,20160
+A運輸,九州,北海道,500,28000
+A運輸,九州,北海道,1000,44800
+A運輸,九州,北海道,1500,58800
+A運輸,九州,北海道,2000,70000
+A運輸,九州,東北,30,4900
+A運輸,九州,東北,50,6370
+A運輸,九州,東北,100,9310
+A運輸,九州,東北,150,11760
+A運輸,九州,東北,200,13720
+A運輸,九州,東北,300,17640
+A運輸,九州,東北,500,24500
+A運輸,九州,東北,1000,39200
+A運輸,九州,東北,1500,51450
+A運輸,九州,東北,2000,61250
+A運輸,九州,関東,30,4200
+A運輸,九州,関東,50,5460
+A運輸,九州,関東,100,7980
+A運輸,九州,関東,150,10080
+A運輸,九州,関東,200,11760
+A運輸,九州,関東,300,15120
+A運輸,九州,関東,500,21000
+A運輸,九州,関東,1000,33600
+A運輸,九州,関東,1500,44100
+A運輸,九州,関東,2000,52500
+A運輸,九州,中部,30,3500
+A運輸,九州,中部,50,4550
+A運輸,九州,中部,100,6650
+A運輸,九州,中部,150,8400
+A運輸,九州,中部,200,9800
+A運輸,九州,中部,300,12600
+A運輸,九州,中部,500,17500
+A運輸,九州,中部,1000,28000
+A運輸,九州,中部,1500,36750
+A運輸,九州,中部,2000,43750
+A運輸,九州,関西,30,2800
+A運輸,九州,関西,50,3640
+A運輸,九州,関西,100,5320
+A運輸,九州,関西,150,6720
+A運輸,九州,関西,200,7840
+A運輸,九州,関西,300,10080
+A運輸,九州,関西,500,14000
+A運輸,九州,関西,1000,22400
+A運輸,九州,関西,1500,29400
+A運輸,九州,関西,2000,35000
+A運輸,九州,中四国,30,2100
+A運輸,九州,中四国,50,2730
+A運輸,九州,中四国,100,3990
+A運輸,九州,中四国,150,5040
+A運輸,九州,中四国,200,5880
+A運輸,九州,中四国,300,7560
+A運輸,九州,中四国,500,10500
+A運輸,九州,中四国,1000,16800
+A運輸,九州,中四国,1500,22050
+A運輸,九州,中四国,2000,26250
+A運輸,九州,九州,30,1400
+A運輸,九州,九州,50,1820
+A運輸,九州,九州,100,2660
+A運輸,九州,九州,150,3360
+A運輸,九州,九州,200,3920
+A運輸,九州,九州,300,5040
+A運輸,九州,九州,500,7000
+A運輸,九州,九州,1000,11200
+A運輸,九州,九州,1500,14700
+A運輸,九州,九州,2000,17500
+B急便,北海道,北海道,30,1300
+B急便,北海道,北海道,50,1690
+B急便,北海道,北海道,100,2470
+B急便,北海道,北海道,150,3120
+B急便,北海道,北海道,200,3640
+B急便,北海道,北海道,300,4680
+B急便,北海道,北海道,500,6500
+B急便,北海道,北海道,1000,10400
+B急便,北海道,北海道,1500,13650
+B急便,北海道,北海道,2000,16250
+B急便,北海道,東北,30,2060
+B急便,北海道,東北,50,2680
+B急便,北海道,東北,100,3910
+B急便,北海道,東北,150,4940
+B急便,北海道,東北,200,5770
+B急便,北海道,東北,300,7420
+B急便,北海道,東北,500,10300
+B急便,北海道,東北,1000,16480
+B急便,北海道,東北,1500,21630
+B急便,北海道,東北,2000,25750
+B急便,北海道,北関東,30,2670
+B急便,北海道,北関東,50,3470
+B急便,北海道,北関東,100,5070
+B急便,北海道,北関東,150,6400
+B急便,北海道,北関東,200,7470
+B急便,北海道,北関東,300,9600
+B急便,北海道,北関東,500,13340
+B急便,北海道,北関東,1000,21340
+B急便,北海道,北関東,1500,28010
+B急便,北海道,北関東,2000,33350
+B急便,北海道,南関東,30,2970
+B急便,北海道,南関東,50,3860
+B急便,北海道,南関東,100,5650
+B急便,北海道,南関東,150,7130
+B急便,北海道,南関東,200,8320
+B急便,北海道,南関東,300,10700
+B急便,北海道,南関東,500,14860
+B急便,北海道,南関東,1000,23780
+B急便,北海道,南関東,1500,31210
+B急便,北海道,南関東,2000,37150
+B急便,北海道,中部,30,3580
+B急便,北海道,中部,50,4650
+B急便,北海道,中部,100,6800
+B急便,北海道,中部,150,8590
+B急便,北海道,中部,200,10020
+B急便,北海道,中部,300,12890
+B急便,北海道,中部,500,17900
+B急便,北海道,中部,1000,28640
+B急便,北海道,中部,1500,37590
+B急便,北海道,中部,2000,44750
+B急便,北海道,関西,30,4340
+B急便,北海道,関西,50,5640
+B急便,北海道,関西,100,8250
+B急便,北海道,関西,150,10420
+B急便,北海道,関西,200,12150
+B急便,北海道,関西,300,15620
+B急便,北海道,関西,500,21700
+B急便,北海道,関西,1000,34720
+B急便,北海道,関西,1500,45570
+B急便,北海道,関西,2000,54250
+B急便,北海道,中四国,30,5100
+B急便,北海道,中四国,50,6630
+B急便,北海道,中四国,100,9690
+B急便,北海道,中四国,150,12240
+B急便,北海道,中四国,200,14280
+B急便,北海道,中四国,300,18360
+B急便,北海道,中四国,500,25500
+B急便,北海道,中四国,1000,40800
+B急便,北海道,中四国,1500,53550
+B急便,北海道,中四国,2000,63750
+B急便,北海道,九州,30,5860
+B急便,北海道,九州,50,7620
+B急便,北海道,九州,100,11130
+B急便,北海道,九州,150,14060
+B急便,北海道,九州,200,16410
+B急便,北海道,九州,300,21100
+B急便,北海道,九州,500,29300
+B急便,北海道,九州,1000,46880
+B急便,北海道,九州,1500,61530
+B急便,北海道,九州,2000,73250
+B急便,東北,北海道,30,2060
+B急便,東北,北海道,50,2680
+B急便,東北,北海道,100,3910
+B急便,東北,北海道,150,4940
+B急便,東北,北海道,200,5770
+B急便,東北,北海道,300,7420
+B急便,東北,北海道,500,10300
+B急便,東北,北海道,1000,16480
+B急便,東北,北海道,1500,21630
+B急便,東北,北海道,2000,25750
+B急便,東北,東北,30,1300
+B急便,東北,東北,50,1690
+B急便,東北,東北,100,2470
+B急便,東北,東北,150,3120
+B急便,東北,東北,200,3640
+B急便,東北,東北,300,4680
+B急便,東北,東北,500,6500
+B急便,東北,東北,1000,10400
+B急便,東北,東北,1500,13650
+B急便,東北,東北,2000,16250
+B急便,東北,北関東,30,1910
+B急便,東北,北関東,50,2480
+B急便,東北,北関東,100,3630
+B急便,東北,北関東,150,4580
+B急便,東北,北関東,200,5340
+B急便,東北,北関東,300,6870
+B急便,東北,北関東,500,9540
+B急便,東北,北関東,1000,15260
+B急便,東北,北関東,1500,20030
+B急便,東北,北関東,2000,23850
+B急便,東北,南関東,30,2210
+B急便,東北,南関東,50,2880
+B急便,東北,南関東,100,4200
+B急便,東北,南関東,150,5310
+B急便,東北,南関東,200,6190
+B急便,東北,南関東,300,7960
+B急便,東北,南関東,500,11060
+B急便,東北,南関東,1000,17700
+B急便,東北,南関東,1500,23230
+B急便,東北,南関東,2000,27650
+B急便,東北,中部,30,2820
+B急便,東北,中部,50,3670
+B急便,東北,中部,100,5360
+B急便,東北,中部,150,6770
+B急便,東北,中部,200,7900
+B急便,東北,中部,300,10150
+B急便,東北,中部,500,14100
+B急便,東北,中部,1000,22560
+B急便,東北,中部,1500,29610
+B急便,東北,中部,2000,35250
+B急便,東北,関西,30,3580
+B急便,東北,関西,50,4650
+B急便,東北,関西,100,6800
+B急便,東北,関西,150,8590
+B急便,東北,関西,200,10020
+B急便,東北,関西,300,12890
+B急便,東北,関西,500,17900
+B急便,東北,関西,1000,28640
+B急便,東北,関西,1500,37590
+B急便,東北,関西,2000,44750
+B急便,東北,中四国,30,4340
+B急便,東北,中四国,50,5640
+B急便,東北,中四国,100,8250
+B急便,東北,中四国,150,10420
+B急便,東北,中四国,200,12150
+B急便,東北,中四国,300,15620
+B急便,東北,中四国,500,21700
+B急便,東北,中四国,1000,34720
+B急便,東北,中四国,1500,45570
+B急便,東北,中四国,2000,54250
+B急便,東北,九州,30,5100
+B急便,東北,九州,50,6630
+B急便,東北,九州,100,9690
+B急便,東北,九州,150,12240
+B急便,東北,九州,200,14280
+B急便,東北,九州,300,18360
+B急便,東北,九州,500,25500
+B急便,東北,九州,1000,40800
+B急便,東北,九州,1500,53550
+B急便,東北,九州,2000,63750
+B急便,北関東,北海道,30,2670
+B急便,北関東,北海道,50,3470
+B急便,北関東,北海道,100,5070
+B急便,北関東,北海道,150,6400
+B急便,北関東,北海道,200,7470
+B急便,北関東,北海道,300,9600
+B急便,北関東,北海道,500,13340
+B急便,北関東,北海道,1000,21340
+B急便,北関東,北海道,1500,28010
+B急便,北関東,北海道,2000,33350
+B急便,北関東,東北,30,1910
+B急便,北関東,東北,50,2480
+B急便,北関東,東北,100,3630
+B急便,北関東,東北,150,4580
+B急便,北関東,東北,200,5340
+B急便,北関東,東北,300,6870
+B急便,北関東,東北,500,9540
+B急便,北関東,東北,1000,15260
+B急便,北関東,東北,1500,20030
+B急便,北関東,東北,2000,23850
+B急便,北関東,北関東,30,1300
+B急便,北関東,北関東,50,1690
+B急便,北関東,北関東,100,2470
+B急便,北関東,北関東,150,3120
+B急便,北関東,北関東,200,3640
+B急便,北関東,北関東,300,4680
+B急便,北関東,北関東,500,6500
+B急便,北関東,北関東,1000,10400
+B急便,北関東,北関東,1500,13650
+B急便,北関東,北関東,2000,16250
+B急便,北関東,南関東,30,1600
+B急便,北関東,南関東,50,2090
+B急便,北関東,南関東,100,3050
+B急便,北関東,南関東,150,3850
+B急便,北関東,南関東,200,4490
+B急便,北関東,南関東,300,5770
+B急便,北関東,南関東,500,8020
+B急便,北関東,南関東,1000,12830
+B急便,北関東,南関東,1500,16840
+B急便,北関東,南関東,2000,20050
+B急便,北関東,中部,30,2210
+B急便,北関東,中部,50,2880
+B急便,北関東,中部,100,4200
+B急便,北関東,中部,150,5310
+B急便,北関東,中部,200,6190
+B急便,北関東,中部,300,7960
+B急便,北関東,中部,500,11060
+B急便,北関東,中部,1000,17700
+B急便,北関東,中部,1500,23230
+B急便,北関東,中部,2000,27650
+B急便,北関東,関西,30,2970
+B急便,北関東,関西,50,3860
+B急便,北関東,関西,100,5650
+B急便,北関東,関西,150,7130
+B急便,北関東,関西,200,8320
+B急便,北関東,関西,300,10700
+B急便,北関東,関西,500,14860
+B急便,北関東,関西,1000,23780
+B急便,北関東,関西,1500,31210
+B急便,北関東,関西,2000,37150
+B急便,北関東,中四国,30,3730
+B急便,北関東,中四国,50,4850
+B急便,北関東,中四国,100,7090
+B急便,北関東,中四国,150,8960
+B急便,北関東,中四国,200,10450
+B急便,北関東,中四国,300,13440
+B急便,北関東,中四国,500,18660
+B急便,北関東,中四国,1000,29860
+B急便,北関東,中四国,1500,39190
+B急便,北関東,中四国,2000,46650
+B急便,北関東,九州,30,4490
+B急便,北関東,九州,50,5840
+B急便,北関東,九州,100,8530
+B急便,北関東,九州,150,10780
+B急便,北関東,九州,200,12580
+B急便,北関東,九州,300,16170
+B急便,北関東,九州,500,22460
+B急便,北関東,九州,1000,35940
+B急便,北関東,九州,1500,47170
+B急便,北関東,九州,2000,56150
+B急便,南関東,北海道,30,2970
+B急便,南関東,北海道,50,3860
+B急便,南関東,北海道,100,5650
+B急便,南関東,北海道,150,7130
+B急便,南関東,北海道,200,8320
+B急便,南関東,北海道,300,10700
+B急便,南関東,北海道,500,14860
+B急便,南関東,北海道,1000,23780
+B急便,南関東,北海道,1500,31210
+B急便,南関東,北海道,2000,37150
+B急便,南関東,東北,30,2210
+B急便,南関東,東北,50,2880
+B急便,南関東,東北,100,4200
+B急便,南関東,東北,150,5310
+B急便,南関東,東北,200,6190
+B急便,南関東,東北,300,7960
+B急便,南関東,東北,500,11060
+B急便,南関東,東北,1000,17700
+B急便,南関東,東北,1500,23230
+B急便,南関東,東北,2000,27650
+B急便,南関東,北関東,30,1600
+B急便,南関東,北関東,50,2090
+B急便,南関東,北関東,100,3050
+B急便,南関東,北関東,150,3850
+B急便,南関東,北関東,200,4490
+B急便,南関東,北関東,300,5770
+B急便,南関東,北関東,500,8020
+B急便,南関東,北関東,1000,12830
+B急便,南関東,北関東,1500,16840
+B急便,南関東,北関東,2000,20050
+B急便,南関東,南関東,30,1300
+B急便,南関東,南関東,50,1690
+B急便,南関東,南関東,100,2470
+B急便,南関東,南関東,150,3120
+B急便,南関東,南関東,200,3640
+B急便,南関東,南関東,300,4680
+B急便,南関東,南関東,500,6500
+B急便,南関東,南関東,1000,10400
+B急便,南関東,南関東,1500,13650
+B急便,南関東,南関東,2000,16250
+B急便,南関東,中部,30,1910
+B急便,南関東,中部,50,2480
+B急便,南関東,中部,100,3630
+B急便,南関東,中部,150,4580
+B急便,南関東,中部,200,5340
+B急便,南関東,中部,300,6870
+B急便,南関東,中部,500,9540
+B急便,南関東,中部,1000,15260
+B急便,南関東,中部,1500,20030
+B急便,南関東,中部,2000,23850
+B急便,南関東,関西,30,2670
+B急便,南関東,関西,50,3470
+B急便,南関東,関西,100,5070
+B急便,南関東,関西,150,6400
+B急便,南関東,関西,200,7470
+B急便,南関東,関西,300,9600
+B急便,南関東,関西,500,13340
+B急便,南関東,関西,1000,21340
+B急便,南関東,関西,1500,28010
+B急便,南関東,関西,2000,33350
+B急便,南関東,中四国,30,3430
+B急便,南関東,中四国,50,4460
+B急便,南関東,中四国,100,6510
+B急便,南関東,中四国,150,8230
+B急便,南関東,中四国,200,9600
+B急便,南関東,中四国,300,12340
+B急便,南関東,中四国,500,17140
+B急便,南関東,中四国,1000,27420
+B急便,南関東,中四国,1500,35990
+B急便,南関東,中四国,2000,42850
+B急便,南関東,九州,30,4190
+B急便,南関東,九州,50,5440
+B急便,南関東,九州,100,7960
+B急便,南関東,九州,150,10050
+B急便,南関東,九州,200,11730
+B急便,南関東,九州,300,15080
+B急便,南関東,九州,500,20940
+B急便,南関東,九州,1000,33500
+B急便,南関東,九州,1500,43970
+B急便,南関東,九州,2000,52350
+B急便,中部,北海道,30,3580
+B急便,中部,北海道,50,4650
+B急便,中部,北海道,100,6800
+B急便,中部,北海道,150,8590
+B急便,中部,北海道,200,10020
+B急便,中部,北海道,300,12890
+B急便,中部,北海道,500,17900
+B急便,中部,北海道,1000,28640
+B急便,中部,北海道,1500,37590
+B急便,中部,北海道,2000,44750
+B急便,中部,東北,30,2820
+B急便,中部,東北,50,3670
+B急便,中部,東北,100,5360
+B急便,中部,東北,150,6770
+B急便,中部,東北,200,7900
+B急便,中部,東北,300,10150
+B急便,中部,東北,500,14100
+B急便,中部,東北,1000,22560
+B急便,中部,東北,1500,29610
+B急便,中部,東北,2000,35250
+B急便,中部,北関東,30,2210
+B急便,中部,北関東,50,2880
+B急便,中部,北関東,100,4200
+B急便,中部,北関東,150,5310
+B急便,中部,北関東,200,6190
+B急便,中部,北関東,300,7960
+B急便,中部,北関東,500,11060
+B急便,中部,北関東,1000,17700
+B急便,中部,北関東,1500,23230
+B急便,中部,北関東,2000,27650
+B急便,中部,南関東,30,1910
+B急便,中部,南関東,50,2480
+B急便,中部,南関東,100,3630
+B急便,中部,南関東,150,4580
+B急便,中部,南関東,200,5340
+B急便,中部,南関東,300,6870
+B急便,中部,南関東,500,9540
+B急便,中部,南関東,1000,15260
+B急便,中部,南関東,1500,20030
+B急便,中部,南関東,2000,23850
+B急便,中部,中部,30,1300
+B急便,中部,中部,50,1690
+B急便,中部,中部,100,2470
+B急便,中部,中部,150,3120
+B急便,中部,中部,200,3640
+B急便,中部,中部,300,4680
+B急便,中部,中部,500,6500
+B急便,中部,中部,1000,10400
+B急便,中部,中部,1500,13650
+B急便,中部,中部,2000,16250
+B急便,中部,関西,30,2060
+B急便,中部,関西,50,2680
+B急便,中部,関西,100,3910
+B急便,中部,関西,150,4940
+B急便,中部,関西,200,5770
+B急便,中部,関西,300,7420
+B急便,中部,関西,500,10300
+B急便,中部,関西,1000,16480
+B急便,中部,関西,1500,21630
+B急便,中部,関西,2000,25750
+B急便,中部,中四国,30,2820
+B急便,中部,中四国,50,3670
+B急便,中部,中四国,100,5360
+B急便,中部,中四国,150,6770
+B急便,中部,中四国,200,7900
+B急便,中部,中四国,300,10150
+B急便,中部,中四国,500,14100
+B急便,中部,中四国,1000,22560
+B急便,中部,中四国,1500,29610
+B急便,中部,中四国,2000,35250
+B急便,中部,九州,30,3580
+B急便,中部,九州,50,4650
+B急便,中部,九州,100,6800
+B急便,中部,九州,150,8590
+B急便,中部,九州,200,10020
+B急便,中部,九州,300,12890
+B急便,中部,九州,500,17900
+B急便,中部,九州,1000,28640
+B急便,中部,九州,1500,37590
+B急便,中部,九州,2000,44750
+B急便,関西,北海道,30,4340
+B急便,関西,北海道,50,5640
+B急便,関西,北海道,100,8250
+B急便,関西,北海道,150,10420
+B急便,関西,北海道,200,12150
+B急便,関西,北海道,300,15620
+B急便,関西,北海道,500,21700
+B急便,関西,北海道,1000,34720
+B急便,関西,北海道,1500,45570
+B急便,関西,北海道,2000,54250
+B急便,関西,東北,30,3580
+B急便,関西,東北,50,4650
+B急便,関西,東北,100,6800
+B急便,関西,東北,150,8590
+B急便,関西,東北,200,10020
+B急便,関西,東北,300,12890
+B急便,関西,東北,500,17900
+B急便,関西,東北,1000,28640
+B急便,関西,東北,1500,37590
+B急便,関西,東北,2000,44750
+B急便,関西,北関東,30,2970
+B急便,関西,北関東,50,3860
+B急便,関西,北関東,100,5650
+B急便,関西,北関東,150,7130
+B急便,関西,北関東,200,8320
+B急便,関西,北関東,300,10700
+B急便,関西,北関東,500,14860
+B急便,関西,北関東,1000,23780
+B急便,関西,北関東,1500,31210
+B急便,関西,北関東,2000,37150
+B急便,関西,南関東,30,2670
+B急便,関西,南関東,50,3470
+B急便,関西,南関東,100,5070
+B急便,関西,南関東,150,6400
+B急便,関西,南関東,200,7470
+B急便,関西,南関東,300,9600
+B急便,関西,南関東,500,13340
+B急便,関西,南関東,1000,21340
+B急便,関西,南関東,1500,28010
+B急便,関西,南関東,2000,33350
+B急便,関西,中部,30,2060
+B急便,関西,中部,50,2680
+B急便,関西,中部,100,3910
+B急便,関西,中部,150,4940
+B急便,関西,中部,200,5770
+B急便,関西,中部,300,7420
+B急便,関西,中部,500,10300
+B急便,関西,中部,1000,16480
+B急便,関西,中部,1500,21630
+B急便,関西,中部,2000,25750
+B急便,関西,関西,30,1300
+B急便,関西,関西,50,1690
+B急便,関西,関西,100,2470
+B急便,関西,関西,150,3120
+B急便,関西,関西,200,3640
+B急便,関西,関西,300,4680
+B急便,関西,関西,500,6500
+B急便,関西,関西,1000,10400
+B急便,関西,関西,1500,13650
+B急便,関西,関西,2000,16250
+B急便,関西,中四国,30,2060
+B急便,関西,中四国,50,2680
+B急便,関西,中四国,100,3910
+B急便,関西,中四国,150,4940
+B急便,関西,中四国,200,5770
+B急便,関西,中四国,300,7420
+B急便,関西,中四国,500,10300
+B急便,関西,中四国,1000,16480
+B急便,関西,中四国,1500,21630
+B急便,関西,中四国,2000,25750
+B急便,関西,九州,30,2820
+B急便,関西,九州,50,3670
+B急便,関西,九州,100,5360
+B急便,関西,九州,150,6770
+B急便,関西,九州,200,7900
+B急便,関西,九州,300,10150
+B急便,関西,九州,500,14100
+B急便,関西,九州,1000,22560
+B急便,関西,九州,1500,29610
+B急便,関西,九州,2000,35250
+B急便,中四国,北海道,30,5100
+B急便,中四国,北海道,50,6630
+B急便,中四国,北海道,100,9690
+B急便,中四国,北海道,150,12240
+B急便,中四国,北海道,200,14280
+B急便,中四国,北海道,300,18360
+B急便,中四国,北海道,500,25500
+B急便,中四国,北海道,1000,40800
+B急便,中四国,北海道,1500,53550
+B急便,中四国,北海道,2000,63750
+B急便,中四国,東北,30,4340
+B急便,中四国,東北,50,5640
+B急便,中四国,東北,100,8250
+B急便,中四国,東北,150,10420
+B急便,中四国,東北,200,12150
+B急便,中四国,東北,300,15620
+B急便,中四国,東北,500,21700
+B急便,中四国,東北,1000,34720
+B急便,中四国,東北,1500,45570
+B急便,中四国,東北,2000,54250
+B急便,中四国,北関東,30,3730
+B急便,中四国,北関東,50,4850
+B急便,中四国,北関東,100,7090
+B急便,中四国,北関東,150,8960
+B急便,中四国,北関東,200,10450
+B急便,中四国,北関東,300,13440
+B急便,中四国,北関東,500,18660
+B急便,中四国,北関東,1000,29860
+B急便,中四国,北関東,1500,39190
+B急便,中四国,北関東,2000,46650
+B急便,中四国,南関東,30,3430
+B急便,中四国,南関東,50,4460
+B急便,中四国,南関東,100,6510
+B急便,中四国,南関東,150,8230
+B急便,中四国,南関東,200,9600
+B急便,中四国,南関東,300,12340
+B急便,中四国,南関東,500,17140
+B急便,中四国,南関東,1000,27420
+B急便,中四国,南関東,1500,35990
+B急便,中四国,南関東,2000,42850
+B急便,中四国,中部,30,2820
+B急便,中四国,中部,50,3670
+B急便,中四国,中部,100,5360
+B急便,中四国,中部,150,6770
+B急便,中四国,中部,200,7900
+B急便,中四国,中部,300,10150
+B急便,中四国,中部,500,14100
+B急便,中四国,中部,1000,22560
+B急便,中四国,中部,1500,29610
+B急便,中四国,中部,2000,35250
+B急便,中四国,関西,30,2060
+B急便,中四国,関西,50,2680
+B急便,中四国,関西,100,3910
+B急便,中四国,関西,150,4940
+B急便,中四国,関西,200,5770
+B急便,中四国,関西,300,7420
+B急便,中四国,関西,500,10300
+B急便,中四国,関西,1000,16480
+B急便,中四国,関西,1500,21630
+B急便,中四国,関西,2000,25750
+B急便,中四国,中四国,30,1300
+B急便,中四国,中四国,50,1690
+B急便,中四国,中四国,100,2470
+B急便,中四国,中四国,150,3120
+B急便,中四国,中四国,200,3640
+B急便,中四国,中四国,300,4680
+B急便,中四国,中四国,500,6500
+B急便,中四国,中四国,1000,10400
+B急便,中四国,中四国,1500,13650
+B急便,中四国,中四国,2000,16250
+B急便,中四国,九州,30,2060
+B急便,中四国,九州,50,2680
+B急便,中四国,九州,100,3910
+B急便,中四国,九州,150,4940
+B急便,中四国,九州,200,5770
+B急便,中四国,九州,300,7420
+B急便,中四国,九州,500,10300
+B急便,中四国,九州,1000,16480
+B急便,中四国,九州,1500,21630
+B急便,中四国,九州,2000,25750
+B急便,九州,北海道,30,5860
+B急便,九州,北海道,50,7620
+B急便,九州,北海道,100,11130
+B急便,九州,北海道,150,14060
+B急便,九州,北海道,200,16410
+B急便,九州,北海道,300,21100
+B急便,九州,北海道,500,29300
+B急便,九州,北海道,1000,46880
+B急便,九州,北海道,1500,61530
+B急便,九州,北海道,2000,73250
+B急便,九州,東北,30,5100
+B急便,九州,東北,50,6630
+B急便,九州,東北,100,9690
+B急便,九州,東北,150,12240
+B急便,九州,東北,200,14280
+B急便,九州,東北,300,18360
+B急便,九州,東北,500,25500
+B急便,九州,東北,1000,40800
+B急便,九州,東北,1500,53550
+B急便,九州,東北,2000,63750
+B急便,九州,北関東,30,4490
+B急便,九州,北関東,50,5840
+B急便,九州,北関東,100,8530
+B急便,九州,北関東,150,10780
+B急便,九州,北関東,200,12580
+B急便,九州,北関東,300,16170
+B急便,九州,北関東,500,22460
+B急便,九州,北関東,1000,35940
+B急便,九州,北関東,1500,47170
+B急便,九州,北関東,2000,56150
+B急便,九州,南関東,30,4190
+B急便,九州,南関東,50,5440
+B急便,九州,南関東,100,7960
+B急便,九州,南関東,150,10050
+B急便,九州,南関東,200,11730
+B急便,九州,南関東,300,15080
+B急便,九州,南関東,500,20940
+B急便,九州,南関東,1000,33500
+B急便,九州,南関東,1500,43970
+B急便,九州,南関東,2000,52350
+B急便,九州,中部,30,3580
+B急便,九州,中部,50,4650
+B急便,九州,中部,100,6800
+B急便,九州,中部,150,8590
+B急便,九州,中部,200,10020
+B急便,九州,中部,300,12890
+B急便,九州,中部,500,17900
+B急便,九州,中部,1000,28640
+B急便,九州,中部,1500,37590
+B急便,九州,中部,2000,44750
+B急便,九州,関西,30,2820
+B急便,九州,関西,50,3670
+B急便,九州,関西,100,5360
+B急便,九州,関西,150,6770
+B急便,九州,関西,200,7900
+B急便,九州,関西,300,10150
+B急便,九州,関西,500,14100
+B急便,九州,関西,1000,22560
+B急便,九州,関西,1500,29610
+B急便,九州,関西,2000,35250
+B急便,九州,中四国,30,2060
+B急便,九州,中四国,50,2680
+B急便,九州,中四国,100,3910
+B急便,九州,中四国,150,4940
+B急便,九州,中四国,200,5770
+B急便,九州,中四国,300,7420
+B急便,九州,中四国,500,10300
+B急便,九州,中四国,1000,16480
+B急便,九州,中四国,1500,21630
+B急便,九州,中四国,2000,25750
+B急便,九州,九州,30,1300
+B急便,九州,九州,50,1690
+B急便,九州,九州,100,2470
+B急便,九州,九州,150,3120
+B急便,九州,九州,200,3640
+B急便,九州,九州,300,4680
+B急便,九州,九州,500,6500
+B急便,九州,九州,1000,10400
+B急便,九州,九州,1500,13650
+B急便,九州,九州,2000,16250
+C物流,東日本,東日本,30,1550
+C物流,東日本,東日本,50,2020
+C物流,東日本,東日本,100,2940
+C物流,東日本,東日本,150,3720
+C物流,東日本,東日本,200,4340
+C物流,東日本,東日本,300,5580
+C物流,東日本,東日本,500,7750
+C物流,東日本,東日本,1000,12400
+C物流,東日本,東日本,1500,16280
+C物流,東日本,東日本,2000,19380
+C物流,東日本,関東,30,2380
+C物流,東日本,関東,50,3100
+C物流,東日本,関東,100,4530
+C物流,東日本,関東,150,5720
+C物流,東日本,関東,200,6670
+C物流,東日本,関東,300,8580
+C物流,東日本,関東,500,11910
+C物流,東日本,関東,1000,19060
+C物流,東日本,関東,1500,25010
+C物流,東日本,関東,2000,29780
+C物流,東日本,中部,30,3020
+C物流,東日本,中部,50,3930
+C物流,東日本,中部,100,5740
+C物流,東日本,中部,150,7250
+C物流,東日本,中部,200,8460
+C物流,東日本,中部,300,10880
+C物流,東日本,中部,500,15110
+C物流,東日本,中部,1000,24180
+C物流,東日本,中部,1500,31730
+C物流,東日本,中部,2000,37780
+C物流,東日本,西日本,30,3980
+C物流,東日本,西日本,50,5180
+C物流,東日本,西日本,100,7570
+C物流,東日本,西日本,150,9560
+C物流,東日本,西日本,200,11150
+C物流,東日本,西日本,300,14340
+C物流,東日本,西日本,500,19910
+C物流,東日本,西日本,1000,31860
+C物流,東日本,西日本,1500,41810
+C物流,東日本,西日本,2000,49780
+C物流,東日本,九州,30,4940
+C物流,東日本,九州,50,6420
+C物流,東日本,九州,100,9390
+C物流,東日本,九州,150,11860
+C物流,東日本,九州,200,13840
+C物流,東日本,九州,300,17790
+C物流,東日本,九州,500,24710
+C物流,東日本,九州,1000,39540
+C物流,東日本,九州,1500,51890
+C物流,東日本,九州,2000,61780
+C物流,関東,東日本,30,2380
+C物流,関東,東日本,50,3100
+C物流,関東,東日本,100,4530
+C物流,関東,東日本,150,5720
+C物流,関東,東日本,200,6670
+C物流,関東,東日本,300,8580
+C物流,関東,東日本,500,11910
+C物流,関東,東日本,1000,19060
+C物流,関東,東日本,1500,25010
+C物流,関東,東日本,2000,29780
+C物流,関東,関東,30,1550
+C物流,関東,関東,50,2020
+C物流,関東,関東,100,2940
+C物流,関東,関東,150,3720
+C物流,関東,関東,200,4340
+C物流,関東,関東,300,5580
+C物流,関東,関東,500,7750
+C物流,関東,関東,1000,12400
+C物流,関東,関東,1500,16280
+C物流,関東,関東,2000,19380
+C物流,関東,中部,30,2190
+C物流,関東,中部,50,2850
+C物流,関東,中部,100,4160
+C物流,関東,中部,150,5260
+C物流,関東,中部,200,6130
+C物流,関東,中部,300,7880
+C物流,関東,中部,500,10950
+C物流,関東,中部,1000,17520
+C物流,関東,中部,1500,23000
+C物流,関東,中部,2000,27380
+C物流,関東,西日本,30,3150
+C物流,関東,西日本,50,4100
+C物流,関東,西日本,100,5980
+C物流,関東,西日本,150,7560
+C物流,関東,西日本,200,8820
+C物流,関東,西日本,300,11340
+C物流,関東,西日本,500,15750
+C物流,関東,西日本,1000,25200
+C物流,関東,西日本,1500,33080
+C物流,関東,西日本,2000,39380
+C物流,関東,九州,30,4110
+C物流,関東,九州,50,5340
+C物流,関東,九州,100,7810
+C物流,関東,九州,150,9860
+C物流,関東,九州,200,11510
+C物流,関東,九州,300,14800
+C物流,関東,九州,500,20550
+C物流,関東,九州,1000,32880
+C物流,関東,九州,1500,43160
+C物流,関東,九州,2000,51380
+C物流,中部,東日本,30,3020
+C物流,中部,東日本,50,3930
+C物流,中部,東日本,100,5740
+C物流,中部,東日本,150,7250
+C物流,中部,東日本,200,8460
+C物流,中部,東日本,300,10880
+C物流,中部,東日本,500,15110
+C物流,中部,東日本,1000,24180
+C物流,中部,東日本,1500,31730
+C物流,中部,東日本,2000,37780
+C物流,中部,関東,30,2190
+C物流,中部,関東,50,2850
+C物流,中部,関東,100,4160
+C物流,中部,関東,150,5260
+C物流,中部,関東,200,6130
+C物流,中部,関東,300,7880
+C物流,中部,関東,500,10950
+C物流,中部,関東,1000,17520
+C物流,中部,関東,1500,23000
+C物流,中部,関東,2000,27380
+C物流,中部,中部,30,1550
+C物流,中部,中部,50,2020
+C物流,中部,中部,100,2940
+C物流,中部,中部,150,3720
+C物流,中部,中部,200,4340
+C物流,中部,中部,300,5580
+C物流,中部,中部,500,7750
+C物流,中部,中部,1000,12400
+C物流,中部,中部,1500,16280
+C物流,中部,中部,2000,19380
+C物流,中部,西日本,30,2510
+C物流,中部,西日本,50,3260
+C物流,中部,西日本,100,4770
+C物流,中部,西日本,150,6020
+C物流,中部,西日本,200,7030
+C物流,中部,西日本,300,9040
+C物流,中部,西日本,500,12550
+C物流,中部,西日本,1000,20080
+C物流,中部,西日本,1500,26360
+C物流,中部,西日本,2000,31380
+C物流,中部,九州,30,3470
+C物流,中部,九州,50,4510
+C物流,中部,九州,100,6590
+C物流,中部,九州,150,8330
+C物流,中部,九州,200,9720
+C物流,中部,九州,300,12490
+C物流,中部,九州,500,17350
+C物流,中部,九州,1000,27760
+C物流,中部,九州,1500,36440
+C物流,中部,九州,2000,43380
+C物流,西日本,東日本,30,3980
+C物流,西日本,東日本,50,5180
+C物流,西日本,東日本,100,7570
+C物流,西日本,東日本,150,9560
+C物流,西日本,東日本,200,11150
+C物流,西日本,東日本,300,14340
+C物流,西日本,東日本,500,19910
+C物流,西日本,東日本,1000,31860
+C物流,西日本,東日本,1500,41810
+C物流,西日本,東日本,2000,49780
+C物流,西日本,関東,30,3150
+C物流,西日本,関東,50,4100
+C物流,西日本,関東,100,5980
+C物流,西日本,関東,150,7560
+C物流,西日本,関東,200,8820
+C物流,西日本,関東,300,11340
+C物流,西日本,関東,500,15750
+C物流,西日本,関東,1000,25200
+C物流,西日本,関東,1500,33080
+C物流,西日本,関東,2000,39380
+C物流,西日本,中部,30,2510
+C物流,西日本,中部,50,3260
+C物流,西日本,中部,100,4770
+C物流,西日本,中部,150,6020
+C物流,西日本,中部,200,7030
+C物流,西日本,中部,300,9040
+C物流,西日本,中部,500,12550
+C物流,西日本,中部,1000,20080
+C物流,西日本,中部,1500,26360
+C物流,西日本,中部,2000,31380
+C物流,西日本,西日本,30,1550
+C物流,西日本,西日本,50,2020
+C物流,西日本,西日本,100,2940
+C物流,西日本,西日本,150,3720
+C物流,西日本,西日本,200,4340
+C物流,西日本,西日本,300,5580
+C物流,西日本,西日本,500,7750
+C物流,西日本,西日本,1000,12400
+C物流,西日本,西日本,1500,16280
+C物流,西日本,西日本,2000,19380
+C物流,西日本,九州,30,2510
+C物流,西日本,九州,50,3260
+C物流,西日本,九州,100,4770
+C物流,西日本,九州,150,6020
+C物流,西日本,九州,200,7030
+C物流,西日本,九州,300,9040
+C物流,西日本,九州,500,12550
+C物流,西日本,九州,1000,20080
+C物流,西日本,九州,1500,26360
+C物流,西日本,九州,2000,31380
+C物流,九州,東日本,30,4940
+C物流,九州,東日本,50,6420
+C物流,九州,東日本,100,9390
+C物流,九州,東日本,150,11860
+C物流,九州,東日本,200,13840
+C物流,九州,東日本,300,17790
+C物流,九州,東日本,500,24710
+C物流,九州,東日本,1000,39540
+C物流,九州,東日本,1500,51890
+C物流,九州,東日本,2000,61780
+C物流,九州,関東,30,4110
+C物流,九州,関東,50,5340
+C物流,九州,関東,100,7810
+C物流,九州,関東,150,9860
+C物流,九州,関東,200,11510
+C物流,九州,関東,300,14800
+C物流,九州,関東,500,20550
+C物流,九州,関東,1000,32880
+C物流,九州,関東,1500,43160
+C物流,九州,関東,2000,51380
+C物流,九州,中部,30,3470
+C物流,九州,中部,50,4510
+C物流,九州,中部,100,6590
+C物流,九州,中部,150,8330
+C物流,九州,中部,200,9720
+C物流,九州,中部,300,12490
+C物流,九州,中部,500,17350
+C物流,九州,中部,1000,27760
+C物流,九州,中部,1500,36440
+C物流,九州,中部,2000,43380
+C物流,九州,西日本,30,2510
+C物流,九州,西日本,50,3260
+C物流,九州,西日本,100,4770
+C物流,九州,西日本,150,6020
+C物流,九州,西日本,200,7030
+C物流,九州,西日本,300,9040
+C物流,九州,西日本,500,12550
+C物流,九州,西日本,1000,20080
+C物流,九州,西日本,1500,26360
+C物流,九州,西日本,2000,31380
+C物流,九州,九州,30,1550
+C物流,九州,九州,50,2020
+C物流,九州,九州,100,2940
+C物流,九州,九州,150,3720
+C物流,九州,九州,200,4340
+C物流,九州,九州,300,5580
+C物流,九州,九州,500,7750
+C物流,九州,九州,1000,12400
+C物流,九州,九州,1500,16280
+C物流,九州,九州,2000,19380`;
+const DEMO_CONTRACTS_CSV = `carrier,discount_rate,volume_kg_per_m3,fuel_surcharge_rate,min_fare,timed_delivery_fee
+A運輸,0.45,280,0.08,1000,500
+B急便,0.4,270,0.07,900,800
+C物流,0.5,300,0.09,1100,0`;
+
+function buildDemoState() {
+  const zrows = parseTable(DEMO_ZONES_CSV).slice(1);
+  const trows = parseTable(DEMO_TARIFF_CSV).slice(1);
+  const crows = parseTable(DEMO_CONTRACTS_CSV).slice(1);
+  const carriers = [];
+  for (const [name, disc, vol, fuel, minFare, timedFee] of crows) {
+    const zoneByPref = {};
+    zrows.filter(r => r[0] === name).forEach(r => { zoneByPref[r[1]] = r[2]; });
+    const tariff = trows.filter(r => r[0] === name)
+      .map(r => ({ from: r[1], to: r[2], maxKg: parseNum(r[3]), fare: parseNum(r[4]) }));
+    carriers.push({
+      id: "demo-" + name,
+      name,
+      discountRate: parseFloat(disc),
+      volumeKgPerM3: parseFloat(vol),
+      minFare: parseNum(minFare),
+      timedFee: parseNum(timedFee),
+      surcharges: [{ date: "2020-01-01", rate: parseFloat(fuel) }],
+      zoneByPref, tariff,
+      isDemo: true,
+    });
+  }
+  return { v: 1, carriers };
+}
+
+/* =================== 状態 =================== */
+let state = null;
+let selectedCarrierId = null;
+let idSeq = 1;
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) { const s = JSON.parse(raw); if (s && s.v === 1 && Array.isArray(s.carriers)) return s; }
+  } catch (e) { /* localStorage不可・壊れたJSONはデモへフォールバック */ }
+  return buildDemoState();
+}
+function saveState() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { toast("保存できませんでした（ストレージ不可）"); }
+  refreshDemoChip();
+}
+function refreshDemoChip() {
+  const allDemo = state.carriers.length > 0 && state.carriers.every(c => c.isDemo);
+  const chip = document.getElementById("demo-chip");
+  chip.hidden = !allDemo;
+}
+
+/* =================== 共通UI =================== */
+const $ = (sel) => document.querySelector(sel);
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined) n.setAttribute(k, v);
+  }
+  for (const c of children) n.append(c);
+  return n;
+}
+function yen(n) { return n.toLocaleString("ja-JP") + "円"; }
+let toastTimer = null;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+async function copyText(text, okMsg) {
+  try { await navigator.clipboard.writeText(text); toast(okMsg || "コピーしました"); }
+  catch (e) { toast("コピーできませんでした。手動で選択してください"); }
+}
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+
+/* タブ切替 */
+document.querySelectorAll(".tabs button").forEach(b => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b ? "true" : "false"));
+    document.querySelectorAll("section.view").forEach(v => v.classList.remove("active"));
+    $("#view-" + b.dataset.view).classList.add("active");
+    if (b.dataset.view === "master") renderMaster();
+  });
+});
+
+/* ツールチップ */
+const tooltip = $("#tooltip");
+function showTip(html, x, y) {
+  tooltip.innerHTML = html;
+  tooltip.style.display = "block";
+  const pad = 14;
+  const w = tooltip.offsetWidth, h = tooltip.offsetHeight;
+  tooltip.style.left = Math.min(x + pad, window.innerWidth - w - 8) + "px";
+  tooltip.style.top = Math.max(y - h - pad, 8) + "px";
+}
+function hideTip() { tooltip.style.display = "none"; }
+
+/* =================== 列マッピング =================== */
+const HEADER_SYNONYMS = {
+  from: ["発", "発地", "発都道府県", "from", "出荷元"],
+  to: ["着", "着地", "着都道府県", "to", "届け先"],
+  weight: ["重量", "実重量", "重量kg", "weight", "kg"],
+  volume: ["容積", "容積m3", "容積m³", "volume", "m3", "m³"],
+  timed: ["時間指定", "timed", "指定"],
+  date: ["日付", "出荷日", "date"],
+  carrier: ["会社", "運送会社", "carrier", "業者"],
+  amount: ["請求額", "請求", "金額", "amount", "請求額円"],
+};
+function detectColumns(headerRow, wanted) {
+  const map = {};
+  let hits = 0;
+  headerRow.forEach((cell, i) => {
+    const c = String(cell).trim().toLowerCase();
+    for (const key of wanted) {
+      if (map[key] === undefined && HEADER_SYNONYMS[key].some(s => c === s.toLowerCase())) { map[key] = i; hits++; }
+    }
+  });
+  return hits >= 2 ? map : null;
+}
+function rowsToShipments(rows, wanted, positional) {
+  if (!rows.length) return { header: false, items: [] };
+  const map = detectColumns(rows[0], wanted);
+  const dataRows = map ? rows.slice(1) : rows;
+  const get = (row, key, idx) => map ? (map[key] !== undefined ? row[map[key]] : "") : (row[idx] || "");
+  const items = dataRows.map((row, n) => {
+    const o = { line: n + (map ? 2 : 1) };
+    wanted.forEach((key) => { o[key] = get(row, key, positional.indexOf(key)); });
+    return o;
+  });
+  return { header: !!map, items };
+}
+
+/* =================== 単発計算 =================== */
+function initQuoteForm() {
+  for (const id of ["q-from", "q-to"]) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = "";
+    PREFS.forEach(p => sel.append(el("option", { value: p }, p)));
+  }
+  $("#q-from").value = "東京";
+  $("#q-to").value = "大阪";
+  $("#q-date").value = todayStr();
+}
+$("#q-vol-apply").addEventListener("click", () => {
+  const w = parseNum($("#q-w").value), d = parseNum($("#q-d").value), h = parseNum($("#q-h").value);
+  const q = Math.max(1, parseNum($("#q-qty").value) || 1);
+  if (w <= 0 || d <= 0 || h <= 0) { toast("縦・横・高さを入力してください"); return; }
+  const m3 = w * d * h * q / 1e6;
+  $("#q-volume").value = (Math.ceil(m3 * 1000) / 1000).toString();
+  toast("容積 " + $("#q-volume").value + " m³ を反映しました");
+});
+$("#q-run").addEventListener("click", () => {
+  const inp = {
+    fromPref: $("#q-from").value, toPref: $("#q-to").value,
+    weightKg: parseNum($("#q-weight").value), volumeM3: parseNum($("#q-volume").value),
+    timed: $("#q-timed").checked, date: $("#q-date").value || todayStr(),
+  };
+  if (!state.carriers.length) { toast("運送会社が未登録です（タリフマスタで追加）"); return; }
+  const rs = quoteAll(state.carriers, inp);
+  const list = $("#q-results");
+  list.innerHTML = "";
+  const bestTotal = rs.length && rs[0].ok ? rs[0].total : null;
+  rs.forEach((r, i) => {
+    const card = el("div", { class: "quote-card" + (i === 0 && r.ok ? " best" : "") });
+    card.append(el("span", { class: "cname" }, r.name));
+    if (!r.ok) {
+      card.append(el("span", { class: "na" }, "― " + r.reason));
+    } else {
+      if (i === 0) card.append(el("span", { class: "chip-best" }, "最安"));
+      card.append(el("span", { class: "total" }, yen(r.total)));
+      if (bestTotal !== null && i > 0) {
+        const d = r.total - bestTotal;
+        card.append(el("span", { class: "diff" }, "+" + yen(d) + "（+" + (d / bestTotal * 100).toFixed(1) + "%）"));
+      }
+      card.append(el("span", { class: "detail" },
+        r.lane + " ／ 課金 " + r.chargeable + "kg（" + r.basis + "勝ち）／ 〜" + r.band + "kg帯 ／ " +
+        "定価 " + yen(r.listFare) + " → 割引後 " + yen(r.discounted) +
+        (r.timedFee ? " ＋時間指定 " + yen(r.timedFee) : "") +
+        " ＋燃料サーチャージ " + yen(r.surcharge) + "（" + (r.surchargeRate * 100).toFixed(1) + "%）"
+      ));
+    }
+    list.append(card);
+  });
+});
+
+/* =================== 一括見積り =================== */
+const BATCH_SAMPLE = [
+  "発\t着\t重量\t容積\t時間指定\t出荷日",
+  "東京\t大阪\t80\t0.4\t\t2026-08-14",
+  "埼玉\t福岡\t450\t\t○\t2026-08-14",
+  "愛知\t宮城\t120\t0.2\t\t2026-08-15",
+  "大阪\t東京\t35\t\t\t2026-08-15",
+  "神奈川\t広島\t260\t0.9\t\t2026-08-16",
+  "千葉\t北海道\t60\t0.3\t\t2026-08-16",
+  "兵庫\t福岡\t900\t\t\t2026-08-17",
+  "東京\t沖縄\t100\t\t\t2026-08-17",
+].join("\n");
+$("#batch-sample").addEventListener("click", () => { $("#batch-input").value = BATCH_SAMPLE; });
+
+let batchTSV = "";
+$("#batch-run").addEventListener("click", () => {
+  const rows = parseTable($("#batch-input").value);
+  if (!rows.length) { toast("出荷リストを貼り付けてください"); return; }
+  const { items } = rowsToShipments(rows, ["from", "to", "weight", "volume", "timed", "date"],
+    ["from", "to", "weight", "volume", "timed", "date"]);
+  const carriers = state.carriers;
+  if (!carriers.length) { toast("運送会社が未登録です"); return; }
+
+  const perRow = items.map(it => {
+    const inp = {
+      fromPref: it.from, toPref: it.to,
+      weightKg: parseNum(it.weight), volumeM3: parseNum(it.volume),
+      timed: parseTruthy(it.timed), date: it.date || todayStr(),
+    };
+    const quotes = carriers.map(c => quoteCarrier(c, inp));
+    const okQuotes = quotes.filter(q => q.ok);
+    const best = okQuotes.length ? okQuotes.reduce((a, b) => a.total <= b.total ? a : b) : null;
+    return { it, inp, quotes, best };
+  });
+
+  // 戦略別合計
+  const strategies = carriers.map((c, ci) => {
+    let sum = 0, served = 0, missed = 0;
+    perRow.forEach(r => { const q = r.quotes[ci]; if (q.ok) { sum += q.total; served++; } else missed++; });
+    return { name: c.name, sum, served, missed, kind: "single" };
+  });
+  let mixSum = 0, mixServed = 0, mixMissed = 0;
+  perRow.forEach(r => { if (r.best) { mixSum += r.best.total; mixServed++; } else mixMissed++; });
+  const mix = { name: "最安ミックス", sum: mixSum, served: mixServed, missed: mixMissed, kind: "mix" };
+
+  const complete = strategies.filter(s => s.missed === 0);
+  const bestSingle = complete.length ? complete.reduce((a, b) => a.sum <= b.sum ? a : b) : null;
+  const saving = bestSingle ? bestSingle.sum - mixSum : null;
+
+  const out = $("#batch-out");
+  out.innerHTML = "";
+
+  // タイル
+  const tiles = el("div", { class: "tiles" });
+  tiles.append(tileEl("出荷件数", perRow.length + "件", mixMissed ? "うち全社対応不可 " + mixMissed + "件" : ""));
+  if (bestSingle) tiles.append(tileEl("単社ベスト（" + bestSingle.name + "）", yen(bestSingle.sum), "全件を1社に出した場合の最良"));
+  tiles.append(tileEl("最安ミックス合計", yen(mixSum), "行ごとに最安社を選択（対応可能行のみ）"));
+  if (saving !== null && mixMissed === 0) {
+    const tile = tileEl("ミックスで浮く額", yen(saving), bestSingle.sum > 0 ? "単社ベスト比 −" + (saving / bestSingle.sum * 100).toFixed(1) + "%" : "");
+    tile.classList.add("hero");
+    tiles.append(tile);
+  }
+  out.append(tiles);
+
+  // チャート
+  out.append(renderStrategyChart([...strategies, mix], perRow.length));
+
+  // 明細テーブル
+  const head = ["#", "発", "着", "課金kg", "最安社", "最安額", ...carriers.map(c => c.name)];
+  const table = el("table", {},
+    el("thead", {}, el("tr", {}, ...head.map((h, i) => el("th", { class: i >= 3 && i !== 4 ? "num" : "" }, h)))));
+  const tbody = el("tbody");
+  perRow.forEach((r, i) => {
+    const tr = el("tr", {});
+    tr.append(el("td", {}, String(i + 1)));
+    tr.append(el("td", {}, normalizePref(r.it.from) || "—"));
+    tr.append(el("td", {}, normalizePref(r.it.to) || "—"));
+    tr.append(el("td", { class: "num" }, r.quotes.find(q => q.ok) ? String(r.quotes.find(q => q.ok).chargeable) : "—"));
+    tr.append(el("td", {}, r.best ? r.best.name : "—"));
+    tr.append(el("td", { class: "num" }, r.best ? el("span", { class: "best-mark" }, yen(r.best.total)) : "—"));
+    r.quotes.forEach(q => {
+      tr.append(el("td", { class: "num", title: q.ok ? "" : q.reason },
+        q.ok ? (r.best && q.name === r.best.name && q.total === r.best.total ? el("span", { class: "best-mark" }, yen(q.total)) : yen(q.total)) : "対象外"));
+    });
+    tbody.append(tr);
+  });
+  table.append(tbody);
+  out.append(el("div", { class: "table-wrap" }, table));
+
+  // TSVエクスポート
+  const tsvHead = ["発", "着", "重量kg", "容積m3", "時間指定", "出荷日", "最安社", "最安額", ...carriers.map(c => c.name)];
+  const tsvRows = perRow.map(r => [
+    normalizePref(r.it.from), normalizePref(r.it.to), r.inp.weightKg, r.inp.volumeM3, r.inp.timed ? "○" : "", r.inp.date,
+    r.best ? r.best.name : "", r.best ? r.best.total : "",
+    ...r.quotes.map(q => q.ok ? q.total : "対象外"),
+  ].join("\t"));
+  batchTSV = [tsvHead.join("\t"), ...tsvRows].join("\n");
+  $("#batch-copy").hidden = false;
+});
+$("#batch-copy").addEventListener("click", () => copyText(batchTSV, "結果TSVをコピーしました"));
+
+function tileEl(label, value, sub) {
+  return el("div", { class: "tile" },
+    el("div", { class: "t-label" }, label),
+    el("div", { class: "t-value" }, value),
+    el("div", { class: "t-sub" }, sub || ""));
+}
+
+/* 戦略比較 横棒チャート */
+function renderStrategyChart(strategies, totalRows) {
+  const panel = el("div", { class: "chart-panel" });
+  panel.append(el("div", { class: "chart-title" }, "配送戦略別の運賃合計"));
+  panel.append(el("div", { class: "chart-sub" }, "「全件を1社に出す」各戦略と「行ごとに最安社を選ぶ」ミックスの比較。対応不可行がある戦略は合計から除外分を注記。"));
+  const legend = el("div", { class: "legend" });
+  legend.append(el("span", {}, el("span", { class: "sw", style: "background: var(--chart-c1)" }), "単社戦略"));
+  legend.append(el("span", {}, el("span", { class: "sw", style: "background: var(--chart-c2)" }), "最安ミックス"));
+  panel.append(legend);
+
+  const W = 720, rowH = 34, padL = 110, padR = 96, padT = 8, padB = 22;
+  const H = padT + strategies.length * rowH + padB;
+  const maxSum = Math.max(...strategies.map(s => s.sum), 1);
+  const x = (v) => padL + (W - padL - padR) * (v / maxSum);
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "戦略別運賃合計の横棒グラフ");
+
+  // グリッド（4分割）
+  for (let g = 1; g <= 4; g++) {
+    const gx = padL + (W - padL - padR) * g / 4;
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", gx); line.setAttribute("x2", gx);
+    line.setAttribute("y1", padT); line.setAttribute("y2", H - padB);
+    line.setAttribute("class", "gridline");
+    svg.append(line);
+    const t = document.createElementNS(svgNS, "text");
+    t.setAttribute("x", gx); t.setAttribute("y", H - 8);
+    t.setAttribute("text-anchor", "middle"); t.setAttribute("class", "axis-label");
+    t.textContent = Math.round(maxSum * g / 4 / 1000).toLocaleString("ja-JP") + "千円";
+    svg.append(t);
+  }
+
+  strategies.forEach((s, i) => {
+    const y = padT + i * rowH + 7;
+    const barH = 18, r = 4;
+    const x1 = Math.max(x(s.sum), padL + 2);
+    const name = document.createElementNS(svgNS, "text");
+    name.setAttribute("x", padL - 8); name.setAttribute("y", y + barH - 5);
+    name.setAttribute("text-anchor", "end"); name.setAttribute("class", "bar-label");
+    name.textContent = s.name;
+    svg.append(name);
+
+    const path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d",
+      "M" + padL + "," + y +
+      " L" + (x1 - r) + "," + y +
+      " Q" + x1 + "," + y + " " + x1 + "," + (y + r) +
+      " L" + x1 + "," + (y + barH - r) +
+      " Q" + x1 + "," + (y + barH) + " " + (x1 - r) + "," + (y + barH) +
+      " L" + padL + "," + (y + barH) + " Z");
+    path.setAttribute("fill", s.kind === "mix" ? "var(--chart-c2)" : "var(--chart-c1)");
+    svg.append(path);
+
+    const val = document.createElementNS(svgNS, "text");
+    val.setAttribute("x", x1 + 6); val.setAttribute("y", y + barH - 5);
+    val.setAttribute("class", "bar-value");
+    val.textContent = yen(s.sum);
+    svg.append(val);
+    if (s.missed > 0) {
+      const note = document.createElementNS(svgNS, "text");
+      note.setAttribute("x", padL); note.setAttribute("y", y - 2);
+      note.setAttribute("class", "bar-note");
+      note.textContent = "※対応不可 " + s.missed + "件を除く";
+      svg.append(note);
+    }
+
+    // ホバー用ヒット領域
+    const hit = document.createElementNS(svgNS, "rect");
+    hit.setAttribute("x", 0); hit.setAttribute("y", padT + i * rowH);
+    hit.setAttribute("width", W); hit.setAttribute("height", rowH);
+    hit.setAttribute("fill", "transparent");
+    hit.addEventListener("mousemove", (ev) => showTip(
+      "<strong>" + s.name + "</strong><br>合計 " + yen(s.sum) +
+      "<br>対応 " + s.served + "/" + totalRows + "件" + (s.missed ? "（不可" + s.missed + "件）" : ""),
+      ev.clientX, ev.clientY));
+    hit.addEventListener("mouseleave", hideTip);
+    svg.append(hit);
+  });
+
+  panel.append(el("div", { class: "chart-wrap" }, svg));
+  return panel;
+}
+
+/* =================== 請求照合 =================== */
+const AUDIT_SAMPLE = [
+  "会社\t発\t着\t重量\t容積\t時間指定\t出荷日\t請求額",
+  "A運輸\t東京\t大阪\t80\t0.4\t\t2026-08-14\t4000",
+  "A運輸\t愛知\t宮城\t120\t0.2\t\t2026-08-14\t4500",
+  "B急便\t埼玉\t福岡\t450\t\t○\t2026-08-15\t14300",
+  "B急便\t大阪\t東京\t35\t\t\t2026-08-15\t2500",
+  "C物流\t神奈川\t広島\t260\t0.9\t\t2026-08-16\t9000",
+  "C物流\t東京\t沖縄\t100\t\t\t2026-08-16\t8800",
+].join("\n");
+$("#audit-sample").addEventListener("click", () => { $("#audit-input").value = AUDIT_SAMPLE; });
+
+let auditTSV = "";
+$("#audit-run").addEventListener("click", () => {
+  const rows = parseTable($("#audit-input").value);
+  if (!rows.length) { toast("請求明細を貼り付けてください"); return; }
+  const tol = parseNum($("#audit-tol").value);
+  const { items } = rowsToShipments(rows, ["carrier", "from", "to", "weight", "volume", "timed", "date", "amount"],
+    ["carrier", "from", "to", "weight", "volume", "timed", "date", "amount"]);
+
+  let match = 0, mismatch = 0, na = 0, diffSum = 0;
+  const results = items.map(it => {
+    const carrier = state.carriers.find(c => c.name === String(it.carrier).trim());
+    const amount = parseNum(it.amount);
+    if (!carrier) { na++; return { it, amount, status: "na", note: "未登録の会社「" + it.carrier + "」" }; }
+    const q = quoteCarrier(carrier, {
+      fromPref: it.from, toPref: it.to,
+      weightKg: parseNum(it.weight), volumeM3: parseNum(it.volume),
+      timed: parseTruthy(it.timed), date: it.date || todayStr(),
+    });
+    if (!q.ok) { na++; return { it, amount, status: "na", note: q.reason }; }
+    const diff = amount - q.total;
+    if (Math.abs(diff) <= tol) { match++; return { it, amount, q, diff, status: "ok" }; }
+    mismatch++; diffSum += diff;
+    return { it, amount, q, diff, status: "bad" };
+  });
+
+  const out = $("#audit-out");
+  out.innerHTML = "";
+  const tiles = el("div", { class: "tiles" });
+  tiles.append(tileEl("明細件数", results.length + "件", ""));
+  tiles.append(tileEl("一致", match + "件", "許容差 ±" + tol + "円"));
+  const mmTile = tileEl("差異あり", mismatch + "件", na ? "ほか判定不能 " + na + "件" : "");
+  if (mismatch > 0) mmTile.classList.add("hero");
+  tiles.append(mmTile);
+  tiles.append(tileEl("差異合計（請求−計算）", (diffSum >= 0 ? "+" : "−") + yen(Math.abs(diffSum)), "プラス＝払い過ぎ疑い"));
+  out.append(tiles);
+
+  const table = el("table", {},
+    el("thead", {}, el("tr", {},
+      el("th", {}, "#"), el("th", {}, "会社"), el("th", {}, "区間"),
+      el("th", { class: "num" }, "課金kg"), el("th", { class: "num" }, "請求額"),
+      el("th", { class: "num" }, "計算額"), el("th", { class: "num" }, "差異"), el("th", {}, "判定"))));
+  const tbody = el("tbody");
+  results.forEach((r, i) => {
+    const tr = el("tr", {});
+    tr.append(el("td", {}, String(i + 1)));
+    tr.append(el("td", {}, String(r.it.carrier || "—")));
+    tr.append(el("td", {}, normalizePref(r.it.from) + "→" + normalizePref(r.it.to)));
+    tr.append(el("td", { class: "num" }, r.q ? String(r.q.chargeable) : "—"));
+    tr.append(el("td", { class: "num" }, yen(r.amount)));
+    tr.append(el("td", { class: "num" }, r.q ? yen(r.q.total) : "—"));
+    tr.append(el("td", { class: "num" }, r.q ? (r.diff > 0 ? "+" : r.diff < 0 ? "−" : "±") + Math.abs(r.diff).toLocaleString("ja-JP") : "—"));
+    const pill = r.status === "ok" ? el("span", { class: "pill ok" }, "✓ 一致")
+      : r.status === "bad" ? el("span", { class: "pill bad" }, "！ 差異")
+      : el("span", { class: "pill na", title: r.note }, "− 判定不能");
+    tr.append(el("td", {}, pill));
+    tbody.append(tr);
+  });
+  table.append(tbody);
+  out.append(el("div", { class: "table-wrap" }, table));
+  out.append(el("p", { class: "hint" }, "判定不能の行はタリフ未登録・地帯対象外・会社名不一致など。行にカーソルを載せると理由が出ます。"));
+
+  auditTSV = [["会社", "発", "着", "請求額", "計算額", "差異", "判定"].join("\t"),
+    ...results.map(r => [r.it.carrier, normalizePref(r.it.from), normalizePref(r.it.to), r.amount,
+      r.q ? r.q.total : "", r.q ? r.diff : "", r.status === "ok" ? "一致" : r.status === "bad" ? "差異" : "判定不能"].join("\t"))
+  ].join("\n");
+  $("#audit-copy").hidden = false;
+});
+$("#audit-copy").addEventListener("click", () => copyText(auditTSV, "照合結果TSVをコピーしました"));
+
+/* =================== タリフマスタ =================== */
+function currentCarrier() { return state.carriers.find(c => c.id === selectedCarrierId) || state.carriers[0] || null; }
+
+function renderMaster() {
+  const chips = $("#m-chips");
+  chips.innerHTML = "";
+  if (!state.carriers.length) {
+    $("#m-editor").innerHTML = "";
+    $("#m-editor").append(el("p", { class: "hint" }, "会社が未登録です。「会社を追加」から始めてください。"));
+    return;
+  }
+  if (!currentCarrier()) selectedCarrierId = state.carriers[0].id;
+  if (!state.carriers.some(c => c.id === selectedCarrierId)) selectedCarrierId = state.carriers[0].id;
+  state.carriers.forEach(c => {
+    const b = el("button", { class: c.id === selectedCarrierId ? "sel" : "", onclick: () => { selectedCarrierId = c.id; renderMaster(); } }, c.name);
+    chips.append(b);
+  });
+  renderEditor(currentCarrier());
+}
+
+function renderEditor(c) {
+  const ed = $("#m-editor");
+  ed.innerHTML = "";
+  if (!c) return;
+
+  /* 基本条件 */
+  const basic = el("div", { class: "panel" });
+  basic.append(el("h3", { style: "margin-top:0" }, "契約条件"));
+  const fg = el("div", { class: "form-grid" });
+  fg.append(fieldEl("会社名", el("input", { type: "text", id: "e-name", value: c.name })));
+  fg.append(fieldEl("割引率 %（タリフ定価からの引き率）", el("input", { type: "number", id: "e-disc", min: 0, max: 100, step: 0.1, value: (c.discountRate * 100).toString() })));
+  fg.append(fieldEl("容積換算 kg/m³", el("input", { type: "number", id: "e-vol", min: 0, step: 1, value: c.volumeKgPerM3.toString() })));
+  fg.append(fieldEl("最低運賃 円", el("input", { type: "number", id: "e-min", min: 0, step: 10, value: c.minFare.toString() })));
+  fg.append(fieldEl("時間指定割増 円", el("input", { type: "number", id: "e-timed", min: 0, step: 10, value: c.timedFee.toString() })));
+  basic.append(fg);
+
+  basic.append(el("h3", {}, "燃料サーチャージ履歴（出荷日に応じて自動適用）"));
+  const surWrap = el("div", { id: "e-sur" });
+  (c.surcharges || []).forEach(s => surWrap.append(surRowEl(s.date, s.rate)));
+  basic.append(surWrap);
+  basic.append(el("div", { class: "btn-row" },
+    el("button", { class: "btn ghost", onclick: () => surWrap.append(surRowEl(todayStr(), 0)) }, "行を追加")));
+  ed.append(basic);
+
+  /* 地帯割当 */
+  const zone = el("div", { class: "panel" });
+  const assigned = Object.keys(c.zoneByPref).length;
+  zone.append(el("h3", { style: "margin-top:0" }, "地帯区分（都道府県 → 地帯名）"));
+  zone.append(el("p", { class: "hint" }, "1行に「都道府県,地帯名」。空欄の県は対象外扱い。現在 " + assigned + "/47 都道府県を割当済み。"));
+  const zoneText = Object.entries(c.zoneByPref).map(([p, z]) => p + "," + z).join("\n");
+  const zta = el("textarea", { id: "e-zones", rows: 10 }); zta.value = zoneText;
+  zone.append(zta);
+  const qf = el("div", { class: "btn-row" });
+  qf.append(el("span", { class: "hint" }, "地方ごと一括追記："));
+  const regSel = el("select", { id: "e-reg" });
+  Object.keys(REGIONS).forEach(r => regSel.append(el("option", { value: r }, r)));
+  qf.append(regSel);
+  const regZone = el("input", { type: "text", id: "e-regzone", placeholder: "地帯名", style: "min-width:100px; border:1px solid var(--line); border-radius:4px; padding:6px 9px; background:var(--surface)" });
+  qf.append(regZone);
+  qf.append(el("button", {
+    class: "btn ghost", onclick: () => {
+      const z = regZone.value.trim();
+      if (!z) { toast("地帯名を入力してください"); return; }
+      const lines = REGIONS[regSel.value].map(p => p + "," + z);
+      zta.value = (zta.value.trim() ? zta.value.trim() + "\n" : "") + lines.join("\n");
+    }
+  }, "追記"));
+  zone.append(qf);
+  ed.append(zone);
+
+  /* タリフ */
+  const tar = el("div", { class: "panel" });
+  tar.append(el("h3", { style: "margin-top:0" }, "運賃表（ロング形式: 発地帯,着地帯,重量帯上限kg,運賃円）"));
+  tar.append(el("p", { class: "hint" }, "現在 " + c.tariff.length + " 行。Excelから4列コピペでも、下のマトリクス取込でもOK。"));
+  const tta = el("textarea", { id: "e-tariff", rows: 12 });
+  tta.value = c.tariff.map(r => [r.from, r.to, r.maxKg, r.fare].join(",")).join("\n");
+  tar.append(tta);
+
+  tar.append(el("h3", {}, "マトリクス取込（運賃表の紙面イメージをそのまま貼る）"));
+  tar.append(el("p", { class: "hint" }, "1行目: 着地帯[タブ]重量帯上限kg…、2行目以降: 着地帯名と運賃。指定した発地帯の行を上の表に追記します。"));
+  const mfrom = el("input", { type: "text", id: "e-mfrom", placeholder: "発地帯名（例: 関東）", style: "min-width:140px; border:1px solid var(--line); border-radius:4px; padding:6px 9px; background:var(--surface)" });
+  const mta = el("textarea", { id: "e-matrix", rows: 5, placeholder: "着地帯\t30\t50\t100\n関西\t1540\t2000\t2920\n九州\t2380\t3100\t4520" });
+  tar.append(el("div", { class: "btn-row" }, mfrom,
+    el("button", {
+      class: "btn ghost", onclick: () => {
+        const from = mfrom.value.trim();
+        if (!from) { toast("発地帯名を入力してください"); return; }
+        const rows = parseTable(mta.value);
+        if (rows.length < 2) { toast("マトリクスを貼り付けてください"); return; }
+        const bands = rows[0].slice(1).map(parseNum);
+        if (bands.some(b => b <= 0)) { toast("1行目の重量帯上限が読めません"); return; }
+        const lines = [];
+        for (const row of rows.slice(1)) {
+          const to = row[0];
+          row.slice(1).forEach((v, i) => { if (i < bands.length && String(v).trim() !== "") lines.push([from, to, bands[i], parseNum(v)].join(",")); });
+        }
+        tta.value = (tta.value.trim() ? tta.value.trim() + "\n" : "") + lines.join("\n");
+        toast(lines.length + " 行を追記しました（保存を忘れずに）");
+      }
+    }, "変換して追記")));
+  tar.append(mta);
+  ed.append(tar);
+
+  ed.append(el("div", { class: "btn-row" },
+    el("button", { class: "btn", onclick: () => saveEditor(c) }, "この会社を保存"),
+    el("span", { class: "hint" }, "保存するとこの会社はダミー扱いが外れます")));
+}
+
+function fieldEl(label, input) { return el("div", { class: "field" }, el("label", {}, label), input); }
+function surRowEl(date, rate) {
+  const row = el("div", { class: "sur-row" });
+  row.append(el("input", { type: "date", class: "sur-date", value: date, style: "border:1px solid var(--line); border-radius:4px; padding:5px 8px; background:var(--surface)" }));
+  row.append(el("input", { type: "number", class: "sur-rate", min: 0, max: 100, step: 0.1, value: (rate * 100).toString(), style: "min-width:80px; border:1px solid var(--line); border-radius:4px; padding:5px 8px; background:var(--surface)" }));
+  row.append(el("span", { class: "hint" }, "%"));
+  row.append(el("button", { class: "btn subtle", onclick: () => row.remove() }, "削除"));
+  return row;
+}
+
+function saveEditor(c) {
+  const name = $("#e-name").value.trim();
+  if (!name) { toast("会社名を入力してください"); return; }
+  c.name = name;
+  c.discountRate = Math.min(100, Math.max(0, parseNum($("#e-disc").value))) / 100;
+  c.volumeKgPerM3 = parseNum($("#e-vol").value);
+  c.minFare = parseNum($("#e-min").value);
+  c.timedFee = parseNum($("#e-timed").value);
+  c.surcharges = [...document.querySelectorAll("#e-sur .sur-row")].map(row => ({
+    date: row.querySelector(".sur-date").value || "2000-01-01",
+    rate: parseNum(row.querySelector(".sur-rate").value) / 100,
+  }));
+  const zoneByPref = {};
+  let zbad = 0;
+  parseTable($("#e-zones").value).forEach(r => {
+    const p = normalizePref(r[0]), z = (r[1] || "").trim();
+    if (PREFS.includes(p) && z) zoneByPref[p] = z; else if (r[0]) zbad++;
+  });
+  c.zoneByPref = zoneByPref;
+  const tariff = [];
+  let tbad = 0;
+  parseTable($("#e-tariff").value).forEach(r => {
+    const [from, to] = [String(r[0] || "").trim(), String(r[1] || "").trim()];
+    const maxKg = parseNum(r[2]), fare = parseNum(r[3]);
+    if (from && to && maxKg > 0 && fare > 0) tariff.push({ from, to, maxKg, fare }); else tbad++;
+  });
+  c.tariff = tariff;
+  c.isDemo = false;
+  saveState();
+  renderMaster();
+  toast("保存しました" + (zbad || tbad ? "（読めない行 地帯" + zbad + "・運賃" + tbad + " をスキップ）" : ""));
+}
+
+let addSeq = 1;
+$("#m-add").addEventListener("click", () => {
+  const c = {
+    id: "c" + Date.now().toString(36) + (addSeq++), name: "新しい会社" + addSeq,
+    discountRate: 0, volumeKgPerM3: 280, minFare: 0, timedFee: 0,
+    surcharges: [], zoneByPref: {}, tariff: [], isDemo: false,
+  };
+  state.carriers.push(c);
+  selectedCarrierId = c.id;
+  saveState(); renderMaster();
+});
+$("#m-dup").addEventListener("click", () => {
+  const c = currentCarrier(); if (!c) return;
+  const copy = JSON.parse(JSON.stringify(c));
+  copy.id = "c" + Date.now().toString(36) + (addSeq++);
+  copy.name = c.name + "（複製）";
+  copy.isDemo = false;
+  state.carriers.push(copy);
+  selectedCarrierId = copy.id;
+  saveState(); renderMaster();
+});
+$("#m-del").addEventListener("click", () => {
+  const c = currentCarrier(); if (!c) return;
+  if (!confirm("「" + c.name + "」を削除しますか？")) return;
+  state.carriers = state.carriers.filter(x => x.id !== c.id);
+  selectedCarrierId = state.carriers[0] ? state.carriers[0].id : null;
+  saveState(); renderMaster();
+});
+
+/* =================== データ管理 =================== */
+$("#data-export-fill").addEventListener("click", () => {
+  $("#data-export").value = JSON.stringify(state, null, 1);
+  toast("JSONを生成しました");
+});
+$("#data-export-copy").addEventListener("click", () => {
+  if (!$("#data-export").value) $("#data-export").value = JSON.stringify(state, null, 1);
+  copyText($("#data-export").value, "JSONをコピーしました");
+});
+$("#data-import-run").addEventListener("click", () => {
+  try {
+    const s = JSON.parse($("#data-import").value);
+    if (!s || s.v !== 1 || !Array.isArray(s.carriers)) throw new Error("形式が違います");
+    state = s;
+    saveState(); renderMaster();
+    toast("読み込みました（" + s.carriers.length + "社）");
+  } catch (e) { toast("読み込めませんでした：" + e.message); }
+});
+$("#data-demo").addEventListener("click", () => {
+  if (!confirm("現在のデータを破棄してデモデータに戻しますか？")) return;
+  state = buildDemoState();
+  selectedCarrierId = null;
+  saveState(); renderMaster();
+  toast("デモデータを読み込みました");
+});
+$("#data-clear").addEventListener("click", () => {
+  if (!confirm("全データを削除しますか？（元に戻せません）")) return;
+  state = { v: 1, carriers: [] };
+  selectedCarrierId = null;
+  saveState(); renderMaster();
+  toast("削除しました");
+});
+
+/* =================== 起動 =================== */
+state = loadState();
+initQuoteForm();
+refreshDemoChip();
+saveState();
+</script>
