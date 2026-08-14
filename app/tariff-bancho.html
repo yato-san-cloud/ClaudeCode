@@ -1,6 +1,9 @@
 <title>タリフ番長</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
+    color-scheme: light;
     --bg: #F6F7F9;
     --surface: #FFFFFF;
     --surface-2: #EEF1F5;
@@ -9,7 +12,7 @@
     --accent: #1F4E8C;
     --accent-ink: #FFFFFF;
     --accent-soft: #E8EEF7;
-    --kraft: #A96A2E;
+    --kraft: #8F5926;
     --kraft-soft: #F6EDE2;
     --line: #D8DDE4;
     --chart-c1: #2A5CA0;
@@ -22,6 +25,7 @@
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --bg: #12161C;
       --surface: #1A2028;
       --surface-2: #222A34;
@@ -43,6 +47,7 @@
     }
   }
   :root[data-theme="dark"] {
+    color-scheme: dark;
     --bg: #12161C;
     --surface: #1A2028;
     --surface-2: #222A34;
@@ -186,7 +191,7 @@
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; line-height: 1.6; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   td.num, th.num { text-align: right; }
-  thead th { font-size: 11px; letter-spacing: 0.08em; font-weight: 700; color: var(--muted); background: var(--accent-soft); position: sticky; top: 0; }
+  thead th { font-size: 11px; letter-spacing: 0.08em; font-weight: 700; color: var(--muted); background: var(--accent-soft); }
   tbody tr:last-child td { border-bottom: none; }
   td .best-mark { font-weight: 800; color: var(--kraft); }
 
@@ -381,7 +386,13 @@ function ceil10(x) { return Math.ceil(x / 10) * 10; }
 function normalizePref(s) {
   let v = String(s || "").trim().replace(/[\s　]/g, "");
   if (v === "北海道") return v;
-  return v.replace(/[都府県]$/, "");
+  const stripped = v.replace(/[都府県]$/, "");
+  return stripped.length >= 2 ? stripped : v; // 「京都」を「京」に壊さない
+}
+
+function normalizeDate(s) {
+  const m = String(s || "").trim().match(/^(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?$/);
+  return m ? m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0") : "";
 }
 
 function surchargeRateFor(surcharges, dateStr) {
@@ -438,7 +449,11 @@ function parseTable(text) {
 }
 
 function parseNum(s) {
-  const v = parseFloat(String(s || "").replace(/[,，円\s]/g, ""));
+  const half = String(s || "")
+    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/．/g, ".")
+    .replace(/[,，円\s]/g, "");
+  const v = parseFloat(half);
   return isNaN(v) ? 0 : v;
 }
 
@@ -2039,9 +2054,31 @@ function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
 }
-async function copyText(text, okMsg) {
+async function copyText(text, okMsg, fallbackHost) {
   try { await navigator.clipboard.writeText(text); toast(okMsg || "コピーしました"); }
-  catch (e) { toast("コピーできませんでした。手動で選択してください"); }
+  catch (e) {
+    if (fallbackHost) {
+      let ta = fallbackHost.querySelector("textarea.copy-fallback");
+      if (!ta) { ta = el("textarea", { class: "copy-fallback", rows: 6, readonly: "" }); fallbackHost.prepend(ta); }
+      ta.value = text; ta.focus(); ta.select();
+      toast("自動コピー不可のため上の欄に表示しました。手動でコピーしてください");
+    } else {
+      toast("コピーできませんでした。手動で選択してください");
+    }
+  }
+}
+
+// Artifactサンドボックスでは confirm() が常にfalseを返すため、2段階クリックで確認する
+function confirmClick(btn, fn) {
+  if (btn.dataset.armed === "1") {
+    btn.dataset.armed = ""; btn.textContent = btn.dataset.orig;
+    fn(); return;
+  }
+  btn.dataset.armed = "1"; btn.dataset.orig = btn.textContent;
+  btn.textContent = "もう一度押すと実行";
+  setTimeout(() => {
+    if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.textContent = btn.dataset.orig; }
+  }, 4000);
 }
 function todayStr() {
   const d = new Date();
@@ -2060,8 +2097,15 @@ document.querySelectorAll(".tabs button").forEach(b => {
 
 /* ツールチップ */
 const tooltip = $("#tooltip");
-function showTip(html, x, y) {
-  tooltip.innerHTML = html;
+function showTip(title, lines, x, y) {
+  tooltip.replaceChildren();
+  const b = document.createElement("strong");
+  b.textContent = title;
+  tooltip.append(b);
+  for (const ln of lines) {
+    tooltip.append(document.createElement("br"));
+    tooltip.append(document.createTextNode(ln));
+  }
   tooltip.style.display = "block";
   const pad = 14;
   const w = tooltip.offsetWidth, h = tooltip.offsetHeight;
@@ -2185,7 +2229,7 @@ $("#batch-run").addEventListener("click", () => {
     const inp = {
       fromPref: it.from, toPref: it.to,
       weightKg: parseNum(it.weight), volumeM3: parseNum(it.volume),
-      timed: parseTruthy(it.timed), date: it.date || todayStr(),
+      timed: parseTruthy(it.timed), date: normalizeDate(it.date) || todayStr(),
     };
     const quotes = carriers.map(c => quoteCarrier(c, inp));
     const okQuotes = quotes.filter(q => q.ok);
@@ -2235,7 +2279,7 @@ $("#batch-run").addEventListener("click", () => {
     tr.append(el("td", {}, String(i + 1)));
     tr.append(el("td", {}, normalizePref(r.it.from) || "—"));
     tr.append(el("td", {}, normalizePref(r.it.to) || "—"));
-    tr.append(el("td", { class: "num" }, r.quotes.find(q => q.ok) ? String(r.quotes.find(q => q.ok).chargeable) : "—"));
+    tr.append(el("td", { class: "num" }, r.best ? String(r.best.chargeable) : "—"));
     tr.append(el("td", {}, r.best ? r.best.name : "—"));
     tr.append(el("td", { class: "num" }, r.best ? el("span", { class: "best-mark" }, yen(r.best.total)) : "—"));
     r.quotes.forEach(q => {
@@ -2257,7 +2301,7 @@ $("#batch-run").addEventListener("click", () => {
   batchTSV = [tsvHead.join("\t"), ...tsvRows].join("\n");
   $("#batch-copy").hidden = false;
 });
-$("#batch-copy").addEventListener("click", () => copyText(batchTSV, "結果TSVをコピーしました"));
+$("#batch-copy").addEventListener("click", () => copyText(batchTSV, "結果TSVをコピーしました", $("#batch-out")));
 
 function tileEl(label, value, sub) {
   return el("div", { class: "tile" },
@@ -2342,8 +2386,8 @@ function renderStrategyChart(strategies, totalRows) {
     hit.setAttribute("width", W); hit.setAttribute("height", rowH);
     hit.setAttribute("fill", "transparent");
     hit.addEventListener("mousemove", (ev) => showTip(
-      "<strong>" + s.name + "</strong><br>合計 " + yen(s.sum) +
-      "<br>対応 " + s.served + "/" + totalRows + "件" + (s.missed ? "（不可" + s.missed + "件）" : ""),
+      s.name,
+      ["合計 " + yen(s.sum), "対応 " + s.served + "/" + totalRows + "件" + (s.missed ? "（不可" + s.missed + "件）" : "")],
       ev.clientX, ev.clientY));
     hit.addEventListener("mouseleave", hideTip);
     svg.append(hit);
@@ -2381,7 +2425,7 @@ $("#audit-run").addEventListener("click", () => {
     const q = quoteCarrier(carrier, {
       fromPref: it.from, toPref: it.to,
       weightKg: parseNum(it.weight), volumeM3: parseNum(it.volume),
-      timed: parseTruthy(it.timed), date: it.date || todayStr(),
+      timed: parseTruthy(it.timed), date: normalizeDate(it.date) || todayStr(),
     });
     if (!q.ok) { na++; return { it, amount, status: "na", note: q.reason }; }
     const diff = amount - q.total;
@@ -2432,7 +2476,7 @@ $("#audit-run").addEventListener("click", () => {
   ].join("\n");
   $("#audit-copy").hidden = false;
 });
-$("#audit-copy").addEventListener("click", () => copyText(auditTSV, "照合結果TSVをコピーしました"));
+$("#audit-copy").addEventListener("click", () => copyText(auditTSV, "照合結果TSVをコピーしました", $("#audit-out")));
 
 /* =================== タリフマスタ =================== */
 function currentCarrier() { return state.carriers.find(c => c.id === selectedCarrierId) || state.carriers[0] || null; }
@@ -2606,13 +2650,13 @@ $("#m-dup").addEventListener("click", () => {
   selectedCarrierId = copy.id;
   saveState(); renderMaster();
 });
-$("#m-del").addEventListener("click", () => {
+$("#m-del").addEventListener("click", (e) => confirmClick(e.currentTarget, () => {
   const c = currentCarrier(); if (!c) return;
-  if (!confirm("「" + c.name + "」を削除しますか？")) return;
   state.carriers = state.carriers.filter(x => x.id !== c.id);
   selectedCarrierId = state.carriers[0] ? state.carriers[0].id : null;
   saveState(); renderMaster();
-});
+  toast("削除しました");
+}));
 
 /* =================== データ管理 =================== */
 $("#data-export-fill").addEventListener("click", () => {
@@ -2632,20 +2676,18 @@ $("#data-import-run").addEventListener("click", () => {
     toast("読み込みました（" + s.carriers.length + "社）");
   } catch (e) { toast("読み込めませんでした：" + e.message); }
 });
-$("#data-demo").addEventListener("click", () => {
-  if (!confirm("現在のデータを破棄してデモデータに戻しますか？")) return;
+$("#data-demo").addEventListener("click", (e) => confirmClick(e.currentTarget, () => {
   state = buildDemoState();
   selectedCarrierId = null;
   saveState(); renderMaster();
   toast("デモデータを読み込みました");
-});
-$("#data-clear").addEventListener("click", () => {
-  if (!confirm("全データを削除しますか？（元に戻せません）")) return;
+}));
+$("#data-clear").addEventListener("click", (e) => confirmClick(e.currentTarget, () => {
   state = { v: 1, carriers: [] };
   selectedCarrierId = null;
   saveState(); renderMaster();
   toast("削除しました");
-});
+}));
 
 /* =================== 起動 =================== */
 state = loadState();

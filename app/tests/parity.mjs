@@ -40,7 +40,7 @@ const carriers = crows.map(([name, disc, vol, fuel, minFare, timedFee]) => {
 });
 
 // --- ケース生成（決定的） ---
-const prefs = ["東京", "大阪", "北海道", "福岡", "沖縄", "愛知", "広島", "宮城", "高知", "埼玉"];
+const prefs = ["東京", "大阪", "北海道", "福岡", "沖縄", "愛知", "広島", "宮城", "高知", "埼玉", "京都", "神奈川"];
 const combos = [
   { weight: 1, volume: 0, timed: false },
   { weight: 29.9, volume: 0, timed: false },
