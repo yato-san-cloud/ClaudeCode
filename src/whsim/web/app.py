@@ -58,6 +58,7 @@ from whsim.web.routes._common import (  # noqa: F401 — re-exported for callers
 from whsim.web.routes import (
     analysis as analysis_routes,
     design as design_routes,
+    exports_geo as exports_geo_routes,
     imports as imports_routes,
     inventory as inventory_routes,
     login as login_routes,
@@ -475,6 +476,7 @@ app.include_router(scorecard_routes.router)
 app.include_router(run_render_routes.router)
 app.include_router(viewer_routes.router)
 app.include_router(sweep_routes.router)
+app.include_router(exports_geo_routes.router)  # layout.geojson / layout.csv
 
 # ---- static frontend (mounted last so /api/* wins) --------------------------
 app.mount("/", StaticFiles(directory=str(STATIC), html=True), name="static")

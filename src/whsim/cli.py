@@ -372,5 +372,46 @@ def mapmaker(
         typer.echo(f"シナリオ台帳 -> {ledger}")
 
 
+@app.command("export-geojson")
+def export_geojson(
+    name: str,
+    out: str = typer.Option("", "--out", "-o", help="出力先 (既定 <name>_layout.geojson)"),
+    grouped: bool = typer.Option(False, "--grouped",
+                                 help="段を畳んで棚(間口列)ごと1 Feature にする"),
+    csv_out: str = typer.Option("", "--csv",
+                                help="同じ幾何を間口1行の CSV でも書き出す (Power BI 用)"),
+    metrics: bool = typer.Option(True, "--metrics/--no-metrics",
+                                 help="出荷実績・在庫から数値属性を埋める"),
+):
+    """レイアウトを GeoJSON (間口=Feature) で書き出す — 可視化先を選ぶ前の中間形式。
+
+    座標は**倉庫ローカルのメートル・原点は左下・y は上向き**（緯度経度に変換しない）。
+    `--csv` を付けると Deneb/Power BI がそのまま取り込める間口1行の CSV も出る
+    （どちらも同じ幾何源なので食い違わない）。詳細は docs/geojson-export.md。
+    """
+    import json as _json
+
+    from whsim import geoexport
+    proj = _open_project(name)
+    model = proj.load_model()
+    table = geoexport.metrics_from_orders(model) if metrics else None
+    fc = geoexport.to_geojson(model, level_mode="grouped" if grouped else "per-level",
+                              metrics=table or None)
+    dest = Path(out) if out else Path(f"{name}_layout.geojson")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # Compact: a real warehouse is 10k+ 間口 and this file is machine-read
+    # (pretty-printing the coordinate arrays doubles it for nobody's benefit).
+    dest.write_text(_json.dumps(fc, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    typer.echo(f"GeoJSON -> {dest}  ({len(fc['features'])} features / "
+               f"間口 {fc['whsim']['location_count']} 件 / mode={fc['whsim']['level_mode']})")
+    if csv_out:
+        cdest = Path(csv_out)
+        cdest.parent.mkdir(parents=True, exist_ok=True)
+        cdest.write_text(geoexport.to_layout_csv(model, metrics=table or None), "utf-8")
+        typer.echo(f"レイアウトCSV -> {cdest}")
+    if not fc["features"]:
+        typer.echo("  ! ロケーションがまだありません（空の FeatureCollection を出力）。")
+
+
 if __name__ == "__main__":
     app()
