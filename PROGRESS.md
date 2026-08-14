@@ -227,3 +227,32 @@ tools/ 配下・opus5並列実装・コミット済（5060eb4 / 9e07872 / d83779
   全スイート再緑（29+85+verify全緑）。
 
 # 第3ラン 完了（3ツール全基準合格）
+
+
+---
+
+# 第4ラン: UI/UX総合見直し（究極系）— 進行中
+
+ゴール: ①取込→⑤提案の**旅路全体**をUXとして見直し、製品の顔を究極系へ。
+（第3ランまでの磨きは④検証中心の部分パス。今回は全景。）
+
+## 体制（opus5×3、ビュー所有分離）
+
+- **U1: 旅路と最初の5分** — overview(①取込ランディング)・journey stepper・
+  phasehint・onboarding/初回体験・プロジェクト作成動線・全ビュー共通の
+  空状態規約。**styles.css のグローバルトークンは U1 だけが触る**。
+- **U2: ②分析＋③設計** — dataanalysis/bianalytics/bi/materialflow、
+  designer（ツールバー/インスペクタ/ライブラリ）、pickrate/storage/cost/
+  timetable。ビュー固有CSSは各JSの注入スタイルで（styles.css 禁止）。
+- **U3: ④検証＋⑤提案＋採点表ドック** — dashboard/analysis/view2d/
+  workcompare/compare/viewpng/export、scorecard。同じくビュー固有CSSのみ。
+
+共通規律: スクショPDCA（両テーマ・900px）最低2周、既存テスト緑、
+数値リテラルKPI禁止、replay/API契約不変、npm禁止。評価軸 =
+初回体験/タスク摩擦/情報の匂い/フィードバック/エラー回復/一貫性/
+コントラスト・フォーカス/日本語マイクロコピー。
+
+## 完了後
+
+- [ ] 統合コミット → fresh UX監査（初見エージェントが「テンプレから提案書
+  まで」をタスクベースで踏破し所見）→ 修正 → 最終報告
