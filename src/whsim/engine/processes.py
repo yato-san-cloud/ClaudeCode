@@ -13,6 +13,7 @@ Two operating modes share the same pack stage:
 
 from __future__ import annotations
 
+import math
 import random
 import zlib
 
@@ -96,9 +97,15 @@ def _board_conveyor(world: World, p):
     beside the picker, not on a far-away vertex), the boarding point, and its arc
     length from that line's infeed (how much belt is already behind it). ``None``
     when no conveyor is active. Lines are compared by walking (Manhattan) distance
-    to their projected point, matching the metric the picker actually walks."""
+    to their projected point, matching the metric the picker actually walks.
+
+    Only the line's ENTRANCES are offered (``World.entry_conveyors``): on a chained
+    line the 本線 and the 引き込み run right through the pick area, so boarding one
+    of those would drop the tote in halfway down the chain — past the very stretch
+    whose jam is supposed to reach back to this picker. With no chain authored the
+    list is every active belt, i.e. the historical choice."""
     best = None
-    for line in world.conveyors:
+    for line in (world.entry_conveyors or world.conveyors):
         xy, arc = line.project(p)
         d = manhattan(p, xy)
         if best is None or d < best[0]:
@@ -765,6 +772,11 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
             # propagates back to the picker. The tote then rides the belt from its
             # boarding point to the discharge end and packs there, holding its slot
             # the whole time, modelling real accumulation.
+            # Chained line (this belt hands on, or a 引き込み branches off it) vs the
+            # single-belt line the engine has always had. The branch is decided by
+            # the topology resolved at BUILD time, so an unchained model takes the
+            # legacy code path unchanged — same events, same RNG draws.
+            chained = line.next_line is not None or bool(line.junctions)
             for o, arr, tote in zip(orders, arrivals, totes):
                 req_t = env.now
                 slot = line.belt.request()
@@ -773,9 +785,11 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 world.log(t=env.now, event="conveyor_on", order_id=o.order_id,
                           resource="conveyor", conveyor=line.id, wait=waited,
                           blocked=1 if waited > 1e-6 else 0,
-                          transit=transit, ride_m=ride_m)
-                env.process(_convey_tote(world, o, arr, line, arc, slot,
-                                         dist_per_order, tote))
+                          transit=transit, ride_m=ride_m,
+                          leg=0, entry=1)
+                ride = _convey_chain if chained else _convey_tote
+                env.process(ride(world, o, arr, line, arc, slot,
+                                 dist_per_order, tote))
             if world.recording():
                 w.kf(env.now, pos[0], pos[1], "idle")
             continue
@@ -922,7 +936,259 @@ def _convey_tote(world: World, order: Order, arrival: float, line, arc: float,
     # conveyor KPIs integrate for utilisation.
     world.log(t=env.now, event="conveyor_off", order_id=order.order_id,
               resource="conveyor", conveyor=line.id, transit=transit,
-              ride_m=ride_m, occupancy=env.now - board_t)
+              ride_m=ride_m, occupancy=env.now - board_t,
+              leg=0, last=1)
+    world.log(t=env.now, event="order_complete", order_id=order.order_id,
+              cycle=env.now - arrival, dist=dist_per_order, due=order.due_s)
+
+
+# --- ベルト連鎖 (chained belts) と 引き込み(spur) ------------------------------
+# A real 出荷ライン is one machine made of many belts: 検品ライン → 本線 → 引き込み →
+# 梱包台. Its defining behaviour is the jam travelling BACKWARDS along it — a full
+# 引き込み holds totes on the 本線, which holds them on the 検品ライン, which is what
+# finally stops the picker from letting go. Modelling each belt as its own world
+# made every one of those couplings invisible.
+
+
+def _belt_load(line) -> int:
+    """How much work is standing in a belt: waiting for it + already on it."""
+    return len(line.belt.queue) + line.belt.count
+
+
+def _belt_room(line) -> bool:
+    """Can a tote turn into ``line`` right now (nobody queued, a slot free)?"""
+    return not line.belt.queue and line.belt.count < line.belt.capacity
+
+
+def _divert_wake(world: World, trunk):
+    """The broadcast a tote stalled on ``trunk`` waits on: "some 引き込み off this
+    trunk has freed a slot, look again".
+
+    One shared event rather than a queue per spur, because a stalled tote is
+    interested in EVERY spur from where it stands onwards — it cannot know in
+    advance which one will free first. Created on first use and replaced once
+    fired (the standard SimPy broadcast idiom), and nothing can be missed: the
+    decision to wait and the registration happen without an intervening yield, so
+    no release can slip between them."""
+    ev = trunk.divert_wake
+    if ev is None or ev.triggered:
+        ev = world.env.event()
+        trunk.divert_wake = ev
+    return ev
+
+
+def _signal_divert(spur) -> None:
+    """A 引き込み just freed a slot — wake everyone stalled on its trunk.
+
+    Waiters resume in the order they registered, i.e. the order they started
+    waiting, and each re-scans SYNCHRONOUSLY (checking room and seizing the slot
+    happen without a yield between them), so the longest-waiting tote that can use
+    the freed slot is the one that gets it."""
+    host = spur.host
+    if host is None:
+        return
+    ev = host.divert_wake
+    if ev is not None and not ev.triggered:
+        host.divert_wake = None
+        ev.succeed()
+
+
+def _ride_belt(world: World, line, a0: float, a1: float, tote):
+    """Ride ``line`` from arc ``a0`` to arc ``a1``, drawing the tote along the path.
+
+    The caller has already emitted the keyframe at ``a0``; this emits every corner
+    up to and including ``a1``, spaced by arc length, so a viewer lerping between
+    keyframes follows a BENT belt instead of cutting its corners."""
+    env = world.env
+    total_t = max(a1 - a0, 0.0) / line.speed       # speed is guaranteed > 0 by build()
+    pts = line.slice_pts(a0, a1)
+    seglens = [math.dist(pts[i - 1], pts[i]) for i in range(1, len(pts))]
+    pathlen = sum(seglens)
+    if pathlen <= 1e-9 or tote is None:
+        yield env.timeout(total_t)
+        return
+    for i in range(1, len(pts)):
+        yield env.timeout(total_t * seglens[i - 1] / pathlen)
+        if world.recording():
+            tote.kf(env.now, pts[i][0], pts[i][1], "belt")
+
+
+def _leg_on(world: World, order: Order, line, leg: int, arc: float, wait: float) -> None:
+    """``conveyor_on`` for one belt of a chained ride (``leg`` 0 is the entrance,
+    logged by the picker because that is who the jam blocks).
+
+    ``ride_m``/``transit`` here are the belt AHEAD of the tote — how far it could
+    ride — matching what the single-belt path has always logged at boarding. What
+    it ACTUALLY rode is on the matching ``conveyor_off``, which can be shorter
+    because the tote turned off at a 引き込み partway along."""
+    ride_m = line.remaining(arc)
+    world.log(t=world.env.now, event="conveyor_on", order_id=order.order_id,
+              resource="conveyor", conveyor=line.id, wait=wait,
+              blocked=1 if wait > 1e-6 else 0,
+              transit=ride_m / line.speed, ride_m=ride_m,
+              leg=leg, entry=0)
+
+
+def _leg_off(world: World, order: Order, line, leg: int, arc_in: float,
+             arc_out: float, board_t: float, last: int) -> None:
+    """``conveyor_off`` for one belt of a chained ride: what it rode on THIS belt,
+    and how long it held one of THIS belt's slots (``occupancy`` — the accumulation
+    the conveyor KPIs integrate, so a tote stalled waiting for a full 引き込み shows
+    up as occupancy of the 本線 it is standing on)."""
+    ride_m = max(arc_out - arc_in, 0.0)
+    world.log(t=world.env.now, event="conveyor_off", order_id=order.order_id,
+              resource="conveyor", conveyor=line.id,
+              transit=ride_m / line.speed, ride_m=ride_m,
+              occupancy=world.env.now - board_t, leg=leg, last=last)
+
+
+def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
+                  slot, dist_per_order, tote=None):
+    """One tote down a CHAINED line: hand-overs, 引き込み diverts, then 梱包.
+
+    **Deadlock-freedom is structural, not lucky.** Every slot this process waits
+    for is strictly DOWNSTREAM of the one it holds: a hand-over acquires the next
+    belt's slot and only then releases the one behind it, and a 引き込み is entered
+    from the trunk and never the reverse. So the wait-for graph only ever points
+    forward and no set of totes can close a cycle. A belt already ridden is treated
+    as the end of the line and the hop count is capped at the number of belts, so
+    even a mis-drawn loop terminates.
+
+    **引き込み選択 is GREEDY and WORK-CONSERVING** — deterministic, no RNG:
+
+    * at a junction, turn into a spur there if one has room (both sides of the same
+      junction are candidates: least loaded, ties by belt id);
+    * otherwise advance to the next junction, but ONLY if some spur from there on
+      has room;
+    * if nothing downstream has room, stall AT THIS junction holding the 本線 slot
+      — which is how a full 引き込み backs the 本線 up, one slot at a time, until
+      the picker cannot let go;
+    * a stalled tote is woken whenever ANY spur on this trunk frees a slot and
+      re-scans from where it stands (:func:`_divert_wake`).
+
+    The greed and the re-scan are what make it work-conserving, and that is not a
+    refinement — it is the difference between a model and a fiction. Committing to
+    a target spur at boarding fails BOTH ways: the tote sails past empty 引き込み
+    it could have used, and once it has passed them it can never go back, so
+    benches sit idle while totes stall. That produced the physically impossible
+    reading of packing utilisation FALLING (to 0.62) as demand rose past capacity.
+    A tote may only ever move forward, so the decision has to be taken at each
+    junction with what is true there and then — which is also what the people on
+    the line do: you take the tote in front of you when you have room for it.
+    """
+    env = world.env
+    pack_time = max(world.model.process.pack_time_s, 0.0)
+    leg = 0
+    hops = 0
+    max_hops = max(1, len(world.conveyors))
+    visited = {line.id}
+    pack_wait = 0.0            # 引き込み待ち — charged to the pack stage's wait
+    if tote is not None and world.recording():
+        p0 = line.point_at(arc)
+        tote.kf(env.now, p0[0], p0[1], "belt")
+
+    while True:
+        board_t = env.now
+        arc_in = arc
+        spur = None
+        spur_slot = None
+        spur_wait = 0.0
+        branches = ([(a, s) for a, s in line.junctions
+                     if a >= arc - 1e-9 and s.id not in visited]
+                    if hops < max_hops else [])
+        if branches:
+            i = 0
+            while True:
+                arc_j = branches[i][0]
+                if arc_j > arc + 1e-9:
+                    yield from _ride_belt(world, line, arc, arc_j, tote)
+                    arc = arc_j
+                # Every 引き込み hanging off THIS junction — a trunk is normally
+                # tapped from both sides at the same point (両側の引き込み).
+                j = i
+                while j < len(branches) and branches[j][0] <= arc_j + 1e-9:
+                    j += 1
+                here = [s for _a, s in branches[i:j] if _belt_room(s)]
+                if here:
+                    # ``branches`` is id-ordered inside a junction and ``min`` keeps
+                    # the first of equal keys ⇒ least loaded, ties by id ascending.
+                    cand = min(here, key=_belt_load)
+                    spur_slot = cand.belt.request()
+                    yield spur_slot          # room was just checked: granted at once
+                    spur = cand
+                    break
+                if j < len(branches) and any(_belt_room(s) for _a, s in branches[j:]):
+                    i = j                    # room further down: go and take it
+                    continue
+                # Nothing from here on has room: stall HERE, holding the 本線 slot,
+                # until some 引き込み frees up — then look again from this junction.
+                wait0 = env.now
+                yield _divert_wake(world, line)
+                spur_wait += env.now - wait0
+
+        if spur is not None:
+            pack_wait += spur_wait
+            hops += 1
+            leg += 1
+            _leg_on(world, order, spur, leg, 0.0, spur_wait)
+            _leg_off(world, order, line, leg - 1, arc_in, arc, board_t, last=0)
+            line.belt.release(slot)              # hand-over-hand: hold, then let go
+            line, slot, arc = spur, spur_slot, 0.0
+            visited.add(line.id)
+            if tote is not None and world.recording():
+                p0 = line.points[0]
+                tote.kf(env.now, p0[0], p0[1], "belt")
+            continue
+
+        yield from _ride_belt(world, line, arc, line.length, tote)
+        arc = line.length
+        nxt = line.next_line
+        if nxt is not None and nxt.id not in visited and hops < max_hops:
+            req_t = env.now
+            nslot = nxt.belt.request()
+            yield nslot                          # blocks when the belt ahead is full
+            waited = env.now - req_t
+            _, nxt_arc = nxt.project(line.points[-1])
+            hops += 1
+            leg += 1
+            _leg_on(world, order, nxt, leg, nxt_arc, waited)
+            _leg_off(world, order, line, leg - 1, arc_in, arc, board_t, last=0)
+            line.belt.release(slot)
+            line, slot, arc = nxt, nslot, nxt_arc
+            visited.add(line.id)
+            if tote is not None and world.recording():
+                p0 = line.point_at(arc)
+                tote.kf(env.now, p0[0], p0[1], "belt")
+            continue
+        break
+
+    # 梱包: at the 引き込み's OWN benches when the drawing puts benches at its end,
+    # else at the shared pack pool (a spur nobody stands at still runs).
+    end = line.point_at(arc)
+    pool = line.bench if line.bench is not None else world.packers
+    pack_req_t = env.now
+    preq = pool.request()
+    yield preq
+    seize_t = env.now
+    # The 引き込み wait and the 梱包台 wait are both "this tote could not be packed
+    # yet", so they land together on pack_start's existing wait field.
+    world.log(t=env.now, event="pack_start", order_id=order.order_id,
+              wait=pack_wait + (seize_t - pack_req_t), resource="packer")
+    if tote is not None and world.recording():
+        tote.kf(env.now, end[0], end[1], "pack")
+    yield env.timeout(pack_time)
+    pool.release(preq)
+    # The tote occupies the 引き込み until it is packed: the belt AND the bench are
+    # where it physically stands, so the slot is only freed now — and freeing it is
+    # what lets a tote stalled on the trunk come in (no-op for a belt that is not a
+    # 引き込み, which nobody is waiting on).
+    line.belt.release(slot)
+    _signal_divert(line)
+    if tote is not None and world.recording():
+        tote.kf(env.now, end[0], end[1], "pack")
+    world.log(t=env.now, event="pack_done", order_id=order.order_id,
+              busy=env.now - seize_t, resource="packer")
+    _leg_off(world, order, line, leg, arc_in, arc, board_t, last=1)
     world.log(t=env.now, event="order_complete", order_id=order.order_id,
               cycle=env.now - arrival, dist=dist_per_order, due=order.due_s)
 

@@ -224,8 +224,10 @@ def test_the_line_actually_carries_the_work():
     assert kpis["completion_rate"] > 0.85
     # A ride is real time (the inspection dwell), never instantaneous.
     assert kpis["conveyor_transit_mean_s"] > 30.0
-    # ...and the drawn line has enough slots that it is not the constraint.
-    assert kpis["conveyor_jams"] == 0
+    # ...and the drawn line has enough slots that it is not the constraint. With
+    # the chained belts a hand-over may wait a moment at a busy 引き込み (that IS
+    # accumulation working), so the pin is the RATIO staying marginal, not zero.
+    assert kpis["conveyor_block_ratio"] < 0.05
     assert kpis["bottleneck"] == "picking"
 
 

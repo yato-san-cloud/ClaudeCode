@@ -77,17 +77,38 @@ class ConveyorLine:
     REMAINING distance to the discharge end, so boarding next to the discharge is
     genuinely quicker than boarding at the infeed.
 
-    ``belt`` is this line's own slot pool (~1 tote per metre of ITS length, min 1),
-    so two conveyors jam independently and a slow pack stage backs up only the
-    line that feeds it."""
+    ``belt`` is this line's own slot pool (one tote per ``Conveyor.tote_pitch_m``
+    of ITS length, historically 1/m, min 1), so two conveyors jam independently and
+    a slow pack stage backs up only the line that feeds it.
+
+    A line can also be a link in a CHAIN rather than a world of its own:
+
+    * ``next_line`` — the belt this one discharges ONTO (its last point sits on
+      that belt's path). A tote hands over there instead of being packed.
+    * ``junctions`` — ``(arc, spur)`` pairs in arc order: where a 引き込み(spur)
+      branches off THIS belt (the spur's infeed sits on this path). A tote riding
+      past turns into one of them.
+    * ``host`` — the reverse of ``junctions``: the trunk a spur branches off.
+    * ``bench`` / ``n_bench`` — a spur's OWN 梱包台 (the stations standing at its
+      discharge end). ``None`` = this belt has no bench of its own and its totes
+      fall back to the shared pack pool (never blocks).
+    * ``divert_wake`` — on a TRUNK, the broadcast a tote stalled at one of its
+      junctions waits on: fired whenever any 引き込み hanging off this trunk frees
+      a slot, so nobody sits still while a bench downstream of them goes idle."""
 
     id: str
     points: list[tuple[float, float]]
     seglens: list[float]                    # euclidean length of each segment
     length: float                           # total path length (m)
     speed: float                            # m/s (> 0)
-    capacity: int                           # slots (~1 tote / metre)
+    capacity: int                           # slots (length / tote pitch)
     belt: simpy.Resource
+    next_line: ConveyorLine | None = None
+    junctions: list[tuple[float, ConveyorLine]] = field(default_factory=list)
+    host: ConveyorLine | None = None
+    bench: simpy.Resource | None = None
+    n_bench: int = 0
+    divert_wake: simpy.Event | None = None
 
     def project(self, p) -> tuple[tuple[float, float], float]:
         """Nearest point ON the polyline to ``p`` + its arc length from the infeed.
@@ -138,6 +159,140 @@ class ConveyorLine:
                 return out
             acc += seg
         return [self.points[-1]]
+
+    def point_at(self, arc: float) -> tuple[float, float]:
+        """The point on the path at arc length ``arc`` (clamped to both ends)."""
+        arc = max(arc, 0.0)
+        acc = 0.0
+        for i, seg in enumerate(self.seglens):
+            if arc <= acc + seg + 1e-9:
+                a, b = self.points[i], self.points[i + 1]
+                t = min(max((arc - acc) / seg, 0.0), 1.0) if seg > 1e-12 else 0.0
+                return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            acc += seg
+        return self.points[-1]
+
+    def slice_pts(self, a0: float, a1: float) -> list[tuple[float, float]]:
+        """Corner waypoints from arc ``a0`` to arc ``a1`` (``a0`` first, ``a1`` last).
+
+        The generalisation of :meth:`tail` a CHAINED ride needs: a tote may leave
+        this belt at a 引き込み junction partway along, so the replay track has to
+        follow the polyline between two arbitrary arcs, not only from an arc to the
+        discharge end. ``tail`` is left alone — it is the legacy single-belt path."""
+        a0 = max(a0, 0.0)
+        a1 = max(min(a1, self.length), a0)
+        out = [self.point_at(a0)]
+        acc = 0.0
+        for i, seg in enumerate(self.seglens):
+            acc += seg
+            if acc <= a0 + 1e-9:
+                continue
+            if acc >= a1 - 1e-9:
+                break
+            p = self.points[i + 1]
+            if math.dist(p, out[-1]) > 1e-9:
+                out.append(p)
+        end = self.point_at(a1)
+        if math.dist(end, out[-1]) > 1e-9:
+            out.append(end)
+        return out
+
+
+# A belt end / infeed this close to another belt's path is physically ON it. One
+# drawn corner rounds to a few centimetres, so a metre-ish tolerance is what
+# "they touch" means on a drawing; wider than that and two parallel lines running
+# past each other would be spliced into one.
+JOIN_TOL_M = 0.8
+# Stations this close to a 引き込み(spur)'s discharge end are ITS 梱包台. A bench
+# stands beside the belt end with room to work, so the reach is a couple of metres,
+# not a couple of centimetres.
+BENCH_REACH_M = 3.0
+
+
+def _attach_to(lines: list[ConveyorLine], p, exclude: set[str]):
+    """The belt whose PATH ``p`` sits on, as ``(line, arc)`` — or ``None``.
+
+    Pure geometry, no randomness: the nearest path within :data:`JOIN_TOL_M`, ties
+    broken by belt id so the resolved topology is identical on every run."""
+    best = None
+    for c in lines:
+        if c.id in exclude:
+            continue
+        xy, arc = c.project(p)
+        d = math.dist(p, xy)
+        if d <= JOIN_TOL_M and (best is None or (d, c.id) < (best[0], best[1].id)):
+            best = (d, c, arc)
+    return (best[1], best[2]) if best is not None else None
+
+
+def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[ConveyorLine]:
+    """Resolve the belts into ONE line: serial hand-overs, 引き込み branches, 梱包台.
+
+    A real 出荷ライン is a chain — 検品ライン → 本線 → 引き込み → 梱包台 — and its
+    interesting behaviour is the jam travelling BACKWARDS along it (引き込みが満杯
+    ⇒ 本線に滞留 ⇒ 検品ラインが止まる ⇒ ピッカーが手放せない). Modelling each belt as
+    its own world made every one of those couplings invisible.
+
+    Two different joints, both read off the drawn geometry (deterministic, no
+    search, no randomness):
+
+    * **直列** — belt A's DISCHARGE end (``points[-1]``) sits on belt B's path,
+      so A hands over to B (``A.next_line = B``).
+    * **枝分かれ** — a spur's INFEED (``points[0]``) sits on the trunk's path, so
+      the trunk carries a junction at that arc (``trunk.junctions``). Which belts
+      are spurs is a DESIGN statement, not geometry: they are the belts named by
+      the conveyor legs into 梱包 (``flowgraph.pack_conveyor_ids``).
+
+    Returns the belts a picker may board (``flowgraph.entry_conveyor_ids``,
+    falling back to every line). Nothing here fires unless the flow says so, so a
+    model with a single unchained belt comes back exactly as it went in."""
+    from whsim import flowgraph
+
+    def _refs(fn):
+        try:
+            return fn(model) or set()
+        except Exception:      # noqa: BLE001 — a broken flow must not break the run
+            return set()
+
+    by_id = {c.id: c for c in lines}
+    spurs = [by_id[r] for r in sorted(_refs(flowgraph.pack_conveyor_ids)) if r in by_id]
+    spur_ids = {s.id for s in spurs}
+
+    # 梱包台: the stations standing at a spur's discharge end become THAT spur's
+    # own bench pool. A spur nobody stands at keeps ``bench=None`` and its totes
+    # fall back to the shared pack pool — a half-drawn line still runs.
+    stations = list(getattr(model.resources, "stations", None) or [])
+    for s in spurs:
+        end = s.points[-1]
+        n = sum(max(0, int(st.count)) for st in stations
+                if math.dist((float(st.x), float(st.y)), end) <= BENCH_REACH_M)
+        if n > 0:
+            s.n_bench = n
+            s.bench = simpy.Resource(env, capacity=n)
+
+    # 枝分かれ: hang each spur off the trunk its infeed touches. Spurs are never
+    # junction hosts — a 引き込み feeds benches, not another 引き込み.
+    for s in spurs:
+        hit = _attach_to(lines, s.points[0], exclude=spur_ids)
+        if hit is not None:
+            hit[0].junctions.append((hit[1], s))
+            s.host = hit[0]      # so freeing a spur slot can wake the trunk's waiters
+    for c in lines:
+        c.junctions.sort(key=lambda j: (j[0], j[1].id))
+
+    # 直列: a belt discharging onto another belt hands over instead of packing.
+    # A spur is a terminal on both sides (it ends at its benches), so it is
+    # neither a hand-over source nor a hand-over target.
+    for a in lines:
+        if a.id in spur_ids:
+            continue
+        hit = _attach_to(lines, a.points[-1], exclude=spur_ids | {a.id})
+        if hit is not None:
+            a.next_line = hit[0]
+
+    entry_refs = _refs(flowgraph.entry_conveyor_ids)
+    entry = [c for c in lines if c.id in entry_refs]
+    return entry or list(lines)
 
 
 @dataclass
@@ -197,6 +352,10 @@ class World:
     # speed and slot capacity). Empty ⇒ no conveyor (has_conveyor False) and the
     # engine takes the legacy carry-to-pack path unchanged.
     conveyors: list[ConveyorLine] = field(default_factory=list)
+    # Which lines a PICKER may hand a tote to (``flowgraph.entry_conveyor_ids``).
+    # Always non-empty when ``conveyors`` is: it falls back to every active line,
+    # which is the behaviour from before belts could be chained.
+    entry_conveyors: list[ConveyorLine] = field(default_factory=list)
     workers: list[Worker] = field(default_factory=list)
     helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
     totes: list[Tote] = field(default_factory=list)      # goods tracks (replay only)
@@ -475,10 +634,14 @@ def build(
         speed = float(cv.speed_mps)
         if not (speed > 0.0):
             speed = DEFAULT_CONVEYOR_SPEED_MPS
-        cap = max(1, int(total))
+        # Slots = how many totes physically fit, i.e. length / tote pitch. An
+        # unstated (or non-positive) pitch keeps the historical 1 個/m.
+        pitch = float(cv.tote_pitch_m) if cv.tote_pitch_m is not None else 0.0
+        cap = max(1, int(total / pitch)) if pitch > 0.0 else max(1, int(total))
         conveyor_lines.append(ConveyorLine(
             id=cv.id, points=pts, seglens=seglens, length=total, speed=speed,
             capacity=cap, belt=simpy.Resource(env, capacity=cap)))
+    entry_lines = _wire_conveyor_chain(model, env, conveyor_lines)
     # Wall-aware routing graph (only meaningful when walls exist). A caller may
     # inject a pre-built one (shared across replications of the same layout).
     if graph is None:
@@ -620,6 +783,7 @@ def build(
         packers=simpy.Resource(env, capacity=n_packers),
         put_wall=simpy.Resource(env, capacity=put_wall_cap),
         has_conveyor=has_conveyor, conveyors=conveyor_lines,
+        entry_conveyors=entry_lines,
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),

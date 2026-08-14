@@ -4431,6 +4431,7 @@
           ]
         ],
         "speed_mps": 0.35,
+        "tote_pitch_m": 0.6,
         "elevation_m": 0.35
       },
       {
@@ -4450,6 +4451,7 @@
           ]
         ],
         "speed_mps": 0.35,
+        "tote_pitch_m": 0.6,
         "elevation_m": 0.35
       },
       {
@@ -4481,6 +4483,7 @@
           ]
         ],
         "speed_mps": 0.5,
+        "tote_pitch_m": 0.6,
         "elevation_m": 0.35
       },
       {
@@ -4496,6 +4499,7 @@
           ]
         ],
         "speed_mps": 0.5,
+        "tote_pitch_m": 0.6,
         "elevation_m": 0.95
       },
       {
@@ -4511,6 +4515,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4526,6 +4531,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4541,6 +4547,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4556,6 +4563,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4571,6 +4579,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4586,6 +4595,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4601,6 +4611,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4616,6 +4627,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4631,6 +4643,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       },
       {
@@ -4646,6 +4659,7 @@
           ]
         ],
         "speed_mps": 0.3,
+        "tote_pitch_m": 0.45,
         "elevation_m": 0.35
       }
     ],

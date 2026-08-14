@@ -215,6 +215,55 @@ def conveyor_ids_in_use(model) -> set[str] | None:
     return refs
 
 
+def _conveyor_refs(model, *, src_role: str = "", dst_role: str = "") -> set[str] | None:
+    """Belts named by the conveyor legs LEAVING ``src_role`` / ENTERING ``dst_role``.
+
+    Same three-valued answer as :func:`conveyor_ids_in_use`, applied to one end of
+    the leg: ``None`` = "no such conveyor leg is designed", an EMPTY set =
+    「コンベアだが機番の指定なし」, a non-empty set = exactly those belts. Callers
+    treat both falsy answers as "no gate" so a half-authored flow never removes
+    behaviour (never-blocks).
+    """
+    g = resolve(model)
+    role_of = {n.id: n.role for n in g.nodes}
+    refs: set[str] = set()
+    found = False
+    for e in g.edges:
+        if e.transport != "conveyor":
+            continue
+        if src_role and role_of.get(e.src) != src_role:
+            continue
+        if dst_role and role_of.get(e.dst) != dst_role:
+            continue
+        found = True
+        if e.equipment_ref:
+            refs.add(e.equipment_ref)
+    return refs if found else None
+
+
+def entry_conveyor_ids(model) -> set[str] | None:
+    """Belts a PICKER may hand a tote to (conveyor legs out of a ``pick`` process).
+
+    A chained line has an entrance: 検品ラインに載せるのであって、引き込みや本線に
+    直接載せるのではない. Without this the engine let a picker board whatever belt
+    ran nearest — on a line whose 本線 and 引き込み pass right through the pick
+    area, that is halfway down the chain, and the jam upstream of it can never
+    reach the picker. ``None`` (no such leg authored) keeps the historical
+    "every belt is boardable" behaviour.
+    """
+    return _conveyor_refs(model, src_role="pick")
+
+
+def pack_conveyor_ids(model) -> set[str] | None:
+    """Belts that DELIVER to packing (conveyor legs into a ``pack`` process).
+
+    These are the 引き込み(spur) belts: the leg that ends at a work bench rather
+    than handing on to another belt. ``None`` = packing is not fed by a belt, so
+    the engine keeps the pooled pack stations.
+    """
+    return _conveyor_refs(model, dst_role="pack")
+
+
 def diagnose(model) -> list[dict]:
     """Inconsistencies in the design, as warnings. Never blocks, never raises.
 

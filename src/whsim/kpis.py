@@ -189,7 +189,21 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         cv_area += _occ * (t - _t)
         _t, _occ = t, _occ + delta
     cv_area += _occ * max(res.duration_s - _t, 0.0)   # totes still on the belt at the end
+    # A CHAINED line emits one on/off pair per BELT a tote rides, and a tote really
+    # does hold a slot on each belt it is on, so summing the per-belt occupancy
+    # against the summed capacity is exactly right — no leg is double-counted,
+    # because the second leg's slot is a second physical slot.
     cv_util = cv_area / max(cv_cap * res.duration_s, 1e-9) if cv_cap else 0.0
+    # 搬送し終えたトート数. On a chain each tote passes several belts, so only the
+    # LAST leg is a completed transport (``last=1``); the legacy single-belt path
+    # writes no such field and every leg is a last one — hence the default.
+    cv_totes = sum(1 for e in cv_off if e.get("last", 1))
+    # 詰まり: a boarding that had to WAIT is a slot that was not free, i.e. the belt
+    # ahead is full. The ratio says how bad, the first one says when it started —
+    # a line that jams 20 minutes in looks fine in a 10-minute run.
+    cv_blocked = sum(1 for e in cv_on if e.get("blocked"))
+    cv_block_ratio = cv_blocked / len(cv_on) if cv_on else 0.0
+    cv_first_block = min((float(e["t"]) for e in cv_on if e.get("blocked")), default=None)
 
     # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
     # Populated only when replenishment was enabled (replenish_done / stockout_wait
@@ -294,11 +308,17 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "sorter_channels": sorter_channels,
         # コンベア搬送: 搬送数 / 平均搬送時間 / ジャム(待ち) / 稼働率.
         "conveyor_utilization": cv_util,
-        "conveyor_totes": len(cv_off),
+        "conveyor_totes": cv_totes,
         "conveyor_transit_mean_s": statistics.fmean(cv_transits) if cv_transits else 0.0,
         "conveyor_wait_mean_s": statistics.fmean(cv_waits) if cv_waits else 0.0,
         "conveyor_jams": sum(e.get("blocked", 0) for e in cv_on),
         "conveyor_capacity": cv_cap,
+        # コンベア詰まり: how OFTEN a hand-over waited, and WHEN it first did.
+        "conveyor_block_ratio": cv_block_ratio,
+        "conveyor_time_to_first_block_s": cv_first_block,
+        # ...and WHERE (per belt), which is the only read-out that points at the
+        # 引き込み/本線 to fix rather than at "the conveyor".
+        "conveyors": _per_belt(res, model, cv_on, cv_off),
         "n_conveyors": getattr(res, "n_conveyors", 0),
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
@@ -339,6 +359,102 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "labour_rate_per_hr": rate,
         "currency": c["currency"],
     }
+
+
+def _per_belt(res: RunResult, model: WarehouseModel | None,
+              cv_on: list[dict], cv_off: list[dict]) -> dict:
+    """Per-belt コンベア詰まり read-out — 1枚で「どのベルトで詰まっているか」.
+
+    The line totals say the belt system is jammed; a chained line
+    (検品ライン→本線→引き込み) needs to say WHERE, because the fix is different for
+    each: a full 引き込み is a 梱包台 problem, a full 本線 is a line-speed problem.
+    Every field is derived from the event log — the engine hard-codes no metric.
+
+    Occupancy is integrated from the same +1/-1 step function as the line total,
+    restricted to one belt; capacity comes from ``analytic.belt_slots``, the
+    engine's own slot rule, so 「このベルトは8割埋まっている」 means the same thing in
+    the estimate, in the run and here. Unknown capacity (a legacy caller with no
+    model, or a belt that is no longer drawn) ⇒ ``capacity`` 0 and ``utilization``
+    0.0, with every other field still reported — never blocks.
+    """
+    if not cv_on and not cv_off:
+        return {}
+    caps: dict[str, int] = {}
+    if model is not None:
+        try:
+            from whsim.analytic import belt_slots
+            caps = {str(cv.id): belt_slots(cv)
+                    for cv in (model.resources.conveyors or [])}
+        except Exception:      # noqa: BLE001 — a read-out must never break the KPIs
+            caps = {}
+
+    steps: dict[str, list[tuple[float, int]]] = {}
+    stat: dict[str, dict] = {}
+    for e in cv_on:
+        b = str(e.get("conveyor", ""))
+        d = stat.setdefault(b, {"boardings": 0, "blocked": 0, "waits": [], "first": None})
+        d["boardings"] += 1
+        d["waits"].append(float(e.get("wait", 0.0)))
+        if e.get("blocked"):
+            d["blocked"] += 1
+            t = float(e["t"])
+            if d["first"] is None or t < d["first"]:
+                d["first"] = t
+        steps.setdefault(b, []).append((float(e["t"]), 1))
+    for e in cv_off:
+        steps.setdefault(str(e.get("conveyor", "")), []).append((float(e["t"]), -1))
+
+    out: dict[str, dict] = {}
+    for belt, pts in steps.items():
+        d = stat.get(belt) or {"boardings": 0, "blocked": 0, "waits": [], "first": None}
+        area, peak, prev_t, occ = 0.0, 0, 0.0, 0
+        # Ties are ordered RELEASE-then-BOARD, which is what physically happens
+        # (the waiting request is granted the instant the slot is freed, at the
+        # same sim time). The integral is identical either way — a tie spans zero
+        # time — but the other order would report a peak ABOVE the belt's own slot
+        # count, which reads as a broken KPI rather than a full belt.
+        for t, delta in sorted(pts, key=lambda p: (p[0], p[1])):
+            area += occ * (t - prev_t)
+            prev_t, occ = t, occ + delta
+            peak = max(peak, occ)
+        area += occ * max(res.duration_s - prev_t, 0.0)   # still riding at the end
+        cap = caps.get(belt, 0)
+        out[belt] = {
+            "utilization": (area / max(cap * res.duration_s, 1e-9)) if cap else 0.0,
+            "peak_occupancy": peak,
+            "capacity": cap,
+            "boardings": d["boardings"],
+            "blocked": d["blocked"],
+            "block_ratio": d["blocked"] / d["boardings"] if d["boardings"] else 0.0,
+            "time_to_first_block_s": d["first"],
+            "wait_mean_s": statistics.fmean(d["waits"]) if d["waits"] else 0.0,
+        }
+    return out
+
+
+def _merge_per_belt(per: list[dict]) -> dict:
+    """Average the per-belt read-outs across replications.
+
+    ``compute``'s generic loop can only average TOP-LEVEL numerics, so without
+    this the per-belt view would silently report replication #1 only. A belt that
+    never blocked in a given rep contributes no ``time_to_first_block_s`` (it has
+    none), so that field is the mean over the reps where it DID block — and stays
+    ``None`` when it never did, rather than being read as 0 s (「開始直後に詰まる」).
+    """
+    belts: list[str] = []
+    for rep in per:
+        for b in rep:
+            if b not in belts:
+                belts.append(b)
+    out: dict[str, dict] = {}
+    for b in belts:
+        rows = [rep[b] for rep in per if b in rep]
+        merged: dict = {}
+        for key in rows[0]:
+            vals = [r[key] for r in rows if isinstance(r.get(key), (int, float))]
+            merged[key] = statistics.fmean(vals) if vals else None
+        out[b] = merged
+    return out
 
 
 def _measured_productivity(res: RunResult, model: WarehouseModel | None,
@@ -436,6 +552,14 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     agg["replications"] = len(results)
     agg["n_pickers"] = results[0].n_pickers
     agg["n_packers"] = results[0].n_packers
+    # コンベア詰まり: the two fields the generic loop above cannot average — a nested
+    # dict (it would keep replication #1 only) and a "when" that is ``None`` when
+    # the run never jammed (it would keep whatever rep #1 happened to say).
+    agg["conveyors"] = _merge_per_belt([p["conveyors"] for p in per])
+    _firsts = [p["conveyor_time_to_first_block_s"] for p in per
+               if isinstance(p["conveyor_time_to_first_block_s"], (int, float))]
+    agg["conveyor_time_to_first_block_s"] = (statistics.fmean(_firsts)
+                                             if _firsts else None)
 
     # Bottleneck = the busiest stage (pickers, pack stations, AGV fleet, or the
     # 種まき put wall when total picking is in use).
@@ -520,4 +644,20 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     agv_busy_s = agg.get("agv_busy_s", 0.0)
     if agv_busy_s > 0 and agg.get("agv_wait_s", 0.0) > 0.05 * agv_busy_s:
         agg["verdict"] += "。AGVの通路待ちが発生しています（台数/レイアウトの見直し余地）"
+    # コンベア詰まり: a line that fills up is the last thing a proposal should let
+    # the customer discover on site. Fires on a material block rate OR on any block
+    # inside the horizon at all — a line that starts jamming at minute 40 of a
+    # 60-minute run is a jammed line, not a rounding error — and names the belt it
+    # started on, because 引き込みが満杯 and 本線が遅い need different fixes. No belt
+    # in use ⇒ no blocks ⇒ nothing appended (additive, verdict byte-identical).
+    first_block = agg.get("conveyor_time_to_first_block_s")
+    if agg.get("conveyor_capacity") and (
+            agg.get("conveyor_block_ratio", 0.0) > 0.05 or first_block is not None):
+        belts = [(v.get("time_to_first_block_s"), b)
+                 for b, v in (agg.get("conveyors") or {}).items()
+                 if isinstance(v.get("time_to_first_block_s"), (int, float))]
+        when = (f"最初の詰まり: {first_block / 60:.0f}分" if first_block is not None
+                else f"手待ち率 {agg['conveyor_block_ratio'] * 100:.0f}%")
+        where = f", ベルト{min(belts)[1]}" if belts else ""
+        agg["verdict"] += f"。コンベアに滞留が出ています（{when}{where}）"
     return agg

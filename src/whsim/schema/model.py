@@ -446,6 +446,15 @@ class Conveyor(BaseModel):
     # (see docs/ARCHITECTURE.md §3), but a saved model had no way to say it, so the
     # upper deck's totes rendered inside the lower belt.
     elevation_m: float | None = None
+    # トート間ピッチ (m) — how much belt ONE tote occupies, i.e. the belt's slot
+    # count is ``length / tote_pitch_m``. ``None`` ⇒ the engine's historical
+    # 1 slot per metre, so every model written before this field accumulates
+    # exactly as it did. A pitch is a property of what rides the belt (オリコン
+    # なら ~0.45 m, パレットなら ~1.3 m), and it is the ONLY thing that decides how
+    # many totes a full line holds — which is what a 引き込み(spur) jam backing up
+    # into the 本線 is measured in. Non-positive values fall back to 1 個/m too
+    # (never blocks, never divides by zero).
+    tote_pitch_m: float | None = None
 
 
 class Station(BaseModel):

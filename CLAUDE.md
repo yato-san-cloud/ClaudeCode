@@ -78,7 +78,15 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   — NOT the time-average `Lq`), **wave** (the window scoop is self-limiting,
   `B = λ·W`; the gate hold is picker-busy on both sides), **zone** (a serpentine
   runs each aisle end to end ⇒ ℓ, not ℓ/3) and **conveyor** (asymmetric legs:
-  out from the last hand-off, back only to the nearest belt). 解析↔DES agreement
+  out from the last hand-off, back only to the nearest belt; chained belts add
+  詰まり — `capacity_line = min(Σ並列 v/pitch per stage, μ_pack)`, over-feed ⇒
+  `time_to_jam ≈ K/(λ−capacity)` + picker throttled at capacity, GTP-style;
+  engine side rides flow_edges-derived chains hand-over-hand with **greedy**
+  junction diversion — target-commit starves benches, 0.62 vs 0.977 util at
+  peak — and `Conveyor.tote_pitch_m` sets slot density, KPIs
+  `conveyor_block_ratio`/`time_to_first_block`/per-belt `kpis["conveyors"]`,
+  pinned by `tests/test_{engine_conveyor_chain,analytic_conveyor_jam}.py`
+  with unchained models byte-identical). 解析↔DES agreement
   is pinned by `tests/test_analytic_aisle_travel.py` on **every** template
   (|Δutil| < 0.08 each, catalogue mean < 0.04) — it used to check two, and the
   six unchecked ones hid residuals up to 0.81.

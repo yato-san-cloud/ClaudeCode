@@ -62,6 +62,13 @@ INSPECT_Y = (10.4, 8.8)            # ライン検品 2列 (フリーコンベア
 INSPECT_X0 = 10.0
 INSPECT_SPEED = 0.35               # 遅いのが仕様: この滞留時間が検品そのもの
 TRUNK_SPEED = 0.5
+# 折りたたみコンテナ ~0.53 × 0.37 m。ベルト上の1個分ピッチ＝スロット密度（≒滞留
+# 容量）で、未指定の歴史既定 1個/m は 2.6 m の引き込みを「2枠」と数えてバッファを
+# ほぼゼロに見せる（詰まりを早く言い過ぎる）。容器は本線→引き込みで向きを変えずに
+# 滑るだけで、進行軸のほうが 90° 回る — だから本線・検品ライン（長辺リード）と
+# 引き込み（短辺リード）でピッチが違うのは仕様であって不揃いではない。
+TOTE_PITCH_LONG = 0.6              # 本線・検品ライン: 長辺 0.53 ＋ 隙間
+TOTE_PITCH_SHORT = 0.45            # 引き込み: 短辺 0.37 ＋ 隙間
 DECK_LOW, DECK_HIGH = 0.35, 0.95   # 2段駆動コンベアのトレッド高さ (下段 / 上段)
 
 
@@ -121,6 +128,7 @@ def _conveyors() -> list[dict]:
             "id": f"insp{n}",
             "points": [[INSPECT_X0, y], [x_end, y], [x_end, TRUNK_Y]],
             "speed_mps": INSPECT_SPEED,
+            "tote_pitch_m": TOTE_PITCH_LONG,
             "elevation_m": DECK_LOW,
         })
     # 本線 (下段): the trunk, its 停止線 at the west end of the bench run, then the
@@ -130,6 +138,7 @@ def _conveyors() -> list[dict]:
         "points": [[TRUNK_X1, TRUNK_Y], [TRUNK_X0 + 0.9, TRUNK_Y], [9.6, 4.35],
                    [8.4, 5.0], [6.8, 5.6], [5.0, 5.6]],
         "speed_mps": TRUNK_SPEED,
+        "tote_pitch_m": TOTE_PITCH_LONG,
         "elevation_m": DECK_LOW,
     })
     # 上段: the empty containers going back to the chute end over the same
@@ -139,14 +148,17 @@ def _conveyors() -> list[dict]:
         "id": "trunk_up",
         "points": [[TRUNK_X0 + 0.9, TRUNK_Y], [TRUNK_X1, TRUNK_Y]],
         "speed_mps": TRUNK_SPEED,
+        "tote_pitch_m": TOTE_PITCH_LONG,
         "elevation_m": DECK_HIGH,
     })
     # 引き込みコンベア 5ヶ所 × 両側: pulled off the trunk to each bench pair.
     for i, x in enumerate(SPUR_X, start=1):
         out.append({"id": f"spur{i}n", "points": [[x, TRUNK_Y], [x, TRUNK_Y + SPUR_REACH]],
-                    "speed_mps": 0.3, "elevation_m": DECK_LOW})
+                    "speed_mps": 0.3, "tote_pitch_m": TOTE_PITCH_SHORT,
+                    "elevation_m": DECK_LOW})
         out.append({"id": f"spur{i}s", "points": [[x, TRUNK_Y], [x, TRUNK_Y - SPUR_REACH]],
-                    "speed_mps": 0.3, "elevation_m": DECK_LOW})
+                    "speed_mps": 0.3, "tote_pitch_m": TOTE_PITCH_SHORT,
+                    "elevation_m": DECK_LOW})
     return out
 
 
