@@ -11,7 +11,7 @@
 
 - `議事録/` (folder_id: 400559758901)
   - `index.html` (file_id: 2350976207572) — 全議事録のインデックス(ブラウザ用)。毎回再生成
-  - `index.md` — 同内容のMarkdown版(Boxプレビュー用)。毎回再生成
+  - `index.md` (file_id: 2407409730832) — 同内容のMarkdown版(Boxプレビュー用)。毎回再生成
   - `_processed.json` (file_id: 2350978796466) — 処理済みPLAUD録音のリスト。title/summaryを含み、インデックス再生成の正データ
   - `_運用ルール.md` (file_id: 2350987943846) — 本ルールの正本
   - `_Copilotエージェント設定手順.md` (file_id: 2352740284529) — 議事録Q&A用Copilotエージェントの設定手順
@@ -35,6 +35,7 @@
 6. `index.html` と `index.md` を `_processed.json` のtitle/summaryから再生成して `upload_file_version` で更新(顧客別セクション×日付降順、列: 日付/会議名/要点/Markdown/HTML)
 7. `_processed.json` に処理済みエントリを追記: `{plaud_id, meeting_date, customer, title, summary, md_file_id, html_file_id, processed_at, skipped:false}`
 8. 内容が実質ない録音(数秒・無音・雑談のみ)は保存せず `{plaud_id, meeting_date, skipped:true, reason}` で記録のみ(再処理防止)
+9. **文字起こし・AI要約が未生成の録音**(録音は長いがget_note/get_transcriptが空)は `_processed.json` に**記録しない**。PLAUD側で文字起こしが生成され次第、翌日以降の定期実行が自動で拾う
 
 ## 顧客判定の目安
 
