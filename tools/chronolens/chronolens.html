@@ -1,0 +1,2018 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chrono-lens v1</title>
+<style>
+/* ============================================================ 意匠は最小限。
+   v1 は機構優先: 動く・正しい・軽い。                                        */
+:root{
+  --bg:#0d1117; --bg2:#141b24; --bg3:#1b2532; --line:#2a3644;
+  --fg:#e6edf3; --fg2:#9fb0c3; --fg3:#6b7f95;
+  --accent:#4fc3f7; --warn:#ffb74d; --err:#ff6b6b; --ok:#7bd88f;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+  overflow:hidden}
+.hidden{display:none !important}
+button,.btn{background:var(--bg3);color:var(--fg);border:1px solid var(--line);
+  border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px}
+button:hover,.btn:hover{background:#243244;border-color:#3d5068}
+button:disabled{opacity:.45;cursor:default}
+button.on{background:var(--accent);color:#04121b;border-color:var(--accent);font-weight:600}
+select,input[type=number]{background:var(--bg3);color:var(--fg);border:1px solid var(--line);
+  border-radius:4px;padding:3px 5px;font-size:12px;font-family:var(--mono)}
+input[type=range]{accent-color:var(--accent);vertical-align:middle}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+#top{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--bg2);
+  border-bottom:1px solid var(--line);height:44px}
+#top h1{margin:0;font-size:15px;letter-spacing:.06em;font-weight:600}
+#top h1 em{font-style:normal;color:var(--accent)}
+#top .ver{font-size:10px;color:var(--fg3);margin-left:4px}
+#runinfo{font-family:var(--mono);font-size:11px;color:var(--fg2);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+.spacer{flex:1}
+
+#drop{position:absolute;inset:44px 0 0 0;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:14px;text-align:center;padding:24px}
+#drop .box{border:2px dashed var(--line);border-radius:12px;padding:34px 50px;max-width:760px}
+#drop h2{margin:0 0 8px;font-size:18px;font-weight:600}
+#drop p{margin:5px 0;color:var(--fg2);font-size:12.5px}
+#drop code{font-family:var(--mono);color:var(--accent);font-size:12px}
+body.dragging #drop .box{border-color:var(--accent);background:#12202c}
+
+#report{position:absolute;inset:44px 0 0 0;overflow:auto;padding:16px 20px;background:var(--bg)}
+#report h2{margin:0 0 4px;font-size:16px}
+#report .lead{color:var(--fg2);margin:0 0 14px;font-size:12.5px}
+table.rep{border-collapse:collapse;width:100%;max-width:1200px;font-size:12px}
+table.rep th,table.rep td{border:1px solid var(--line);padding:5px 8px;text-align:left;
+  vertical-align:top}
+table.rep th{background:var(--bg3);color:var(--fg2);font-weight:600;white-space:nowrap}
+table.rep td.sev{white-space:nowrap;font-weight:600}
+td.sev.error{color:var(--err)} td.sev.warn{color:var(--warn)} td.sev.info{color:var(--fg3)}
+table.rep td.ex{font-family:var(--mono);font-size:11px;color:var(--fg2);white-space:pre-wrap;
+  word-break:break-all;max-width:430px}
+.badge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;
+  font-family:var(--mono);border:1px solid}
+.badge.error{color:var(--err);border-color:var(--err)}
+.badge.warn{color:var(--warn);border-color:var(--warn)}
+.badge.ok{color:var(--ok);border-color:var(--ok)}
+
+#app{position:absolute;inset:44px 0 0 0;display:flex}
+#side{width:266px;min-width:266px;border-right:1px solid var(--line);background:var(--bg2);
+  overflow:auto;padding:10px 11px 30px}
+#side h3{margin:12px 0 6px;font-size:11px;letter-spacing:.09em;color:var(--fg3);
+  text-transform:uppercase;font-weight:700}
+#side h3:first-child{margin-top:0}
+.kv{display:flex;justify-content:space-between;gap:8px;padding:2px 0;font-size:12px}
+.kv .k{color:var(--fg2)}
+.kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.kv .v small{color:var(--fg3);font-size:10px}
+.srcnote{font-size:10.5px;color:var(--fg3);margin:3px 0 0;line-height:1.45}
+.util{display:grid;grid-template-columns:44px 1fr 44px;gap:5px;align-items:center;
+  font-size:11px;font-family:var(--mono);margin:2px 0}
+.util .bar{height:7px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.util .bar i{display:block;height:100%;background:var(--accent)}
+
+#center{flex:1;display:flex;flex-direction:column;min-width:0}
+#rangebar{padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg2)}
+#rangeCanvasWrap{position:relative;height:46px}
+#rangeCanvas{width:100%;height:46px;display:block;cursor:crosshair}
+#rangeCtl{display:flex;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap;font-size:11.5px}
+#rangeCtl .lbl{color:var(--fg3)}
+#tabs{display:flex;gap:2px;padding:6px 10px 0;background:var(--bg2);border-bottom:1px solid var(--line)}
+#tabs button{border-bottom-left-radius:0;border-bottom-right-radius:0;padding:5px 14px}
+#views{flex:1;position:relative;min-height:0}
+.view{position:absolute;inset:0;display:flex;flex-direction:column}
+.viewbar{display:flex;align-items:center;gap:9px;padding:5px 10px;background:var(--bg2);
+  border-bottom:1px solid var(--line);flex-wrap:wrap;font-size:11.5px}
+.viewbar .lbl{color:var(--fg3)}
+.cvwrap{flex:1;position:relative;min-height:0;background:var(--bg)}
+.cvwrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.tip{position:absolute;pointer-events:none;background:#0b1219ee;border:1px solid var(--line);
+  border-radius:4px;padding:4px 7px;font-family:var(--mono);font-size:11px;white-space:pre;
+  z-index:5;color:var(--fg)}
+.hint{color:var(--fg3);font-size:10.5px}
+#loading{position:absolute;inset:44px 0 0 0;background:#0d1117f2;display:flex;
+  align-items:center;justify-content:center;flex-direction:column;gap:10px;z-index:20}
+#loading .bar{width:340px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
+#loading .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
+#loadMsg{font-family:var(--mono);font-size:12px;color:var(--fg2)}
+.legend{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px}
+.legend .ramp{width:120px;height:9px;border:1px solid var(--line);border-radius:2px}
+.swatchrow{display:flex;flex-wrap:wrap;gap:3px 8px;padding:2px 0 0}
+.swatch{display:flex;align-items:center;gap:3px;font-family:var(--mono);font-size:10px;
+  color:var(--fg2)}
+.swatch i{width:9px;height:9px;border-radius:2px;display:block}
+</style>
+</head>
+<body>
+
+<header id="top">
+  <h1>chrono<em>·</em>lens<span class="ver">v1 / WHSIM_CONTRACTS 1.0</span></h1>
+  <div id="runinfo"></div>
+  <div class="spacer"></div>
+  <label class="btn">ファイル選択<input id="fileInput" type="file" multiple hidden
+    accept=".geojson,.jsonl,.json"></label>
+  <label class="btn">フォルダ選択<input id="dirInput" type="file" webkitdirectory hidden></label>
+  <button id="clearBtn" class="hidden">閉じる</button>
+</header>
+
+<div id="drop">
+  <div class="box">
+    <h2>runs/&lt;run_id&gt;/ をここにドロップ</h2>
+    <p>または右上の「ファイル選択」「フォルダ選択」から読み込む。</p>
+    <p>必須: <code>layout.geojson</code> / <code>events.jsonl</code> / <code>positions.jsonl</code>
+       　任意: <code>summary.json</code> / <code>meta.json</code> / <code>scenario.json</code></p>
+    <p class="hint">単一HTML・外部依存ゼロ。file:// のまま完全にオフラインで動く。
+      読み込んだファイルはブラウザ内だけで処理され、どこにも送信しない。</p>
+  </div>
+</div>
+
+<div id="report" class="hidden"></div>
+
+<div id="loading" class="hidden">
+  <div id="loadMsg">読み込み中…</div>
+  <div class="bar"><i id="loadBar"></i></div>
+</div>
+
+<main id="app" class="hidden">
+  <aside id="side"></aside>
+  <section id="center">
+    <div id="rangebar">
+      <div id="rangeCanvasWrap"><canvas id="rangeCanvas"></canvas></div>
+      <div id="rangeCtl">
+        <span class="lbl">時間範囲</span>
+        <input id="rT0" type="number" step="1" style="width:92px">
+        <span class="lbl">〜</span>
+        <input id="rT1" type="number" step="1" style="width:92px">
+        <span class="lbl">秒</span>
+        <button id="rAll">全体</button>
+        <span id="rInfo" class="hint"></span>
+      </div>
+    </div>
+    <nav id="tabs">
+      <button data-view="marey" class="on">① ダイヤ (Marey)</button>
+      <button data-view="heat">② フロアヒートマップ</button>
+      <button data-view="play">③ 再生</button>
+    </nav>
+    <div id="views">
+
+      <div class="view" id="v-marey">
+        <div class="viewbar">
+          <span class="lbl">縦軸</span>
+          <select id="mYMode">
+            <option value="node">ノード列 (events)</option>
+            <option value="proj">経路上位置 (positions)</option>
+          </select>
+          <label><input type="checkbox" id="mShowWait" checked> 待機を強調</label>
+          <label><input type="checkbox" id="mShowPts"> イベント点</label>
+          <span class="lbl">アクタ</span>
+          <select id="mActor"><option value="">全て</option></select>
+          <button id="mReset">全体表示</button>
+          <span class="hint">ホイール=時間ズーム / ドラッグ=パン / Shift+ドラッグ=範囲選択 / ダブルクリック=全体</span>
+          <span class="spacer"></span>
+          <span id="mInfo" class="hint num"></span>
+        </div>
+        <div class="cvwrap" id="mWrap"><canvas id="mCanvas"></canvas></div>
+      </div>
+
+      <div class="view hidden" id="v-heat">
+        <div class="viewbar">
+          <span class="lbl">指標</span>
+          <select id="hMode">
+            <option value="dwell">滞在時間</option>
+            <option value="wait">待機時間</option>
+          </select>
+          <span class="lbl">セル</span>
+          <select id="hCell">
+            <option value="0.5">0.5 m</option>
+            <option value="1" selected>1.0 m</option>
+            <option value="2">2.0 m</option>
+            <option value="4">4.0 m</option>
+          </select>
+          <span class="lbl">濃度</span>
+          <input id="hAlpha" type="range" min="10" max="100" value="82" style="width:80px">
+          <label><input type="checkbox" id="hLog"> 対数</label>
+          <button id="hFit">全体表示</button>
+          <span class="legend"><span>0</span><canvas id="hRamp" class="ramp" width="120" height="9"></canvas><span id="hMax" class="num"></span></span>
+          <span class="spacer"></span>
+          <span id="hInfo" class="hint num"></span>
+        </div>
+        <div class="cvwrap" id="hWrap"><canvas id="hCanvas"></canvas></div>
+      </div>
+
+      <div class="view hidden" id="v-play">
+        <div class="viewbar">
+          <button id="pPlay">▶ 再生</button>
+          <span class="lbl">速度</span>
+          <select id="pSpeed">
+            <option value="0.5">0.5×</option><option value="1">1×</option>
+            <option value="2">2×</option><option value="5">5×</option>
+            <option value="10">10×</option><option value="30" selected>30×</option>
+            <option value="60">60×</option><option value="240">240×</option>
+          </select>
+          <span class="lbl">残像</span>
+          <input id="pTrail" type="range" min="1" max="120" value="30" style="width:80px">
+          <label><input type="checkbox" id="pGlow" checked> 加算グロー</label>
+          <label><input type="checkbox" id="pLabel"> ID表示</label>
+          <button id="pFit">全体表示</button>
+          <span class="spacer"></span>
+          <span id="pInfo" class="hint num"></span>
+        </div>
+        <div style="padding:4px 10px;background:var(--bg2);border-bottom:1px solid var(--line);
+                    display:flex;align-items:center;gap:8px">
+          <input id="pSeek" type="range" min="0" max="1000" value="0" style="flex:1">
+          <span id="pClock" class="num" style="font-size:12px;min-width:190px;text-align:right"></span>
+        </div>
+        <div class="cvwrap" id="pWrap">
+          <canvas id="pBase"></canvas><canvas id="pTrailCv"></canvas>
+        </div>
+      </div>
+
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* ============================================================================
+   chrono-lens v1 — 契約 (WHSIM_CONTRACTS v1.0) 準拠のラン成果物ビューア
+   構成:
+     §0 小道具        §1 契約検証レポート  §2 高速 JSONL 解析
+     §3 レイアウト検証 §4 events 解析      §5 positions 解析
+     §6 索引構築/派生 §7 KPI 再計算       §8 共有時間レンジ
+     §9 ダイヤ図      §10 ヒートマップ     §11 再生       §12 読み込み配線
+   表示する数値はすべて読み込んだファイルからの計算値。表示用の固定値は持たない。
+   ========================================================================= */
+
+/* ------------------------------------------------------------------ §0 */
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+const CORE_EVENT_TYPES = ["task_assign","move_start","move_end","wait_start","wait_end",
+                          "pick_start","pick_end","load","unload"];
+const REQUIRED_FILES = ["layout.geojson","events.jsonl","positions.jsonl"];
+const OPTIONAL_FILES = ["summary.json","meta.json","scenario.json"];
+const CRS_EXPECTED = "local-meters";
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function isNum(v){ return typeof v === "number" && Number.isFinite(v); }
+function nf(v, d){
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  const digits = (d === undefined)
+    ? (Math.abs(v) >= 1000 ? 0 : Math.abs(v) >= 10 ? 1 : Math.abs(v) >= 1 ? 2 : 3) : d;
+  return v.toLocaleString("ja-JP", {minimumFractionDigits: digits, maximumFractionDigits: digits});
+}
+function hms(sec){
+  if (!Number.isFinite(sec)) return "—";
+  const neg = sec < 0; sec = Math.abs(sec);
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  return (neg?"-":"") + String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"
+    + (s<10?"0":"") + s.toFixed(s % 1 ? 1 : 0);
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+function actorColor(i, n){
+  const h = (i * 360 / Math.max(1, Math.min(n, 24)) + i * 47) % 360;
+  return `hsl(${h.toFixed(1)},72%,${58 + (i % 3) * 6}%)`;
+}
+/* pT[lo..hi) の中で t 以上になる最初の位置 */
+function lowerBound(arr, lo, hi, t){
+  while (lo < hi){ const m = (lo + hi) >> 1; if (arr[m] < t) lo = m + 1; else hi = m; }
+  return lo;
+}
+function percentile(sorted, q){
+  if (!sorted.length) return 0;
+  if (sorted.length === 1) return sorted[0];
+  const p = (sorted.length - 1) * q, lo = Math.floor(p), hi = Math.min(lo + 1, sorted.length - 1);
+  return sorted[lo] * (1 - (p - lo)) + sorted[hi] * (p - lo);
+}
+function niceTicks(a, b, target){
+  const span = b - a; if (!(span > 0)) return [a];
+  const raw = span / Math.max(1, target);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const out = []; for (let v = Math.ceil(a/step)*step; v <= b + 1e-9; v += step) out.push(v);
+  return out;
+}
+
+/* ------------------------------------------------------------------ §1
+   検証レポート: 同じ違反が100万行続いても壊れないよう code 単位で集約する */
+class Report {
+  constructor(){ this.map = new Map(); }
+  add(sev, file, code, msg, example){
+    const key = file + "|" + code;
+    let e = this.map.get(key);
+    if (!e){ e = {sev, file, code, msg, count: 0, examples: []}; this.map.set(key, e); }
+    e.count++;
+    if (example && e.examples.length < 4) e.examples.push(example);
+    return e;
+  }
+  err(f,c,m,x){ return this.add("error", f, c, m, x); }
+  warn(f,c,m,x){ return this.add("warn", f, c, m, x); }
+  info(f,c,m,x){ return this.add("info", f, c, m, x); }
+  list(){ const order = {error:0, warn:1, info:2};
+    return Array.from(this.map.values()).sort((a,b)=> order[a.sev]-order[b.sev] || a.file.localeCompare(b.file)); }
+  count(sev){ let n = 0; for (const e of this.map.values()) if (e.sev === sev) n++; return n; }
+  hasErrors(){ return this.count("error") > 0; }
+}
+
+/* ------------------------------------------------------------------ §2
+   高速 JSONL 解析。positions は 150万行規模になるので JSON.parse を使わず
+   フラットオブジェクト専用スキャナで typed array に直接書く。
+   想定外の形 (ネスト・エスケープ) に当たった行だけ JSON.parse に落とす。   */
+let NUM_VAL = 0, NUM_END = 0;
+function readNumber(s, i, b){
+  let c = s.charCodeAt(i), sign = 1;
+  if (c === 45){ sign = -1; i++; } else if (c === 43){ i++; }
+  let v = 0, any = false;
+  while (i < b){ c = s.charCodeAt(i); if (c >= 48 && c <= 57){ v = v*10 + (c-48); i++; any = true; } else break; }
+  if (i < b && s.charCodeAt(i) === 46){
+    i++; let f = 0.1;
+    while (i < b){ c = s.charCodeAt(i); if (c >= 48 && c <= 57){ v += (c-48)*f; f *= 0.1; i++; any = true; } else break; }
+  }
+  if (!any) return -1;
+  if (i < b){ c = s.charCodeAt(i);
+    if (c === 101 || c === 69){
+      i++; let es = 1; c = s.charCodeAt(i);
+      if (c === 45){ es = -1; i++; } else if (c === 43) i++;
+      let e = 0, eany = false;
+      while (i < b){ c = s.charCodeAt(i); if (c >= 48 && c <= 57){ e = e*10 + (c-48); i++; eany = true; } else break; }
+      if (!eany) return -1;
+      v *= Math.pow(10, es * e);
+    } }
+  NUM_VAL = sign * v; NUM_END = i; return 1;
+}
+/* 文字列を切り出さずにアクタIDを内部索引に写す (150万回の slice を避ける) */
+function makeInterner(){
+  const ids = [], buckets = new Map();
+  function fromRange(s, a, b){
+    let h = 5381 | 0;
+    for (let k = a; k < b; k++) h = ((h * 33) ^ s.charCodeAt(k)) | 0;
+    const len = b - a;
+    let bk = buckets.get(h);
+    if (bk){
+      for (let q = 0; q < bk.length; q++){
+        const id = ids[bk[q]];
+        if (id.length === len){
+          let ok = true;
+          for (let k = 0; k < len; k++) if (id.charCodeAt(k) !== s.charCodeAt(a+k)){ ok = false; break; }
+          if (ok) return bk[q];
+        }
+      }
+    } else { bk = []; buckets.set(h, bk); }
+    const idx = ids.length; ids.push(s.slice(a, b)); bk.push(idx); return idx;
+  }
+  function fromString(str){ return fromRange(str, 0, str.length); }
+  return {ids, fromRange, fromString};
+}
+
+/* ------------------------------------------------------------------ §3
+   layout.geojson の検証と読み取り。契約 §1 / 座標系 / §7 (edge×rack 交差0件) */
+function pointInRing(px, py, ring){
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++){
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function segIntersect(ax,ay,bx,by,cx,cy,dx,dy){
+  const d1 = (bx-ax)*(cy-ay) - (by-ay)*(cx-ax);
+  const d2 = (bx-ax)*(dy-ay) - (by-ay)*(dx-ax);
+  const d3 = (dx-cx)*(ay-cy) - (dy-cy)*(ax-cx);
+  const d4 = (dx-cx)*(by-cy) - (dy-cy)*(bx-cx);
+  if (((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0))) return true;
+  return false;
+}
+function parseLayout(text, rep){
+  const F = "layout.geojson";
+  let gj;
+  try { gj = JSON.parse(text); }
+  catch (e){ rep.err(F, "NOT_JSON", "JSON として読めない", String(e.message).slice(0,160)); return null; }
+  if (!gj || typeof gj !== "object" || Array.isArray(gj)){
+    rep.err(F, "NOT_OBJECT", "トップレベルがオブジェクトでない"); return null; }
+  if (gj.type !== "FeatureCollection")
+    rep.err(F, "NOT_FC", `type は "FeatureCollection" でなければならない`, `type = ${JSON.stringify(gj.type)}`);
+  const crs = gj.meta && gj.meta.crs;
+  if (crs === undefined)
+    rep.warn(F, "CRS_MISSING", `meta.crs が無い (契約: "${CRS_EXPECTED}" を明記)`, "meta.crs = (無し)");
+  else if (crs !== CRS_EXPECTED)
+    rep.err(F, "CRS_BAD", `座標系違反: meta.crs は "${CRS_EXPECTED}" (平面直交・メートル・非地理)`,
+            `meta.crs = ${JSON.stringify(crs)}`);
+  if (!Array.isArray(gj.features)){
+    rep.err(F, "NO_FEATURES", "features が配列でない"); return null; }
+
+  const L = {racks:[], nodes:[], edges:[], zones:[], nodeById:new Map(),
+             bounds:{minx:Infinity,miny:Infinity,maxx:-Infinity,maxy:-Infinity}, crs: crs || null};
+  const bump = (x,y) => { const b = L.bounds;
+    if (x<b.minx) b.minx=x; if (x>b.maxx) b.maxx=x; if (y<b.miny) b.miny=y; if (y>b.maxy) b.maxy=y; };
+  const okCoord = (c) => Array.isArray(c) && isNum(c[0]) && isNum(c[1]);
+
+  gj.features.forEach((f, i) => {
+    const where = `features[${i}]`;
+    if (!f || typeof f !== "object"){ rep.err(F,"FEATURE_BAD","Feature がオブジェクトでない", where); return; }
+    const p = f.properties, g = f.geometry;
+    if (!p || typeof p !== "object"){ rep.err(F,"PROPS_MISSING","properties が無い", where); return; }
+    if (!g || typeof g !== "object"){ rep.err(F,"GEOM_MISSING","geometry が無い", `${where} kind=${p.kind}`); return; }
+    const kind = p.kind;
+    if (typeof kind !== "string"){ rep.err(F,"KIND_MISSING","properties.kind が無い/文字列でない", `${where} kind=${JSON.stringify(kind)}`); return; }
+    const needId = () => { if (typeof p.id !== "string" || !p.id){
+      rep.err(F,"ID_MISSING",`${kind} に properties.id (文字列) が必要`, `${where} id=${JSON.stringify(p.id)}`); return false; } return true; };
+
+    if (kind === "rack" || kind === "zone"){
+      if (g.type !== "Polygon"){ rep.err(F,"GEOM_TYPE_"+kind, `${kind} の geometry は Polygon`, `${where} type=${JSON.stringify(g.type)}`); return; }
+      if (!Array.isArray(g.coordinates) || !Array.isArray(g.coordinates[0])){
+        rep.err(F,"POLY_BAD", `${kind} の coordinates が Polygon の形をしていない`, where); return; }
+      const ring = g.coordinates[0].filter((c) => {
+        if (!okCoord(c)){ rep.err(F,"COORD_BAD","座標が有限な数値2要素でない", `${where} ${JSON.stringify(c)}`); return false; }
+        bump(c[0], c[1]); return true; });
+      if (ring.length < 3){ rep.err(F,"POLY_SHORT", `${kind} のリングが3点未満`, where); return; }
+      if (!needId()) return;
+      if (kind === "zone" && typeof p.label !== "string")
+        rep.warn(F,"ZONE_LABEL_MISSING","zone に properties.label (文字列) が必要", `${where} id=${p.id}`);
+      const obj = {id:p.id, label:(typeof p.label === "string" ? p.label : ""), ring};
+      let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+      for (const c of ring){ x0=Math.min(x0,c[0]); y0=Math.min(y0,c[1]); x1=Math.max(x1,c[0]); y1=Math.max(y1,c[1]); }
+      obj.bbox = [x0,y0,x1,y1];
+      (kind === "rack" ? L.racks : L.zones).push(obj);
+    } else if (kind === "node"){
+      if (g.type !== "Point"){ rep.err(F,"GEOM_TYPE_node","node の geometry は Point", `${where} type=${JSON.stringify(g.type)}`); return; }
+      if (!okCoord(g.coordinates)){ rep.err(F,"COORD_BAD","座標が有限な数値2要素でない", `${where} ${JSON.stringify(g.coordinates)}`); return; }
+      if (!needId()) return;
+      const n = {id:p.id, x:g.coordinates[0], y:g.coordinates[1],
+                 loc_id:(typeof p.loc_id === "string" ? p.loc_id : null)};
+      bump(n.x, n.y);
+      if (L.nodeById.has(n.id)) rep.warn(F,"NODE_DUP","node の id が重複", `${where} id=${n.id}`);
+      L.nodeById.set(n.id, L.nodes.length); L.nodes.push(n);
+    } else if (kind === "edge"){
+      if (g.type !== "LineString"){ rep.err(F,"GEOM_TYPE_edge","edge の geometry は LineString", `${where} type=${JSON.stringify(g.type)}`); return; }
+      if (!Array.isArray(g.coordinates) || g.coordinates.length < 2){
+        rep.err(F,"LINE_SHORT","edge の coordinates が2点未満", where); return; }
+      const pts = g.coordinates.filter((c) => {
+        if (!okCoord(c)){ rep.err(F,"COORD_BAD","座標が有限な数値2要素でない", `${where} ${JSON.stringify(c)}`); return false; }
+        bump(c[0], c[1]); return true; });
+      if (pts.length < 2) return;
+      if (!needId()) return;
+      if (typeof p.from !== "string" || typeof p.to !== "string")
+        rep.err(F,"EDGE_ENDS","edge に properties.from / to (node id) が必要",
+                `${where} id=${p.id} from=${JSON.stringify(p.from)} to=${JSON.stringify(p.to)}`);
+      if (p.width_m !== undefined && !isNum(p.width_m))
+        rep.err(F,"EDGE_WIDTH","edge.width_m は数値", `${where} width_m=${JSON.stringify(p.width_m)}`);
+      L.edges.push({id:p.id, from:p.from, to:p.to, pts, width:(isNum(p.width_m)?p.width_m:null)});
+    } else {
+      rep.info(F,"KIND_UNKNOWN",`未知の kind (契約は rack/node/edge/zone)。描画対象外`, `${where} kind=${kind}`);
+    }
+  });
+
+  if (!L.nodes.length) rep.warn(F,"NO_NODES","node が1つも無い (ダイヤ図のノード列軸が作れない)");
+  if (!Number.isFinite(L.bounds.minx)){ rep.err(F,"NO_GEOMETRY","有効な座標が1つも無い"); return null; }
+
+  /* edge の端点が実在ノードか (契約 §1 通路グラフの辺) */
+  for (const e of L.edges){
+    if (e.from !== undefined && !L.nodeById.has(e.from))
+      rep.warn(F,"EDGE_ENDPOINT_UNKNOWN","edge.from/to が node id に一致しない", `edge=${e.id} from=${e.from}`);
+    if (e.to !== undefined && !L.nodeById.has(e.to))
+      rep.warn(F,"EDGE_ENDPOINT_UNKNOWN","edge.from/to が node id に一致しない", `edge=${e.id} to=${e.to}`);
+  }
+  /* 契約 §7: edge と rack ポリゴンの交差0件 */
+  let crossN = 0;
+  for (const e of L.edges){
+    for (const r of L.racks){
+      let hit = false;
+      for (let i = 0; i + 1 < e.pts.length && !hit; i++){
+        const ax=e.pts[i][0], ay=e.pts[i][1], bx=e.pts[i+1][0], by=e.pts[i+1][1];
+        if (Math.max(ax,bx) < r.bbox[0] || Math.min(ax,bx) > r.bbox[2] ||
+            Math.max(ay,by) < r.bbox[1] || Math.min(ay,by) > r.bbox[3]) continue;
+        if (pointInRing(ax,ay,r.ring) || pointInRing(bx,by,r.ring)) hit = true;
+        for (let k = 0, m = r.ring.length - 1; k < r.ring.length && !hit; m = k++)
+          if (segIntersect(ax,ay,bx,by, r.ring[m][0],r.ring[m][1], r.ring[k][0],r.ring[k][1])) hit = true;
+      }
+      if (hit){ crossN++;
+        rep.err(F,"EDGE_CROSSES_RACK","契約 §7 違反: edge が rack ポリゴンと交差している",
+                `edge=${e.id} × rack=${r.id}`); }
+    }
+  }
+  L.crossN = crossN;
+  L.rackIndex = buildRackIndex(L);
+  return L;
+}
+/* rack のバウンディングボックスを粗いグリッドに載せ、点判定を O(1) 近くにする */
+function buildRackIndex(L){
+  const b = L.bounds;
+  const w = Math.max(1e-6, b.maxx - b.minx), h = Math.max(1e-6, b.maxy - b.miny);
+  const cell = Math.max(0.5, Math.max(w, h) / 96);
+  const nx = Math.max(1, Math.ceil(w / cell)), ny = Math.max(1, Math.ceil(h / cell));
+  const cells = new Array(nx * ny);
+  L.racks.forEach((r, ri) => {
+    const gx0 = clamp(Math.floor((r.bbox[0]-b.minx)/cell), 0, nx-1);
+    const gx1 = clamp(Math.floor((r.bbox[2]-b.minx)/cell), 0, nx-1);
+    const gy0 = clamp(Math.floor((r.bbox[1]-b.miny)/cell), 0, ny-1);
+    const gy1 = clamp(Math.floor((r.bbox[3]-b.miny)/cell), 0, ny-1);
+    for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++){
+      const k = gy*nx + gx; (cells[k] || (cells[k] = [])).push(ri); }
+  });
+  return {cell, nx, ny, minx:b.minx, miny:b.miny, cells,
+    rackAt(x, y){
+      const gx = Math.floor((x-this.minx)/this.cell), gy = Math.floor((y-this.miny)/this.cell);
+      if (gx < 0 || gy < 0 || gx >= this.nx || gy >= this.ny) return -1;
+      const c = this.cells[gy*this.nx + gx]; if (!c) return -1;
+      for (const ri of c) if (pointInRing(x, y, L.racks[ri].ring)) return ri;
+      return -1;
+    }};
+}
+
+/* ------------------------------------------------------------------ §4
+   events.jsonl。件数はせいぜい数十万なので JSON.parse で厳密に読む。      */
+function parseEvents(text, rep, interner){
+  const F = "events.jsonl";
+  const evT = [], evType = [], evActor = [], evFrom = [], evTo = [], evMeta = [];
+  let line = 0, lastT = -Infinity, n = 0, i = 0;
+  const len = text.length;
+  while (i < len){
+    let e = text.indexOf("\n", i); if (e < 0) e = len;
+    let a = i; let b = e;
+    while (a < b && text.charCodeAt(a) <= 32) a++;
+    while (b > a && text.charCodeAt(b-1) <= 32) b--;
+    i = e + 1; line++;
+    if (b <= a) continue;
+    let o;
+    try { o = JSON.parse(text.slice(a, b)); }
+    catch (ex){ rep.err(F,"NOT_JSON","JSONL の行が JSON として読めない",
+                        `行${line}: ${text.slice(a, Math.min(b, a+70))}`); continue; }
+    if (!o || typeof o !== "object" || Array.isArray(o)){
+      rep.err(F,"NOT_OBJECT","行がオブジェクトでない", `行${line}`); continue; }
+    let bad = false;
+    if (!isNum(o.t)){ rep.err(F,"T_TYPE","t は有限の数値 (ラン開始からの経過秒)",
+                              `行${line}: t=${JSON.stringify(o.t)}`); bad = true; }
+    if (typeof o.type !== "string" || !o.type){
+      rep.err(F,"TYPE_MISSING","type は文字列", `行${line}: type=${JSON.stringify(o.type)}`); bad = true; }
+    if (typeof o.actorId !== "string" || !o.actorId){
+      rep.err(F,"ACTOR_MISSING","actorId は文字列", `行${line}: actorId=${JSON.stringify(o.actorId)}`); bad = true; }
+    if (o.from !== undefined && typeof o.from !== "string"){
+      rep.err(F,"FROM_TYPE","from は node id (文字列)", `行${line}: from=${JSON.stringify(o.from)}`); bad = true; }
+    if (o.to !== undefined && typeof o.to !== "string"){
+      rep.err(F,"TO_TYPE","to は node id (文字列)", `行${line}: to=${JSON.stringify(o.to)}`); bad = true; }
+    if (o.meta !== undefined && (o.meta === null || typeof o.meta !== "object" || Array.isArray(o.meta))){
+      rep.warn(F,"META_TYPE","meta はオブジェクト", `行${line}: meta=${JSON.stringify(o.meta)}`); }
+    if (bad) continue;
+    if (o.t < lastT){
+      rep.err(F,"T_ORDER","契約 §7 違反: t が単調非減少でない",
+              `行${line}: t=${o.t} < 直前 t=${lastT}`); }
+    else lastT = o.t;
+    if (!CORE_EVENT_TYPES.includes(o.type))
+      rep.info(F,"TYPE_NONCORE","コア集合外の type (契約上は自由。ダイヤ図では位置アンカーとして扱う)",
+               `行${line}: type=${o.type}`);
+    evT.push(o.t); evType.push(o.type); evActor.push(interner.fromString(o.actorId));
+    evFrom.push(o.from === undefined ? null : o.from);
+    evTo.push(o.to === undefined ? null : o.to);
+    evMeta.push(o.meta || null);
+    n++;
+  }
+  if (!n) rep.err(F,"EMPTY","有効なイベントが1件も無い");
+  return {n, t:evT, type:evType, actor:evActor, from:evFrom, to:evTo, meta:evMeta, lines:line};
+}
+
+/* ------------------------------------------------------------------ §5
+   positions.jsonl。専用スキャナ + typed array。progress は chunk ごとに返す。 */
+async function parsePositions(text, rep, interner, onProgress){
+  const F = "positions.jsonl";
+  const len = text.length;
+  let cap = Math.max(4096, Math.ceil(len / 44) + 64);
+  let T = new Float64Array(cap), X = new Float32Array(cap), Y = new Float32Array(cap);
+  let A = new Uint16Array(cap);
+  let count = 0, line = 0, i = 0, lastT = -Infinity, orderBad = 0;
+  const grow = () => {
+    cap = Math.ceil(cap * 1.7);
+    const t2 = new Float64Array(cap); t2.set(T); T = t2;
+    const x2 = new Float32Array(cap); x2.set(X); X = x2;
+    const y2 = new Float32Array(cap); y2.set(Y); Y = y2;
+    const a2 = new Uint16Array(cap); a2.set(A); A = a2;
+  };
+  const push = (t, aidx, x, y) => {
+    if (count === cap) grow();
+    T[count] = t; X[count] = x; Y[count] = y; A[count] = aidx; count++;
+  };
+  const slowLine = (a, b, lineNo) => {           /* 想定外の形はここで厳密に読む */
+    let o;
+    try { o = JSON.parse(text.slice(a, b)); }
+    catch (ex){ rep.err(F,"NOT_JSON","JSONL の行が JSON として読めない",
+                        `行${lineNo}: ${text.slice(a, Math.min(b, a+70))}`); return; }
+    if (!o || typeof o !== "object" || Array.isArray(o)){
+      rep.err(F,"NOT_OBJECT","行がオブジェクトでない", `行${lineNo}`); return; }
+    let ok = true;
+    if (!isNum(o.t)){ rep.err(F,"T_TYPE","t は有限の数値", `行${lineNo}: t=${JSON.stringify(o.t)}`); ok = false; }
+    if (typeof o.actorId !== "string" || !o.actorId){
+      rep.err(F,"ACTOR_MISSING","actorId は文字列", `行${lineNo}: actorId=${JSON.stringify(o.actorId)}`); ok = false; }
+    if (!isNum(o.x)){ rep.err(F,"X_TYPE","x は有限の数値 (メートル)", `行${lineNo}: x=${JSON.stringify(o.x)}`); ok = false; }
+    if (!isNum(o.y)){ rep.err(F,"Y_TYPE","y は有限の数値 (メートル)", `行${lineNo}: y=${JSON.stringify(o.y)}`); ok = false; }
+    if (!ok) return;
+    if (o.t < lastT){ orderBad++;
+      rep.err(F,"T_ORDER","契約 §7 違反: t が単調非減少でない", `行${lineNo}: t=${o.t} < 直前 t=${lastT}`); }
+    else lastT = o.t;
+    push(o.t, interner.fromString(o.actorId), o.x, o.y);
+  };
+
+  const t0 = performance.now();
+  let chunkCheck = 0;
+  while (i < len){
+    let e = text.indexOf("\n", i); if (e < 0) e = len;
+    let a = i, b = e;
+    while (a < b && text.charCodeAt(a) <= 32) a++;
+    while (b > a && text.charCodeAt(b-1) <= 32) b--;
+    const lineStart = a, lineEnd = b;
+    i = e + 1; line++;
+    if (b <= a) continue;
+
+    /* --- 高速パス: フラットオブジェクト専用スキャナ ------------------ */
+    let t = NaN, x = NaN, y = NaN, aidx = -1;
+    let hasT = false, hasX = false, hasY = false, fell = false;
+    let j = a;
+    if (text.charCodeAt(j) !== 123){ slowLine(lineStart, lineEnd, line); continue; }
+    j++;
+    for (;;){
+      while (j < b && text.charCodeAt(j) <= 32) j++;
+      if (j >= b){ fell = true; break; }
+      const c0 = text.charCodeAt(j);
+      if (c0 === 125){ j++; break; }
+      if (c0 === 44){ j++; continue; }
+      if (c0 !== 34){ fell = true; break; }
+      j++;
+      const ks = j;
+      while (j < b && text.charCodeAt(j) !== 34){ if (text.charCodeAt(j) === 92){ fell = true; break; } j++; }
+      if (fell || j >= b){ fell = true; break; }
+      const ke = j; j++;
+      while (j < b && text.charCodeAt(j) <= 32) j++;
+      if (text.charCodeAt(j) !== 58){ fell = true; break; }
+      j++;
+      while (j < b && text.charCodeAt(j) <= 32) j++;
+      const vc = text.charCodeAt(j);
+      let kind = 0, num = 0, ss = -1, se = -1;
+      if (vc === 34){
+        j++; ss = j;
+        while (j < b && text.charCodeAt(j) !== 34){ if (text.charCodeAt(j) === 92){ fell = true; break; } j++; }
+        if (fell || j >= b){ fell = true; break; }
+        se = j; j++; kind = 1;
+      } else if (vc === 123 || vc === 91){ fell = true; break; }
+      else if (readNumber(text, j, b) > 0){ num = NUM_VAL; j = NUM_END; kind = 2; }
+      else { while (j < b){ const cc = text.charCodeAt(j); if (cc === 44 || cc === 125 || cc <= 32) break; j++; } kind = 3; }
+      const klen = ke - ks;
+      if (klen === 1){
+        const k0 = text.charCodeAt(ks);
+        if (k0 === 116){ if (kind === 2){ t = num; hasT = true; } else { fell = true; break; } }
+        else if (k0 === 120){ if (kind === 2){ x = num; hasX = true; } else { fell = true; break; } }
+        else if (k0 === 121){ if (kind === 2){ y = num; hasY = true; } else { fell = true; break; } }
+      } else if (klen === 7 && text.charCodeAt(ks) === 97 && text.startsWith("actorId", ks)){
+        if (kind === 1) aidx = interner.fromRange(text, ss, se); else { fell = true; break; }
+      }
+    }
+    if (fell || !hasT || !hasX || !hasY || aidx < 0 || !Number.isFinite(t) ||
+        !Number.isFinite(x) || !Number.isFinite(y)){
+      slowLine(lineStart, lineEnd, line); }
+    else {
+      if (t < lastT){ orderBad++;
+        rep.err(F,"T_ORDER","契約 §7 違反: t が単調非減少でない", `行${line}: t=${t} < 直前 t=${lastT}`); }
+      else lastT = t;
+      if (interner.ids.length > 65535){ rep.err(F,"TOO_MANY_ACTORS","アクタ数が 65535 を超えた"); break; }
+      push(t, aidx, x, y);
+    }
+    if ((++chunkCheck & 65535) === 0){
+      if (onProgress) onProgress(i / len, count);
+      await sleep(0);
+    }
+  }
+  if (!count) rep.err(F,"EMPTY","有効な位置サンプルが1件も無い");
+  return {count, T, X, Y, A, lines:line, ms: performance.now() - t0};
+}
+
+/* ------------------------------------------------------------------ §6
+   索引構築: アクタごとに連続領域へ並べ替え (安定な計数ソート = t 昇順を保つ)  */
+function buildIndex(raw, nActors){
+  const n = raw.count;
+  const off = new Int32Array(nActors + 1);
+  for (let i = 0; i < n; i++) off[raw.A[i] + 1]++;
+  for (let a = 0; a < nActors; a++) off[a+1] += off[a];
+  const cur = off.slice(0, nActors);
+  const T = new Float64Array(n), X = new Float32Array(n), Y = new Float32Array(n);
+  for (let i = 0; i < n; i++){
+    const a = raw.A[i], j = cur[a]++;
+    T[j] = raw.T[i]; X[j] = raw.X[i]; Y[j] = raw.Y[i];
+  }
+  return {n, T, X, Y, off};
+}
+
+/* ------------------------------------------------------------------ §7
+   派生: 待機区間 / ダイヤ図アンカー / ノード順序 / KPI 再計算              */
+function buildDerived(D, rep){
+  const nA = D.actorIds.length;
+  const ev = D.events;
+
+  /* --- 待機区間 (契約 §7: wait_start と wait_end の対応) --------------- */
+  const openWait = new Map();
+  D.waits = [];
+  for (let i = 0; i < ev.n; i++){
+    const a = ev.actor[i];
+    if (ev.type[i] === "wait_start"){
+      if (openWait.has(a))
+        rep.warn("events.jsonl","WAIT_NESTED","wait_start が閉じられる前に次の wait_start",
+                 `actor=${D.actorIds[a]} t=${ev.t[i]}`);
+      openWait.set(a, i);
+    } else if (ev.type[i] === "wait_end"){
+      if (!openWait.has(a)){
+        rep.warn("events.jsonl","WAIT_UNMATCHED_END","対応する wait_start の無い wait_end",
+                 `actor=${D.actorIds[a]} t=${ev.t[i]}`); continue; }
+      const s = openWait.get(a); openWait.delete(a);
+      D.waits.push({actor:a, t0:ev.t[s], t1:ev.t[i],
+                    node:(ev.from[s] || ev.to[s] || ev.from[i] || ev.to[i] || null)});
+    }
+  }
+  for (const [a, s] of openWait)
+    rep.warn("events.jsonl","WAIT_UNCLOSED","wait_end の無い wait_start (末尾まで待機扱い)",
+             `actor=${D.actorIds[a]} t=${ev.t[s]}`);
+
+  /* --- 時間の全体レンジ ------------------------------------------------ */
+  let tMin = Infinity, tMax = -Infinity;
+  if (ev.n){ tMin = Math.min(tMin, ev.t[0]); tMax = Math.max(tMax, ev.t[ev.n-1]); }
+  if (D.pos.n){
+    for (let a = 0; a < nA; a++){
+      const s = D.pos.off[a], e = D.pos.off[a+1];
+      if (e > s){ tMin = Math.min(tMin, D.pos.T[s]); tMax = Math.max(tMax, D.pos.T[e-1]); } }
+  }
+  if (!Number.isFinite(tMin)){ tMin = 0; tMax = 1; }
+  if (tMax <= tMin) tMax = tMin + 1;
+  D.tMin = tMin; D.tMax = tMax;
+
+  /* --- ノード順序: 主軸に射影して並べる (経路上位置の代理) ------------- */
+  const nodes = D.layout.nodes;
+  if (nodes.length){
+    let mx = 0, my = 0;
+    for (const n of nodes){ mx += n.x; my += n.y; }
+    mx /= nodes.length; my /= nodes.length;
+    let sxx = 0, sxy = 0, syy = 0;
+    for (const n of nodes){ const dx = n.x-mx, dy = n.y-my; sxx += dx*dx; sxy += dx*dy; syy += dy*dy; }
+    const th = 0.5 * Math.atan2(2*sxy, sxx - syy);
+    D.axis = {cx:mx, cy:my, ux:Math.cos(th), uy:Math.sin(th)};
+  } else D.axis = {cx:0, cy:0, ux:1, uy:0};
+  const proj = (x,y) => (x - D.axis.cx)*D.axis.ux + (y - D.axis.cy)*D.axis.uy;
+  D.proj = proj;
+  D.nodeOrder = nodes.map((n,i)=>i).sort((i,j) => {
+    const d = proj(nodes[i].x,nodes[i].y) - proj(nodes[j].x,nodes[j].y);
+    if (d) return d;
+    return (nodes[i].id < nodes[j].id) ? -1 : 1; });
+  D.nodeRank = new Map();
+  D.nodeOrder.forEach((ni, r) => D.nodeRank.set(nodes[ni].id, r));
+  let pmin = Infinity, pmax = -Infinity;
+  for (const n of nodes){ const p = proj(n.x,n.y); if (p<pmin) pmin=p; if (p>pmax) pmax=p; }
+  if (!Number.isFinite(pmin)){ pmin = 0; pmax = 1; }
+  D.projRange = [pmin, pmax];
+
+  /* --- ダイヤ図アンカー (イベントの from/to をノード列に写す) ---------- */
+  const PREF = {move_end:"to", task_assign:"from", load:"from", unload:"from"};
+  const anchors = [];
+  for (let a = 0; a < nA; a++) anchors.push({t:[], y:[]});
+  let unknown = 0;
+  for (let i = 0; i < ev.n; i++){
+    const pref = PREF[ev.type[i]] === "to" ? ev.to[i] : ev.from[i];
+    const alt  = PREF[ev.type[i]] === "to" ? ev.from[i] : ev.to[i];
+    const nid = (pref !== null && D.nodeRank.has(pref)) ? pref
+              : (alt !== null && D.nodeRank.has(alt)) ? alt : null;
+    if (nid === null){
+      if ((pref || alt) && unknown < 5){
+        unknown++;
+        rep.warn("events.jsonl","NODE_UNKNOWN","from/to が layout の node id に一致しない",
+                 `t=${ev.t[i]} type=${ev.type[i]} from=${ev.from[i]} to=${ev.to[i]}`);
+      }
+      continue;
+    }
+    const A = anchors[ev.actor[i]];
+    A.t.push(ev.t[i]); A.y.push(D.nodeRank.get(nid));
+  }
+  D.anchors = anchors.map((A) => ({t:Float64Array.from(A.t), y:Float32Array.from(A.y), n:A.t.length}));
+
+  /* --- 待機区間のダイヤ図上のy (ノード列モード) ------------------------ */
+  for (const w of D.waits){
+    w.rank = (w.node !== null && D.nodeRank.has(w.node)) ? D.nodeRank.get(w.node) : null;
+    if (w.rank === null){
+      const A = D.anchors[w.actor];
+      if (A.n){ let k = lowerBound(A.t, 0, A.n, w.t0); if (k >= A.n) k = A.n - 1; w.rank = A.y[k]; }
+    }
+  }
+  D.waitsByActor = [];
+  for (let a = 0; a < nA; a++) D.waitsByActor.push([]);
+  for (const w of D.waits) D.waitsByActor[w.actor].push(w);
+  for (const arr of D.waitsByActor) arr.sort((p,q)=>p.t0-q.t0);
+
+  /* --- 位置サンプルの「待機中」フラグ (ヒートマップの待機モード用) ----- */
+  const isWait = new Uint8Array(D.pos.n);
+  for (let a = 0; a < nA; a++){
+    const s = D.pos.off[a], e = D.pos.off[a+1];
+    for (const w of D.waitsByActor[a]){
+      let i = lowerBound(D.pos.T, s, e, w.t0);
+      for (; i < e && D.pos.T[i] <= w.t1; i++) isWait[i] = 1;
+    }
+  }
+  D.isWait = isWait;
+
+  /* --- 契約 §7: 軌跡 × rack ポリゴンの交差0件 -------------------------- */
+  if (D.layout.racks.length && D.pos.n){
+    let hits = 0, firstEx = [];
+    const idx = D.layout.rackIndex;
+    for (let i = 0; i < D.pos.n; i++){
+      const ri = idx.rackAt(D.pos.X[i], D.pos.Y[i]);
+      if (ri >= 0){
+        hits++;
+        if (firstEx.length < 4) firstEx.push(
+          `actor=${D.actorIds[actorOfSample(D, i)]} t=${D.pos.T[i]} (${D.pos.X[i].toFixed(2)}, ${D.pos.Y[i].toFixed(2)}) は rack=${D.layout.racks[ri].id} の内部`);
+      }
+    }
+    if (hits){
+      const e = rep.err("positions.jsonl","POS_IN_RACK",
+        "契約 §7 違反: 軌跡が rack ポリゴンの内部を通っている", firstEx[0]);
+      e.count = hits; for (let k = 1; k < firstEx.length; k++) e.examples.push(firstEx[k]);
+    }
+    D.posInRack = hits;
+  } else D.posInRack = 0;
+
+  /* --- KPI 再計算 (契約 §6: すべて events/positions からの集計) -------- */
+  D.calc = recomputeKPI(D);
+  D.perActorSamples = [];
+  for (let a = 0; a < nA; a++) D.perActorSamples.push(D.pos.off[a+1] - D.pos.off[a]);
+}
+function actorOfSample(D, i){
+  const off = D.pos.off;
+  let lo = 0, hi = off.length - 1;
+  while (lo < hi){ const m = (lo + hi) >> 1; if (off[m+1] <= i) lo = m + 1; else hi = m; }
+  return lo;
+}
+function recomputeKPI(D){
+  const nA = D.actorIds.length, ev = D.events;
+  let dist = 0;
+  const distByActor = new Float64Array(nA);
+  for (let a = 0; a < nA; a++){
+    const s = D.pos.off[a], e = D.pos.off[a+1];
+    let d = 0;
+    for (let i = s + 1; i < e; i++){
+      const dx = D.pos.X[i]-D.pos.X[i-1], dy = D.pos.Y[i]-D.pos.Y[i-1];
+      d += Math.sqrt(dx*dx + dy*dy);
+    }
+    distByActor[a] = d; dist += d;
+  }
+  const span = D.tMax - D.tMin;
+  const waitDur = D.waits.map((w)=>w.t1-w.t0).sort((a,b)=>a-b);
+  const waitTotal = waitDur.reduce((s,v)=>s+v, 0);
+  const waitByActor = new Float64Array(nA);
+  for (const w of D.waits) waitByActor[w.actor] += w.t1 - w.t0;
+  const typeCount = new Map();
+  for (let i = 0; i < ev.n; i++) typeCount.set(ev.type[i], (typeCount.get(ev.type[i])||0)+1);
+  const picks = typeCount.get("pick_end") || 0;
+  /* 稼働率 = task_assign から直後の pick_end までを稼働とみなした比率 */
+  const busy = new Float64Array(nA); const openTask = new Map();
+  for (let i = 0; i < ev.n; i++){
+    const a = ev.actor[i];
+    if (ev.type[i] === "task_assign") openTask.set(a, ev.t[i]);
+    else if (ev.type[i] === "pick_end" && openTask.has(a)){ busy[a] += ev.t[i] - openTask.get(a); openTask.delete(a); }
+  }
+  const util = {};
+  for (let a = 0; a < nA; a++) util[D.actorIds[a]] = span > 0 ? Math.min(1, busy[a]/span) : 0;
+  return {
+    span, rows_per_hour: span > 0 ? picks * 3600 / span : 0,
+    picks, total_distance_m: dist, distByActor, waitByActor,
+    wait: {n: waitDur.length, mean: waitDur.length ? waitTotal/waitDur.length : 0,
+           p50: percentile(waitDur, 0.5), p95: percentile(waitDur, 0.95), total: waitTotal},
+    utilization: util, typeCount
+  };
+}
+
+/* ------------------------------------------------------------------ §7b
+   summary.json の検証 + 再計算との突き合わせ                              */
+function parseSummary(text, rep){
+  const F = "summary.json";
+  let o;
+  try { o = JSON.parse(text); }
+  catch (e){ rep.err(F,"NOT_JSON","JSON として読めない", String(e.message).slice(0,160)); return null; }
+  if (!o || typeof o !== "object" || Array.isArray(o)){ rep.err(F,"NOT_OBJECT","オブジェクトでない"); return null; }
+  if (o.schema_version !== "1.0")
+    rep.warn(F,"SCHEMA_VERSION",`schema_version は "1.0"`, `schema_version = ${JSON.stringify(o.schema_version)}`);
+  const miss = (k) => rep.warn(F, `FIELD_MISSING(${k})`, `${k} が無い`, k);
+  const typ = (k, v, want) => rep.err(F, `FIELD_TYPE(${k})`, `${k} は${want}`,
+                                      `${k} = ${JSON.stringify(v)}`);
+  for (const k of ["rows_per_hour","total_distance_m"]){
+    if (o[k] === undefined) miss(k); else if (!isNum(o[k])) typ(k, o[k], "数値");
+  }
+  if (o.wait_time_s === undefined) miss("wait_time_s");
+  else if (typeof o.wait_time_s !== "object" || o.wait_time_s === null)
+    typ("wait_time_s", o.wait_time_s, "オブジェクト");
+  else for (const k of ["mean","p50","p95","total"]){
+    if (o.wait_time_s[k] === undefined) miss(`wait_time_s.${k}`);
+    else if (!isNum(o.wait_time_s[k])) typ(`wait_time_s.${k}`, o.wait_time_s[k], "数値");
+  }
+  if (o.utilization === undefined) miss("utilization");
+  else if (typeof o.utilization !== "object" || o.utilization === null || Array.isArray(o.utilization))
+    typ("utilization", o.utilization, "{actorId: 数値} のオブジェクト");
+  else for (const k of Object.keys(o.utilization))
+    if (!isNum(o.utilization[k])) typ(`utilization["${k}"]`, o.utilization[k], "数値");
+  return o;
+}
+function crossCheckSummary(D, rep){
+  const s = D.summary; if (!s) return;
+  const cmp = (label, given, calc, tol) => {
+    if (!isNum(given)) return;
+    const d = Math.abs(given - calc), base = Math.abs(calc);
+    if (base < 1e-9 ? d > 1e-9 : d / base > tol)
+      rep.warn("summary.json","MISMATCH",
+        "summary の値がログからの再計算と一致しない (契約 §6: summary は events/positions の集計値)",
+        `${label}: 記載 ${given} / 再計算 ${calc.toFixed(3)}`
+        + (base < 1e-9 ? " (再計算は0)" : ` (差 ${(100*d/base).toFixed(1)}%)`));
+  };
+  cmp("rows_per_hour", s.rows_per_hour, D.calc.rows_per_hour, 0.05);
+  cmp("total_distance_m", s.total_distance_m, D.calc.total_distance_m, 0.05);
+  if (s.wait_time_s){
+    cmp("wait_time_s.total", s.wait_time_s.total, D.calc.wait.total, 0.05);
+    cmp("wait_time_s.mean", s.wait_time_s.mean, D.calc.wait.mean, 0.05);
+  }
+}
+
+/* ------------------------------------------------------------------ §8
+   状態 + 共有時間レンジ (3ビュー連動の唯一の源)                            */
+const S = {
+  D: null, view: "marey", range: {t0: 0, t1: 1},
+  heat: {mode:"dwell", cell:1, alpha:0.82, log:false, grid:null, max:0, nx:0, ny:0,
+         ox:0, oy:0, dirty:true},
+  play: {on:false, t:0, speed:30, trail:30, glow:true, label:false, fps:0, last:0,
+         frames:0, fpsT:0, frameMs:0},
+  marey: {yMode:"node", showWait:true, showPts:false, actor:-1},
+  perf: {}
+};
+const listeners = [];
+function onRangeChange(fn){ listeners.push(fn); }
+function setRange(t0, t1, src){
+  const D = S.D; if (!D) return;
+  if (!(t1 > t0)) t1 = t0 + Math.max(1e-3, (D.tMax - D.tMin) * 1e-4);
+  t0 = clamp(t0, D.tMin, D.tMax); t1 = clamp(t1, D.tMin, D.tMax);
+  if (t1 - t0 < 1e-6) t1 = Math.min(D.tMax, t0 + 1e-6);
+  S.range.t0 = t0; S.range.t1 = t1;
+  $("#rT0").value = t0.toFixed(1); $("#rT1").value = t1.toFixed(1);
+  S.heat.dirty = true;
+  S.play.t = clamp(S.play.t, t0, t1);
+  for (const fn of listeners) fn(src);
+}
+
+/* ------------------------------------------------------------------ §9
+   ダイヤビュー (Marey図)                                                  */
+const Marey = (() => {
+  const cv = $("#mCanvas"), wrap = $("#mWrap");
+  let tip = null, drag = null;
+  const M = {l: 94, r: 16, t: 12, b: 30};
+
+  function geom(){
+    const r = wrap.getBoundingClientRect();
+    return {w: r.width, h: r.height,
+            pw: Math.max(10, r.width - M.l - M.r), ph: Math.max(10, r.height - M.t - M.b)};
+  }
+  function xOf(t, g){ return M.l + (t - S.range.t0) / (S.range.t1 - S.range.t0) * g.pw; }
+  function tOf(px, g){ return S.range.t0 + (px - M.l) / g.pw * (S.range.t1 - S.range.t0); }
+  function yScale(D){
+    if (S.marey.yMode === "node"){
+      const n = Math.max(1, D.layout.nodes.length);
+      return {min: 0, max: Math.max(1, n - 1), label: "ノード列 (主軸順)"};
+    }
+    return {min: D.projRange[0], max: D.projRange[1], label: "経路上位置 [m] (主軸射影)"};
+  }
+  function draw(){
+    const D = S.D; if (!D) return;
+    const dpr = window.devicePixelRatio || 1;
+    const g = geom();
+    cv.width = Math.max(1, Math.round(g.w*dpr)); cv.height = Math.max(1, Math.round(g.h*dpr));
+    const ctx = cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,g.w,g.h);
+    const ys = yScale(D);
+    const yOf = (v) => M.t + g.ph - (v - ys.min) / Math.max(1e-9, ys.max - ys.min) * g.ph;
+
+    /* 背景グリッド */
+    ctx.strokeStyle = "#1d2734"; ctx.lineWidth = 1; ctx.fillStyle = "#6b7f95";
+    ctx.font = "10px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const ticks = niceTicks(S.range.t0, S.range.t1, Math.max(3, Math.round(g.pw/110)));
+    for (const t of ticks){
+      const x = Math.round(xOf(t, g)) + .5;
+      ctx.beginPath(); ctx.moveTo(x, M.t); ctx.lineTo(x, M.t+g.ph); ctx.stroke();
+      ctx.fillText(hms(t), x, M.t + g.ph + 5);
+    }
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    if (S.marey.yMode === "node"){
+      const nodes = D.layout.nodes, N = D.nodeOrder.length;
+      const step = Math.max(1, Math.ceil(N / Math.max(4, Math.floor(g.ph / 13))));
+      for (let r = 0; r < N; r += step){
+        const y = Math.round(yOf(r)) + .5;
+        ctx.strokeStyle = "#18202b"; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(M.l+g.pw, y); ctx.stroke();
+        ctx.fillStyle = "#6b7f95"; ctx.fillText(nodes[D.nodeOrder[r]].id, M.l - 6, y);
+      }
+    } else {
+      for (const v of niceTicks(ys.min, ys.max, Math.max(3, Math.round(g.ph/40)))){
+        const y = Math.round(yOf(v)) + .5;
+        ctx.strokeStyle = "#18202b"; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(M.l+g.pw, y); ctx.stroke();
+        ctx.fillStyle = "#6b7f95"; ctx.fillText(nf(v,1), M.l - 6, y);
+      }
+    }
+    ctx.save(); ctx.beginPath(); ctx.rect(M.l, M.t, g.pw, g.ph); ctx.clip();
+
+    const nA = D.actorIds.length;
+    const only = S.marey.actor;
+    let drawnPts = 0, drawnActors = 0, waitSegs = 0;
+
+    for (let a = 0; a < nA; a++){
+      if (only >= 0 && a !== only) continue;
+      ctx.strokeStyle = D.colors[a]; ctx.lineWidth = (only >= 0 ? 1.6 : 1.1);
+      ctx.globalAlpha = only >= 0 ? 1 : (nA > 24 ? .78 : .95);
+      ctx.beginPath();
+      let started = false, cnt = 0;
+      if (S.marey.yMode === "node"){
+        const A = D.anchors[a]; if (!A.n) continue;
+        let i0 = lowerBound(A.t, 0, A.n, S.range.t0); if (i0 > 0) i0--;
+        let i1 = lowerBound(A.t, 0, A.n, S.range.t1); if (i1 < A.n) i1++;
+        const stride = Math.max(1, Math.floor((i1 - i0) / 6000));
+        for (let i = i0; i < i1; i += stride){
+          const x = xOf(A.t[i], g), y = yOf(A.y[i]);
+          if (!started){ ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+          cnt++;
+        }
+      } else {
+        const s = D.pos.off[a], e = D.pos.off[a+1]; if (e <= s) continue;
+        let i0 = lowerBound(D.pos.T, s, e, S.range.t0); if (i0 > s) i0--;
+        let i1 = lowerBound(D.pos.T, s, e, S.range.t1); if (i1 < e) i1++;
+        const stride = Math.max(1, Math.floor((i1 - i0) / Math.max(200, g.pw * 2)));
+        for (let i = i0; i < i1; i += stride){
+          const x = xOf(D.pos.T[i], g), y = yOf(D.proj(D.pos.X[i], D.pos.Y[i]));
+          if (!started){ ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+          cnt++;
+        }
+      }
+      if (started){ ctx.stroke(); drawnActors++; drawnPts += cnt; }
+      if (S.marey.showPts && S.marey.yMode === "node"){
+        const A = D.anchors[a];
+        ctx.fillStyle = D.colors[a];
+        let i0 = lowerBound(A.t, 0, A.n, S.range.t0), i1 = lowerBound(A.t, 0, A.n, S.range.t1);
+        if (i1 - i0 < 4000) for (let i = i0; i < i1; i++)
+          ctx.fillRect(xOf(A.t[i],g) - 1.2, yOf(A.y[i]) - 1.2, 2.4, 2.4);
+      }
+    }
+    /* 待機 = 水平区間。ダイヤ図の主役なので最後に太く重ねる */
+    if (S.marey.showWait){
+      ctx.globalAlpha = 1; ctx.lineCap = "round";
+      for (const w of D.waits){
+        if (only >= 0 && w.actor !== only) continue;
+        if (w.t1 < S.range.t0 || w.t0 > S.range.t1) continue;
+        let y;
+        if (S.marey.yMode === "node"){ if (w.rank === null || w.rank === undefined) continue; y = yOf(w.rank); }
+        else {
+          const s = D.pos.off[w.actor], e = D.pos.off[w.actor+1]; if (e <= s) continue;
+          let i = lowerBound(D.pos.T, s, e, w.t0); if (i >= e) i = e-1;
+          y = yOf(D.proj(D.pos.X[i], D.pos.Y[i]));
+        }
+        const x0 = xOf(w.t0, g), x1 = xOf(w.t1, g);
+        ctx.strokeStyle = "#ffb74d"; ctx.lineWidth = 3.4;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(Math.max(x1, x0 + 1), y); ctx.stroke();
+        ctx.strokeStyle = "#ff8a3d"; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(x0, y-3.4); ctx.lineTo(x0, y+3.4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(Math.max(x1,x0+1), y-3.4); ctx.lineTo(Math.max(x1,x0+1), y+3.4); ctx.stroke();
+        waitSegs++;
+      }
+      ctx.lineCap = "butt";
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+    /* 枠と軸ラベル */
+    ctx.strokeStyle = "#2a3644"; ctx.strokeRect(M.l+.5, M.t+.5, g.pw, g.ph);
+    ctx.save(); ctx.translate(11, M.t + g.ph/2); ctx.rotate(-Math.PI/2);
+    ctx.fillStyle = "#6b7f95"; ctx.font = "10px monospace"; ctx.textAlign = "center";
+    ctx.fillText(ys.label, 0, 0); ctx.restore();
+
+    if (drag && drag.mode === "brush"){
+      const x0 = Math.min(drag.x0, drag.x1), x1 = Math.max(drag.x0, drag.x1);
+      ctx.fillStyle = "rgba(79,195,247,.18)"; ctx.fillRect(x0, M.t, x1-x0, g.ph);
+      ctx.strokeStyle = "#4fc3f7"; ctx.strokeRect(x0+.5, M.t+.5, x1-x0, g.ph);
+    }
+    $("#mInfo").textContent =
+      `表示: ${drawnActors}アクタ / ${drawnPts.toLocaleString()}点 / 待機区間 ${waitSegs}件`
+      + `　全待機 ${D.waits.length}件`;
+    S.marey.lastWaitSegs = waitSegs;
+  }
+
+  /* --- 操作: ホイール=ズーム, ドラッグ=パン, Shift+ドラッグ=範囲選択 ---- */
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault(); const g = geom();
+    const f = Math.exp(e.deltaY * 0.0016);
+    const tc = tOf(e.offsetX, g);
+    setRange(tc - (tc - S.range.t0)*f, tc + (S.range.t1 - tc)*f, "marey");
+  }, {passive:false});
+  cv.addEventListener("mousedown", (e) => {
+    const g = geom();
+    drag = e.shiftKey ? {mode:"brush", x0:e.offsetX, x1:e.offsetX}
+                      : {mode:"pan", x:e.offsetX, t0:S.range.t0, t1:S.range.t1, g};
+    cv.style.cursor = e.shiftKey ? "crosshair" : "grabbing";
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const rect = cv.getBoundingClientRect();
+    const ox = e.clientX - rect.left;
+    if (drag.mode === "brush"){ drag.x1 = clamp(ox, M.l, rect.width - M.r); draw(); }
+    else {
+      const g = drag.g;
+      const dt = (ox - drag.x) / g.pw * (drag.t1 - drag.t0);
+      setRange(drag.t0 - dt, drag.t1 - dt, "marey");
+    }
+  });
+  window.addEventListener("mouseup", () => {
+    if (drag && drag.mode === "brush"){
+      const g = geom();
+      const a = tOf(Math.min(drag.x0, drag.x1), g), b = tOf(Math.max(drag.x0, drag.x1), g);
+      drag = null;
+      if (Math.abs(b - a) > 1e-9) setRange(a, b, "marey"); else draw();
+    }
+    drag = null; cv.style.cursor = "default";
+  });
+  cv.addEventListener("dblclick", () => { const D = S.D; if (D) setRange(D.tMin, D.tMax, "marey"); });
+  cv.addEventListener("mousemove", (e) => {
+    const D = S.D; if (!D || drag) { if (tip) tip.remove(), tip = null; return; }
+    const g = geom(); const t = tOf(e.offsetX, g);
+    const ys = yScale(D);
+    const yOf = (v) => M.t + g.ph - (v - ys.min)/Math.max(1e-9, ys.max-ys.min)*g.ph;
+    let best = null;
+    for (let a = 0; a < D.actorIds.length; a++){
+      if (S.marey.actor >= 0 && a !== S.marey.actor) continue;
+      let y = null, label = "";
+      if (S.marey.yMode === "node"){
+        const A = D.anchors[a]; if (!A.n) continue;
+        let i = lowerBound(A.t, 0, A.n, t); if (i >= A.n) i = A.n-1;
+        y = yOf(A.y[i]); label = D.layout.nodes[D.nodeOrder[Math.round(A.y[i])]].id;
+      } else {
+        const s = D.pos.off[a], e2 = D.pos.off[a+1]; if (e2 <= s) continue;
+        let i = lowerBound(D.pos.T, s, e2, t); if (i >= e2) i = e2-1;
+        y = yOf(D.proj(D.pos.X[i], D.pos.Y[i]));
+        label = `(${D.pos.X[i].toFixed(1)}, ${D.pos.Y[i].toFixed(1)})`;
+      }
+      const d = Math.abs(y - e.offsetY);
+      if (best === null || d < best.d) best = {d, a, y, label};
+    }
+    if (tip) tip.remove(), tip = null;
+    if (best && best.d < 14){
+      tip = document.createElement("div"); tip.className = "tip";
+      const wnow = D.waitsByActor[best.a].find((w)=>t >= w.t0 && t <= w.t1);
+      tip.textContent = `${D.actorIds[best.a]}  t=${hms(t)}\n${best.label}`
+        + (wnow ? `\n待機中 ${nf(wnow.t1-wnow.t0,1)}s` : "");
+      tip.style.left = (e.offsetX + 12) + "px"; tip.style.top = (best.y + 10) + "px";
+      wrap.appendChild(tip);
+    }
+  });
+  cv.addEventListener("mouseleave", () => { if (tip) tip.remove(), tip = null; });
+  return {draw};
+})();
+
+/* ------------------------------------------------------------------ §10
+   フロアヒートマップ                                                       */
+function rampColor(u){            /* 0..1 -> 暗青→シアン→黄→赤 の連続ランプ */
+  u = clamp(u, 0, 1);
+  const stops = [[0,28,52,112],[0.25,20,125,170],[0.5,45,205,175],[0.75,245,215,95],[1,255,80,60]];
+  for (let i = 1; i < stops.length; i++){
+    if (u <= stops[i][0]){
+      const a = stops[i-1], b = stops[i];
+      const f = (u - a[0]) / (b[0] - a[0] || 1);
+      return [a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f, a[3]+(b[3]-a[3])*f];
+    }
+  }
+  return [255,80,60];
+}
+const Cam = {
+  make(){ return {k:1, tx:0, ty:0, ready:false}; },
+  fit(cam, b, w, h, pad){
+    const bw = Math.max(1e-6, b.maxx-b.minx), bh = Math.max(1e-6, b.maxy-b.miny);
+    cam.k = Math.min((w-2*pad)/bw, (h-2*pad)/bh);
+    cam.tx = (w - bw*cam.k)/2 - b.minx*cam.k;
+    cam.ty = (h + bh*cam.k)/2 + b.miny*cam.k;   /* y反転 */
+    cam.ready = true;
+  },
+  sx(cam, x){ return x*cam.k + cam.tx; },
+  sy(cam, y){ return cam.ty - y*cam.k; },
+  wx(cam, px){ return (px - cam.tx)/cam.k; },
+  wy(cam, py){ return (cam.ty - py)/cam.k; }
+};
+function drawLayout(ctx, cam, L, opt){
+  const o = opt || {};
+  ctx.lineWidth = 1;
+  for (const z of L.zones){
+    ctx.beginPath();
+    z.ring.forEach((c,i)=>{ const x = Cam.sx(cam,c[0]), y = Cam.sy(cam,c[1]);
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(79,195,247,.06)"; ctx.fill();
+    ctx.strokeStyle = "rgba(79,195,247,.35)"; ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+    if (z.label){ ctx.fillStyle = "#4a6076"; ctx.font = "10px monospace"; ctx.textAlign = "left";
+      ctx.fillText(z.label, Cam.sx(cam, z.bbox[0]) + 3, Cam.sy(cam, z.bbox[3]) + 11); }
+  }
+  ctx.strokeStyle = o.edgeColor || "#2e3d4e"; ctx.lineWidth = o.edgeWidth || 1;
+  ctx.beginPath();
+  for (const e of L.edges){
+    e.pts.forEach((c,i)=>{ const x = Cam.sx(cam,c[0]), y = Cam.sy(cam,c[1]);
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
+  }
+  ctx.stroke();
+  for (const r of L.racks){
+    ctx.beginPath();
+    r.ring.forEach((c,i)=>{ const x = Cam.sx(cam,c[0]), y = Cam.sy(cam,c[1]);
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
+    ctx.closePath();
+    ctx.fillStyle = o.rackFill || "rgba(120,140,165,.16)"; ctx.fill();
+    ctx.strokeStyle = o.rackLine || "rgba(140,165,190,.42)"; ctx.lineWidth = 1; ctx.stroke();
+  }
+  if (o.nodes !== false){
+    ctx.fillStyle = o.nodeColor || "#3d5165";
+    for (const n of L.nodes){
+      const x = Cam.sx(cam,n.x), y = Cam.sy(cam,n.y);
+      ctx.fillRect(x-1.2, y-1.2, 2.4, 2.4);
+    }
+  }
+}
+const Heat = (() => {
+  const cv = $("#hCanvas"), wrap = $("#hWrap");
+  const cam = Cam.make();
+  let off = null, tip = null, drag = null;
+
+  function compute(){
+    const D = S.D; if (!D) return;
+    const t0 = performance.now();
+    const b = D.layout.bounds, cell = S.heat.cell;
+    const nx = Math.max(1, Math.ceil((b.maxx-b.minx)/cell));
+    const ny = Math.max(1, Math.ceil((b.maxy-b.miny)/cell));
+    const grid = new Float64Array(nx*ny);
+    const waitOnly = S.heat.mode === "wait";
+    const R0 = S.range.t0, R1 = S.range.t1;
+    let used = 0;
+    for (let a = 0; a < D.actorIds.length; a++){
+      const s = D.pos.off[a], e = D.pos.off[a+1]; if (e - s < 2) continue;
+      let i = lowerBound(D.pos.T, s, e, R0); if (i > s) i--;
+      for (; i < e-1; i++){
+        const ta = D.pos.T[i], tb = D.pos.T[i+1];
+        if (ta > R1) break;
+        const w = Math.min(tb, R1) - Math.max(ta, R0);
+        if (w <= 0) continue;
+        if (waitOnly && !D.isWait[i]) continue;
+        const gx = Math.floor((D.pos.X[i]-b.minx)/cell), gy = Math.floor((D.pos.Y[i]-b.miny)/cell);
+        if (gx < 0 || gy < 0 || gx >= nx || gy >= ny) continue;
+        grid[gy*nx+gx] += w; used++;
+      }
+    }
+    let max = 0, argmax = -1, sum = 0, nz = 0;
+    for (let k = 0; k < grid.length; k++){
+      const v = grid[k]; sum += v; if (v > 0) nz++;
+      if (v > max){ max = v; argmax = k; } }
+    Object.assign(S.heat, {grid, nx, ny, max, argmax, sum, nz, used, ox:b.minx, oy:b.miny,
+                           ms: performance.now()-t0, dirty:false});
+    /* オフスクリーンにセル画像を焼く */
+    off = document.createElement("canvas"); off.width = nx; off.height = ny;
+    const octx = off.getContext("2d");
+    const img = octx.createImageData(nx, ny);
+    const lg = S.heat.log;
+    const denom = lg ? Math.log1p(max) : max;
+    for (let gy = 0; gy < ny; gy++) for (let gx = 0; gx < nx; gx++){
+      const v = grid[gy*nx+gx];
+      const p = ((ny-1-gy)*nx + gx) * 4;       /* 画像は上下反転 (y上向き) */
+      if (v <= 0){ img.data[p+3] = 0; continue; }
+      const u = denom > 0 ? (lg ? Math.log1p(v)/denom : v/denom) : 0;
+      const c = rampColor(u);
+      img.data[p] = c[0]; img.data[p+1] = c[1]; img.data[p+2] = c[2];
+      img.data[p+3] = Math.round(255 * (0.42 + 0.58*Math.sqrt(u)));
+    }
+    octx.putImageData(img, 0, 0);
+    drawRamp();
+  }
+  function drawRamp(){
+    const c = $("#hRamp"), x = c.getContext("2d");
+    for (let i = 0; i < c.width; i++){
+      const col = rampColor(i/(c.width-1));
+      x.fillStyle = `rgb(${col[0]|0},${col[1]|0},${col[2]|0})`; x.fillRect(i,0,1,c.height);
+    }
+    $("#hMax").textContent = nf(S.heat.max, 1) + " s";
+  }
+  function draw(){
+    const D = S.D; if (!D) return;
+    if (S.heat.dirty) compute();
+    const dpr = window.devicePixelRatio || 1;
+    const r = wrap.getBoundingClientRect(), w = r.width, h = r.height;
+    cv.width = Math.max(1,Math.round(w*dpr)); cv.height = Math.max(1,Math.round(h*dpr));
+    const ctx = cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle = "#0d1117"; ctx.fillRect(0,0,w,h);
+    if (!cam.ready) Cam.fit(cam, D.layout.bounds, w, h, 26);
+    drawLayout(ctx, cam, D.layout, {});
+    if (off){
+      const b = D.layout.bounds, cell = S.heat.cell;
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = S.heat.alpha;
+      const x0 = Cam.sx(cam, b.minx), y0 = Cam.sy(cam, b.miny + S.heat.ny*cell);
+      ctx.drawImage(off, x0, y0, S.heat.nx*cell*cam.k, S.heat.ny*cell*cam.k);
+      ctx.globalAlpha = 1;
+    }
+    /* 最大セルの印 (計算結果) */
+    if (S.heat.argmax >= 0){
+      const gx = S.heat.argmax % S.heat.nx, gy = Math.floor(S.heat.argmax / S.heat.nx);
+      const cx = Cam.sx(cam, S.heat.ox + (gx+0.5)*S.heat.cell);
+      const cy = Cam.sy(cam, S.heat.oy + (gy+0.5)*S.heat.cell);
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = "10px monospace"; ctx.textAlign = "left";
+      ctx.fillText(`最大 ${nf(S.heat.max,1)}s @ (${nf(S.heat.ox+(gx+0.5)*S.heat.cell,1)}, ${nf(S.heat.oy+(gy+0.5)*S.heat.cell,1)})`,
+                   cx + 12, cy - 10);
+    }
+    $("#hInfo").textContent =
+      `セル ${S.heat.nx}×${S.heat.ny} / 非ゼロ ${S.heat.nz.toLocaleString()} / `
+      + `合計 ${nf(S.heat.sum,0)}s / 集計 ${S.heat.used.toLocaleString()}区間 / ${nf(S.heat.ms,1)}ms`;
+  }
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const f = Math.exp(-e.deltaY*0.0015);
+    const wx = Cam.wx(cam, e.offsetX), wy = Cam.wy(cam, e.offsetY);
+    cam.k *= f; cam.tx = e.offsetX - wx*cam.k; cam.ty = e.offsetY + wy*cam.k;
+    draw();
+  }, {passive:false});
+  cv.addEventListener("mousedown", (e) => { drag = {x:e.offsetX, y:e.offsetY, tx:cam.tx, ty:cam.ty}; });
+  window.addEventListener("mouseup", () => { drag = null; });
+  cv.addEventListener("mousemove", (e) => {
+    if (drag){ cam.tx = drag.tx + (e.offsetX-drag.x); cam.ty = drag.ty + (e.offsetY-drag.y); draw(); return; }
+    const D = S.D; if (!D || !S.heat.grid) return;
+    const wx = Cam.wx(cam, e.offsetX), wy = Cam.wy(cam, e.offsetY);
+    const gx = Math.floor((wx-S.heat.ox)/S.heat.cell), gy = Math.floor((wy-S.heat.oy)/S.heat.cell);
+    if (tip) tip.remove(), tip = null;
+    if (gx >= 0 && gy >= 0 && gx < S.heat.nx && gy < S.heat.ny){
+      const v = S.heat.grid[gy*S.heat.nx+gx];
+      tip = document.createElement("div"); tip.className = "tip";
+      tip.textContent = `(${nf(S.heat.ox+(gx+.5)*S.heat.cell,1)}, ${nf(S.heat.oy+(gy+.5)*S.heat.cell,1)}) m`
+        + `\nセル[${gx}, ${gy}]  ${nf(v,2)} s`
+        + (S.heat.max > 0 ? `\n最大比 ${nf(100*v/S.heat.max,1)}%` : "");
+      tip.style.left = (e.offsetX+12)+"px"; tip.style.top = (e.offsetY+12)+"px";
+      wrap.appendChild(tip);
+    }
+  });
+  cv.addEventListener("mouseleave", () => { if (tip) tip.remove(), tip = null; });
+  $("#hFit").onclick = () => { const D = S.D; if (!D) return;
+    const r = wrap.getBoundingClientRect(); Cam.fit(cam, D.layout.bounds, r.width, r.height, 26); draw(); };
+  return {draw, refit(){ const D = S.D; if (!D) return; const r = wrap.getBoundingClientRect();
+    Cam.fit(cam, D.layout.bounds, r.width, r.height, 26); }};
+})();
+
+/* ------------------------------------------------------------------ §11
+   再生ビュー: 残像トレイル (クリアせず半透明矩形を重ね塗り) + 加算グロー   */
+const Play = (() => {
+  const base = $("#pBase"), trail = $("#pTrailCv"), wrap = $("#pWrap");
+  const cam = Cam.make();
+  let sprites = [], drag = null, cursor = null, dpr = 1, W = 0, H = 0;
+
+  function makeSprite(color, r){
+    const c = document.createElement("canvas"); c.width = c.height = r*2;
+    const x = c.getContext("2d");
+    const g = x.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, color); g.addColorStop(0.35, color);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = g; x.beginPath(); x.arc(r, r, r, 0, Math.PI*2); x.fill();
+    return c;
+  }
+  function resize(){
+    const r = wrap.getBoundingClientRect();
+    dpr = window.devicePixelRatio || 1; W = r.width; H = r.height;
+    for (const cv of [base, trail]){
+      cv.width = Math.max(1,Math.round(W*dpr)); cv.height = Math.max(1,Math.round(H*dpr));
+      cv.getContext("2d").setTransform(dpr,0,0,dpr,0,0);
+    }
+    if (!cam.ready) Cam.fit(cam, S.D.layout.bounds, W, H, 26);
+    drawBase(); clearTrail();
+  }
+  function drawBase(){
+    const ctx = base.getContext("2d");
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle = "#0d1117"; ctx.fillRect(0,0,W,H);
+    drawLayout(ctx, cam, S.D.layout, {rackFill:"rgba(120,140,165,.13)"});
+  }
+  function clearTrail(){
+    const ctx = trail.getContext("2d");
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0,0,trail.width,trail.height);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  function reset(){ cam.ready = false; resize(); }
+
+  function sampleAt(a, t){
+    const D = S.D, s = D.pos.off[a], e = D.pos.off[a+1];
+    if (e <= s) return null;
+    let i = cursor[a];
+    if (i < s || i >= e || D.pos.T[i] > t){ i = lowerBound(D.pos.T, s, e, t); if (i > s) i--; }
+    while (i + 1 < e && D.pos.T[i+1] <= t) i++;
+    cursor[a] = i;
+    if (D.pos.T[i] > t + 1e-9 && i === s) return null;
+    let x = D.pos.X[i], y = D.pos.Y[i];
+    if (i + 1 < e){
+      const dt = D.pos.T[i+1] - D.pos.T[i];
+      if (dt > 0){ const f = clamp((t - D.pos.T[i]) / dt, 0, 1);
+        x += (D.pos.X[i+1]-x)*f; y += (D.pos.Y[i+1]-y)*f; }
+    }
+    return {x, y, i};
+  }
+  function isWaiting(a, t){
+    const arr = S.D.waitsByActor[a];
+    for (let k = 0; k < arr.length; k++){ if (arr[k].t0 <= t && t <= arr[k].t1) return true;
+      if (arr[k].t0 > t) break; }
+    return false;
+  }
+  function frame(){
+    const D = S.D; if (!D) return;
+    const ctx = trail.getContext("2d");
+    /* 1) 残像: クリアせず半透明矩形を重ね塗り (destination-out で下地を残す) */
+    const fade = clamp(1 / Math.max(1, S.play.trail), 0.006, 1);
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = `rgba(0,0,0,${fade})`;
+    ctx.fillRect(0, 0, W, H);
+    /* 2) 現在位置: 加算合成でグロー */
+    ctx.globalCompositeOperation = S.play.glow ? "lighter" : "source-over";
+    const t = S.play.t;
+    let live = 0, waiting = 0;
+    const nA = D.actorIds.length;
+    for (let a = 0; a < nA; a++){
+      const p = sampleAt(a, t); if (!p) continue;
+      const x = Cam.sx(cam, p.x), y = Cam.sy(cam, p.y);
+      if (x < -30 || y < -30 || x > W+30 || y > H+30) continue;   /* ビューポート外は捨てる */
+      live++;
+      const sp = sprites[a], r = sp.width/2;
+      ctx.drawImage(sp, x-r, y-r);
+      if (isWaiting(a, t)){
+        waiting++;
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = "#ffb74d"; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.arc(x, y, 7.5, 0, Math.PI*2); ctx.stroke();
+        ctx.globalCompositeOperation = S.play.glow ? "lighter" : "source-over";
+      }
+      if (S.play.label){
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "#c8d6e5"; ctx.font = "9px monospace"; ctx.textAlign = "center";
+        ctx.fillText(D.actorIds[a], x, y - 9);
+        ctx.globalCompositeOperation = S.play.glow ? "lighter" : "source-over";
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
+    $("#pClock").textContent = `t=${hms(t)} / ${hms(S.range.t1)}　${nf(S.play.fps,1)} fps`;
+    $("#pInfo").textContent = `表示中 ${live}/${nA} アクタ　待機中 ${waiting}`
+      + `　描画 ${nf(S.play.frameMs,2)} ms/frame`;
+    const f = (t - S.range.t0) / Math.max(1e-9, S.range.t1 - S.range.t0);
+    $("#pSeek").value = String(Math.round(f * 1000));
+  }
+  let raf = null;
+  function loop(now){
+    raf = requestAnimationFrame(loop);
+    if (!S.D) return;
+    const dtr = S.play.last ? Math.min(0.25, (now - S.play.last)/1000) : 0;
+    S.play.last = now;
+    if (S.play.on){
+      S.play.t += dtr * S.play.speed;
+      if (S.play.t > S.range.t1){ S.play.t = S.range.t0; clearTrail(); }
+    }
+    if (S.view !== "play") return;
+    S.play.frames++;
+    if (now - S.play.fpsT > 500){
+      S.play.fps = S.play.frames * 1000 / (now - S.play.fpsT);
+      S.play.frames = 0; S.play.fpsT = now;
+      if (S.play.on && window.__CL_LOG_FPS)
+        console.log("[chronolens] fps " + S.play.fps.toFixed(1)
+                    + " frameMs " + S.play.frameMs.toFixed(2));
+    }
+    const f0 = performance.now();
+    frame();
+    /* 描画1コマの実コスト (rAF が環境側で制限されても測れる指標) */
+    const dtf = performance.now() - f0;
+    S.play.frameMs = S.play.frameMs ? S.play.frameMs*0.9 + dtf*0.1 : dtf;
+  }
+  function start(){
+    const D = S.D;
+    sprites = D.actorIds.map((_,a)=>makeSprite(D.colors[a], 9));
+    cursor = new Int32Array(D.actorIds.length).fill(-1);
+    S.play.t = S.range.t0; cam.ready = false;
+    if (raf === null) raf = requestAnimationFrame(loop);
+  }
+  trail.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const f = Math.exp(-e.deltaY*0.0015);
+    const wx = Cam.wx(cam, e.offsetX), wy = Cam.wy(cam, e.offsetY);
+    cam.k *= f; cam.tx = e.offsetX - wx*cam.k; cam.ty = e.offsetY + wy*cam.k;
+    drawBase(); clearTrail();
+  }, {passive:false});
+  trail.addEventListener("mousedown", (e) => { drag = {x:e.offsetX,y:e.offsetY,tx:cam.tx,ty:cam.ty}; });
+  window.addEventListener("mouseup", () => { drag = null; });
+  trail.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    cam.tx = drag.tx + (e.offsetX-drag.x); cam.ty = drag.ty + (e.offsetY-drag.y);
+    drawBase(); clearTrail();
+  });
+  $("#pFit").onclick = () => { cam.ready = false; resize(); };
+  return {start, resize, reset, clearTrail, seek(t){ S.play.t = t; clearTrail(); }};
+})();
+
+/* ------------------------------------------------------------------ §8b
+   共有レンジのミニマップ (イベント密度 + 選択区間)                          */
+const RangeBar = (() => {
+  const cv = $("#rangeCanvas");
+  let drag = null, hist = null, histN = 0;
+  function buildHist(){
+    const D = S.D; if (!D) return;
+    histN = 600; hist = new Float64Array(histN);
+    const span = D.tMax - D.tMin;
+    for (let i = 0; i < D.events.n; i++){
+      const k = clamp(Math.floor((D.events.t[i]-D.tMin)/span*histN), 0, histN-1);
+      hist[k]++;
+    }
+  }
+  function draw(){
+    const D = S.D; if (!D) return;
+    if (!hist) buildHist();
+    const dpr = window.devicePixelRatio || 1;
+    const r = cv.getBoundingClientRect(), w = r.width, h = r.height;
+    cv.width = Math.max(1,Math.round(w*dpr)); cv.height = Math.max(1,Math.round(h*dpr));
+    const ctx = cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle = "#111823"; ctx.fillRect(0,0,w,h);
+    let max = 0; for (const v of hist) if (v > max) max = v;
+    ctx.fillStyle = "#26506b";
+    for (let i = 0; i < histN; i++){
+      const x = i/histN*w, bw = w/histN + .6;
+      const bh = max > 0 ? hist[i]/max*(h-16) : 0;
+      ctx.fillRect(x, h-4-bh, bw, bh);
+    }
+    /* 待機区間の帯 */
+    ctx.fillStyle = "rgba(255,183,77,.75)";
+    const span = D.tMax - D.tMin;
+    for (const wt of D.waits){
+      const x0 = (wt.t0-D.tMin)/span*w, x1 = (wt.t1-D.tMin)/span*w;
+      ctx.fillRect(x0, 2, Math.max(1, x1-x0), 4);
+    }
+    const sx0 = (S.range.t0-D.tMin)/span*w, sx1 = (S.range.t1-D.tMin)/span*w;
+    ctx.fillStyle = "rgba(13,17,23,.62)";
+    ctx.fillRect(0,0,sx0,h); ctx.fillRect(sx1,0,w-sx1,h);
+    ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 1;
+    ctx.strokeRect(sx0+.5, .5, Math.max(1,sx1-sx0), h-1);
+    ctx.fillStyle = "#6b7f95"; ctx.font = "9px monospace"; ctx.textAlign = "left";
+    ctx.fillText(hms(D.tMin), 3, 10); ctx.textAlign = "right"; ctx.fillText(hms(D.tMax), w-3, 10);
+  }
+  function tAt(px){ const D = S.D, r = cv.getBoundingClientRect();
+    return D.tMin + clamp(px/r.width, 0, 1)*(D.tMax-D.tMin); }
+  cv.addEventListener("mousedown", (e) => { drag = {a: tAt(e.offsetX)}; });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const r = cv.getBoundingClientRect();
+    const b = tAt(e.clientX - r.left);
+    if (Math.abs(b - drag.a) > 1e-9) setRange(Math.min(drag.a,b), Math.max(drag.a,b), "rangebar");
+  });
+  window.addEventListener("mouseup", () => { drag = null; });
+  cv.addEventListener("dblclick", () => { const D = S.D; if (D) setRange(D.tMin, D.tMax, "rangebar"); });
+  return {draw, invalidate(){ hist = null; }};
+})();
+
+/* ------------------------------------------------------------------ §12
+   サイドパネル (KPI) — 記載値 (summary.json) と 再計算値 を並べる          */
+function renderSide(){
+  const D = S.D, C = D.calc, s = D.summary;
+  const row = (k, v, note) => `<div class="kv"><span class="k">${esc(k)}</span>`
+    + `<span class="v">${v}${note ? `<small> ${esc(note)}</small>` : ""}</span></div>`;
+  const cmpRow = (k, given, calc, unit, digits) => {
+    const g = isNum(given) ? nf(given, digits) : "—";
+    const c = nf(calc, digits);
+    let badge = "";
+    if (isNum(given)){
+      const base = Math.max(1e-9, Math.abs(calc));
+      const d = Math.abs(given - calc) / base;
+      badge = d <= 0.05 ? `<span class="badge ok">一致</span>` :
+              `<span class="badge warn">差 ${nf(d*100,1)}%</span>`;
+    } else badge = `<span class="badge warn">記載なし</span>`;
+    return `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${c} ${esc(unit)}</span></div>`
+      + `<div class="kv"><span class="k" style="padding-left:9px;color:#57697d">summary記載</span>`
+      + `<span class="v" style="color:#9fb0c3">${g} ${badge}</span></div>`;
+  };
+  const ty = Array.from(C.typeCount.entries()).sort((a,b)=>b[1]-a[1]);
+  let h = "";
+  h += `<h3>ラン</h3>`;
+  h += row("run_id", esc(D.runId || "—"));
+  if (D.meta && D.meta.generator) h += row("generator", esc(String(D.meta.generator)));
+  if (D.meta && D.meta.seed !== undefined) h += row("seed", esc(String(D.meta.seed)));
+  h += row("時間範囲", `${hms(D.tMin)} 〜 ${hms(D.tMax)}`);
+  h += row("全体長", `${nf(C.span,1)} s`);
+  h += row("アクタ", `${D.actorIds.length}`);
+  h += row("イベント", `${D.events.n.toLocaleString()}`);
+  h += row("位置サンプル", `${D.pos.n.toLocaleString()}`);
+  if (D.scenario && D.scenario.actors && isNum(D.scenario.actors.speed_mps))
+    h += row("scenario.speed", `${nf(D.scenario.actors.speed_mps,2)} m/s`);
+
+  h += `<h3>KPI (ログ再計算 / 記載値)</h3>`;
+  h += cmpRow("行/時 (pick_end基準)", s && s.rows_per_hour, C.rows_per_hour, "行/h", 1);
+  h += cmpRow("総移動距離", s && s.total_distance_m, C.total_distance_m, "m", 1);
+  h += `<p class="srcnote">再計算は positions.jsonl の連続サンプル間距離の総和、
+        行/時 は pick_end 件数 ÷ ログ全体長。</p>`;
+
+  h += `<h3>待機 (wait_start〜wait_end)</h3>`;
+  h += row("区間数", `${C.wait.n}`);
+  h += cmpRow("合計", s && s.wait_time_s && s.wait_time_s.total, C.wait.total, "s", 1);
+  h += cmpRow("平均", s && s.wait_time_s && s.wait_time_s.mean, C.wait.mean, "s", 1);
+  h += cmpRow("p50", s && s.wait_time_s && s.wait_time_s.p50, C.wait.p50, "s", 1);
+  h += cmpRow("p95", s && s.wait_time_s && s.wait_time_s.p95, C.wait.p95, "s", 1);
+  h += row("全体に占める割合",
+    `${nf(100*C.wait.total/Math.max(1e-9, C.span*D.actorIds.length),2)} %`);
+
+  h += `<h3>選択範囲</h3><div id="selStats"></div>`;
+
+  h += `<h3>イベント種別</h3>`;
+  for (const [k,v] of ty) h += row(k, v.toLocaleString());
+
+  h += `<h3>稼働率 (task_assign→pick_end)</h3>`;
+  const ids = D.actorIds.map((id,i)=>[id,i]).sort((a,b)=>C.utilization[b[0]]-C.utilization[a[0]]);
+  for (const [id,i] of ids.slice(0, 60)){
+    const u = C.utilization[id];
+    const given = s && s.utilization && isNum(s.utilization[id]) ? s.utilization[id] : null;
+    h += `<div class="util"><span style="color:${D.colors[i]}">${esc(id)}</span>`
+      + `<span class="bar"><i style="width:${(u*100).toFixed(1)}%"></i></span>`
+      + `<span>${nf(u*100,0)}%</span></div>`;
+    if (given !== null && Math.abs(given - u) > 0.05)
+      h += `<div class="srcnote" style="margin:-2px 0 3px 46px">summary記載 ${nf(given*100,0)}%</div>`;
+  }
+  if (ids.length > 60) h += `<p class="srcnote">…他 ${ids.length-60} アクタ</p>`;
+
+  h += `<h3>契約チェック</h3>`;
+  h += row("edge × rack 交差", `${D.layout.crossN}`);
+  h += row("軌跡 × rack 交差", `${D.posInRack}`);
+  h += row("meta.crs", esc(D.layout.crs || "(無し)"));
+  h += row("読込 (取得/解析/索引)",
+    `${nf(S.perf.read,0)}/${nf(S.perf.parse,0)}/${nf(S.perf.index,0)} ms`);
+  h += row("読込 合計", `${nf(S.perf.total,0)} ms`);
+  if (D.warnCount) h += `<p class="srcnote"><span class="badge warn">警告 ${D.warnCount}件</span>
+      <a href="#" id="showRep" style="color:#4fc3f7">詳細</a></p>`;
+  $("#side").innerHTML = h;
+  const sr = $("#showRep");
+  if (sr) sr.onclick = (e) => { e.preventDefault(); showReport(D.lastReport, true); };
+  renderSelStats();
+}
+/* 範囲統計はサンプル全走査を含むので、ドラッグ中は間引いて後追いさせる */
+let selTimer = null;
+function scheduleSelStats(){
+  if (selTimer) return;
+  selTimer = setTimeout(()=>{ selTimer = null; renderSelStats(); }, 110);
+}
+function renderSelStats(){
+  const D = S.D; if (!D) return;
+  const el = $("#selStats"); if (!el) return;
+  const R0 = S.range.t0, R1 = S.range.t1;
+  let waitN = 0, waitS = 0, evN = 0, dist = 0, samp = 0;
+  for (const w of D.waits){
+    const ov = Math.min(w.t1,R1) - Math.max(w.t0,R0);
+    if (ov > 0){ waitN++; waitS += ov; }
+  }
+  {                       /* events.t は契約 §7 で単調非減少 -> 二分探索で数える */
+    const et = D.events.t;
+    const lo = lowerBound(et, 0, D.events.n, R0);
+    let hi = lowerBound(et, 0, D.events.n, R1);
+    while (hi < D.events.n && et[hi] <= R1) hi++;
+    evN = hi - lo;
+  }
+  for (let a = 0; a < D.actorIds.length; a++){
+    const s = D.pos.off[a], e = D.pos.off[a+1];
+    let i = lowerBound(D.pos.T, s, e, R0);
+    for (; i < e && D.pos.T[i] <= R1; i++){
+      samp++;
+      if (i > s){ const dx = D.pos.X[i]-D.pos.X[i-1], dy = D.pos.Y[i]-D.pos.Y[i-1];
+        dist += Math.sqrt(dx*dx+dy*dy); }
+    }
+  }
+  const row = (k,v)=>`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  el.innerHTML = row("範囲", `${hms(R0)} 〜 ${hms(R1)}`)
+    + row("長さ", `${nf(R1-R0,1)} s`)
+    + row("イベント", evN.toLocaleString())
+    + row("位置サンプル", samp.toLocaleString())
+    + row("移動距離", `${nf(dist,1)} m`)
+    + row("待機 (重なり)", `${waitN} 件 / ${nf(waitS,1)} s`);
+  $("#rInfo").textContent = `長さ ${nf(R1-R0,1)}s / イベント ${evN.toLocaleString()} / サンプル ${samp.toLocaleString()}`;
+}
+
+/* --------------------------------------------------------------- 検証レポート表示 */
+function showReport(rep, asWarnings){
+  const errs = rep.count("error"), warns = rep.count("warn");
+  const rows = rep.list().map((e) => {
+    const sevJa = {error:"エラー", warn:"警告", info:"情報"}[e.sev];
+    return `<tr><td class="sev ${e.sev}">${sevJa}</td><td class="num">${esc(e.file)}</td>`
+      + `<td class="num">${esc(e.code)}</td><td>${esc(e.msg)}</td>`
+      + `<td class="num" style="text-align:right">${e.count.toLocaleString()}</td>`
+      + `<td class="ex">${e.examples.map(esc).join("\n")}</td></tr>`;
+  }).join("");
+  const head = asWarnings
+    ? `<h2>検証レポート <span class="badge warn">警告 ${warns}</span></h2>
+       <p class="lead">契約 (WHSIM_CONTRACTS v1.0) の必須項目は満たしている。以下は注意点。</p>`
+    : `<h2>読み込みを中止した <span class="badge error">エラー ${errs}</span>
+       <span class="badge warn">警告 ${warns}</span></h2>
+       <p class="lead">WHSIM_CONTRACTS v1.0 に反するフィールド、または必須ファイルの不足がある。
+        どのファイルのどの行のどのフィールドがどう違反しているかを下に出す。修正して読み直すこと。</p>`;
+  $("#report").innerHTML = head
+    + `<table class="rep"><thead><tr><th>種別</th><th>ファイル</th><th>コード</th>`
+    + `<th>内容</th><th>件数</th><th>例</th></tr></thead><tbody>${rows}</tbody></table>`
+    + `<p style="margin-top:14px">`
+    + (asWarnings ? `<button id="backBtn">ビューに戻る</button>`
+                  : `<button id="againBtn">別のランを読み込む</button>`
+                    + (window.__CL_PARTIAL ? ` <button id="forceBtn">違反を承知で表示する</button>` : ""))
+    + `</p>`;
+  $("#report").classList.remove("hidden");
+  $("#app").classList.add("hidden"); $("#drop").classList.add("hidden");
+  const b1 = $("#backBtn"); if (b1) b1.onclick = () => {
+    $("#report").classList.add("hidden"); $("#app").classList.remove("hidden"); redrawAll(); };
+  const b2 = $("#againBtn"); if (b2) b2.onclick = () => {
+    $("#report").classList.add("hidden"); $("#drop").classList.remove("hidden"); };
+  const b3 = $("#forceBtn"); if (b3) b3.onclick = () => {
+    $("#report").classList.add("hidden"); mount(window.__CL_PARTIAL); };
+}
+
+/* --------------------------------------------------------------- 読み込み配線 */
+function setLoading(on, msg, frac){
+  $("#loading").classList.toggle("hidden", !on);
+  if (msg !== undefined) $("#loadMsg").textContent = msg;
+  if (frac !== undefined) $("#loadBar").style.width = (clamp(frac,0,1)*100).toFixed(1) + "%";
+}
+function pickFiles(fileList){
+  const want = new Map(), extra = [];
+  for (const f of fileList){
+    const base = (f.name || "").toLowerCase();
+    if (REQUIRED_FILES.includes(base) || OPTIONAL_FILES.includes(base)){
+      if (!want.has(base)) want.set(base, f);
+    } else extra.push(f.name);
+  }
+  /* 名前が違っても拡張子で救う (1つしか無い場合のみ) */
+  if (!want.has("layout.geojson")){
+    const g = Array.from(fileList).filter((f)=>/\.geojson$/i.test(f.name));
+    if (g.length === 1) want.set("layout.geojson", g[0]);
+  }
+  return {want, extra};
+}
+let loadToken = 0;
+async function loadFiles(fileList){
+  const rep = new Report();
+  window.__CL_PARTIAL = null;
+  /* 新しいランを読む時点で前のランは畳む — 拒否されたときに前のデータが
+     裏に残ったまま「読み込み済み」に見えるのを防ぐ */
+  const token = ++loadToken;
+  S.D = null; S.play.on = false;
+  $("#pPlay").textContent = "▶ 再生"; $("#pPlay").classList.remove("on");
+  $("#app").classList.add("hidden"); $("#report").classList.add("hidden");
+  $("#drop").classList.add("hidden"); $("#runinfo").textContent = "";
+  const {want, extra} = pickFiles(fileList);
+  for (const f of REQUIRED_FILES) if (!want.has(f))
+    rep.err(f, "FILE_MISSING", "必須ファイルが読み込みに含まれていない (runs/<run_id>/ ごと渡す)",
+            `見つかったファイル: ${Array.from(want.keys()).concat(extra).join(", ") || "(無し)"}`);
+  const stale = () => token !== loadToken;      /* 読み込み中に次のランが来たら破棄 */
+  if (rep.hasErrors()){ setLoading(false); showReport(rep, false); return; }
+
+  const tAll = performance.now();
+  setLoading(true, "ファイル取得中…", 0.02);
+  const tRead0 = performance.now();
+  const texts = {};
+  const names = Array.from(want.keys());
+  for (let i = 0; i < names.length; i++){
+    const nm = names[i];
+    setLoading(true, `読み込み: ${nm}`, 0.02 + 0.28*i/names.length);
+    if (stale()) return;
+    let txt = await want.get(nm).text();
+    if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);   /* BOM 付きでも通す */
+    texts[nm] = txt;
+    await sleep(0);
+  }
+  const tRead = performance.now() - tRead0;
+
+  const tParse0 = performance.now();
+  setLoading(true, "layout.geojson を検証中…", 0.32);
+  const layout = parseLayout(texts["layout.geojson"], rep);
+  const interner = makeInterner();
+  setLoading(true, "events.jsonl を検証中…", 0.38);
+  await sleep(0);
+  const events = parseEvents(texts["events.jsonl"], rep, interner);
+  setLoading(true, "positions.jsonl を解析中…", 0.42);
+  await sleep(0);
+  const raw = await parsePositions(texts["positions.jsonl"], rep, interner,
+    (f, n) => setLoading(true, `positions.jsonl 解析中… ${n.toLocaleString()} 行`, 0.42 + 0.44*f));
+  const tParse = performance.now() - tParse0;
+
+  setLoading(true, "索引を構築中…", 0.88);
+  await sleep(0);
+  const tIdx0 = performance.now();
+  let summary = null;
+  if (want.has("summary.json")) summary = parseSummary(texts["summary.json"], rep);
+  let meta = null, scenario = null;
+  if (want.has("meta.json")){
+    try { meta = JSON.parse(texts["meta.json"]); }
+    catch (e){ rep.warn("meta.json","NOT_JSON","JSON として読めない (任意ファイルなので続行)", String(e.message).slice(0,120)); }
+  }
+  if (want.has("scenario.json")){
+    try { scenario = JSON.parse(texts["scenario.json"]); }
+    catch (e){ rep.warn("scenario.json","NOT_JSON","JSON として読めない (任意ファイルなので続行)", String(e.message).slice(0,120)); }
+    if (scenario && scenario.schema_version !== undefined && scenario.schema_version !== "1.0")
+      rep.warn("scenario.json","SCHEMA_VERSION",`schema_version は "1.0"`,
+               `schema_version = ${JSON.stringify(scenario.schema_version)}`);
+  }
+  if (meta && meta.schema_version !== undefined && meta.schema_version !== "1.0")
+    rep.warn("meta.json","SCHEMA_VERSION",`schema_version は "1.0"`,
+             `schema_version = ${JSON.stringify(meta.schema_version)}`);
+
+  let D = null;
+  if (layout && raw.count && events.n){
+    const pos = buildIndex(raw, interner.ids.length);
+    D = {layout, events, pos, actorIds: interner.ids, summary, meta, scenario,
+         runId: (meta && meta.run_id) || guessRunId(want), lastReport: rep};
+    D.colors = D.actorIds.map((_,i)=>actorColor(i, D.actorIds.length));
+    buildDerived(D, rep);
+    crossCheckSummary(D, rep);
+    /* positions にしか居ない / events にしか居ないアクタ */
+    for (let a = 0; a < D.actorIds.length; a++){
+      if (D.pos.off[a+1] === D.pos.off[a])
+        rep.warn("positions.jsonl","ACTOR_NO_POSITIONS","events に出るアクタの位置サンプルが無い",
+                 `actorId=${D.actorIds[a]}`);
+    }
+    window.__CL_PARTIAL = D;
+  }
+  const tIdx = performance.now() - tIdx0;
+  if (stale()) return;
+  S.perf = {read: tRead, parse: tParse, index: tIdx, total: performance.now() - tAll,
+            positions: raw.count, events: events.n, parsePositionsMs: raw.ms};
+  console.log("[chronolens] perf " + JSON.stringify(S.perf));
+  setLoading(false);
+
+  if (rep.hasErrors() || !D){ showReport(rep, false); return; }
+  D.warnCount = rep.count("warn");
+  mount(D);
+  if (D.warnCount) console.log("[chronolens] warnings " + D.warnCount);
+}
+function guessRunId(want){
+  for (const f of want.values()){
+    const p = f.webkitRelativePath || "";
+    const parts = p.split("/").filter(Boolean);
+    if (parts.length >= 2) return parts[parts.length-2];
+  }
+  return null;
+}
+function mount(D){
+  S.D = D;
+  $("#report").classList.add("hidden"); $("#drop").classList.add("hidden");
+  $("#app").classList.remove("hidden"); $("#clearBtn").classList.remove("hidden");
+  $("#runinfo").textContent =
+    `${D.runId || "(run_id不明)"}　events ${D.events.n.toLocaleString()} / positions ${D.pos.n.toLocaleString()}`
+    + ` / actors ${D.actorIds.length}`;
+  const sel = $("#mActor");
+  sel.innerHTML = `<option value="-1">全て</option>`
+    + D.actorIds.map((id,i)=>`<option value="${i}">${esc(id)}</option>`).join("");
+  S.marey.actor = -1; sel.value = "-1";
+  RangeBar.invalidate();
+  S.heat.dirty = true;
+  setRange(D.tMin, D.tMax, "mount");
+  Play.start();
+  renderSide();
+  switchView(S.view);
+  redrawAll();
+}
+function redrawAll(){
+  if (!S.D) return;
+  RangeBar.draw();
+  if (S.view === "marey") Marey.draw();
+  if (S.view === "heat") Heat.draw();
+  if (S.view === "play") Play.resize();
+  renderSelStats();
+}
+function switchView(name){
+  S.view = name;
+  $$("#tabs button").forEach((b)=>b.classList.toggle("on", b.dataset.view === name));
+  $("#v-marey").classList.toggle("hidden", name !== "marey");
+  $("#v-heat").classList.toggle("hidden", name !== "heat");
+  $("#v-play").classList.toggle("hidden", name !== "play");
+  if (!S.D) return;
+  if (name === "marey") Marey.draw();
+  if (name === "heat"){ Heat.refit(); Heat.draw(); }
+  if (name === "play") Play.resize();
+}
+
+/* --------------------------------------------------------------- イベント配線 */
+$$("#tabs button").forEach((b)=>b.onclick = ()=>switchView(b.dataset.view));
+$("#fileInput").onchange = (e) => { if (e.target.files.length) loadFiles(e.target.files); };
+$("#dirInput").onchange = (e) => { if (e.target.files.length) loadFiles(e.target.files); };
+$("#clearBtn").onclick = () => {
+  S.D = null; S.play.on = false;
+  $("#app").classList.add("hidden"); $("#report").classList.add("hidden");
+  $("#drop").classList.remove("hidden"); $("#clearBtn").classList.add("hidden");
+  $("#runinfo").textContent = "";
+};
+document.addEventListener("dragover", (e)=>{ e.preventDefault(); document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", (e)=>{ if (e.relatedTarget === null) document.body.classList.remove("dragging"); });
+document.addEventListener("drop", async (e) => {
+  e.preventDefault(); document.body.classList.remove("dragging");
+  const dt = e.dataTransfer; if (!dt) return;
+  const out = [];
+  const items = dt.items ? Array.from(dt.items) : [];
+  const entries = items.map((it)=> it.webkitGetAsEntry ? it.webkitGetAsEntry() : null).filter(Boolean);
+  if (entries.length){
+    const walk = (entry) => new Promise((res) => {
+      if (entry.isFile) entry.file((f)=>{ out.push(f); res(); }, ()=>res());
+      else if (entry.isDirectory){
+        const rd = entry.createReader();
+        const readAll = () => rd.readEntries(async (ents) => {
+          if (!ents.length) return res();
+          for (const en of ents) await walk(en);
+          readAll();
+        }, ()=>res());
+        readAll();
+      } else res();
+    });
+    for (const en of entries) await walk(en);
+  }
+  if (!out.length && dt.files) for (const f of dt.files) out.push(f);
+  if (out.length) loadFiles(out);
+});
+$("#rT0").onchange = () => setRange(parseFloat($("#rT0").value), S.range.t1, "input");
+$("#rT1").onchange = () => setRange(S.range.t0, parseFloat($("#rT1").value), "input");
+$("#rAll").onclick = () => { const D = S.D; if (D) setRange(D.tMin, D.tMax, "input"); };
+$("#mYMode").onchange = (e)=>{ S.marey.yMode = e.target.value; Marey.draw(); };
+$("#mShowWait").onchange = (e)=>{ S.marey.showWait = e.target.checked; Marey.draw(); };
+$("#mShowPts").onchange = (e)=>{ S.marey.showPts = e.target.checked; Marey.draw(); };
+$("#mActor").onchange = (e)=>{ S.marey.actor = parseInt(e.target.value, 10); Marey.draw(); };
+$("#mReset").onclick = ()=>{ const D = S.D; if (D) setRange(D.tMin, D.tMax, "marey"); };
+$("#hMode").onchange = (e)=>{ S.heat.mode = e.target.value; S.heat.dirty = true; Heat.draw(); };
+$("#hCell").onchange = (e)=>{ S.heat.cell = parseFloat(e.target.value); S.heat.dirty = true; Heat.draw(); };
+$("#hAlpha").oninput = (e)=>{ S.heat.alpha = parseInt(e.target.value,10)/100; Heat.draw(); };
+$("#hLog").onchange = (e)=>{ S.heat.log = e.target.checked; S.heat.dirty = true; Heat.draw(); };
+$("#pPlay").onclick = () => {
+  S.play.on = !S.play.on;
+  $("#pPlay").textContent = S.play.on ? "❚❚ 一時停止" : "▶ 再生";
+  $("#pPlay").classList.toggle("on", S.play.on);
+};
+$("#pSpeed").onchange = (e)=>{ S.play.speed = parseFloat(e.target.value); };
+$("#pTrail").oninput = (e)=>{ S.play.trail = parseInt(e.target.value,10); };
+$("#pGlow").onchange = (e)=>{ S.play.glow = e.target.checked; };
+$("#pLabel").onchange = (e)=>{ S.play.label = e.target.checked; };
+$("#pSeek").oninput = (e)=>{
+  const f = parseInt(e.target.value,10)/1000;
+  Play.seek(S.range.t0 + f*(S.range.t1 - S.range.t0));
+};
+window.addEventListener("keydown", (e) => {
+  if (!S.D || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.code === "Space"){ e.preventDefault(); $("#pPlay").click(); }
+  if (e.code === "Digit1") switchView("marey");
+  if (e.code === "Digit2") switchView("heat");
+  if (e.code === "Digit3") switchView("play");
+});
+onRangeChange(() => {
+  RangeBar.draw(); scheduleSelStats();
+  if (S.view === "marey") Marey.draw();
+  if (S.view === "heat") Heat.draw();
+});
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(()=>{ if (S.D) redrawAll(); }, 90);
+});
+
+/* --------------------------------------------------------------- 検証用フック */
+window.__chronolens = {
+  get state(){ return S; },
+  get data(){ return S.D; },
+  loaded(){ return !!S.D; },
+  setView: switchView,
+  setRange: (a,b) => setRange(a,b,"api"),
+  play(on){ if (S.play.on !== on) $("#pPlay").click(); },
+  setSpeed(v){ S.play.speed = v; $("#pSpeed").value = String(v); },
+  logFps(on){ window.__CL_LOG_FPS = !!on; },
+  stats(){
+    const D = S.D; if (!D) return null;
+    return {
+      runId: D.runId, actors: D.actorIds.length, events: D.events.n, positions: D.pos.n,
+      tMin: D.tMin, tMax: D.tMax, range: {t0:S.range.t0, t1:S.range.t1},
+      waitSegments: D.waits.length,
+      mareyWaitSegmentsDrawn: S.marey.lastWaitSegs,
+      kpi: {rows_per_hour: D.calc.rows_per_hour, total_distance_m: D.calc.total_distance_m,
+            wait: D.calc.wait, picks: D.calc.picks},
+      summary: D.summary,
+      contract: {edgeRackCrossings: D.layout.crossN, posInRack: D.posInRack, crs: D.layout.crs},
+      perf: S.perf, fps: S.play.fps
+    };
+  },
+  heatStats(){
+    const D = S.D; if (!D) return null;
+    if (S.heat.dirty) Heat.draw();
+    const gx = S.heat.argmax % S.heat.nx, gy = Math.floor(S.heat.argmax / S.heat.nx);
+    return {mode: S.heat.mode, cell_m: S.heat.cell,
+            grid_origin: [S.heat.ox, S.heat.oy], grid_size: [S.heat.nx, S.heat.ny],
+            max_cell_index: [gx, gy],
+            max_cell_center_m: [S.heat.ox + (gx+0.5)*S.heat.cell, S.heat.oy + (gy+0.5)*S.heat.cell],
+            max_cell_value_s: S.heat.max, nonzero_cells: S.heat.nz, sum_s: S.heat.sum,
+            range: {t0:S.range.t0, t1:S.range.t1}, computeMs: S.heat.ms};
+  },
+  report(){ const D = S.D; return D && D.lastReport ? D.lastReport.list() : null; },
+  loadFiles
+};
+console.log("[chronolens] ready");
+</script>
+</body>
+</html>
