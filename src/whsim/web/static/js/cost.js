@@ -70,6 +70,16 @@ function injectStyle() {
   .co-tbl tr.total td{border-top:2px solid var(--line-strong);font-weight:700;font-size:14px}
   .co-tbl tr.zero td{opacity:.5}
   .co-sec{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary);margin:2px 0}
+  /* 結論が先 — one sentence between the headline numbers and the 6費目 evidence. */
+  .co-take{font-size:var(--fs-sm,13px);line-height:1.6;color:var(--ink-secondary);
+    border-left:3px solid var(--accent);padding:3px 0 3px 12px}
+  .co-take b{color:var(--ink-primary);font-variant-numeric:tabular-nums}
+  /* The 単価 form is an input, not an answer: it used to push the breakdown below
+     the fold, so it now collapses and states its own values in the summary. */
+  .co-adv{border:1px solid var(--line-hair);border-radius:12px;background:var(--bg-sunken);padding:10px 14px}
+  .co-adv>summary{cursor:pointer;font-size:var(--fs-sm,12.5px);font-weight:700;color:var(--ink-primary)}
+  .co-adv .co-sum{font-weight:500;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary);margin-left:8px}
+  .co-adv .co-knobs{border:none;background:transparent;padding:8px 0 0}
   .co-ec{width:100%;height:230px}
   .co-empty{padding:40px;text-align:center;color:var(--ink-tertiary)}
   .co-note{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary)}
@@ -152,6 +162,33 @@ export function mountCost(el, opts = {}) {
       <div class="co-empty">${esc(msg)}</div>`;
   }
 
+  const share = (v, tot) => (!tot || v == null ? '—' : `${Math.round((v / tot) * 1000) / 10}%`);
+
+  // 結論が先: the breakdown's own headline — which 費目 carries the month, and what
+  // moving it is worth. Computed from the very rows the table prints (no fetch).
+  function takeHtml(cats, d) {
+    const rows = (cats || []).filter((c) => (c.yen_month || 0) > 0);
+    if (!rows.length || !d.total_yen_month) return '';
+    const top = rows.reduce((a, b) => ((b.yen_month || 0) > (a.yen_month || 0) ? b : a), rows[0]);
+    const pc = Math.round((top.yen_month / d.total_yen_month) * 100);
+    const per = d.orders_per_month ? (top.yen_month / d.orders_per_month) : null;
+    const tail = pc >= 60
+      ? `ここの生産性が1割上がれば、合計は約 <b>${yen(Math.round(top.yen_month * 0.1))}</b>/月 下がります。`
+      : '特定の費目に偏っていないので、単価そのものの見直しが効きます。';
+    return `<div class="co-take">月額 <b>${yen(d.total_yen_month)}</b> のうち`
+      + ` <b>${esc(top.label.replace(/^[①-⑨]\s*/, ''))}</b> が <b>${pc}%</b>`
+      + `${per != null ? `（<b>${d.currency || '¥'}${fmt(per, 1)}</b>/件）` : ''}。${tail}</div>`;
+  }
+
+  // Summary shown on the collapsed 単価設定 — the form is closed by default so the
+  // 6費目 (the answer) is above the fold, but its current state must still be
+  // readable without opening it.
+  function knobSummary() {
+    return FIELDS.filter((f) => Number(knob[f.key]) !== 0)
+      .map((f) => `${f.label} ${fmt(knob[f.key], Number.isInteger(knob[f.key]) ? 0 : 2)}`).join(' ・ ');
+  }
+  const anyNonDefault = () => FIELDS.some((f) => Number(knob[f.key]) !== Number(f.def));
+
   function knobsHtml() {
     return `<div class="co-knobs">
       ${FIELDS.map((f) => `<div class="co-knob">
@@ -185,17 +222,23 @@ export function mountCost(el, opts = {}) {
           <div class="v">${fmt(d.mh_per_day, 1)} <span style="font-size:12px">人時/日</span></div>
           <div class="d">工程別 物量÷生産性</div></div>
       </div>
-      <div class="co-sec">単価設定（編集すると即時に再計算。「保存」でこのプロジェクトに記録）</div>
-      ${knobsHtml()}
+      ${takeHtml(cats, d)}
       <div class="co-ec" data-ec></div>
-      <table class="co-tbl"><thead><tr><th>費目</th><th>算出根拠</th><th class="num">月額</th></tr></thead>
+      <table class="co-tbl"><thead><tr><th>費目</th><th>算出根拠</th><th class="num">月額</th><th class="num">構成比</th></tr></thead>
         <tbody>
           ${cats.map((c) => `<tr class="${(c.yen_month || 0) === 0 ? 'zero' : ''}">
             <td><b>${esc(c.label)}</b><div class="formula">${esc(c.formula || '')}</div></td>
             <td class="co-sec">${esc(c.basis || '')}</td>
-            <td class="num">${yen(c.yen_month)}</td></tr>`).join('')}
-          <tr class="total"><td>合計</td><td></td><td class="num">${yen(d.total_yen_month)}</td></tr>
+            <td class="num">${yen(c.yen_month)}</td>
+            <td class="num">${share(c.yen_month, d.total_yen_month)}</td></tr>`).join('')}
+          <tr class="total"><td>合計</td><td></td><td class="num">${yen(d.total_yen_month)}</td>
+            <td class="num">100%</td></tr>
         </tbody></table>
+      <details class="co-adv"${anyNonDefault() ? ' open' : ''}>
+        <summary>単価設定 <span class="co-sum">${esc(knobSummary())}</span></summary>
+        <div class="co-sec">編集すると即時に再計算。「保存」でこのプロジェクトに記録します。</div>
+        ${knobsHtml()}
+      </details>
       <div class="co-note">※ これは解析的（決定論）見積りです。待ち・混雑・ピーク日の捌けは
         ④検証のシミュレーションで叩いてください。輸配送/システム/運営は単価0のあいだ計上されません。</div>`;
     buildChart(root.querySelector('[data-ec]'), cats);
@@ -207,6 +250,9 @@ export function mountCost(el, opts = {}) {
     const ink = tok('--ink-secondary', '#52677c');
     const line = tok('--line-hair', 'rgba(120,140,170,.18)');
     const rows = cats.filter((c) => (c.yen_month || 0) > 0);
+    // A fixed 230px frame spread two bars a hand's width apart and read as a gap
+    // in the data. One row = one bar's worth of height.
+    node.style.height = `${Math.max(96, Math.min(240, rows.length * 46 + 46))}px`;
     chart = echarts.init(node, null, { renderer: 'canvas' });
     chart.setOption({
       animation: !reduceMotion(),

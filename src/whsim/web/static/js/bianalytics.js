@@ -139,6 +139,9 @@ function injectStyle() {
     border:1px solid var(--line-hair);border-radius:var(--r-sm);padding:2px 6px;flex:0 0 auto}
   .bia-answer{margin-top:var(--sp-2);font-size:var(--fs-sm);color:var(--ink-secondary);line-height:1.5;
     padding-left:var(--sp-1);min-height:18px}
+  /* Before the first question the answer slot is empty — collapse it so the
+     example chips sit right under the box they fill, not across a dead band. */
+  .bia-answer:empty{display:none}
   .bia-answer b{color:var(--ink-primary)}
   .bia-answer .hit{color:var(--accent);font-family:var(--font-mono);font-weight:700}
   .bia-answer .sug{color:var(--ink-tertiary)}
@@ -237,6 +240,10 @@ function injectStyle() {
   .bia-kpi .v{font-family:var(--font-mono);font-size:17px;font-weight:700;
     color:var(--ink-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .bia-kpi .d{font-family:var(--font-mono);font-size:var(--fs-micro);color:var(--accent)}
+  /* not-measurable card: dimmed value + the column that would fill it */
+  .bia-kpi.na .v{color:var(--ink-tertiary);font-weight:600}
+  .bia-kpi .why{margin-top:3px;font-size:var(--fs-micro);color:var(--ink-tertiary);
+    line-height:1.35;white-space:normal}
 
   /* ── CSV export (lives at the right edge of the filter bar) ── */
   .bia-export{margin-left:auto;font-family:var(--font-mono);font-size:var(--fs-micro);
@@ -349,6 +356,16 @@ export function mountBIAnalytics(el, opts = {}) {
     return totals.map((qty, h) => ({ label: `${h}時`, hour: h, qty }));
   }
   const weekdayLabel = (i) => (i == null ? '' : (xtabWeekdays()[i] || WD[i] || String(i)));
+  // Weekday rows arrive in two shapes: the client-side profile ({label, weekday:index})
+  // and the server's `by_weekday` ({weekday: '月'}). Reading `.label` on the latter
+  // printed 「曜が最大」 — a Japanese sentence with the weekday missing. One reader
+  // for both shapes so a row is always self-describing.
+  const wdName = (r) => {
+    if (!r) return '';
+    if (r.label) return String(r.label);
+    if (typeof r.weekday === 'string') return r.weekday;
+    return weekdayLabel(r.weekday);
+  };
   function filterDescription() {
     const parts = [];
     if (facetActive('rank')) parts.push(`ランク${facetValues('rank').join('・')}`);
@@ -446,12 +463,17 @@ export function mountBIAnalytics(el, opts = {}) {
       ['行数', fmt(k.lines)],
       ordersCard,
       ['SKU数（全体）', fmt(k.skus)],
-      ['ピーク曜日', k.peakWd ? `${esc(k.peakWd.label)}曜` : '—'],
-      ['ピーク時間', k.peakHr ? `${k.peakHr.hour}時` : '—'],
-      ['データ日数', k.days ? `${fmt(k.days)}日` : '—'],
+      // A bare 「—」 is indistinguishable from a broken number, so every card that
+      // can come up empty carries WHICH column would have filled it.
+      ['ピーク曜日', k.peakWd ? `${esc(wdName(k.peakWd))}曜` : '—', '出荷日の列が必要です'],
+      ['ピーク時間', k.peakHr ? `${k.peakHr.hour}時` : '—', '出荷時刻の列が必要です'],
+      ['データ日数', k.days ? `${fmt(k.days)}日` : '—', '出荷日の列が必要です'],
     ];
-    return `<div class="bia-kpis" role="group" aria-label="サマリー指標">${cards.map(([l, v]) =>
-      `<div class="bia-kpi"><div class="l">${esc(l)}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+    return `<div class="bia-kpis" role="group" aria-label="サマリー指標">${cards.map(([l, v, why]) => {
+      const na = v === '—';
+      return `<div class="bia-kpi${na ? ' na' : ''}"><div class="l">${esc(l)}</div><div class="v">${v}</div>`
+        + `${na && why ? `<div class="why">${esc(why)}</div>` : ''}</div>`;
+    }).join('')}</div>`;
   }
 
   // ── CSV export of the CURRENT filtered aggregate (rank×weekday×hour) ─────
@@ -505,7 +527,7 @@ export function mountBIAnalytics(el, opts = {}) {
       if (!w.length) return suggestNoData('weekday');
       const mx = w.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), w[0]);
       focus('weekday');
-      setAnswer(`物量が最も多い曜日は <span class="hit">${esc(mx.label)}曜</span>（<b>${fmt(mx.qty)}</b>）。ここが詰まりやすい曜日です。`);
+      setAnswer(`物量が最も多い曜日は <span class="hit">${esc(wdName(mx))}曜</span>（<b>${fmt(mx.qty)}</b>）。ここが詰まりやすい曜日です。`);
       return;
     }
     if (has('ピーク', '時間帯', '時間', '何時', 'ピーク時')) {
@@ -603,7 +625,7 @@ export function mountBIAnalytics(el, opts = {}) {
       const ratio = avg > 0 ? mx.qty / avg : 1;
       out.push({
         sec: 'weekday', kic: filtered ? 'ピーク曜日（絞込中）' : 'ピーク曜日',
-        fact: `<span class="n">${esc(mx.label)}曜</span>が最大（<span class="n">${fmt(mx.qty)}</span>、平均比 <span class="n">×${fmt(ratio, 1)}</span>）。`,
+        fact: `<span class="n">${esc(wdName(mx))}曜</span>が最大（<span class="n">${fmt(mx.qty)}</span>、平均比 <span class="n">×${fmt(ratio, 1)}</span>）。`,
         imp: ratio >= 1.4 ? 'この曜日に人員を寄せるか、前倒し出荷で平準化を。' : '曜日の山は緩やか。日次の平準化余地は小さめ。',
       });
     }
@@ -720,13 +742,21 @@ export function mountBIAnalytics(el, opts = {}) {
       return { value: r.qty || 0, itemStyle: { color: colorOf(r), opacity: off ? 0.25 : 1 } };
     });
     // reflect the active selection in the section subtitle (re-ranked vs default)
-    const sub = reranked ? `${filterDescription()}で再集計（再ランク済み）` : `${fmt(a.length)}品目を物量降順で`;
+    // The right axis lost its 累積% name to the toolbox/legend band, so the header
+    // subtitle says what the line is — one place, always visible, never overlapped.
+    const sub = (reranked ? `${filterDescription()}で再集計（再ランク済み）` : `${fmt(a.length)}品目を物量降順で`)
+      + '・折れ線＝累積%';
     const subEl = node.parentElement && node.parentElement.querySelector('.bia-ch-h .sub');
     if (subEl) subEl.textContent = sub;
     const inst = ensureChart(node, 'abc');
     inst.setOption({
       animation: !reduceMotion(),
-      grid: { left: 52, right: 52, top: 16, bottom: a.length > 14 ? 56 : 30 },
+      // Four things wanted the top-right strip: the toolbox icons, the legend, the
+      // 累積% axis NAME and its 100% label. The plot now starts below that band
+      // (top:34) and the right axis drops its name — its labels already end in %,
+      // so the name was the redundant one. (No containLabel: left/right are
+      // already reserved, and it would pull the names inside the grid instead.)
+      grid: { left: 52, right: 52, top: 34, bottom: a.length > 14 ? 56 : 30 },
       toolbox: toolbox(p),
       legend: {
         // Clickable rank legend (cross-filter). The A/B/C entries map to empty
@@ -753,8 +783,7 @@ export function mountBIAnalytics(el, opts = {}) {
       yAxis: [
         { type: 'value', name: '物量', nameTextStyle: { color: p.ink3, fontFamily: p.fontMono, fontSize: 10 },
           axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
-        { type: 'value', name: '累積%', min: 0, max: 100,
-          nameTextStyle: { color: p.ink3, fontFamily: p.fontMono, fontSize: 10 },
+        { type: 'value', min: 0, max: 100,
           axisLabel: { color: p.ink3, fontFamily: p.fontMono, formatter: '{value}%' }, splitLine: { show: false } },
       ],
       series: [
@@ -903,10 +932,10 @@ export function mountBIAnalytics(el, opts = {}) {
     } else {
       const raw = data.by_weekday || [];
       if (!raw.length) { node.parentElement.replaceWith(scaffoldShell('weekday', '曜日別ヒートマップ', '7セルの濃淡')); return; }
-      const byLabel = {}; raw.forEach((r) => { byLabel[r.label] = r.qty || 0; });
+      const byLabel = {}; raw.forEach((r) => { byLabel[wdName(r)] = r.qty || 0; });
       series = WD.every((d) => d in byLabel)
         ? WD.map((d, i) => ({ label: d, qty: byLabel[d], weekday: i }))
-        : raw.map((r) => ({ label: r.label, qty: r.qty || 0, weekday: WD.indexOf(r.label) }));
+        : raw.map((r) => ({ label: wdName(r), qty: r.qty || 0, weekday: WD.indexOf(wdName(r)) }));
     }
     if (!series.length) { node.parentElement.replaceWith(scaffoldShell('weekday', '曜日別ヒートマップ', '7セルの濃淡')); return; }
     const max = Math.max(...series.map((r) => r.qty || 0), 1);

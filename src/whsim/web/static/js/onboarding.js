@@ -25,6 +25,14 @@ import { $ } from './util.js';
 // the ③設計/④検証 copy to cover the new MapMaker shelf editor + realistic 3D.
 const STORAGE_KEY = 'whsim-onboarded-v3';
 
+// The guide is OPT-IN. It used to auto-open 600ms after the first load, so the
+// first thing a new user did was dismiss a 6-step modal over a dimmed app —
+// spending their attention before they had seen anything worth explaining, and
+// covering the very buttons it was describing. The same five phases are now
+// stated by the ①取込 zero state (which is also where they can act on them),
+// and the tour stays one click away: 「使い方ガイドを見る」 there, ? in the header.
+export const GUIDE_IS_OPT_IN = true;
+
 function alreadyOnboarded() {
   try { return localStorage.getItem(STORAGE_KEY) === '1'; } catch (_e) { return false; }
 }
@@ -281,7 +289,10 @@ export function mountOnboarding(opts = {}) {
   }
 
   function startGuide(force) {
-    if (!force && alreadyOnboarded()) return;
+    // Opt-in only: an unforced call (the old first-visit auto-open) is a no-op.
+    // Kept as a call site rather than deleted so the boot sequence still reads
+    // "offer the guide", and flipping GUIDE_IS_OPT_IN restores the old behaviour.
+    if (!force && (GUIDE_IS_OPT_IN || alreadyOnboarded())) return;
     clearGuide();
     // Remember where focus was so finishGuide can restore it.
     lastFocused = document.activeElement;

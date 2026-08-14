@@ -47,6 +47,14 @@ function injectStyle() {
   .mf-btn{padding:9px 15px;border-radius:10px;border:1px solid var(--accent,#16C0DE);
     background:color-mix(in srgb,var(--accent,#16C0DE) 14%,transparent);color:var(--accent,#16C0DE);font-weight:600;cursor:pointer;font:inherit}
   .mf-btn.primary{background:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222c);border:none}
+  /* The button TIERS (primary / neutral ghost / the 基礎物量 bridge) are owned by
+     the global stylesheet's #materialflow rules — this only groups them and
+     tightens the padding so five sources read as one control, not five decisions. */
+  .mf-bar .mf-grp .mf-btn{padding:9px 12px}
+  .mf-grp{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;
+    border:1px solid var(--line,rgba(120,140,170,.18));border-radius:12px;padding:6px 10px 6px 6px}
+  .mf-grp-l{order:-1;font-size:var(--fs-micro,10.5px);letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);
+    padding:0 4px 0 6px;white-space:nowrap}
   .mf-btn:hover{filter:brightness(1.07)} .mf-btn:disabled{opacity:.5;cursor:default}
   .mf-btn:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:2px}
   @media(prefers-reduced-motion:reduce){.mf-btn{transition:none}}
@@ -426,15 +434,24 @@ export function mountMaterialFlow(el, opts = {}) {
     shell = true;
   }
 
-  function barHtml(full) {
+  // The bar used to be six same-weight buttons in a row, so 「どれを押すのか」 had
+  // to be read one label at a time. It is now two GROUPS with one primary total:
+  // 「物量を入れる」(sources — where the numbers come from) and the forward CTA.
+  // Which one is primary depends on the state: with no 物量 the job is to fill it,
+  // once filled the job is to move on. 表で編集 lives on the canvas bar only —
+  // it was drawn twice, and a duplicated control reads as two different things.
+  function barHtml(full, anyVol) {
+    const src = full && anyVol ? '' : ' primary';
     return `<div class="mf-bar">
-        <button class="mf-btn primary" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成（再アップロード不要）">📥 取込データから</button>
-        ${full ? '<button class="mf-btn" data-act="frombi">基礎物量を取込</button>' : ''}
-        <button class="mf-btn" data-act="sample">サンプル物量を取込</button>
-        <button class="mf-btn" data-act="upload" title="手元の別の出荷CSV/Excelを取り込む">別ファイルを取込</button>
+        <span class="mf-grp" role="group" aria-label="荷役物量の取込元">
+          <span class="mf-grp-l">物量を入れる</span>
+          <button class="mf-btn${src}" data-act="fromproject" title="①取込で読み込んだ出荷実績から荷役物量を作成（再アップロード不要）">📥 取込データから</button>
+          ${full ? '<button class="mf-btn" data-act="frombi" title="②基礎物量で組んだ荷姿換算後の物量を取り込む">基礎物量</button>' : ''}
+          <button class="mf-btn" data-act="sample" title="まず動かしてみるためのダミー物量">サンプル</button>
+          <button class="mf-btn" data-act="upload" title="手元の別の出荷CSV/Excelを取り込む">別ファイル</button>
+          ${full ? '<button class="mf-btn" data-act="generate" title="入力済みの工程から比率で不足分を推計する">不足を生成</button>' : ''}
+        </span>
         <input type="file" data-mf-file accept=".csv,.xlsx,.xls,.json" hidden/>
-        ${full ? '<button class="mf-btn" data-act="generate">不足を生成</button>' : ''}
-        ${full ? `<button class="mf-btn" data-act="editproc">${editing ? '図に戻る' : '表で編集'}</button>` : ''}
         <span class="mf-recalc" data-mf-recalc aria-live="polite">再計算中…</span>
         ${full ? '<button class="mf-btn primary" data-act="timetable" style="margin-left:auto">タイムチャートで人員配置 →</button>' : ''}
        </div>`;
@@ -448,7 +465,7 @@ export function mountMaterialFlow(el, opts = {}) {
     const cards = root.querySelector('[data-mf-cards]');
 
     if (!flow.length) {
-      top.innerHTML = barHtml(false)
+      top.innerHTML = barHtml(false, false)
         + `<div class="mf-empty">
              <div class="mf-empty-title">工程フローがまだありません</div>
              <div class="mf-empty-body">①取込の出荷実績を取り込むと、工程ごとの荷役物量がここに表示されます。「📥 取込データから」で取込済みデータを反映、まずは試すならサンプルでも始められます。図のキャンバスをダブルクリックすれば、工程を1つずつ手で作ることもできます。</div>
@@ -471,7 +488,7 @@ export function mountMaterialFlow(el, opts = {}) {
       `<div class="mf-guide">①取込の出荷実績はまだ反映されていません。<b>「📥 取込データから」</b>`
       + `を押すと、取り込んだデータから工程ごとの荷役物量を自動作成します（再アップロード不要）。</div>`;
 
-    top.innerHTML = barHtml(true)
+    top.innerHTML = barHtml(true, anyVol)
       + `<span class="mf-hint">工程ごとの荷役物量（1日平均）。図で工程と流れを組み、物量を入れて人員配置へ。</span>`
       + guide;
 

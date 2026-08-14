@@ -674,8 +674,13 @@ export class Designer {
     this._btn(bar, '在庫を割付', () => this._assignInventory(), 'font-size:12px;');
     const spacer = document.createElement('div'); spacer.style.flex = '1'; bar.appendChild(spacer);
     // status line for placement hint / inventory result (kept from the old bar).
+    // The hint tells you what the armed brush will do — it used to be squeezed
+    // between the tools and the 診断 chips at max-width:60% + ellipsis, so it read
+    // 「…またはカードを床…」 and stopped exactly where the instruction was. It now
+    // owns the row under the tools (order:9 + 100% basis) and wraps instead.
     this._layoutStatus = document.createElement('span');
-    this._layoutStatus.style.cssText = 'font-size:12px;color:var(--ink-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;';
+    this._layoutStatus.style.cssText = 'order:9;flex:1 1 100%;font-size:12px;line-height:1.5;'
+      + 'color:var(--ink-secondary);border-top:1px solid var(--line-hair);padding-top:5px;margin-top:1px;';
     this._layoutStatus.textContent = this._brushHint();
     bar.appendChild(this._layoutStatus);
     // レイアウト診断 chip: 到達できない棚 / 床の分断 / 狭い通路 — live while you draw.
@@ -694,13 +699,16 @@ export class Designer {
     bar.style.cssText = 'flex:0 0 auto;display:flex;gap:14px;align-items:center;padding:3px 10px;'
       + 'border:1px solid var(--line-hair);border-radius:var(--r-md);background:var(--bg-sunken);'
       + 'font-size:11.5px;color:var(--ink-secondary);font-variant-numeric:tabular-nums;min-height:22px;';
-    this._stPos = this._div(bar, 'min-width:120px;');
-    this._stBrush = this._div(bar, 'min-width:150px;font-weight:700;color:var(--ink-primary);');
-    this._stSel = this._div(bar, 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
-    // persistent pan/zoom hint (MapMaker discoverability — no docs needed).
-    const hint = this._div(bar, 'margin-left:auto;color:var(--ink-tertiary);white-space:nowrap;');
-    hint.textContent = '移動: 右ドラッグ / Space＋ドラッグ ・ ズーム: ホイール';
-    this._stZoom = this._div(bar, '');
+    this._stPos = this._div(bar, 'min-width:112px;flex:0 0 auto;');
+    this._stBrush = this._div(bar, 'min-width:132px;flex:0 0 auto;font-weight:700;color:var(--ink-primary);');
+    this._stSel = this._div(bar, 'flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+    // A status bar reports STATE (座標・armed brush・選択・倍率). The pan/zoom
+    // reminder that used to sit here was an instruction, and being last it was the
+    // one that got sliced when the canvas column narrowed — leaving 「倍率 10」,
+    // a live reading cut mid-number. The reminder now lives where the actions are
+    // (全体表示 / 🖐移動 tooltips + this bar's own title); the readings always fit.
+    bar.title = '移動: 右ドラッグ / Space＋ドラッグ / 中ボタン ・ ズーム: ホイール';
+    this._stZoom = this._div(bar, 'margin-left:auto;flex:0 0 auto;font-weight:700;color:var(--ink-primary);');
     parent.appendChild(bar);
   }
 

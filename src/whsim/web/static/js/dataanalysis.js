@@ -110,7 +110,12 @@ function injectStyle() {
   .da-kpi:hover{border-color:var(--line-strong)}
   .da-kpi .l{font-size:var(--fs-micro);letter-spacing:.06em;color:var(--ink-tertiary,#8195a8);
     text-transform:uppercase;margin-bottom:7px}
-  .da-kpi .v{font-size:var(--fs-title);font-weight:700;color:var(--ink-primary,#16202e);line-height:1.05}
+  .da-kpi .v{font-size:var(--fs-title);font-weight:700;color:var(--ink-primary,#16202e);line-height:1.05;
+    font-variant-numeric:tabular-nums}
+  /* A KPI the imported data cannot answer yet: dimmed value + why, so 「—」 reads
+     as "not measurable" instead of "broken". */
+  .da-kpi.na .v{color:var(--ink-tertiary,#8195a8);font-weight:600}
+  .da-kpi .why{margin-top:6px;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary,#8195a8);line-height:1.4}
   .da-kpi .v small{font-size:var(--fs-sm);font-weight:500;color:var(--ink-secondary,#52677c)}
   /* Full-bleed dashboard: a 6-track grid so each chart row fills the viewport
      width (trend+weekday / ABC+hour), with chart heights tied to the viewport
@@ -121,8 +126,30 @@ function injectStyle() {
   @media(max-width:1100px){.da-card.sp4,.da-card.sp2{grid-column:1/-1}}
   .da-card{background:var(--bg-panel,#f7f6f3);border:1px solid var(--line,rgba(120,140,170,.18));
     border-radius:14px;padding:var(--sp-5);min-width:0}
-  .da-card h3{margin:0 0 14px;font-size:var(--fs-body);font-weight:600;color:var(--ink-primary,#16202e)}
+  .da-card h3{margin:0 0 4px;font-size:var(--fs-body);font-weight:600;color:var(--ink-primary,#16202e)}
+  /* 結論が先: the takeaway sentence sits between the title and its chart, so the
+     eye reads 「何が言えるか」→「その根拠のかたち」 rather than decoding axes first. */
+  .da-take{margin:0 0 10px;font-size:var(--fs-xs,12px);line-height:1.5;color:var(--ink-secondary,#52677c)}
+  .da-take b{color:var(--ink-primary,#16202e);font-weight:700;font-variant-numeric:tabular-nums}
+  .da-legend{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+  .da-legend span{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-micro,10.5px);
+    color:var(--ink-tertiary,#8195a8)}
+  .da-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
   .da-ec{width:100%}
+  /* 工程別 必要人員: numbers right-aligned + tabular so columns compare by eye */
+  table.da-st{width:100%;border-collapse:collapse;font-size:var(--fs-xs,12px)}
+  table.da-st th,table.da-st td{padding:6px 10px;text-align:left;white-space:nowrap}
+  table.da-st thead th{color:var(--ink-tertiary,#8195a8);font-weight:600;
+    border-bottom:1px solid var(--line-strong,rgba(120,140,170,.3))}
+  table.da-st td{color:var(--ink-secondary,#52677c);border-bottom:1px solid var(--line,rgba(120,140,170,.12))}
+  table.da-st td:first-child{color:var(--ink-primary,#16202e);font-weight:600}
+  table.da-st .n{text-align:right;font-variant-numeric:tabular-nums}
+  table.da-st .dim{color:var(--ink-tertiary,#8195a8)}
+  table.da-st .strong{color:var(--ink-primary,#16202e);font-weight:700}
+  table.da-st tr.idle td{opacity:.45}
+  table.da-st tr.top td{background:color-mix(in srgb,var(--accent,#16C0DE) 7%,transparent)}
+  .da-st-tag{margin-left:6px;font-size:var(--fs-micro,10.5px);font-weight:700;border-radius:999px;
+    padding:1px 7px;color:var(--accent,#16C0DE);border:1px solid var(--accent,#16C0DE)}
   .da-ins{display:flex;flex-direction:column;gap:9px}
   /* ── 自動インサイト: compact collapsible strip (collapsed by default) ── */
   .da-insx{border:1px solid var(--line,rgba(120,140,170,.18));border-radius:12px;
@@ -264,7 +291,9 @@ function trendOption(rows) {
   const vals = rows.map((r) => r.qty || 0);
   return {
     animation: !reduceMotion(),
-    grid: { left: 52, right: 18, top: 16, bottom: rows.length > 1 ? 56 : 30 },
+    // containLabel: the y labels are 物量 (5-6 digits on a real warehouse), and a
+    // fixed `left` clipped them to 「0,000」. Let ECharts measure the gutter.
+    grid: { left: 8, right: 18, top: 16, bottom: rows.length > 1 ? 46 : 20, containLabel: true },
     toolbox: toolbox(p),
     tooltip: { trigger: 'axis', ...tipStyle(p), formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data)}` },
     dataZoom: rows.length > 8 ? [
@@ -298,10 +327,11 @@ function abcOption(rows) {
   const colOf = (r) => RANK_C[r.rank] || RANK_C.C;
   return {
     animation: !reduceMotion(),
-    grid: { left: 52, right: 50, top: 24, bottom: top.length > 10 ? 60 : 34 },
+    grid: { left: 8, right: 8, top: 18, bottom: top.length > 10 ? 50 : 24, containLabel: true },
+    // The ABC legend moved OUT of the chart (card header chips): in-chart it sat
+    // under the toolbox icons and on top of the 累積% axis name — three things
+    // fighting for the same 120px. The chart keeps only its own marks.
     toolbox: toolbox(p),
-    legend: { top: 0, right: 86, icon: 'roundRect', itemWidth: 10, itemHeight: 10, selectedMode: false,
-      data: ['A (〜70%)', 'B (〜90%)', 'C'], textStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono } },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
       formatter: (ps) => { const i = ps[0].dataIndex; const r = top[i]; return `<b>${esc(r.sku)}</b><br>物量 ${fmt(r.qty)} · ランク ${esc(r.rank)}<br>累積 ${pct(cum[i] / 100)}`; } },
     xAxis: { type: 'category', data: top.map((r) => r.sku),
@@ -309,15 +339,12 @@ function abcOption(rows) {
         formatter: (v) => (String(v).length > 8 ? `${String(v).slice(0, 8)}…` : v) },
       axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
     yAxis: [
-      { type: 'value', name: '物量', nameTextStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono },
-        axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
-      { type: 'value', name: '累積%', min: 0, max: 100, nameTextStyle: { color: p.ink3, fontSize: 10, fontFamily: p.fontMono },
+      { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono },
+        splitLine: { lineStyle: { color: p.line } } },
+      { type: 'value', min: 0, max: 100,
         axisLabel: { color: p.ink3, fontFamily: p.fontMono, formatter: '{value}%' }, splitLine: { show: false } },
     ],
     series: [
-      { name: 'A (〜70%)', type: 'bar', data: [], itemStyle: { color: RANK_C.A } },
-      { name: 'B (〜90%)', type: 'bar', data: [], itemStyle: { color: RANK_C.B } },
-      { name: 'C', type: 'bar', data: [], itemStyle: { color: RANK_C.C } },
       { name: '物量', type: 'bar', yAxisIndex: 0, barMaxWidth: 30,
         data: top.map((r) => ({ value: r.qty || 0, itemStyle: { color: colOf(r) } })) },
       { name: '累積%', type: 'line', yAxisIndex: 1, data: cum, symbol: 'circle', symbolSize: 5,
@@ -337,17 +364,21 @@ function abcOption(rows) {
 function weekdayOption(rows) {
   if (!rows || !rows.length) return null;
   const p = palette();
+  const mx = rows.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), rows[0]);
   return {
     animation: !reduceMotion(),
-    grid: { left: 46, right: 16, top: 14, bottom: 28 },
+    grid: { left: 6, right: 12, top: 14, bottom: 18, containLabel: true },
     toolbox: toolbox(p),
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
       formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data)}` },
     xAxis: { type: 'category', data: rows.map((r) => r.weekday),
       axisLabel: { color: p.ink2, fontFamily: p.fontMono }, axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
     yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
-    series: [{ type: 'bar', data: rows.map((r) => r.qty || 0), barMaxWidth: 38,
-      itemStyle: { color: p.accent, borderRadius: [4, 4, 0, 0] } }],
+    // The peak bar is the point of this chart, so it is the only saturated one —
+    // the rest recede to a tint (figure/ground instead of seven equal bars).
+    series: [{ type: 'bar', barMaxWidth: 38,
+      data: rows.map((r) => ({ value: r.qty || 0,
+        itemStyle: { color: r === mx ? p.accent : hexAlpha(p.accent, 0.34), borderRadius: [4, 4, 0, 0] } })) }],
   };
 }
 
@@ -355,17 +386,23 @@ function weekdayOption(rows) {
 function hourOption(rows) {
   if (!rows || !rows.length) return null;
   const p = palette();
+  const mx = rows.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), rows[0]);
   return {
     animation: !reduceMotion(),
-    grid: { left: 44, right: 16, top: 14, bottom: 26 },
+    grid: { left: 6, right: 12, top: 14, bottom: 16, containLabel: true },
     toolbox: toolbox(p),
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, ...tipStyle(p),
       formatter: (ps) => `<b>${esc(ps[0].axisValue)}時</b> · ${fmt(ps[0].data)}` },
+    // 「0 / 4 / 8」 alone is not a clock: the unit rides the tick so the axis is
+    // self-describing (and the tick count adapts to how many hours have data).
     xAxis: { type: 'category', data: rows.map((r) => r.hour),
-      axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: 3 },
+      axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: rows.length > 12 ? 3 : 1,
+        formatter: (v) => `${v}時` },
       axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
     yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
-    series: [{ type: 'bar', data: rows.map((r) => r.qty || 0), barMaxWidth: 18, itemStyle: { color: hexAlpha(p.accent, 0.6) } }],
+    series: [{ type: 'bar', barMaxWidth: 18,
+      data: rows.map((r) => ({ value: r.qty || 0,
+        itemStyle: { color: r === mx ? p.accent : hexAlpha(p.accent, 0.45) } })) }],
   };
 }
 
@@ -375,11 +412,11 @@ function headcountOption(hours) {
   const p = palette();
   return {
     animation: !reduceMotion(),
-    grid: { left: 40, right: 16, top: 16, bottom: 26 },
+    grid: { left: 6, right: 12, top: 16, bottom: 16, containLabel: true },
     toolbox: toolbox(p),
     tooltip: { trigger: 'axis', ...tipStyle(p), formatter: (ps) => `<b>${esc(ps[0].axisValue)}時</b> · ${fmt(ps[0].data)} 名` },
     xAxis: { type: 'category', data: hours.map((_, i) => i), boundaryGap: false,
-      axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: 3 },
+      axisLabel: { color: p.ink3, fontFamily: p.fontMono, interval: 3, formatter: (v) => `${v}時` },
       axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
     yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } }, minInterval: 1 },
     series: [{ type: 'line', data: hours, step: 'middle', showSymbol: false,
@@ -392,6 +429,9 @@ function headcountOption(hours) {
 
 function kpiCards(k) {
   if (!k) return '';
+  // [label, value, why] — `why` is only shown when the value is unmeasurable, so
+  // 「—」 always says WHICH data would fill it (never a bare dash).
+  const NEED_STOCK = '在庫データ（①取込）が必要です';
   const cards = [
     ['総出荷ピース', fmt(k.total_pcs_out)],
     ['総出荷ライン', fmt(k.total_lines_out)],
@@ -400,14 +440,55 @@ function kpiCards(k) {
     // (「50 / 0」は壊れて見える)。マスタがある時だけ 稼働/全体 を併記する。
     ['稼働SKU', k.sku_master
       ? `${fmt(k.sku_active)}<small> / ${fmt(k.sku_master)}</small>`
-      : fmt(k.sku_active)],
+      : fmt(k.sku_active), k.sku_master ? '' : '商品マスタ未取込のため稼働数のみ'],
     ['上位10%SKU集中', pct(k.top10_sku_share)],
-    ['平均在庫回転', k.avg_turnover != null ? Number(k.avg_turnover).toFixed(2) : '—'],
-    ['デッドストック率', pct(k.dead_sku_rate)],
+    ['平均在庫回転', k.avg_turnover != null ? Number(k.avg_turnover).toFixed(2) : '—', NEED_STOCK],
+    ['デッドストック率', pct(k.dead_sku_rate), NEED_STOCK],
     ['ピーク', `${k.peak_weekday || '—'}<small> ${fmt(k.peak_day_qty)}</small>`],
   ];
-  return `<div class="da-grid">${cards.map(([l, v]) =>
-    `<div class="da-kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+  return `<div class="da-grid">${cards.map(([l, v, why]) => {
+    const na = v === '—' || v == null;
+    return `<div class="da-kpi${na ? ' na' : ''}"><div class="l">${l}</div><div class="v">${v}</div>`
+      + `${na && why ? `<div class="why">${why}</div>` : ''}</div>`;
+  }).join('')}</div>`;
+}
+
+// ── 結論が先: one-line takeaways computed from the very rows each chart draws
+// (no extra fetch, no new contract). They answer 「で、何が言えるの？」 before the
+// reader has to decode an axis. Empty string ⇒ the card just shows its title.
+function trendTake(rows) {
+  if (!rows || rows.length < 2) return '';
+  const vals = rows.map((r) => r.qty || 0);
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  let mi = 0;
+  vals.forEach((v, i) => { if (v > vals[mi]) mi = i; });
+  const ratio = avg > 0 ? vals[mi] / avg : 1;
+  return `日平均 <b>${fmt(Math.round(avg))}</b> ／ 最大 <b>${fmt(vals[mi])}</b>`
+    + `（${esc(rows[mi].label || '')}）= 平均比 <b>×${ratio.toFixed(1)}</b>`
+    + `${ratio >= 1.4 ? ' — 山日に人員を寄せる余地があります。' : ' — 日次の山は緩やかです。'}`;
+}
+function weekdayTake(rows) {
+  if (!rows || !rows.length) return '';
+  const mx = rows.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), rows[0]);
+  const avg = rows.reduce((s, r) => s + (r.qty || 0), 0) / rows.length;
+  const ratio = avg > 0 ? (mx.qty || 0) / avg : 1;
+  return `最も多いのは <b>${esc(mx.weekday || '')}</b>（<b>${fmt(mx.qty)}</b>・平均比 <b>×${ratio.toFixed(1)}</b>）`;
+}
+function hourTake(rows) {
+  if (!rows || !rows.length) return '';
+  const mx = rows.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), rows[0]);
+  const live = rows.filter((r) => (r.qty || 0) > 0).length;
+  return `ピークは <b>${esc(String(mx.hour))}時</b>（<b>${fmt(mx.qty)}</b>）／ 物量のある時間帯 <b>${live}</b> 時間`;
+}
+function abcTake(rows) {
+  if (!rows || !rows.length) return '';
+  const tot = rows.reduce((s, r) => s + (r.qty || 0), 0) || 1;
+  let acc = 0, n = 0;
+  for (const r of rows) { acc += (r.qty || 0); n += 1; if (acc / tot >= 0.7) break; }
+  const share = n / rows.length;
+  return `上位 <b>${fmt(n)}</b> 品目（全体の <b>${pct(share)}</b>）で物量の <b>70%</b>`
+    + `${share <= 0.25 ? ' — 主力偏在。A品を出荷口へ寄せると歩行が縮みます。'
+      : ' — 比較的フラット。ゾーニングより動線最適化が効きます。'}`;
 }
 
 function insightList(ins) {
@@ -424,25 +505,36 @@ function insightList(ins) {
 
 function staffingCard(s) {
   if (!s || !s.processes || !s.processes.length) return '';
-  const rows = s.processes.map((p) =>
-    `<tr><td>${p.id}</td><td style="text-align:right">${fmt(p.daily_volume)}</td>` +
-    `<td style="text-align:right;color:var(--ink-tertiary,#889)">${p.productivity}${p.unit}</td>` +
-    `<td style="text-align:right;font-weight:700">${p.peak_headcount} 名</td>` +
-    `<td style="text-align:right">${p.man_hours} 人時</td></tr>`).join('');
+  // The heaviest 工程 is what the reader is looking for, so it is marked; 日量0 の
+  // 工程 (this data never touches them) recede instead of reading as "0名で回る".
+  const peak = s.processes.reduce((a, b) =>
+    ((b.peak_headcount || 0) > (a.peak_headcount || 0) ? b : a), s.processes[0]);
+  const rows = s.processes.map((p) => {
+    const idle = !(p.daily_volume > 0);
+    return `<tr class="${idle ? 'idle' : ''}${p === peak && !idle ? ' top' : ''}">`
+      + `<td>${esc(String(p.id))}${p === peak && !idle ? '<span class="da-st-tag">最大</span>' : ''}</td>`
+      + `<td class="n">${fmt(p.daily_volume)}</td>`
+      + `<td class="n dim">${p.productivity}${p.unit}</td>`
+      + `<td class="n strong">${p.peak_headcount} 名</td>`
+      + `<td class="n">${p.man_hours} 人時</td></tr>`;
+  }).join('');
   return `<div class="da-card" style="grid-column:1/-1">
     <h3>工程別 必要人員（実データ由来・平均日）</h3>
+    <p class="da-take">ピーク時に <b>${s.peak_headcount}</b> 名／日あたり <b>${fmt(s.total_man_hours)}</b> 人時。
+      最も厚いのは <b>${esc(String(peak.id))}</b>（<b>${peak.peak_headcount}</b> 名）。</p>
     <div class="da-grid" style="margin-bottom:12px">
       <div class="da-kpi"><div class="l">ピーク人員</div><div class="v">${s.peak_headcount} <small>名</small></div></div>
       <div class="da-kpi"><div class="l">総工数</div><div class="v">${fmt(s.total_man_hours)} <small>人時/日</small></div></div>
       <div class="da-kpi"><div class="l">対象稼働日数</div><div class="v">${fmt(s.operating_days)} <small>日</small></div></div>
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:var(--fs-xs)">
-      <thead><tr style="color:var(--ink-tertiary,#889);text-align:left">
-        <th>工程</th><th style="text-align:right">日量</th><th style="text-align:right">生産性</th>
-        <th style="text-align:right">ピーク</th><th style="text-align:right">工数</th></tr></thead>
+    <table class="da-st">
+      <thead><tr>
+        <th>工程</th><th class="n">日量</th><th class="n">生産性</th>
+        <th class="n">ピーク人員</th><th class="n">工数</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <h3 style="margin:16px 0 6px">時間帯別 必要人員（合計）</h3>
+    <h3 style="margin:16px 0 4px">時間帯別 必要人員（合計）</h3>
+    <p class="da-take">この山の形がそのまま<b>シフトの形</b>になります。</p>
     <div class="da-ec" data-ec="headcount" style="height:170px"></div>
     <div style="margin-top:12px"><button class="da-btn" data-act="to-timetable">タイムチャートで人員配置を見る →</button></div>
   </div>`;
@@ -579,11 +671,21 @@ function standaloneBanner(hasFile, fileName) {
 // A chart card whose body is an ECharts mount node (id) or a friendly empty
 // note. `span` is the grid track class (sp4/sp2/full); heights follow the
 // viewport so the dashboard reads at a glance (全体感) without scrolling.
-function chartCard(title, id, hasData, span = 'sp4', h = 'clamp(220px,30vh,340px)') {
+function chartCard(title, id, hasData, span = 'sp4', h = 'clamp(220px,30vh,340px)', take = '', legend = '') {
   const body = hasData
     ? `<div class="da-ec" data-ec="${id}" style="height:${h}"></div>`
     : `<div class="da-chart-empty" style="min-height:${h}">データなし</div>`;
-  return `<div class="da-card ${span}"><h3>${title}</h3>${body}</div>`;
+  return `<div class="da-card ${span}"><h3>${title}</h3>`
+    + `${hasData && take ? `<p class="da-take">${take}</p>` : '<div style="height:6px"></div>'}`
+    + `${hasData && legend ? legend : ''}${body}</div>`;
+}
+
+// ABC rank legend as card-header chips (see abcOption: it no longer draws one).
+function abcLegend() {
+  const items = [['A', '〜70%'], ['B', '〜90%'], ['C', '残り']];
+  return `<div class="da-legend">${items.map(([r, sub]) =>
+    `<span><i style="background:${RANK_C[r]}"></i>${r}ランク（${sub}）</span>`).join('')}
+    <span><i style="background:transparent;border-top:2px dashed currentColor;border-radius:0;height:0"></i>累積%</span></div>`;
 }
 
 // 自動インサイト as a one-line collapsible strip: severity counts + the top
@@ -709,10 +811,14 @@ export function mountDataAnalysis(el, opts = {}) {
         insightsStrip(b.insights) +
         mapPanel(b) +
         `<div class="da-cards">
-           ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length), 'sp4')}
-           ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length), 'sp2')}
-           ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4')}
-           ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2')}
+           ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length), 'sp4',
+    'clamp(220px,30vh,340px)', trendTake(b.trend_daily))}
+           ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length), 'sp2',
+    'clamp(220px,30vh,340px)', weekdayTake(b.peak && b.peak.by_weekday))}
+           ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4',
+    'clamp(220px,30vh,340px)', abcTake(b.abc_sku), abcLegend())}
+           ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2',
+    'clamp(220px,30vh,340px)', hourTake(b.peak && b.peak.by_hour))}
            ${staffingCard(b.staffing)}
            ${isProj ? invCardShell(invParams) : ''}
          </div>`;

@@ -61,6 +61,7 @@ export function mountFlowCanvas(host, ctx = {}) {
   const view = { k: 1, tx: 30, ty: 24 };
   let drag = null;
   let pan = null;
+  let userFramed = false;               // the reader panned/zoomed ⇒ stop auto-framing
   let saveT = 0;
   let pendingPatch = false;             // a debounced attribute edit is in flight
   let alive = true;
@@ -131,12 +132,19 @@ export function mountFlowCanvas(host, ctx = {}) {
     vp.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.k})`);
     stage.style.backgroundSize = `${24 * view.k}px ${24 * view.k}px`;
     stage.style.backgroundPosition = `${view.tx}px ${view.ty}px`;
+    // Semantic zoom: a long chain framed whole lands around k≈0.5, where four
+    // stacked lines of text inside a 172px card become grey mush. Below the
+    // threshold the card keeps the two things that identify it (工程名 + 人時) and
+    // drops the section/zone sub-line — legible少数 beats illegible全部. Zoom in
+    // (or click the card) and the detail comes back.
+    svg.classList.toggle('is-far', view.k < 0.62);
   }
   function toWorld(ev) {
     const r = svg.getBoundingClientRect();
     return { x: (ev.clientX - r.left - view.tx) / view.k, y: (ev.clientY - r.top - view.ty) / view.k };
   }
   function fit() {
+    userFramed = false;                 // 全体表示 = "frame it for me again"
     const ids = data.nodes.map((n) => n.id).filter((id) => pos[id]);
     if (!ids.length) { view.k = 1; view.tx = 30; view.ty = 24; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -144,9 +152,22 @@ export function mountFlowCanvas(host, ctx = {}) {
       x0 = Math.min(x0, pos[id].x - 60); y0 = Math.min(y0, pos[id].y - 10);
       x1 = Math.max(x1, pos[id].x + NODE_W); y1 = Math.max(y1, pos[id].y + NODE_H);
     }
-    const W = stage.clientWidth || 700, H = stage.clientHeight || 400;
-    const k = Math.max(0.35, Math.min(1.25, (W - 36) / Math.max(1, x1 - x0),
-      (H - 36) / Math.max(1, y1 - y0)));
+    // A one-row chain is WIDE and SHORT, so the scale is set by the width and the
+    // stage's full height is dead space around it — the graph read as a thin strip
+    // marooned in an empty box. Give the stage back the height the content
+    // actually needs (floor so it still feels like a canvas you can drop into,
+    // ceiling so a tall graph still scrolls inside its own frame).
+    const W = stage.clientWidth || 700;
+    // The CSS clamp() height is the ceiling; remember it BEFORE the first inline
+    // height is written (measuring later would just read back our own value), and
+    // never memoise a 0 measured while the panel was hidden.
+    if (!stage.__mfcMaxH && stage.clientHeight > 0) stage.__mfcMaxH = stage.clientHeight;
+    const hMax = stage.__mfcMaxH || 480;
+    const k0 = Math.min(1.25, (W - 36) / Math.max(1, x1 - x0), (hMax - 36) / Math.max(1, y1 - y0));
+    const k = Math.max(0.35, k0);
+    const need = Math.round((y1 - y0) * k + 72);
+    const H = Math.max(300, Math.min(hMax, need));
+    stage.style.height = `${H}px`;
     view.k = k;
     view.tx = (W - (x1 - x0) * k) / 2 - x0 * k;
     view.ty = (H - (y1 - y0) * k) / 2 - y0 * k;
@@ -737,6 +758,7 @@ export function mountFlowCanvas(host, ctx = {}) {
       return;
     }
     if (pan) {
+      userFramed = true;
       view.tx = pan.tx + (ev.clientX - pan.x0);
       view.ty = pan.ty + (ev.clientY - pan.y0);
       applyView();
@@ -758,6 +780,7 @@ export function mountFlowCanvas(host, ctx = {}) {
 
   function onWheel(ev) {
     ev.preventDefault();
+    userFramed = true;
     const r = svg.getBoundingClientRect();
     const px = ev.clientX - r.left, py = ev.clientY - r.top;
     const w = { x: (px - view.tx) / view.k, y: (py - view.ty) / view.k };
@@ -857,14 +880,18 @@ export function mountFlowCanvas(host, ctx = {}) {
     }
   }
 
-  // The panel can be mounted while hidden (width 0), so the first REAL width is
-  // also the first honest chance to frame the graph.
-  let lastW = 0;
+  // The panel can be mounted while hidden (0×0), so the first REAL size is also
+  // the first honest chance to frame the graph. Height matters as much as width:
+  // framing against a stale (short) box left a 6-工程 chain parked near the floor
+  // of a tall canvas with a dead band above it. So the frame follows the box —
+  // until the reader pans or zooms, after which their framing is theirs to keep.
+  let lastW = 0, lastH = 0;
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => {
     if (!alive) return;
-    const w = stage.clientWidth;
-    if (!lastW && w && data.nodes.length) { lastW = w; fit(); return; }
-    lastW = w;
+    const w = stage.clientWidth, h = stage.clientHeight;
+    const moved = Math.abs(w - lastW) > 8 || Math.abs(h - lastH) > 8;
+    lastW = w; lastH = h;
+    if (moved && w && h && data.nodes.length && !userFramed) { fit(); return; }
     applyView();
   }) : null;
   if (ro) ro.observe(stage);

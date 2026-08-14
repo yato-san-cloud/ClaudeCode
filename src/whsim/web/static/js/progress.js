@@ -47,6 +47,7 @@ function injectStyle() {
   .rp-meta{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:12.5px;
     color:var(--ink-secondary,#b6c6d4);font-variant-numeric:tabular-nums}
   .rp-eta{font-weight:700;color:var(--accent,#16C0DE)}
+  .rp-jobs{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
   .rp-pips{display:flex;gap:4px}
   .rp-pip{width:13px;height:5px;border-radius:3px;background:var(--bg-sunken,rgba(120,140,170,.25))}
   .rp-pip.on{background:var(--accent,#16C0DE)}
@@ -140,9 +141,18 @@ export function startRunProgress(opts = {}) {
     const jobs = p.total_jobs || 1;
     const pips = Array.from({ length: reps }, (_, i) =>
       `<span class="rp-pip${i < rep ? ' on' : ''}"></span>`).join('');
+    const pipHtml = `<span class="rp-pips" title="レプリケーション ${rep}/${reps}">🔁 ${pips}</span>`;
+    // What a "job" is depends on WHICH multi-run this is — the server already
+    // says so in `kind`. It used to read 「方式」 unconditionally, which called
+    // シナリオ比較's three scenarios 「方式 1/3」.
+    const JOB_JP = { workmethods: '方式', scenarios: 'シナリオ' };
+    const jobWord = JOB_JP[p.kind] || 'ジョブ';
+    // Multi-job runs kept the job counter and DROPPED the replication pips, so
+    // the longest waits showed the least. Show both: which job, and how far
+    // through its replications we are.
     const jobLine = jobs > 1
-      ? `<span>方式 ${(p.job || 0) + 1} / ${jobs}</span>`
-      : `<span class="rp-pips" title="レプリケーション ${rep}/${reps}">🔁 ${pips}</span>`;
+      ? `<span>${esc(jobWord)} ${(p.job || 0) + 1} / ${jobs}</span>${pipHtml}`
+      : pipHtml;
     const phase = cancelling ? '中止中' : (p.phase || '');
     ov.innerHTML =
       `<div class="rp-card">
@@ -155,7 +165,7 @@ export function startRunProgress(opts = {}) {
           <div class="rp-truck" style="left:${pct}%">🚚</div>
           <div class="rp-flag">🏁</div>
         </div>
-        <div class="rp-meta">${jobLine}<span><span>${pct}%</span> ・ <span class="rp-eta">⏱ あと ${fmtEta(eta)}</span></span></div>
+        <div class="rp-meta"><span class="rp-jobs">${jobLine}</span><span><span>${pct}%</span> ・ <span class="rp-eta">⏱ あと ${fmtEta(eta)}</span></span></div>
         ${canCancel ? `<button type="button" class="rp-cancel"${cancelling ? ' disabled' : ''}>${cancelling ? '中止しています…' : '✕ 中止（Esc）'}</button>` : ''}
       </div>`;
     const cb = ov.querySelector('.rp-cancel');
@@ -192,10 +202,22 @@ export function startRunProgress(opts = {}) {
         ov.remove();
         return;
       }
-      // brief 100% flourish so it never just vanishes mid-bar
-      paint({ frac: 1, elapsed_s: 0 });
-      ov.querySelector('.rp-eta') && (ov.querySelector('.rp-eta').textContent = '✓ 完了');
-      setTimeout(() => { ov.remove(); }, 280);
+      // Brief 100% flourish so it never just vanishes mid-bar. The whole card
+      // resolves together — spinner stops, phase reads 完了, the truck is at the
+      // flag — instead of only the ETA slot changing under a still-spinning
+      // header. 480ms is long enough to register as an ending, short enough not
+      // to be a wait.
+      // phase='完了' so the tag RENDERS in this frame — the live phase chip
+      // (準備中/実行中/集計中) otherwise just disappears at the finish line.
+      paint({ frac: 1, elapsed_s: 0, phase: '完了' });
+      const q = (sel) => ov.querySelector(sel);
+      const eta = q('.rp-eta'); if (eta) eta.textContent = '✓ 完了';
+      const spin = q('.rp-spin');
+      if (spin) { spin.style.animation = 'none'; spin.textContent = '✅'; }
+      const cb2 = q('.rp-cancel'); if (cb2) cb2.remove();
+      ov.style.transition = 'opacity .18s ease';
+      setTimeout(() => { ov.style.opacity = '0'; }, 300);
+      setTimeout(() => { ov.remove(); }, 480);
     },
   };
 }

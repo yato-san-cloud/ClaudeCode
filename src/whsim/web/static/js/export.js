@@ -25,6 +25,14 @@
 
 const EXPORT_STYLE_ID = 'whsim-export-style-v3';
 
+// Empty/error-state glyphs (stroke-only, inherit currentColor — same visual
+// family as the dashboard KPI icons).
+const EMPTY_ICONS = {
+  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.4h7A1.5 1.5 0 0 1 19 9.9v7.6A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5Z"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><path d="M10.2 8.7 15.6 12l-5.4 3.3Z"/></svg>',
+  alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.4 21 19.6H3Z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></svg>',
+};
+
 function injectStyle() {
   if (typeof document === 'undefined') return;
   if (document.getElementById(EXPORT_STYLE_ID)) return;
@@ -183,6 +191,41 @@ const EXPORT_CSS = `
   max-width: 794px; margin: 0 auto;
   border: 1px solid var(--x-line); border-radius: 12px;
   background: var(--x-panel);
+}
+/* Empty / error state — the same "icon → title → why → way out" shape the
+   ⑤シナリオ比較 empty state uses, so the two ⑤ tabs read as one product. */
+#export .export-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 10px; padding: 44px 28px;
+}
+#export .export-empty-ic { width: 40px; height: 40px; color: var(--ink-tertiary); opacity: 0.8; }
+#export .export-empty-ic svg { width: 100%; height: 100%; }
+#export .export-empty-title {
+  font-size: 15px; font-weight: 600; color: var(--ink-primary); letter-spacing: -0.01em;
+}
+#export .export-empty-body {
+  margin: 0; max-width: 46em; font-size: 12.5px; line-height: 1.75;
+  color: var(--ink-tertiary);
+}
+#export .export-empty-btn {
+  margin-top: 6px; padding: 8px 18px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  border: 1px solid var(--x-line); background: transparent; color: var(--ink-secondary);
+}
+#export .export-empty-btn:hover { color: var(--ink-primary); border-color: var(--x-cyan); }
+#export .export-empty-btn.primary {
+  background: var(--x-cyan); border-color: var(--x-cyan); color: #04121A;
+}
+#export .export-empty-btn:focus-visible { outline: 2px solid var(--x-cyan); outline-offset: 2px; }
+/* Loading — a spinner beside the sentence, so a slow read looks alive rather
+   than hung (the old bare 「読み込み中…」 could sit forever with no motion). */
+#export .export-loading {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 44px 28px; color: var(--ink-secondary); font-size: 12.5px;
+}
+#export .export-loading .spinner {
+  width: 15px; height: 15px; margin: 0;
+  border: 2px solid var(--x-line); border-top-color: var(--x-cyan);
 }
 
 /* ---- proposal sheet: white, printable ---- */
@@ -562,7 +605,11 @@ export class ExportView {
     this.root = root;
 
     if (!name) {
-      this._renderPlaceholder('実行後にエクスポートできます。');
+      this._renderPlaceholder({
+        icon: 'folder',
+        title: 'プロジェクトが選ばれていません',
+        body: '左のプロジェクト欄で案件を選ぶか作成すると、ここに提案書のプレビューが出ます。',
+      });
       return;
     }
 
@@ -579,10 +626,26 @@ export class ExportView {
         this.pngUrl = `/api/projects/${encodeURIComponent(name)}/png`;
         this._render(name);
       })
-      .catch(() => {
+      .catch((err) => {
         if (token !== this._reqToken) return;
         this.replay = null;
-        this._renderPlaceholder('実行後にエクスポートできます。');
+        // Two very different situations used to share one sentence («実行後に
+        // エクスポートできます»), which lied whenever a run DID exist and the
+        // fetch merely failed. Tell them apart and give each its own way out.
+        const noRun = err && err.message === 'no-run';
+        this._renderPlaceholder(noRun ? {
+          icon: 'play',
+          title: 'まだシミュレーションを実行していません',
+          body: '④検証で実行すると、その結果から提案書（PPTX/PDF）を組み立てます。'
+            + '実行なしでは数字の裏付けが取れないため、ここは空のままです。',
+          action: { label: '▶ シミュレーションを実行', kind: 'primary', on: 'run' },
+        } : {
+          icon: 'alert',
+          title: '結果を読み込めませんでした',
+          body: '通信が途切れたか、実行結果の読み出しに失敗しました。'
+            + '設計や実行結果は失われていません — もう一度お試しください。',
+          action: { label: '再読み込み', kind: 'ghost', on: 'retry' },
+        });
       });
   }
 
@@ -609,22 +672,65 @@ export class ExportView {
     this._objectUrls = [];
   }
 
-  _renderPlaceholder(message) {
-    const p = document.createElement('p');
-    p.className = 'export-empty';
-    p.style.color = 'var(--ink-tertiary)';
-    p.style.padding = '16px';
-    p.textContent = message;
-    this.root.appendChild(p);
+  // Empty / error state. ALWAYS replaces whatever the root held — the previous
+  // version appended, so a failed load stacked 「読み込み中…」 and the placeholder
+  // on top of each other and the view looked hung.
+  //
+  // Shape: {icon, title, body, action:{label, kind, on}}. A bare string still
+  // works (defensive — one sentence, no affordance).
+  _renderPlaceholder(spec) {
+    if (!this.root) return;
+    this.root.textContent = '';
+    const s = (typeof spec === 'string') ? { title: spec } : (spec || {});
+
+    const box = document.createElement('div');
+    box.className = 'export-empty';
+
+    if (s.icon) {
+      const ic = document.createElement('div');
+      ic.className = 'export-empty-ic';
+      ic.innerHTML = EMPTY_ICONS[s.icon] || EMPTY_ICONS.folder;
+      box.appendChild(ic);
+    }
+    const h = document.createElement('div');
+    h.className = 'export-empty-title';
+    h.textContent = s.title || '';
+    box.appendChild(h);
+    if (s.body) {
+      const b = document.createElement('p');
+      b.className = 'export-empty-body';
+      b.textContent = s.body;
+      box.appendChild(b);
+    }
+    if (s.action && s.action.label) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'export-empty-btn' + (s.action.kind === 'primary' ? ' primary' : '');
+      btn.textContent = s.action.label;
+      btn.addEventListener('click', () => {
+        if (s.action.on === 'retry') { this.refresh(); return; }
+        if (s.action.on === 'run') {
+          // Drive the SHELL's run button rather than taking a new callback:
+          // one run path for the whole app, and no app.js wiring to keep in sync.
+          const rb = document.getElementById('runBtn');
+          if (rb && !rb.disabled) rb.click();
+        }
+      });
+      box.appendChild(btn);
+    }
+    this.root.appendChild(box);
   }
 
   _renderLoading() {
-    const p = document.createElement('p');
-    p.className = 'export-loading';
-    p.style.color = 'var(--ink-secondary)';
-    p.style.padding = '16px';
-    p.textContent = '読み込み中…';
-    this.root.appendChild(p);
+    if (!this.root) return;
+    this.root.textContent = '';
+    const box = document.createElement('div');
+    box.className = 'export-loading';
+    box.innerHTML = '<span class="spinner" aria-hidden="true"></span>';
+    const t = document.createElement('span');
+    t.textContent = '実行結果を読み込んでいます…';
+    box.appendChild(t);
+    this.root.appendChild(box);
   }
 
   _render(name) {

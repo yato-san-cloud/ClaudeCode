@@ -186,16 +186,52 @@ function deltaTone(def, d, value) {
   return 'flat';
 }
 
-// CI block for a card, taken from the analysis hero that annotates the same
-// metric (half_width is already in the hero's display unit — see _common.py).
-function ciFor(def, ctx) {
+// The analysis hero entry that annotates the same metric as this card.
+function heroFor(def, ctx) {
   const an = ctx && ctx.analysis;
   const hero = an && an.kpis && Array.isArray(an.kpis.hero) ? an.kpis.hero : null;
   if (!hero) return null;
-  const hit = hero.find((h) => h && def.hero(h));
+  return hero.find((h) => h && def.hero(h)) || null;
+}
+
+// CI block for a card, taken from the analysis hero that annotates the same
+// metric (half_width is already in the hero's display unit — see _common.py).
+function ciFor(def, ctx) {
+  const hit = heroFor(def, ctx);
   const ci = hit && hit.ci;
   if (!ci || typeof ci !== 'object') return null;
   return ci;
+}
+
+// 状態チップ (要注意 / 高負荷 / …). NOT invented here: it is the very `delta`
+// the server authors for the ④KPI・判定 hero (_common.py), so a card on the
+// dashboard and the same metric one tab over say the SAME word. No hero delta
+// ⇒ no chip (never a fabricated "良好").
+function flagFor(def, ctx) {
+  const hit = heroFor(def, ctx);
+  const d = hit && hit.delta;
+  if (!d || typeof d !== 'object') return null;
+  const txt = typeof d.text === 'string' ? d.text.trim() : '';
+  if (!txt) return null;
+  return { text: txt, tone: d.dir === 'up' ? 'ok' : 'warn' };
+}
+
+// 判定リード: the run's own one-line verdict (kpis.py authors it as
+// 「対応可能 — …」/「要注意 — …」). The tone rule is COPIED from the ④KPI・判定
+// banner (analysis.js: startsWith('対応可能') ? ok : warn) rather than derived
+// from insight severity, so the same sentence is never green here and amber one
+// tab over. `sub` is the top insight's title — the scent of what 判定 holds.
+// Not a run (thin analytic estimate) or no verdict ⇒ no lead line at all.
+function verdictOf(ctx) {
+  const an = ctx && ctx.analysis;
+  if (!an || an.source !== 'run') return null;   // an estimate is not a 実測判定
+  const text = typeof an.verdict === 'string' ? an.verdict.trim() : '';
+  if (!text) return null;
+  const tone = text.startsWith('対応可能') ? 'ok' : 'warn';
+  const ins = Array.isArray(an.insights) && an.insights.length ? an.insights[0] : null;
+  const sub = ins && typeof ins.title === 'string' ? ins.title.trim() : '';
+  const nIns = Array.isArray(an.insights) ? an.insights.length : 0;
+  return { text, tone, sub, nIns };
 }
 
 function injectStyle() {
@@ -246,8 +282,38 @@ function injectStyle() {
     font-weight:var(--fw-semibold,600);cursor:pointer}
   .dkpi-run:hover{background:var(--bg-hover);color:var(--ink-primary)}
   .dkpi-card.is-empty .dkpi-n{color:var(--ink-faint)}
+  /* 状態チップ — same vocabulary as ④KPI・判定 (要注意/高負荷), same source. */
+  .dkpi-flag{flex:0 0 auto;font-size:var(--fs-micro,11px);font-weight:var(--fw-semibold,600);
+    padding:1px 7px;border-radius:var(--r-pill,999px);white-space:nowrap;line-height:1.5;
+    align-self:center;margin-left:auto}
+  .dkpi-flag.warn{background:var(--warn-tint);color:var(--warn-ink,var(--warn))}
+  .dkpi-flag.ok{background:var(--ok-tint);color:var(--ok-ink,var(--ok))}
+  .dkpi-card.is-flagged{border-color:color-mix(in srgb,var(--warn,#f5b05a) 42%,var(--line-hair))}
+  /* 判定リード — the run's verdict, above the numbers that produced it. */
+  .dkpi-lead{display:flex;align-items:flex-start;gap:var(--sp-3,12px);min-width:0;
+    padding:var(--sp-3,10px) var(--sp-4,14px);border-radius:var(--r-lg,12px);
+    border:1px solid var(--line-hair);border-left:3px solid var(--ink-faint);
+    background:var(--bg-panel);box-shadow:var(--sh-xs)}
+  .dkpi-lead.t-bad{border-left-color:var(--bad);background:var(--bad-tint)}
+  .dkpi-lead.t-warn{border-left-color:var(--warn);background:var(--warn-tint)}
+  .dkpi-lead.t-ok{border-left-color:var(--ok);background:var(--ok-tint)}
+  .dkpi-lead-ic{flex:0 0 auto;font-size:13px;line-height:1.5}
+  .dkpi-lead.t-bad .dkpi-lead-ic{color:var(--bad-ink,var(--bad))}
+  .dkpi-lead.t-warn .dkpi-lead-ic{color:var(--warn-ink,var(--warn))}
+  .dkpi-lead.t-ok .dkpi-lead-ic{color:var(--ok-ink,var(--ok))}
+  .dkpi-lead-tx{flex:1 1 auto;min-width:0;font-size:var(--fs-sm,12.5px);line-height:1.55;
+    color:var(--ink-primary)}
+  .dkpi-lead-tx em{font-style:normal;color:var(--ink-tertiary);font-size:var(--fs-micro,11px);
+    display:block;margin-top:2px}
+  .dkpi-more{flex:0 0 auto;padding:5px 12px;border-radius:var(--r-pill,999px);
+    border:1px solid var(--line-strong);background:var(--bg-app);color:var(--ink-secondary);
+    font:inherit;font-size:var(--fs-xs,12px);font-weight:var(--fw-semibold,600);
+    cursor:pointer;white-space:nowrap}
+  .dkpi-more:hover{background:var(--bg-hover);color:var(--ink-primary);border-color:var(--accent)}
+  .dkpi-more:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   @media (prefers-reduced-motion:no-preference){
     .dkpi-run{transition:background var(--dur-2,160ms) var(--ease,ease)}
+    .dkpi-more{transition:background var(--dur-2,160ms) var(--ease,ease)}
   }
   `;
   document.head.appendChild(s);
@@ -270,9 +336,14 @@ export function mountKpiStrip(host, ctx) {
 
   // One delegated listener for the whole strip (nothing to leak per update).
   const onClick = (ev) => {
-    const btn = ev.target && ev.target.closest ? ev.target.closest('.dkpi-run') : null;
-    if (!btn) return;
-    if (cur && typeof cur.onRun === 'function') cur.onRun();
+    const t = ev.target && ev.target.closest ? ev.target : null;
+    if (!t) return;
+    if (t.closest('.dkpi-run')) {
+      if (cur && typeof cur.onRun === 'function') cur.onRun();
+      return;
+    }
+    const more = t.closest('.dkpi-more');
+    if (more && cur && typeof cur.onSelectView === 'function') cur.onSelectView(more.dataset.go || 'analysis');
   };
   root.addEventListener('click', onClick);
 
@@ -326,10 +397,19 @@ export function mountKpiStrip(host, ctx) {
       foot = `<span class="dkpi-ref">解析予測 ${esc(fmt(ref, def.dec))}${unit}</span>${dHtml}`;
     }
 
-    return `<div class="dkpi-card">
+    // 状態チップ — the ④KPI・判定 word for this very metric, carried over so a
+    // glance at the strip already says which number is the problem.
+    const flag = flagFor(def, cur);
+    const flagHtml = flag
+      ? `<span class="dkpi-flag ${flag.tone}">${esc(flag.text)}</span>` : '';
+
+    // The chip rides with the VALUE, not the label: card titles here are
+    // data-driven (「ピッキング稼働率」) and a chip on the label row squeezed them
+    // into an ellipsis — the metric lost its own name to say 「高負荷」.
+    return `<div class="dkpi-card${flag && flag.tone === 'warn' ? ' is-flagged' : ''}">
       <div class="dkpi-top">${icon}<span class="dkpi-label">${label}</span></div>
       <div class="dkpi-val"><span class="dkpi-n">${esc(fmt(value, def.dec))}</span>
-        <span class="dkpi-u">${esc(def.unit(k))}</span>${ciHtml}</div>
+        <span class="dkpi-u">${esc(def.unit(k))}</span>${ciHtml}${flagHtml}</div>
       <div class="dkpi-foot">${foot}</div>
     </div>`;
   }
@@ -353,6 +433,26 @@ export function mountKpiStrip(host, ctx) {
     const defs = filled.length ? filled : DEFS;
     const cards = defs.map((d) => cardHtml(d, filled.length ? k : null, refs)).join('');
 
+    // 判定リード — the run's own verdict, ABOVE the numbers that produced it, so
+    // the strip opens with the answer ("捌けるのか") instead of six figures the
+    // reader has to adjudicate. Absent before a run / for the analytic estimate.
+    let lead = '';
+    let v = null;
+    try { v = verdictOf(cur); } catch (_) { v = null; }
+    if (v) {
+      const ic = v.tone === 'ok' ? '✓' : '!';
+      // The sub-line names the top 注目ポイント and how many wait behind it —
+      // the CTA below then lands on exactly that list.
+      const more = v.nIns > 1 ? `　ほか${fmt(v.nIns - 1)}件` : '';
+      const subHtml = v.sub
+        ? `<em>注目ポイント: ${esc(v.sub)}${esc(more)}</em>` : '';
+      lead = `<div class="dkpi-lead t-${v.tone}">
+        <span class="dkpi-lead-ic" aria-hidden="true">${ic}</span>
+        <span class="dkpi-lead-tx">${esc(v.text)}${subHtml}</span>
+        <button type="button" class="dkpi-more" data-go="analysis">判定と改善提案へ</button>
+      </div>`;
+    }
+
     let note = '';
     if (!k) {
       note = `<div class="dkpi-note"><span>シミュレーション未実行</span>
@@ -361,7 +461,7 @@ export function mountKpiStrip(host, ctx) {
       note = `<div class="dkpi-note"><span>KPIを読み取れませんでした</span>
         <button type="button" class="dkpi-run">シミュレーションを実行</button></div>`;
     }
-    root.innerHTML = `<div class="dkpi-grid">${cards}</div>${note}`;
+    root.innerHTML = `${lead}<div class="dkpi-grid">${cards}</div>${note}`;
   }
 
   render();

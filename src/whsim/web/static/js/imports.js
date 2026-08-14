@@ -55,6 +55,19 @@ const noProject = (cat) => {
   if (cat) mark(cat, false, '先にプロジェクトを作成してください。');
 };
 
+// Failure copy that a person can act on. A raw backend message ("列が見つかりま
+// せん") tells the user what broke but not what to DO, and the table importers
+// have a real remedy sitting one click away (the file chip's 「紐付け」 opens the
+// column-mapping dock). Appended to the log, never replacing the cause.
+const FIX_TABLE = 'ファイル名の右の「紐付け」から、日付・品番・数量の列を指定し直せます。'
+  + '（対応形式: CSV / Excel .xlsx .xls）';
+const FIX_LAYOUT = '対応形式は .dxf / .rmpm / .rmpm.json / MapMaker地図CSV / .zip です。'
+  + 'DWGをDXFとして保存したファイルは読めません（CADでDXF形式にして書き出してください）。';
+function logError(msg, fix) {
+  $('importLog').innerHTML = `<span class="warn">エラー: ${esc(msg)}</span>`
+    + (fix ? `\n<span class="ok">→ ${esc(fix)}</span>` : '');
+}
+
 // ---- import ----------------------------------------------------------------
 export async function uploadZip(file) {
   if (!S.project) { noProject('layout'); return; }
@@ -75,7 +88,7 @@ export async function uploadZip(file) {
     if (S.dataanalysis) S.dataanalysis.refresh();
     toast('データを取り込みました。', 'ok');
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_LAYOUT);
     mark('layout', false, '✕ ' + file.name + ' — ' + e.message);
     toast('取り込みに失敗しました: ' + e.message, 'error');
   }
@@ -94,7 +107,7 @@ export async function uploadDistances(file) {
     mark('layout', true, `✓ ${file.name} — 棚間距離${r.count}件`);
     hist.log('📏', `棚間距離を取込: ${file.name}（${r.count}件）`, 'design', 'layout');
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_LAYOUT);
     mark('layout', false, '✕ ' + file.name + ' — ' + e.message);
     toast('取り込みに失敗しました: ' + e.message, 'error');
   }
@@ -117,7 +130,7 @@ export async function uploadMapcsv(file) {
     if (S.view === 'design') mountDesigner();
     nudgeToDesign(`地図を取り込みました（棚${r.shelves}）。`);
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_LAYOUT);
     mark('layout', false, '✕ ' + file.name + ' — ' + e.message);
     toast('地図取込に失敗しました: ' + e.message, 'error');
   }
@@ -141,7 +154,7 @@ export async function uploadRmpm(file) {
     if (S.view === 'design') mountDesigner();
     nudgeToDesign(`MapMakerレイアウトを取り込みました（棚${r.shelves}）。`);
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_LAYOUT);
     mark('layout', false, '✕ ' + file.name + ' — ' + e.message);
     toast('取込に失敗しました: ' + e.message, 'error');
   }
@@ -191,7 +204,7 @@ export async function uploadShipments(file, itemsFile = null, mapping = null) {
     toast('出荷実績を取り込みました。②分析で物量を確認できます。', 'ok');
     return { ok: true, summary };
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_TABLE);
     mark('actual', false, '✕ ' + file.name + ' — ' + e.message);
     toast('取込に失敗しました: ' + e.message, 'error');
     return { ok: false, summary: e.message };
@@ -245,7 +258,7 @@ async function doTableImport(file, kind, catArg, mapping) {
     toast('取込しました。', 'ok');
     return { ok: true, summary: cnt || '0' };
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_TABLE);
     mark(cat, false, '✕ ' + file.name + ' — ' + e.message);
     toast('取込に失敗しました: ' + e.message, 'error');
     return { ok: false, summary: e.message };
@@ -283,7 +296,7 @@ export async function generateMissing() {
     toast('不足データを生成しました。', 'ok');
     cody('excited', '不足していたマスタを実データから補ったよ。これで実行できる。');
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, null);
     mark('items', false, '✕ 生成に失敗 — ' + e.message);
     toast('生成に失敗しました: ' + e.message, 'error');
   } finally { setBtnBusy($('genMissingBtn'), false); }
@@ -305,7 +318,7 @@ export async function uploadCad(file) {
     if (S.view === 'design') mountDesigner();
     nudgeToDesign(`図面を取り込みました（壁${r.walls}）。`);
   } catch (e) {
-    $('importLog').textContent = 'エラー: ' + e.message;
+    logError(e.message, FIX_LAYOUT);
     mark('layout', false, '✕ ' + file.name + ' — ' + e.message);
     toast('取り込みに失敗しました: ' + e.message, 'error');
   }

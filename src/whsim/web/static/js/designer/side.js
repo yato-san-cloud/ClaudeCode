@@ -59,7 +59,12 @@ export const sideMethods = {
       this._btn(s, '選択モードに戻る (Esc)', () => this._setBrush({ kind: 'select' }), 'margin-bottom:8px;');
     } else {
       this._h(s, 'オブジェクト情報');
-      this._note(s, '床の物をクリックすると、ここで名前・寸法・台数などを数値で編集できます。');
+      this._note(s, '床の物をクリックすると、名前・寸法・台数をここで数値編集できます。');
+      // …and while nothing is selected, say what IS on this floor. An inspector
+      // that only says 「クリックしてください」 tells the reader nothing about the
+      // model they are looking at; the tally is the cheapest honest answer to
+      // 「この図面には何が置いてあるのか」.
+      this._floorTally(s);
     }
 
     // 倉庫サイズ — set the floor extents up front, MapMaker-style.
@@ -73,6 +78,48 @@ export const sideMethods = {
     if ((this.model.resources.conveyors || []).length) {
       this._h(s, `コンベア (${this.model.resources.conveyors.length})`);
       this._btn(s, '最後のコンベアを削除', () => { this._pushUndo(); this.model.resources.conveyors.pop(); this._drawCanvas(); this._renderSide(); });
+    }
+  },
+  // ---- 「この床には何があるか」 tally shown when nothing is selected ------------
+  // Reads only what is already in the model — no fetch, no new contract. A kind
+  // with zero of it is omitted rather than printed as 0 (a list of zeroes reads
+  // as an error report; an omission reads as "not used here").
+  _floorTally(s) {
+    const L = this.model.layout || {};
+    const R = this.model.resources || {};
+    // Authored shelves AND materialised (parametric) rack runs both draw as racks
+    // on the floor, so a tally that counted only the authored ones read 「棚 0」
+    // next to fifteen visible rack rows. Count what the canvas actually draws.
+    let shelves = this._allShelves ? this._allShelves().length : 0;
+    let slots = 0;
+    for (const z of (L.zones || [])) {
+      if (z.type !== 'storage' || (z.shelves || []).length) continue;
+      const locs = this._zoneLocations ? this._zoneLocations(z) : [];
+      slots += locs.length;
+      if (locs.length && this._reconstructRuns) shelves += this._reconstructRuns(locs).length;
+    }
+    const rows = [
+      ['棚（ラック列）', shelves, '列'],
+      ['ロケーション', slots, '間口'],
+      ['ゾーン', (L.zones || []).length, '区画'],
+      ['マテハン設備', (R.equipment || []).length, '基'],
+      ['梱包台', (R.stations || []).length, '台'],
+      ['コンベア', (R.conveyors || []).length, '本'],
+      ['壁', (L.walls || []).length, '本'],
+      ['ドア', (L.doors || []).length, 'ヶ所'],
+    ].filter(([, n]) => n > 0);
+    if (!rows.length) {
+      this._note(s, '床はまだ空です。左のライブラリからカードを選ぶか、床へドラッグしてください。');
+      return;
+    }
+    const box = this._div(s, 'margin-top:8px;display:flex;flex-direction:column;gap:3px;'
+      + 'border-top:1px solid var(--line-hair);padding-top:8px;');
+    for (const [label, n, unit] of rows) {
+      const row = this._div(box, 'display:flex;justify-content:space-between;gap:8px;font-size:12px;');
+      const l = this._div(row, 'color:var(--ink-tertiary);');
+      l.textContent = label;
+      const v = this._div(row, 'color:var(--ink-primary);font-weight:700;font-variant-numeric:tabular-nums;');
+      v.textContent = `${n} ${unit}`;
     }
   },
   // ---- per-shelf editor (ShelfEditor.java port): name / type / facing / size ----

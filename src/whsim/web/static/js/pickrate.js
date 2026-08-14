@@ -41,14 +41,31 @@ function injectStyle() {
   .pr-knob input{width:96px;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;
     background:var(--bg-app);color:var(--ink-primary);font:inherit;font-size:14px;text-align:right}
   .pr-knob input:focus{outline:none;border-color:var(--accent,#16C0DE)}
-  .pr-verdict{padding:10px 14px;border-radius:11px;border:1px solid var(--accent,#16C0DE);
+  /* 結論が先: the recommendation and the two things you can do about it sit
+     directly under the title, above the evidence (chart + table). */
+  .pr-verdict{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+    padding:12px 14px;border-radius:11px;border:1px solid var(--accent,#16C0DE);
     background:color-mix(in srgb,var(--accent,#16C0DE) 12%,transparent);color:var(--ink-primary);font-size:13.5px;font-weight:600}
+  .pr-verdict .t{flex:1 1 320px;line-height:1.5}
+  .pr-verdict .a{display:flex;gap:8px;flex-wrap:wrap;flex:0 0 auto}
   .pr-chart{width:100%;height:300px;background:var(--bg-panel);border:1px solid var(--line-hair);border-radius:12px}
   .pr-tbl{width:100%;border-collapse:collapse;font-size:13px}
   .pr-tbl th,.pr-tbl td{padding:8px 10px;border-bottom:1px solid var(--line-hair);text-align:right;font-variant-numeric:tabular-nums}
-  .pr-tbl th{color:var(--ink-secondary);font-weight:700;text-align:right;border-bottom:2px solid var(--line-hair)}
-  .pr-tbl td.l,.pr-tbl th.l{text-align:left}
+  .pr-tbl th{color:var(--ink-secondary);font-weight:700;text-align:right;border-bottom:2px solid var(--line-hair);
+    vertical-align:bottom;white-space:nowrap}
+  /* Which direction is "good" is not obvious for a column called 移動 m/件 —
+     say it once in the header instead of in a paragraph under the table. */
+  .pr-tbl th i{font-style:normal;font-weight:700;font-size:11px;color:var(--ink-tertiary)}
+  .pr-tbl td.l,.pr-tbl th.l{text-align:left;white-space:nowrap}
+  .pr-tbl td.a,.pr-tbl th.a{text-align:right;white-space:nowrap}
   .pr-tbl tr.best{background:color-mix(in srgb,var(--accent,#16C0DE) 10%,transparent)}
+  .pr-adopt{padding:5px 11px;border-radius:8px;border:1px solid var(--line-strong,rgba(120,140,170,.32));
+    background:transparent;color:var(--ink-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .pr-adopt:hover{border-color:var(--accent,#16C0DE);color:var(--accent,#16C0DE)}
+  .pr-tbl tr.best .pr-adopt{border-color:var(--accent,#16C0DE);color:var(--accent,#16C0DE);font-weight:700}
+  .pr-adv{border:1px solid var(--line-hair);border-radius:11px;background:var(--bg-sunken);padding:8px 12px}
+  .pr-adv>summary{cursor:pointer;font-size:12.5px;color:var(--ink-secondary);font-weight:600;list-style:revert}
+  .pr-adv[open]>summary{margin-bottom:10px}
   .pr-dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
   .pr-tag{font-size:10px;font-weight:700;color:#fff;border-radius:999px;padding:1px 7px;margin-left:6px}
   .pr-empty{padding:16px;border:1px dashed var(--line-strong);border-radius:12px;background:var(--bg-panel);
@@ -99,6 +116,7 @@ export function mountPickrate(el, opts = {}) {
 
   function scatterOption() {
     const ink = tok('--ink-primary', '#222'), line = tok('--line-hair', '#ddd');
+    const ink2 = tok('--ink-secondary', '#556');
     const ms = data.methods;
     return {
       animation: !reduceMotion(),
@@ -112,11 +130,15 @@ export function mountPickrate(el, opts = {}) {
             + `¥${m.cost_per_order}/件`;
         },
       },
-      xAxis: { name: '移動 m/件', nameLocation: 'middle', nameGap: 26,
-        axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink },
+      // Both axes are "less is better", and neither name said so — a scatter with
+      // unsigned axes makes the reader guess which corner wins. 左下＝速くて安い.
+      xAxis: { name: '← 移動 m/件（少ないほど良い）', nameLocation: 'middle', nameGap: 28,
+        nameTextStyle: { color: ink2, fontSize: 11 },
+        axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink2 },
         splitLine: { lineStyle: { color: line, opacity: 0.4 } } },
-      yAxis: { name: '仕分け 秒/件', nameLocation: 'middle', nameGap: 38,
-        axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink },
+      yAxis: { name: '← 仕分け 秒/件（少ないほど良い）', nameLocation: 'middle', nameGap: 42,
+        nameTextStyle: { color: ink2, fontSize: 11 },
+        axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink2 },
         splitLine: { lineStyle: { color: line, opacity: 0.4 } } },
       series: [{
         type: 'scatter',
@@ -150,29 +172,41 @@ export function mountPickrate(el, opts = {}) {
         <td>${fmt(m.sort_per_order_s, 1)}</td>
         <td>${yen(m.cost_per_order)}</td>
         <td>${fmt(m.pickers)}</td>
+        <td class="a"><button type="button" class="pr-adopt" data-adopt="${esc(m.id)}">この方式で設計 →</button></td>
       </tr>`;
     }).join('');
+    const rec = (data.methods || []).find((m) => m.id === data.recommend_id);
     root.innerHTML =
       `<div class="pr-head"><h2>生産性試算 <span style="font-size:12px;font-weight:500;color:var(--ink-tertiary)">解析的・動作時間ベース</span></h2>
         <div class="sub">レイアウトの幾何(MapMaker距離)×動作時間で全作業方式を即比較。重厚なDESは④検証で。</div></div>
+      ${data.has_layout ? '' : '<div class="pr-empty">保管エリア(棚)がまだ無いので床全面で概算しています。③設計でレイアウトを作るとより正確になります。</div>'}
+      <div class="pr-verdict">
+        <div class="t">${esc(data.verdict)}</div>
+        <div class="a">
+          ${rec ? `<button class="pr-btn" data-adopt="${esc(rec.id)}">この方式で設計 →</button>` : ''}
+          <button class="pr-btn primary" data-act="verify">DESで裏取り →</button>
+        </div>
+      </div>
       <div class="pr-geo">
         <span>ピック面積 <b>${fmt(g.pick_area_m2)}</b> ㎡</span>
         <span>搬出距離 <b>${fmt(g.depot_dist_m, 1)}</b> m</span>
         <span>平均 <b>${fmt(g.lines_per_order, 2)}</b> 行/オーダー</span>
         <span>出荷 <b>${fmt(g.daily_pick_lines)}</b> 行/日</span>
       </div>
-      ${data.has_layout ? '' : '<div class="pr-empty">保管エリア(棚)がまだ無いので床全面で概算しています。③設計でレイアウトを作るとより正確になります。</div>'}
-      <div class="pr-knobs">${knobs}
-        <button class="pr-btn" data-act="adopt">推奨方式で設計→</button>
-        <button class="pr-btn primary" data-act="verify">DESで裏取り→</button>
-      </div>
-      <div class="pr-verdict">${esc(data.verdict)}</div>
       <div class="pr-chart" data-chart></div>
       <div style="overflow-x:auto"><table class="pr-tbl">
-        <tr><th class="l">作業方式</th><th>行/h</th><th>件/h</th><th>移動 m/件</th><th>仕分け 秒/件</th><th>¥/件</th><th>必要人数</th></tr>
-        ${rows}
+        <thead><tr><th class="l">作業方式</th>
+          <th title="多いほど良い">行/h <i>↑</i></th><th title="多いほど良い">件/h <i>↑</i></th>
+          <th title="少ないほど良い">移動 m/件 <i>↓</i></th><th title="少ないほど良い">仕分け 秒/件 <i>↓</i></th>
+          <th title="少ないほど良い">¥/件 <i>↓</i></th><th title="少ないほど良い">必要人数 <i>↓</i></th>
+          <th class="a">採用</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table></div>
-      <div class="sub" style="font-size:11px;color:var(--ink-tertiary)">移動=√(面積×ピック数)の巡回近似＋搬出往復。バブル小=¥/件小。値は④検証のDESで裏取りします。</div>`;
+      <div class="sub" style="font-size:11px;color:var(--ink-tertiary)">↑ 大きいほど良い ／ ↓ 小さいほど良い。<b style="color:var(--accent,#16C0DE)">推奨</b>行は解析的に最速の方式です。</div>
+      <details class="pr-adv"><summary>動作時間の前提を調整する（歩行速度・手扱い・仕分け・人件費）</summary>
+        <div class="pr-knobs">${knobs}</div>
+        <div class="sub" style="font-size:11px;color:var(--ink-tertiary);margin-top:8px">移動=√(面積×ピック数)の巡回近似＋搬出往復。バブル小=¥/件小。値は④検証のDESで裏取りします。</div>
+      </details>`;
     wire();
     const node = root.querySelector('[data-chart]');
     chart = echarts.init(node, null, { renderer: 'canvas' });
@@ -192,8 +226,9 @@ export function mountPickrate(el, opts = {}) {
         debounce = setTimeout(load, 280);
       });
     });
-    const adopt = root.querySelector('[data-act=adopt]');
-    if (adopt) adopt.addEventListener('click', () => applyRecommended());
+    root.querySelectorAll('[data-adopt]').forEach((b) => {
+      b.addEventListener('click', () => applyMethod(b.dataset.adopt));
+    });
     const verify = root.querySelector('[data-act=verify]');
     if (verify) verify.addEventListener('click', () => verifyWithDES());
   }
@@ -208,12 +243,15 @@ export function mountPickrate(el, opts = {}) {
       { detail: { id: rec.id, label: rec.label } }));
   }
 
-  // adopt the recommended method into the pick stage's work axes (POST /apply),
-  // mirroring the workcompare "この方式で設計→" handoff. Then nudge to layout.
-  async function applyRecommended() {
+  // 採用: write the chosen method's work axes onto the pick stage (POST /apply).
+  // Same verb, same label and the same per-row placement as ④検証「作業方法比較」 —
+  // the reader adopts a method the same way wherever the comparison is shown, and
+  // it is ANY row, not only the recommended one (a recommendation you cannot
+  // overrule is a verdict, not advice).
+  async function applyMethod(id) {
     const name = getProject();
     if (!name || !data) return;
-    const rec = (data.methods || []).find((m) => m.id === data.recommend_id);
+    const rec = (data.methods || []).find((m) => m.id === id);
     if (!rec) return;
     const WORK = { discrete: { orders_per_trip: 1, consolidation: 'pick' },
       multi: { orders_per_trip: 8, consolidation: 'pick' },

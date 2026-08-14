@@ -115,6 +115,7 @@ function injectStyle() {
   .sc-runbtn:hover{filter:brightness(1.07)}
   .sc-runbtn:disabled{opacity:.5;cursor:default}
   .sc-runbtn:focus-visible{outline:2px solid var(--accent,#16C0DE);outline-offset:2px}
+  .sc-hint{font-size:10.5px;line-height:1.5;color:var(--ink-tertiary,#8195a8);text-align:center}
   .sc-stamp{font-size:10.5px;color:var(--ink-tertiary,#8195a8);text-align:center}
   /* loading / empty */
   .sc-msg{padding:18px 14px;font-size:12px;color:var(--ink-tertiary,#8195a8);text-align:center;line-height:1.5}
@@ -301,9 +302,21 @@ export function mountScorecard(opts = {}) {
       bodyHtml = rows.map((r) => rowHtml(r)).join('');
     }
 
+    // The CTA used to sit label-only, so 「実測検証」 read as a synonym for the
+    // numbers already on screen. These rows are ANALYTIC (srcLabel → 解析); the
+    // line below says what pressing it adds, and — once a run exists — where the
+    // ▲▼ against it are switched on (the 比較 selector defaults to なし, which
+    // otherwise leaves the delta feature invisible).
+    const hint = runDisabled
+      ? 'この採点表は解析値です。DESで回すと実測で裏取りできます（数十秒）。'
+      : (compareSel === 'none'
+        ? '上の「比較」で〈最後の実行(DES)〉を選ぶと、解析と実測の差が▲▼で出ます。'
+        : '▲▼は選択中の比較対象との差です。');
     const footHtml =
       `<div class="sc-foot">
-        <button class="sc-runbtn" data-sc="run" ${busy ? 'disabled' : ''}>▶ DESで実測検証</button>
+        <button class="sc-runbtn" data-sc="run" ${busy ? 'disabled' : ''}
+                title="現在の設計をSimPyの離散事象シミュレーションで実行し、解析値を実測で裏取りします">▶ DESで実測検証</button>
+        <div class="sc-hint">${esc(hint)}</div>
         <div class="sc-stamp">${lastFetched ? '最終更新 ' + stamp(lastFetched) : '—'}</div>
       </div>`;
 

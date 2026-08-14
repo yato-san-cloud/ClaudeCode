@@ -101,6 +101,11 @@ export function injectCanvasStyle() {
   .mfc-nbadge-tx{font:700 10px var(--font-sans,sans-serif);fill:var(--accent-ink,var(--accent,#16C0DE))}
   .mfc-node.is-calc .mfc-nbadge-bg{fill:var(--bg-hover,#f1f0ed)}
   .mfc-node.is-calc .mfc-nbadge-tx{fill:var(--ink-tertiary,#8195a8)}
+  /* semantic zoom (see applyView): when the whole chain is framed, the card keeps
+     its 工程名 and 人時 and drops the finer text rather than rendering it as fuzz. */
+  .mfc-svg.is-far .mfc-nsub{display:none}
+  .mfc-svg.is-far .mfc-nname{font-size:15px}
+  .mfc-svg.is-far .mfc-nmh{font-size:12.5px}
 
   /* 矢印 = 物の流れ (太さ=物量 / 色=搬送手段 / 破線=自動)。
      色と太さは グループの --mf-c / --mf-w に載せる: インラインstyleで直接 stroke を

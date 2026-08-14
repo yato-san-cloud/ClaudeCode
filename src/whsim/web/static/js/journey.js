@@ -185,18 +185,23 @@ export function mountJourney(el, opts = {}) {
   // phase changes (different view set); a project change forces a full rebuild.
   let builtSubsPhaseId = undefined;
 
+  // ✓ used to require having WALKED PAST a phase: import data, run, and stand on
+  // ①取込 and the rail showed no progress at all — it reported where you had been
+  // rather than what is actually done. Phases with a real state signal (案件 /
+  // 実データ / 実行) now read that signal wherever you stand; the rest keep the
+  // positional rule. The phase you are ON never shows ✓ (it has the active spine,
+  // and "完了" on the step you are working in reads as a lie).
   function phaseStatus(phase, state) {
     const locked = RUN_REQUIRED.has(phase.id) && !state.hasRun;
     const idx = PHASES.findIndex((p) => p.id === phase.id);
     const activePhaseId = VIEW_TO_PHASE[activeView] || null;
     const activeIdx = activePhaseId ? PHASES.findIndex((p) => p.id === activePhaseId) : -1;
     let done = false;
-    if (activeIdx >= 0 && idx < activeIdx) {
-      if (phase.id === 'intake') done = !!state.project;
-      else if (DATA_HINTED.has(phase.id)) done = !!state.hasData;
-      else if (RUN_REQUIRED.has(phase.id)) done = !!state.hasRun;
-      else done = true;
-    }
+    if (phase.id === 'intake') done = !!state.project;
+    else if (DATA_HINTED.has(phase.id)) done = !!state.hasData;
+    else if (phase.id === 'validate') done = !!state.hasRun;
+    else if (activeIdx >= 0 && idx < activeIdx) done = true;  // 設計/提案: 通過で判定
+    if (activeIdx >= 0 && idx === activeIdx) done = false;
     return { locked, done };
   }
 

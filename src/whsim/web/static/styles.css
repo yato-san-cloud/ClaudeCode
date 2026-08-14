@@ -17,11 +17,17 @@
   --bg-active:     #EAE9E4;
   --bg-overlay:    rgba(247,246,243,0.72);
 
-  /* ---- Color · Ink (文字) — warm near-black, layered by opacity ------------ */
+  /* ---- Color · Ink (文字) — warm near-black, layered by opacity ------------
+     Alphas are set by CONTRAST, not by taste: the ramp used to be 0.65/0.45/0.32,
+     which puts 支援テキスト at 4.05:1 and メタ表示 at 2.44:1 on --bg-panel — i.e.
+     most of the small Japanese labels in the app failed WCAG AA outright (11px
+     text needs 4.5:1). Hierarchy is carried by the type scale (13.5/11px, 700/400)
+     as much as by value, so the ramp is darkened until 二次=5.9:1, 三次=4.4:1 and
+     only --ink-faint (decoration/disabled, never load-bearing text) stays light. */
   --ink-primary:   #37352F;
-  --ink-secondary: rgba(55,53,47,0.65);
-  --ink-tertiary:  rgba(55,53,47,0.45);
-  --ink-faint:     rgba(55,53,47,0.32);
+  --ink-secondary: rgba(55,53,47,0.78);
+  --ink-tertiary:  rgba(55,53,47,0.68);
+  --ink-faint:     rgba(55,53,47,0.44);
   --ink-onAccent:  #04222C;   /* 暗インク: 鮮やかなシアン塗りの上で AA(7.58:1) */
 
   /* ---- Color · Line (境界) — hairlines ------------------------------------- */
@@ -1277,9 +1283,12 @@ html[data-theme="dark"] {
     --bg-overlay:    rgba(18,24,35,0.78);
 
     --ink-primary:   #E6EDF4;
-    --ink-secondary: rgba(230,237,244,0.66);
-    --ink-tertiary:  rgba(230,237,244,0.46);
-    --ink-faint:     rgba(230,237,244,0.30);
+    /* Same contrast-first ramp as :root (see the note there): 三次 rose from
+       0.46 (4.05:1 — AA only for large text) to 0.62 (6.3:1) so the 10-11px
+       meta lines the app leans on are readable on the dark panels too. */
+    --ink-secondary: rgba(230,237,244,0.74);
+    --ink-tertiary:  rgba(230,237,244,0.62);
+    --ink-faint:     rgba(230,237,244,0.40);
     --ink-onAccent:  #04222C;
 
     --line-hair:     rgba(150,172,200,0.12);

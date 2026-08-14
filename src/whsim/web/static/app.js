@@ -114,8 +114,15 @@ function nudgeToDesign(summary) {
 // ---- data flow -------------------------------------------------------------
 async function loadTemplates() {
   const ts = await api('/api/templates');
+  // Each option carries its description as a tooltip (the names alone truncate
+  // to 「アパレル物流・ゾーン…」 in the narrow select), and the default lands on
+  // ecommerce_small — 提案ヒアリングの出発点 — instead of whatever sorts first.
   $('templateSelect').innerHTML = ts.map(t =>
-    `<option value="${t.template_id}">${t.name || t.template_id}</option>`).join('');
+    `<option value="${t.template_id}" title="${esc(t.description || '')}">`
+    + `${esc(t.name || t.template_id)}</option>`).join('');
+  if (ts.some((t) => t.template_id === 'ecommerce_small')) {
+    $('templateSelect').value = 'ecommerce_small';
+  }
 }
 async function refreshProjects(select) {
   const ps = await api('/api/projects');
@@ -600,6 +607,10 @@ function refreshReadiness() {
   // duplicated this (project/data/run chips) and was removed.
   if (S.journey) S.journey.refresh();
   if (S.view) updatePhaseHint(S.view);
+  // ①取込 carries the same readiness as a checklist + the "next move" button, and
+  // it only rebuilt on view ENTRY: finishing a run while standing on ①取込 left
+  // 実行 unticked and the CTA one step behind reality. Re-derive it here too.
+  if (S.view === 'overview' && S.overview) S.overview.refresh();
 }
 
 // ---- import ----------------------------------------------------------------
@@ -857,6 +868,11 @@ function updatePhaseHint(view) {
   if (!S.phaseHint) return;
   const phase = VIEW_PHASE[view];
   if (!phase) { S.phaseHint.hide(); return; } // chat / notes are cross-cutting
+  // ①取込 owns its own status band with a state-aware 「次の一手」. Showing the
+  // generic banner as well put TWO different next steps 60px apart (banner said
+  // ②分析, band said 出荷実績を取り込む) — the screen argued with itself, so the
+  // banner stands down and the hub speaks alone.
+  if (view === 'overview') { S.phaseHint.hide(); return; }
   let empty = false;
   if (phase === 'validate' || phase === 'propose') empty = !S.hasRun;
   else if (phase === 'analyze') empty = !S.hasData;
@@ -898,6 +914,12 @@ function mountOverviewView() {
       // salesperson reaches a runnable model (and the 60-second proposal path)
       // without any data at hand.
       createSample: () => createSampleProject(),
+      // The zero state hosts the real create form (name + ひな形) and a
+      // 続きから list, so "make a project" is an action ON the stage instead of
+      // a sentence pointing at the sidebar.
+      createProject: (name, template) => doCreate(name, template),
+      openProject: (name) => openProject(name),
+      startGuide: () => { if (S.onboarding) S.onboarding.startGuide(true); },
       toast: (m, k) => toast(m, k),
     });
   } else {
@@ -1221,7 +1243,10 @@ function initUI() {
       await doCreate(name, $('templateSelect').value);
       $('newName').value = '';
       toast(`「${name}」を作成しました。`, 'ok');
-      cody('excited', `「${name}」を用意したよ。まずは設計を触ってみよう。`);
+      // Cody used to point at ③設計 here while the ①取込 band pointed at 出荷実績
+      // and the banner at ②分析 — three different "next steps" on one screen.
+      // The companion now echoes the hub instead of competing with it.
+      cody('excited', `「${name}」を用意したよ。出荷実績（CSV/Excel）を取り込むと、ここからの数字が実データになる。`);
     } catch (e) {
       $('status').textContent = '作成に失敗: ' + e.message;
       toast('作成に失敗しました: ' + e.message, 'error');

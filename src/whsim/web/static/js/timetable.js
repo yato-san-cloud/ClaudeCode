@@ -70,6 +70,17 @@ function injectStyle() {
   const s = document.createElement('style');
   s.id = 'tt-js-style';
   s.textContent = `
+  /* 結論が先 line above the KPI cards; tone follows 過不足. */
+  .tt-take{font-size:var(--fs-sm,13px);line-height:1.6;color:var(--ink-secondary);
+    border-left:3px solid var(--ok,#2aa96b);padding:2px 0 2px 11px;margin:2px 0 2px}
+  .tt-take:empty{display:none}
+  .tt-take.bad{border-left-color:var(--bad,#e0576a)}
+  .tt-take b{color:var(--ink-primary);font-variant-numeric:tabular-nums}
+  /* Five headline numbers should read as ONE row, not 4+1 with a hole in it. */
+  .tt-kpis{grid-template-columns:repeat(auto-fit,minmax(132px,1fr))}
+  .tt-kpi-value{font-variant-numeric:tabular-nums}
+  .tt-kpi-sub{margin-top:3px;font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary);
+    font-variant-numeric:tabular-nums}
   .tt-cursor-sync{display:inline-flex;align-items:center;gap:var(--sp-1);
     font-size:var(--fs-micro);color:var(--ink-tertiary);white-space:nowrap;
     opacity:0;transition:opacity var(--dur-2) var(--ease-out)}
@@ -206,7 +217,7 @@ export function mountTimetable(targetEl, opts = {}) {
   target.appendChild(root);
 
   // Sub-containers (filled after seed loads).
-  let elScenario, elKpis, elWarn, elCursor, elGantt, elGanttCanvas, elMatrix, elParams, elRecalc;
+  let elScenario, elTake, elKpis, elWarn, elCursor, elGantt, elGanttCanvas, elMatrix, elParams, elRecalc;
   let elMap, elMapCanvas, elMapTitle;
   let elCursorSync;          // low-key "時刻連動中" indicator near the time cursor
   let syncFadeTimer = null;  // briefly emphasizes the indicator when the cursor moves
@@ -270,6 +281,12 @@ export function mountTimetable(targetEl, opts = {}) {
     elRecalc.textContent = '再計算中…';
     bar.appendChild(elRecalc);
     root.appendChild(bar);
+
+    // 結論が先: one sentence saying whether the placement covers the work, above
+    // the five cards that prove it. The cards were the first thing on the page
+    // and 「382.9 / 388.5 / +5.6」 is arithmetic the reader had to do themselves.
+    elTake = el('div', 'tt-take');
+    root.appendChild(elTake);
 
     // KPI cards
     elKpis = el('div', 'tt-kpis');
@@ -647,16 +664,28 @@ export function mountTimetable(targetEl, opts = {}) {
       ['総必要工数', r1(r.total_required_hours), 'h'],
       ['総配置工数', r1(r.total_assigned_hours), 'h'],
       ['差分（配置−必要）', (diff >= 0 ? '+' : '') + r1(diff), 'h', diff < 0 ? 'bad' : 'good'],
-      ['ピーク人数', pk, `名 (PT${pt}/Fマン${fm})`],
+      // The PT/Fマン split rode along in the unit string and pushed the card onto a
+      // second line; it is a breakdown, so it reads as one.
+      ['ピーク人数', pk, '名', '', `PT ${pt} / Fマン ${fm}`],
       ['ピーク時間帯', pkTime, '〜'],
     ];
+    if (elTake) {
+      const short = diff < 0;
+      elTake.className = 'tt-take' + (short ? ' bad' : '');
+      elTake.innerHTML = short
+        ? `この配置では <b>${r1(-diff)} 人時</b> 足りません（必要 ${r1(r.total_required_hours)} h に対し配置 ${r1(r.total_assigned_hours)} h）。`
+          + `山は <b>${esc(pkTime)}〜</b> の <b>${pk} 名</b>。この時間帯に人を足すか、前倒しで平準化してください。`
+        : `必要 <b>${r1(r.total_required_hours)} 人時</b> を <b>${r1(r.total_assigned_hours)} 人時</b> で賄えています`
+          + `（余裕 <b>+${r1(diff)} h</b>）。山は <b>${esc(pkTime)}〜</b> の <b>${pk} 名</b>で、ここがシフトの上限です。`;
+    }
     elKpis.innerHTML = '';
-    for (const [label, value, unit, tone] of cards) {
+    for (const [label, value, unit, tone, sub] of cards) {
       const c = el('div', 'tt-kpi' + (tone ? ' ' + tone : ''));
       c.appendChild(el('div', 'tt-kpi-label', label));
       const v = el('div', 'tt-kpi-value', String(value));
       if (unit) v.appendChild(el('span', 'tt-kpi-unit', ' ' + unit));
       c.appendChild(v);
+      if (sub) c.appendChild(el('div', 'tt-kpi-sub', sub));
       elKpis.appendChild(c);
     }
   }

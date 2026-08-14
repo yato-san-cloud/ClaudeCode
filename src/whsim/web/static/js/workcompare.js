@@ -52,6 +52,31 @@ function injectStyle() {
     color:var(--accent);font:inherit;font-weight:700;font-size:12px;cursor:pointer}
   .wc-adopt:hover{background:var(--accent-tint-2,rgba(22,192,222,.14))}
   .wc-empty{padding:40px;text-align:center;color:var(--ink-tertiary)}
+  /* Pre-run explainer — deliberately the SAME shape as ⑤シナリオ比較's
+     (.compare-empty-card): icon → title → what it does → the things it will
+     compare → CTA → time estimate. A blank panel with one sentence gave the
+     salesperson nothing to decide on; these two screens now teach the same way. */
+  .wc-empty-card{max-width:580px;margin:8px auto;padding:var(--sp-6,24px);text-align:center;
+    border:1px solid var(--line-hair);border-radius:var(--r-lg,12px);
+    background:var(--surface-1,rgba(127,127,127,.04))}
+  .wc-empty-card .ce-icon{font-size:30px;line-height:1;margin-bottom:var(--sp-3,12px)}
+  .wc-empty-card .ce-title{margin:0 0 var(--sp-2,8px);font-size:var(--fs-md,16px);
+    font-weight:700;color:var(--ink-primary)}
+  .wc-empty-card .ce-desc{margin:0;font-size:var(--fs-sm,13.5px);line-height:1.7;
+    color:var(--ink-secondary)}
+  .wc-empty-card .ce-steps{display:flex;gap:var(--sp-2,8px);justify-content:center;
+    flex-wrap:wrap;list-style:none;margin:var(--sp-4,16px) 0 0;padding:0}
+  .wc-empty-card .ce-steps li{font-size:var(--fs-xs,12px);font-weight:600;
+    padding:4px 12px;border-radius:var(--r-pill,999px);border:1px solid var(--line-hair);
+    color:var(--ink-secondary);background:var(--bg-panel)}
+  .wc-empty-card .ce-cta{margin-top:var(--sp-4,16px);font:inherit;font-size:var(--fs-sm,14px);
+    font-weight:700;padding:10px 22px;border-radius:var(--r-pill,999px);cursor:pointer;
+    border:1px solid var(--accent);background:var(--accent);color:var(--accent-on,#04121A)}
+  .wc-empty-card .ce-cta:hover{filter:brightness(1.06)}
+  .wc-empty-card .ce-cta:disabled{opacity:.55;cursor:default}
+  .wc-empty-card .ce-cta:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .wc-empty-card .ce-time{display:block;margin-top:var(--sp-3,12px);
+    font-size:var(--fs-micro,11px);color:var(--ink-tertiary)}
   .wc-note{font-size:var(--fs-micro,10.5px);color:var(--ink-tertiary)}
   .wc-sweep-btn{padding:9px 16px;border:1px solid var(--accent);border-radius:10px;cursor:pointer;
     background:transparent;color:var(--accent);font:inherit;font-weight:700}
@@ -104,17 +129,27 @@ export function mountWorkCompare(el, opts = {}) {
       title: '4方式をDESで比較実行中…', sub: 'シングルオーダー・マルチオーダー・ゾーン（リレー）・トータルをそれぞれ回して移動vs仕分けを実測します。' });
     try {
       data = await api(`/api/projects/${encodeURIComponent(name)}/workmethod/compare`, { method: 'POST' });
+      // The request is over, so drop the busy flag BEFORE anything re-renders:
+      // headHtml() reads `running`, and every branch below paints the head. It
+      // used to be cleared in `finally` — after the paint — which left the
+      // finished screen showing a disabled 「比較を実行中…」 button.
+      running = false;
       if (data && data.cancelled) {
         prog.stop('cancelled');
-        root.innerHTML = headHtml() + '<div class="wc-empty">比較を中止しました。</div>';
-        wireHead();
+        // 中止 is a normal outcome, not a dead end — offer the way back in.
+        root.innerHTML = headHtml() + noticeHtml('比較を中止しました',
+          '途中までの計算結果は保存していません。もう一度実行すると最初から4方式を回します。',
+          'もう一度実行');
+        wireHead(); wireNotice();
         return;
       }
       render();
     } catch (e) {
       data = null;
-      root.innerHTML = headHtml() + `<div class="wc-empty">比較の実行に失敗しました：${esc(e && e.message ? e.message : e)}</div>`;
-      wireHead();
+      running = false;   // same reason as above: the head is painted right below
+      root.innerHTML = headHtml() + noticeHtml('比較を実行できませんでした',
+        `${e && e.message ? e.message : e}　設計や実行結果は失われていません。`, '再実行');
+      wireHead(); wireNotice();
     } finally { running = false; prog.stop(); }
   }
 
@@ -129,6 +164,40 @@ export function mountWorkCompare(el, opts = {}) {
     if (b) b.onclick = () => run();
     const s = root.querySelector('[data-sweep]');
     if (s) s.onclick = () => sweepPanel.runSweep();
+  }
+
+  // Cancelled / failed notice — same card as the empty state so an interrupted
+  // comparison lands somewhere recognisable with one obvious way forward.
+  function noticeHtml(title, body, cta) {
+    return `<div class="wc-empty-card">
+      <div class="ce-icon" aria-hidden="true">⚠️</div>
+      <h3 class="ce-title">${esc(title)}</h3>
+      <p class="ce-desc">${esc(body)}</p>
+      <button type="button" class="ce-cta" data-empty-cta>${esc(cta)}</button>
+    </div>`;
+  }
+  function wireNotice() {
+    const ec = root.querySelector('[data-empty-cta]');
+    if (ec) ec.onclick = () => { if (!running) run(); };
+  }
+
+  // Pre-run explainer. Mirrors ⑤シナリオ比較's empty card so ④ and ⑤ teach the
+  // same way: what will run, what it will be judged on, and how long it takes.
+  // The four chips are the four METHOD_PRESETS the endpoint actually runs.
+  function emptyHtml() {
+    return `<div class="wc-empty-card">
+      <div class="ce-icon" aria-hidden="true">⚖️</div>
+      <h3 class="ce-title">作業方法比較はまだ実行されていません</h3>
+      <p class="ce-desc">「▶ 4方式を比較実行」を押すと、4つの作業方法をそれぞれ重厚なDES
+        （離散事象シミュレーション）で実行し、<b>移動 vs 仕分け</b>のトレードオフを
+        ¥/件・処理能力・人員・稼働率で横並びに比べます。歩き回る方式と、
+        まとめて仕分ける方式のどちらが有利かは物量とレイアウトで変わるため、実測で決めます。</p>
+      <ul class="ce-steps">
+        <li>都度（シングル）</li><li>マルチオーダー</li><li>ゾーン（リレー）</li><li>種まき（トータル）</li>
+      </ul>
+      <button type="button" class="ce-cta" data-empty-cta>▶ 4方式を比較実行</button>
+      <span class="ce-time">所要時間の目安：数十秒　／　結果はこの画面で比較し、採用すると設計に反映されます</span>
+    </div>`;
   }
   function renderRunning() {
     disposeChart();
@@ -145,9 +214,16 @@ export function mountWorkCompare(el, opts = {}) {
         ? `<div class="wc-rec">解析（生産性試算）の推奨は <b>${esc(analyticPick.label)}</b>。`
           + `「▶ 4方式を比較実行」でDESを回し、移動/仕分け以外（混雑・待ち）も含めて裏取りします。</div>`
         : '';
-      root.innerHTML = headHtml() + ap + sweepPanel.sweepHtml()
-        + '<div class="wc-empty">「▶ 4方式を比較実行」を押すと、各方式を実行して比較します。</div>';
-      wireHead(); sweepPanel.wireSweep(); return;
+      root.innerHTML = headHtml() + ap + sweepPanel.sweepHtml() + emptyHtml();
+      wireHead(); sweepPanel.wireSweep();
+      // The card's CTA drives the SAME [data-run] button wireHead() just wired,
+      // so the busy/disabled state can never disagree between the two.
+      const ec = root.querySelector('[data-empty-cta]');
+      if (ec) {
+        ec.onclick = () => { if (!running) run(); };
+        if (running) ec.disabled = true;
+      }
+      return;
     }
     const rec = d.recommend || {};
     const recRow = (m) => (m.id === rec.id);

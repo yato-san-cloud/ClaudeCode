@@ -16,8 +16,9 @@
 // destroyed by the rebuild).
 //
 // opts: { getState(): {project,hasData,hasRun}, getProject(): Promise<modelJSON>,
-//         switchTo(view), createSample(), toast(msg,kind) } — app.js supplies.
-import { esc } from './util.js';
+//         switchTo(view), createSample(), createProject(name,template),
+//         openProject(name), startGuide(), toast(msg,kind) } — app.js supplies.
+import { esc, api } from './util.js';
 import {
   uploadZip, uploadCad, uploadDistances, uploadMapcsv, uploadRmpm,
   uploadTable, uploadShipments, reviewTable, reviewShipments, generateMissing,
@@ -49,15 +50,25 @@ const IHUB_CSS = `
   border:1px solid var(--line-hair);overflow:hidden;margin-top:4px}
 .ihub-meter span{display:block;height:100%;background:var(--accent);
   border-radius:var(--r-pill);transition:width var(--dur-3) var(--ease-out)}
-.ihub-checks{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:160px}
+.ihub-checks{display:flex;gap:6px;flex-wrap:wrap;flex:1 1 auto;min-width:150px;
+  align-items:center}
 .ihub-chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
   padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--line-soft);
   background:var(--bg-sunken);color:var(--ink-tertiary);white-space:nowrap}
 .ihub-chip i{font-style:normal;font-weight:800;font-size:10px}
 .ihub-chip.on{background:var(--ok-tint);border-color:var(--ok-line);color:var(--ok-ink)}
 .ihub-nextwrap{display:flex;align-items:center;gap:10px;flex:0 0 auto;margin-left:auto}
+.ihub-next-lab{display:flex;flex-direction:column;align-items:flex-end;gap:1px;min-width:0}
 .ihub-next-k{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--accent-ink);
   text-transform:uppercase;white-space:nowrap}
+/* Why this is the next move — a CTA that states its reason is a decision the
+   user can disagree with, rather than an order they must trust. */
+.ihub-next-why{font-size:10.5px;color:var(--ink-tertiary);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.ihub-checks-k{font-size:10px;font-weight:700;letter-spacing:.06em;
+  color:var(--ink-tertiary);white-space:nowrap;align-self:center}
+.ihub-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 .ihub-next{padding:8px 18px;border:none;border-radius:var(--r-md);cursor:pointer;
   background:var(--accent);color:var(--ink-onAccent);font:inherit;font-weight:700;
   font-size:13px;white-space:nowrap;box-shadow:var(--sh-sm);
@@ -78,7 +89,11 @@ const IHUB_CSS = `
 .ihub-d{font-size:10.5px;color:var(--ink-tertiary);margin-top:1px;line-height:1.45}
 .ihub-cb{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
   display:flex;flex-direction:column;gap:8px;margin-top:9px}
-.ihub-drop{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;
+/* The drop zone GROWS into the card. The cards are a full-height grid, so a
+   fixed 56px dashed box left most of each card as dead space directly under a
+   "ここにドロップ" instruction — the target looked small and precise when the
+   whole card was in fact free real estate. */
+.ihub-drop{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:5px;min-height:56px;padding:8px;text-align:center;
   border:1.5px dashed var(--line-strong);border-radius:var(--r-md);
   background:var(--bg-sunken);cursor:pointer;
@@ -94,7 +109,11 @@ const IHUB_CSS = `
 /* 実績データ card: 出荷/入荷/在庫 are three always-visible stacked drop rows
    (no kind toggle — the vertical space was there, so each kind keeps its own
    target + its own "last import" status line). */
-.ihub-rowwrap{display:flex;flex-direction:column;gap:2px}
+/* The three 実績 rows share the card's free height (a bigger target), but with a
+   ceiling: unbounded they became ~190px cliffs with a 12px label adrift in the
+   middle, which reads as an empty panel rather than a place to drop a file. */
+.ihub-rowwrap{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;
+  min-height:0;max-height:132px}
 .ihub-drop-row{flex-direction:row;align-items:center;gap:8px;min-height:36px;
   padding:5px 9px;text-align:left}
 .ihub-drop-row .ihub-drop-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
@@ -143,18 +162,75 @@ const IHUB_CSS = `
 /* --- footer log (detail record / column-mapping UI from imports.js) --------- */
 .ihub-foot{flex:0 0 auto;max-height:128px;overflow-y:auto;overscroll-behavior:contain}
 .ihub-foot .log{margin:0}
-/* --- empty state (no project) ----------------------------------------------- */
+/* --- empty state (no project) = the first 5 minutes --------------------------
+   The zero state is the product's first sentence, so it does three jobs at once:
+   it NAMES the journey (5 steps, so the app explains itself without a modal
+   tour), it puts the real create form ON THE STAGE (it used to only point at a
+   sidebar select — "look over there" is not an affordance), and it keeps the
+   sample as the equal-weight escape hatch for a rep with no data at hand. */
 .ihub-empty{flex:1;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;text-align:center;padding:24px;color:var(--ink-secondary)}
-.ihub-empty-h{font-size:17px;font-weight:700;color:var(--ink-primary);margin-bottom:8px}
-.ihub-empty p{font-size:13px;line-height:1.7;margin:0}
-.ihub-empty-sample{margin-top:16px;font-size:15px;padding:11px 24px;border:none;
-  border-radius:var(--r-md);background:var(--accent);color:var(--ink-onAccent);
-  font-weight:700;cursor:pointer;box-shadow:var(--sh-sm)}
-.ihub-empty-sample:hover{background:var(--accent-hover)}
-.ihub-empty-or{font-size:12px;color:var(--ink-tertiary);margin-top:12px}
+  justify-content:center;gap:18px;text-align:center;padding:20px 24px 28px;
+  color:var(--ink-secondary)}
+.ihub-empty-hd{max-width:640px}
+.ihub-empty-h{font-size:22px;font-weight:700;color:var(--ink-primary);
+  letter-spacing:-.01em;line-height:1.35}
+.ihub-empty-h small{display:block;font-size:13px;font-weight:500;
+  color:var(--ink-secondary);line-height:1.7;margin-top:6px;letter-spacing:0}
+/* 5-step preview: the journey the stepper will walk, stated once, up front. */
+.ihub-steps{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap;
+  justify-content:center;max-width:760px}
+.ihub-step{display:flex;flex-direction:column;gap:1px;align-items:flex-start;
+  min-width:118px;padding:7px 11px;border-radius:var(--r-md);
+  border:1px solid var(--line-hair);background:var(--bg-sunken);text-align:left}
+.ihub-step.is-now{border-color:var(--accent);background:var(--accent-tint)}
+.ihub-step-n{font-size:11px;font-weight:700;color:var(--ink-primary)}
+.ihub-step.is-now .ihub-step-n{color:var(--accent-ink)}
+.ihub-step-d{font-size:10px;color:var(--ink-tertiary);line-height:1.35}
+.ihub-step-sep{align-self:center;color:var(--ink-faint);font-size:11px}
+/* Once the strip wraps, the chevrons point at line breaks instead of the next
+   step (and one dangles at the end of a row), so they drop out. */
+@media(max-width:900px){.ihub-step-sep{display:none}}
+/* Two doors, equal weight: 案件をつくる (the real path) / サンプル (no data yet). */
+.ihub-doors{display:grid;grid-template-columns:repeat(2,minmax(0,300px));gap:12px;
+  align-items:stretch;text-align:left}
+@media(max-width:700px){.ihub-doors{grid-template-columns:minmax(0,1fr)}}
+.ihub-door{display:flex;flex-direction:column;gap:8px;padding:14px;
+  background:var(--bg-panel);border:1px solid var(--line-hair);
+  border-radius:var(--r-lg);box-shadow:var(--sh-xs)}
+.ihub-door-t{font-size:13.5px;font-weight:700;color:var(--ink-primary)}
+.ihub-door-d{font-size:11.5px;color:var(--ink-secondary);line-height:1.6;margin:-4px 0 0}
+.ihub-field{display:flex;flex-direction:column;gap:3px}
+.ihub-field label{font-size:11px;font-weight:600;color:var(--ink-secondary)}
+.ihub-field input,.ihub-field select{width:100%;font:inherit;font-size:13px;
+  padding:7px 9px;border-radius:var(--r-sm);border:1px solid var(--line-strong);
+  background:var(--bg-app);color:var(--ink-primary)}
+.ihub-field input:focus-visible,.ihub-field select:focus-visible{outline:2px solid var(--accent);
+  outline-offset:1px}
+.ihub-tdesc{font-size:10.5px;color:var(--ink-tertiary);line-height:1.5;min-height:15px}
+.ihub-empty-go,.ihub-empty-sample{font:inherit;font-size:13.5px;font-weight:700;
+  padding:10px 16px;border-radius:var(--r-md);cursor:pointer;border:none;
+  background:var(--accent);color:var(--ink-onAccent);box-shadow:var(--sh-sm);
+  transition:background var(--dur-1) var(--ease-out)}
+.ihub-empty-go:hover,.ihub-empty-sample:hover{background:var(--accent-hover)}
+.ihub-empty-go:disabled{background:var(--bg-active);color:var(--ink-faint);
+  box-shadow:none;cursor:not-allowed}
+.ihub-empty-go:focus-visible,.ihub-empty-sample:focus-visible{outline:2px solid var(--accent);
+  outline-offset:2px}
+.ihub-door .ihub-ghost{margin-top:auto;align-self:flex-start;background:transparent;
+  border:none;padding:2px 0;font:inherit;font-size:11.5px;font-weight:600;
+  color:var(--accent-ink);cursor:pointer;text-decoration:underline;
+  text-underline-offset:2px}
+.ihub-door .ihub-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* 続きから: reopen a recent project without hunting the sidebar select. */
+.ihub-recent{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  justify-content:center;font-size:11.5px;color:var(--ink-tertiary)}
+.ihub-recent button{font:inherit;font-size:11.5px;font-weight:600;padding:4px 12px;
+  border-radius:var(--r-pill);border:1px solid var(--line-strong);
+  background:var(--bg-panel);color:var(--ink-primary);cursor:pointer}
+.ihub-recent button:hover{border-color:var(--accent)}
+.ihub-recent button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion: reduce){
-  .ihub-next,.ihub-kind,.ihub-drop{transition:none}
+  .ihub-next,.ihub-kind,.ihub-drop,.ihub-empty-go,.ihub-empty-sample{transition:none}
 }
 `;
 
@@ -178,6 +254,9 @@ export function mountOverview(el, opts = {}) {
   const getProject = opts.getProject || (async () => null);
   const switchTo = opts.switchTo || (() => {});
   const createSample = typeof opts.createSample === 'function' ? opts.createSample : null;
+  const createProject = typeof opts.createProject === 'function' ? opts.createProject : null;
+  const openProject = typeof opts.openProject === 'function' ? opts.openProject : null;
+  const startGuide = typeof opts.startGuide === 'function' ? opts.startGuide : null;
   const toast = opts.toast || (() => {});
 
   const root = document.createElement('div');
@@ -359,6 +438,37 @@ export function mountOverview(el, opts = {}) {
         for (const f of files) await uploadDistances(f);
       };
     }
+    guardStrayDrops();
+  }
+
+  // A file dropped anywhere OUTSIDE a drop zone is the browser's default
+  // "navigate to file:///…" — the SPA unloads and the whole session (project,
+  // run, unsaved design) is gone, with no error to recover from. Aiming at a
+  // dashed rectangle is exactly the kind of precision a first-timer misses, so
+  // the page swallows stray file drops and says where the file belongs instead.
+  // Only FILE drags are touched: the designer's own library→floor drags carry
+  // no `Files` type and keep working untouched.
+  let guarded = false;
+  function guardStrayDrops() {
+    if (guarded) return;
+    guarded = true;
+    const isFileDrag = (e) => {
+      const t = e.dataTransfer && e.dataTransfer.types;
+      return !!t && Array.prototype.indexOf.call(t, 'Files') >= 0;
+    };
+    const handled = (e) => !!(e.target && e.target.closest
+      && e.target.closest('.ihub-drop,[data-dropzone],input[type="file"]'));
+    document.addEventListener('dragover', (e) => {
+      if (isFileDrag(e) && !handled(e)) e.preventDefault();
+    });
+    document.addEventListener('drop', (e) => {
+      if (!isFileDrag(e) || handled(e)) return;
+      e.preventDefault();
+      const inHub = !!(e.target && e.target.closest && e.target.closest('.ihub'));
+      toast(inHub
+        ? 'ファイルは各カードの点線の枠に落としてください（枠内ならどこでもOK）。'
+        : '取込は①取込の画面で行います。①取込を開いてカードにドロップしてください。', 'info');
+    });
   }
 
   // ---- derive view state -----------------------------------------------------
@@ -381,27 +491,160 @@ export function mountOverview(el, opts = {}) {
     };
   }
 
+  // The ONE next move, in journey order. This is the screen's only forward
+  // instruction (the phase banner stands down on ①取込), so it must never point
+  // somewhere the journey has not reached: after real data lands the next step
+  // is ②分析 — the same place the import toast promises — not ③設計.
+  // `why` states the reason in one clause so the button is a decision, not a dare.
   function nextAction(d) {
     if (!d.hasData && !d.hasOrders) {
-      return { label: '出荷実績を取り込む ↓', act: 'focus', cat: 'actual' };
+      return {
+        label: '出荷実績を取り込む ↓', act: 'focus', cat: 'actual',
+        why: '今はテンプレの仮値です',
+      };
     }
-    if (!d.hasItems) return { label: '不足データを生成', act: 'generate' };
-    if (!d.hasRun) return { label: '③設計を始める →', nav: 'design' };
-    return { label: '④検証で結果を確認 →', nav: 'analysis' };
+    if (!d.hasItems) {
+      return { label: '不足データを生成', act: 'generate', why: '商品マスタが未取込です' };
+    }
+    if (!d.hasRun) {
+      return { label: '②分析で物量を確かめる →', nav: 'dataanalysis', why: '実績の物量・波動を読みます' };
+    }
+    return { label: '④検証で結果を確認 →', nav: 'analysis', why: '実行済み。KPIを見られます' };
   }
 
   // ---- build: empty state ----------------------------------------------------
+  // The 5 phases, named once so the zero state teaches the journey without a
+  // modal tour (the stepper walks these same five).
+  const JOURNEY = [
+    ['① 取込', 'データを入れる'],
+    ['② 分析', '物量を読む'],
+    ['③ 設計', '倉庫を描く'],
+    ['④ 検証', '捌けるか試す'],
+    ['⑤ 提案', '提案書にする'],
+  ];
+
   function buildEmpty() {
     parkAssets();
+    const steps = JOURNEY.map(([n, d], i) =>
+      `<div class="ihub-step${i === 0 ? ' is-now' : ''}">
+         <span class="ihub-step-n">${esc(n)}</span>
+         <span class="ihub-step-d">${esc(d)}</span>
+       </div>`).join('<span class="ihub-step-sep" aria-hidden="true">›</span>');
+
     root.innerHTML =
       `<div class="ihub-empty">
-         <div class="ihub-empty-h">はじめましょう</div>
-         <p>手元にデータが無くても大丈夫。サンプルの倉庫で、①取込→②分析→③設計→④検証→⑤提案までを今すぐ試せます。</p>
-         ${createSample ? '<button class="ihub-empty-sample" data-act="sample">✨ サンプルでためす</button>' : ''}
-         <p class="ihub-empty-or">または左サイドバーの「プロジェクト」で、名前とテンプレートを選んで新規作成。</p>
+         <div class="ihub-empty-hd">
+           <h1 class="ihub-empty-h">まず、案件を1つ作ります
+             <small>ひな形を選ぶだけで動く倉庫が1つできます。データは後から足せます。</small>
+           </h1>
+         </div>
+         <div class="ihub-steps" aria-label="この後の流れ">${steps}</div>
+         <div class="ihub-doors">
+           <section class="ihub-door">
+             <div class="ihub-door-t">案件をつくる</div>
+             <div class="ihub-field">
+               <label for="ihubName">案件名</label>
+               <input id="ihubName" type="text" maxlength="60" autocomplete="off"
+                      placeholder="例: 〇〇物流 新倉庫" />
+             </div>
+             <div class="ihub-field">
+               <label for="ihubTmpl">ひな形（似た倉庫を選ぶ）</label>
+               <select id="ihubTmpl"></select>
+             </div>
+             <div class="ihub-tdesc" data-f="tdesc"></div>
+             <button type="button" class="ihub-empty-go" data-act="create">作成してはじめる</button>
+           </section>
+           <section class="ihub-door">
+             <div class="ihub-door-t">データが手元に無いなら</div>
+             <p class="ihub-door-d">サンプル倉庫を用意します。取込から提案書まで、同じ手順をそのまま試せます。</p>
+             ${createSample ? '<button type="button" class="ihub-empty-sample" data-act="sample">✨ サンプルでためす</button>' : ''}
+             ${startGuide ? '<button type="button" class="ihub-ghost" data-act="guide">使い方ガイドを見る（1分）</button>' : ''}
+           </section>
+         </div>
+         <div class="ihub-recent" data-f="recent" hidden></div>
        </div>`;
+
     const b = root.querySelector('[data-act="sample"]');
     if (b) b.onclick = () => runSample(b);
+    const g = root.querySelector('[data-act="guide"]');
+    if (g) g.onclick = () => startGuide();
+    const create = root.querySelector('[data-act="create"]');
+    const nameEl = root.querySelector('#ihubName');
+    const tmplEl = root.querySelector('#ihubTmpl');
+    const descEl = root.querySelector('[data-f="tdesc"]');
+    if (tmplEl) {
+      tmplEl.onchange = () => {
+        const t = templates.find((x) => x.template_id === tmplEl.value);
+        if (descEl) descEl.textContent = (t && t.description) || '';
+      };
+    }
+    if (nameEl) {
+      nameEl.onkeydown = (e) => { if (e.key === 'Enter' && create) create.click(); };
+      // The name field is the first thing to fill in, so put the caret there.
+      setTimeout(() => { try { nameEl.focus(); } catch (_e) { /* ignore */ } }, 0);
+    }
+    if (create) create.onclick = () => runCreate(create, nameEl, tmplEl);
+    fillTemplates(tmplEl, descEl);
+    fillRecent();
+  }
+
+  // Templates power the ひな形 picker; each option carries its description so the
+  // choice is informed (the sidebar select shows bare names, truncated).
+  let templates = [];
+  const DEFAULT_TEMPLATE = 'ecommerce_small';   // 提案ヒアリングの出発点
+  async function fillTemplates(sel, descEl) {
+    if (!sel) return;
+    if (!templates.length) {
+      try { templates = await api('/api/templates'); } catch (_e) { templates = []; }
+    }
+    if (!root.contains(sel)) return;   // rebuilt while the fetch was in flight
+    sel.innerHTML = templates.map((t) =>
+      `<option value="${esc(t.template_id)}" title="${esc(t.description || '')}">`
+      + `${esc(t.name || t.template_id)}</option>`).join('');
+    const def = templates.find((t) => t.template_id === DEFAULT_TEMPLATE);
+    if (def) sel.value = DEFAULT_TEMPLATE;
+    const cur = templates.find((t) => t.template_id === sel.value);
+    if (descEl) descEl.textContent = (cur && cur.description) || '';
+  }
+
+  // 続きから: existing projects are one click away instead of hidden behind the
+  // sidebar's native select (a returning user's most likely intent).
+  async function fillRecent() {
+    const host = root.querySelector('[data-f="recent"]');
+    if (!host || !openProject) return;
+    let list = [];
+    try { list = await api('/api/projects'); } catch (_e) { return; }
+    if (!root.contains(host) || !list.length) return;
+    host.hidden = false;
+    host.innerHTML = '<span>続きから:</span>' + list.slice(-5).reverse().map((p) =>
+      `<button type="button" data-open="${esc(p)}">${esc(p)}</button>`).join('');
+    host.querySelectorAll('[data-open]').forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await openProject(b.dataset.open); } catch (_e) { b.disabled = false; }
+      };
+    });
+  }
+
+  async function runCreate(btn, nameEl, tmplEl) {
+    if (!createProject) { toast('この画面からは作成できません。左の「プロジェクト」から作成してください。', 'error'); return; }
+    const name = (nameEl && nameEl.value || '').trim();
+    if (!name) {
+      toast('案件名を入力してください。', 'info');
+      if (nameEl) nameEl.focus();
+      return;
+    }
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = '作成中…';
+    try {
+      await createProject(name, (tmplEl && tmplEl.value) || DEFAULT_TEMPLATE);
+      await render();
+    } catch (e) {
+      toast('作成に失敗しました: ' + (e && e.message ? e.message : ''), 'error');
+      btn.disabled = false;
+      btn.textContent = label;
+    }
   }
 
   // ---- build: hub skeleton (per project; statuses prefilled from 履歴) --------
@@ -453,7 +696,10 @@ export function mountOverview(el, opts = {}) {
          </div>
          <div class="ihub-checks" data-f="checks" aria-label="準備状況"></div>
          <div class="ihub-nextwrap">
-           <span class="ihub-next-k">次の一手</span>
+           <span class="ihub-next-lab">
+             <span class="ihub-next-k">次の一手</span>
+             <span class="ihub-next-why" data-f="why"></span>
+           </span>
            <button type="button" class="ihub-next" data-f="next"></button>
          </div>
        </div>
@@ -563,14 +809,23 @@ export function mountOverview(el, opts = {}) {
         ['レイアウト', d.hasLayout],
         ['実行', d.hasRun],
       ];
-      checks.innerHTML = items.map(([lab, on]) =>
-        `<span class="ihub-chip${on ? ' on' : ''}" title="${esc(lab)}: ${on ? '済' : '未'}">`
-        + `<i aria-hidden="true">${on ? '✓' : '·'}</i>${esc(lab)}</span>`).join('');
+      const done = items.filter(([, on]) => on).length;
+      // A bare row of four words does not read as a checklist; the count states
+      // progress ("3/4 そろいました") and each chip says 済/未 in its own text,
+      // so the state never depends on colour alone.
+      checks.innerHTML = `<span class="ihub-checks-k">準備 ${done}/${items.length}</span>`
+        + items.map(([lab, on]) =>
+          `<span class="ihub-chip${on ? ' on' : ''}" title="${esc(lab)}: ${on ? '済' : '未取込'}">`
+          + `<i aria-hidden="true">${on ? '✓' : '·'}</i>${esc(lab)}`
+          + `<span class="ihub-sr">（${on ? '済' : '未取込'}）</span></span>`).join('');
     }
     const next = f('next');
     if (next) {
       const na = nextAction(d);
       next.textContent = na.label;
+      next.title = na.why || '';
+      const whyEl = f('why');
+      if (whyEl) whyEl.textContent = na.why || '';
       next.onclick = () => {
         if (na.nav) { switchTo(na.nav); return; }
         if (na.act === 'generate') { generateMissing(); return; }

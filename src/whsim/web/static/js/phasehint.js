@@ -9,18 +9,23 @@ import { esc } from './util.js';
 // ("why am I here"); `ctaText` = the concrete next move that NAMES the next phase
 // so the 動線 (where this leads) is obvious; `empty` = what to do first when the
 // phase has no data yet.
+// An EMPTY phase gets its own CTA (`emptyCtaText`/`emptyCtaTargetView`): the
+// forward button must never promise a screen that has nothing on it. ②分析 with
+// no data sends you back to ①取込 to fix the cause, not on to ③設計.
 const PHASES = {
   intake: {
     subtitle: '案件を作り、顧客の出荷データを取り込む',
     ctaText: '②分析でデータを読み解く →',
     ctaTargetView: 'dataanalysis',
-    empty: 'まず案件（プロジェクト）を作り、出荷データ（CSV/Excel）を取り込みましょう。ここが提案づくりの出発点です。',
+    empty: 'まず案件（プロジェクト）を作り、出荷データ（CSV/Excel）を取り込みます。',
   },
   analyze: {
     subtitle: '物量・波動・ABCを読み解き、設計の根拠をつかむ',
     ctaText: '③設計でレイアウトを描く →',
     ctaTargetView: 'design',
     empty: '出荷データがまだありません。①取込で読み込むと、ここで自動分析が始まります。',
+    emptyCtaText: '①取込でデータを読み込む →',
+    emptyCtaTargetView: 'overview',
   },
   design: {
     subtitle: 'レイアウト・工程・人員を組み立てる',
@@ -32,13 +37,15 @@ const PHASES = {
     subtitle: '設計で本当に捌けるかを、KPIと動きで確かめる',
     ctaText: '⑤提案へ：結果をまとめる →',
     ctaTargetView: 'viewpng',
-    empty: 'まだ実行結果がありません。下の『▶ シミュレーション実行』を押すと、ここで捌けるかを確認できます。',
+    empty: 'まだ実行結果がありません。『▶ シミュレーション実行』を押すと、捌けるかをここで確認できます。',
   },
   propose: {
     subtitle: '提案PNG・シナリオ比較・提案書で顧客に見せる',
     ctaText: '提案書（PPTX/PDF）を書き出す →',
     ctaTargetView: 'export',
-    empty: '④検証が完了すると、提案PNG・シナリオ比較・提案書を出力できます。',
+    empty: '④検証で実行すると、提案PNG・シナリオ比較・提案書を出力できます。',
+    emptyCtaText: '④検証でシミュレーションを実行 →',
+    emptyCtaTargetView: 'analysis',
   },
 };
 
@@ -118,6 +125,7 @@ export function mountPhaseHint(el, opts = {}) {
     if (!p) return;
     // 実行はフェーズ境界のアクション: ③設計のCTA、および④検証が未実行のときのCTA。
     if (current === 'design' || (current === 'validate' && currentEmpty)) onRun();
+    else if (currentEmpty && p.emptyCtaTargetView) onCta(p.emptyCtaTargetView);
     else if (p.ctaTargetView) onCta(p.ctaTargetView);
   };
 
@@ -127,13 +135,17 @@ export function mountPhaseHint(el, opts = {}) {
     current = phaseId;
     currentEmpty = !!isEmpty;
 
-    // Phase goal + the ACTIVE view's one-liner (recognition aid, mobile-visible):
-    // 「<phase goal> ・ <view desc>」 so the user always sees what they're on.
-    sub.textContent = desc ? `${p.subtitle} ・ ${desc}` : p.subtitle;
+    // ONE line, not two. It used to print 「<phase goal> ・ <view desc>」, which
+    // on ②分析 read 「…読み解き、設計の根拠をつかむ ・ …物量の全体像をつかむ」 —
+    // the same sentence twice. The phase goal already sits under the active pill
+    // in the rail, so the banner carries the finer-grained line (what THIS view
+    // does) and falls back to the phase goal only when a view has no blurb.
+    sub.textContent = desc || p.subtitle;
     // ④検証が未実行のときは、CTA自体を実行アクションにする(結果が無いのに
-    // 「提案をまとめる」と促さない)。それ以外は各フェーズ既定のCTA文言。
+    // 「提案をまとめる」と促さない)。空フェーズは原因を直しに戻す文言を優先。
     const runCta = phaseId === 'validate' && isEmpty;
-    cta.textContent = runCta ? '▶ シミュレーション実行' : p.ctaText;
+    cta.textContent = runCta ? '▶ シミュレーション実行'
+      : (isEmpty && p.emptyCtaText) ? p.emptyCtaText : p.ctaText;
 
     root.classList.toggle('is-empty', !!isEmpty);
     empty.hidden = !isEmpty;
@@ -143,7 +155,7 @@ export function mountPhaseHint(el, opts = {}) {
     // 実行済=次へ)、その他はターゲットビューがある時。
     const showCta = phaseId === 'design' ? !isEmpty
       : phaseId === 'validate' ? true
-      : !!p.ctaTargetView;
+      : !!(isEmpty && p.emptyCtaTargetView ? p.emptyCtaTargetView : p.ctaTargetView);
     cta.hidden = !showCta;
 
     root.hidden = false;
