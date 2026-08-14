@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whsim.local/schema/meta.schema.json",
+  "title": "meta.json (WHSIM_CONTRACTS v1.0 §5)",
+  "description": "Run artifact metadata. t0 is the wall clock that maps to t=0 in orders.json / events.jsonl. created_at is the ONLY wall-clock-of-conversion field written by log-forge; every other output file is a pure function of (input, mapping).",
+  "type": "object",
+  "required": ["run_id", "schema_version", "created_at", "generator"],
+  "additionalProperties": true,
+  "properties": {
+    "run_id": {"type": "string", "minLength": 1},
+    "schema_version": {"const": "1.0"},
+    "seed": {"type": ["number", "null"]},
+    "scenario_hash": {"type": ["string", "null"]},
+    "t0": {"type": ["string", "null"]},
+    "created_at": {"type": "string", "minLength": 1},
+    "generator": {"type": "string", "minLength": 1},
+    "source": {"type": "string"},
+    "inputs": {"type": "object"},
+    "counts": {"type": "object"},
+    "events": {"type": "object"},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  }
+}

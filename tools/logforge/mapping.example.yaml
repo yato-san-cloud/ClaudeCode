@@ -1,0 +1,108 @@
+# log-forge マッピング例 — 同梱の合成サンプル (samples/wms_picklog.xlsx) 用。
+#
+# このファイルが「入力の形」を全部持つ。列名・シート名・桁数・時刻書式は
+# コードに一切書かれていないので、別フォーマットの実績表はこの YAML を
+# 1本足すだけで取り込める（Python を触らない）。
+#
+#   .venv/bin/python tools/logforge/logforge.py convert \
+#       tools/logforge/samples/wms_picklog.xlsx \
+#       --mapping tools/logforge/mapping.example.yaml -o /tmp/out
+#
+# キー名を打ち間違えると「知らないキー」として即エラーになる（黙って無視すると
+# 正規化ルールが効かないまま成功したように見えるため）。
+
+version: 1
+
+# calibration.json の source。実在の拠点名は書かない。
+source: synthetic_sample_v1
+
+input:
+  sheet: 実績          # シート名 or 0始まりの番号
+  header_row: auto     # auto = mapping の列名が最も多く並ぶ行を見出しとみなす
+                       # （タイトル行・出力日時行が上にあっても拾える）。数値で固定も可。
+  csv:
+    encoding: utf-8-sig  # 読めなければ utf-8-sig / cp932 の順で自動リトライ
+    delimiter: ","
+
+# 契約フィールド（左）← 入力の列名（右、候補を複数書ける = 表記ゆれ吸収）。
+# 照合は NFKC 畳み込み + 空白除去 + 大小無視なので、半角カナ（商品ｺｰﾄﾞ）と
+# 全角（商品コード）はどちらでも当たる。
+columns:
+  order_id:      [伝票番号, オーダーNo, 受注番号]
+  site_code:     [拠点コード, 倉庫コード]
+  loc_id:        [ロケーション, 間口, ロケーションコード]
+  sku:           [商品コード, 品番]
+  qty:           [出荷バラ数, 数量, ピース数]
+  actor_id:      [作業者コード, 作業者ID]
+  assigned_at:   [指示日時, 指示時刻]
+  pick_start_at: [作業開始日時, ピッキング開始]
+  pick_end_at:   [作業終了日時, ピッキング完了]
+
+# これが空/欠落の行は error_table.csv に隔離して次の行へ進む。
+required: [order_id, loc_id, qty]
+
+# コード正規化。マスタと履歴で書式が違うのが常態（マスタはゼロ詰め・履歴は非ゼロ詰め、
+# Excel が数値化して先頭のゼロを食う等）。突合の前に両側を同じ規則に通す。
+normalize:
+  loc_id:
+    trim: true
+    nfkc: true
+    upper: true
+    segment_sep: "-"       # A-1-2 のような区切り
+    pad_segments: [0, 2, 2]  # 段ごとの桁数。0 = 触らない（英字のエリアを壊さない）
+                             # → A-1-2 が A-01-02 になりマスタと一致する
+  site_code:
+    zero_pad: 4            # 数値だけの文字列を左ゼロ詰め: 7 → 0007
+  order_id:
+    upper: true
+  actor_id:
+    upper: true
+
+# マスタ照合。normalize_key: true で「マスタ側にも同じ正規化を適用」する
+# （これが無いと片側だけ整って一致率0%になる）。
+masters:
+  loc_id:
+    file: samples/loc_master.csv   # mapping.yaml からの相対パス
+    key_column: ロケーション
+    normalize_key: true
+    on_unknown: error_table        # error_table（隔離して継続）/ keep（通す）/ drop（黙って捨てる）
+
+time:
+  formats:                          # 上から順に試す。Excel の日時セル/シリアル値は書式不要
+    - "%Y-%m-%d %H:%M:%S.%f"
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y/%m/%d %H:%M:%S"
+    - "%Y/%m/%d %H:%M"
+  t0: auto_min                      # auto_min = 全時刻の最小値を t=0 とする / fixed = 下で指定
+  # t0_fixed: "2025-07-01 08:00:00"
+  ndigits: 3                        # 経過秒の丸め桁（決定性のため固定）
+
+orders:                             # orders.json の各フィールドをどの列から作るか
+  order_id: order_id
+  loc_id: loc_id
+  qty: qty
+  ready_t: assigned_at              # 壁時計 → t0 からの経過秒に変換して ready_t にする
+
+events:
+  actor: actor_id
+  loc_as_node: false                # 契約の from/to は「通路グラフの node id」。
+                                    # ロケーションIDが node id と同じ体系のときだけ true。
+                                    # false なら loc_id は meta に入れる（node を捏造しない）
+  meta_fields: [order_id, loc_id, sku]
+  emit:                             # 実データに時刻列がある type だけを出す
+    - {type: task_assign, time: assigned_at}
+    - {type: pick_start,  time: pick_start_at}
+    - {type: pick_end,    time: pick_end_at}
+    # move_start / move_end / wait_start / wait_end / load / unload は
+    # 行単位の実績表からは復元できない（推測になる）ので出さない。README 参照。
+
+calibration:
+  min_samples: 20                   # これ未満ならフィットせず「出さない」（出所の無い数字を作らない）
+  series:
+    pick_time_s:                    # 契約 §8 の系列名。単位付き（_s）で終わること
+      start: pick_start_at
+      end: pick_end_at
+      # 代わりに所要時間の列がある場合: column: 作業秒数 / unit: s|min|h
+      candidates: [lognorm, gamma, expon]
+      min_s: 0.1                    # 0秒打刻などの明らかな異常を外す（外した件数は sample.excluded に残る）
+      max_s: 600

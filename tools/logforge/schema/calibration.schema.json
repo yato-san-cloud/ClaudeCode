@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whsim.local/schema/calibration.schema.json",
+  "title": "calibration.json (WHSIM_CONTRACTS v1.0 §8)",
+  "description": "Fitted work-time distributions. Every series carries its sample size (n) and a goodness-of-fit p value (ks_p) - a number without provenance is not allowed.",
+  "type": "object",
+  "required": ["schema_version", "source", "fitted_at"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "source": {"type": "string", "minLength": 1},
+    "fitted_at": {"type": "string", "minLength": 1}
+  },
+  "patternProperties": {
+    "^[a-z][a-z0-9_]*_s$": {
+      "type": "object",
+      "required": ["dist", "params", "n", "ks_p"],
+      "additionalProperties": false,
+      "properties": {
+        "dist": {"enum": ["lognorm", "gamma", "expon", "norm", "weibull_min"]},
+        "params": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {"type": "number"}
+        },
+        "n": {"type": "integer", "minimum": 1},
+        "ks_p": {"type": "number", "minimum": 0, "maximum": 1},
+        "ks_stat": {"type": "number", "minimum": 0},
+        "unit": {"type": "string"},
+        "method": {"type": "string"},
+        "sample": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mean": {"type": "number"},
+            "p50": {"type": "number"},
+            "p95": {"type": "number"},
+            "min": {"type": "number"},
+            "max": {"type": "number"},
+            "excluded": {"type": "integer", "minimum": 0}
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["dist", "params", "ks_p", "ks_stat"],
+            "additionalProperties": false,
+            "properties": {
+              "dist": {"type": "string", "minLength": 1},
+              "params": {"type": "object", "additionalProperties": {"type": "number"}},
+              "ks_p": {"type": "number", "minimum": 0, "maximum": 1},
+              "ks_stat": {"type": "number", "minimum": 0}
+            }
+          }
+        }
+      }
+    }
+  }
+}
