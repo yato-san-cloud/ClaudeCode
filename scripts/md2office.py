@@ -112,6 +112,18 @@ def parse_markdown(text: str):
             i += 1
             continue
 
+        # コードフェンス(```): 閉じフェンスまでを整形済みテキストとして保持(インライン解釈しない)
+        if stripped.startswith("```"):
+            i += 1
+            code_lines = []
+            while i < n and not lines[i].strip().startswith("```"):
+                code_lines.append(lines[i])
+                i += 1
+            if i < n:
+                i += 1  # 閉じフェンスを消費(無い場合はEOFまでをコードとして扱う)
+            blocks.append({"type": "codeblock", "text": "\n".join(code_lines)})
+            continue
+
         # 表: 現在行が | を含み、次行が区切り行(---|---)
         if "|" in stripped and i + 1 < n and TABLE_SEP_RE.match(lines[i + 1].strip()):
             header = [parse_inline(c) for c in split_table_row(stripped)]
@@ -152,6 +164,7 @@ def parse_markdown(text: str):
         while i < n:
             nxt = lines[i].strip()
             if nxt == "" or HEADING_RE.match(nxt) or HR_RE.match(nxt) or nxt.startswith(">") \
+                    or nxt.startswith("```") \
                     or UL_RE.match(nxt) or OL_RE.match(nxt) or ("|" in nxt and i + 1 < n and TABLE_SEP_RE.match(lines[i + 1].strip())):
                 break
             para_lines.append(nxt)
@@ -234,6 +247,8 @@ def blocks_to_html_body(blocks, doc_type: str) -> str:
             parts.append(f"<p>{runs_to_html(b['runs'])}</p>")
         elif b["type"] == "hr":
             parts.append("<hr>")
+        elif b["type"] == "codeblock":
+            parts.append(f"<pre><code>{esc(b['text'])}</code></pre>")
         elif b["type"] == "quote":
             parts.append(f"<blockquote>{runs_to_html(b['runs'])}</blockquote>")
         elif b["type"] == "list":
@@ -280,6 +295,8 @@ th {{ background: #eaeaea; }}
 blockquote {{ border-left: 4px solid #999; margin: 12px 0; padding: 6px 12px; color: #444; background: #f7f7f7; }}
 hr {{ border: none; border-top: 1px solid #999; margin: 20px 0; }}
 code {{ background: #f0f0f0; padding: 1px 5px; font-family: "Courier New", monospace; font-size: 0.95em; }}
+pre {{ background: #f5f5f5; border: 1px solid #ddd; padding: 10px 12px; overflow-x: auto; font-family: "MS Gothic", "ＭＳ ゴシック", "Courier New", monospace; font-size: 0.85em; line-height: 1.4; }}
+pre code {{ background: none; padding: 0; }}
 ul, ol {{ padding-left: 24px; margin: 8px 0; }}
 li {{ margin: 3px 0; }}
 .meta-table th {{ display: none; }}
@@ -401,6 +418,19 @@ def build_docx(blocks, doc_type: str, title: str, out_path: Path):
             add_runs(p, b["runs"])
         elif b["type"] == "hr":
             add_hr(document)
+        elif b["type"] == "codeblock":
+            # 等幅フォントの段落として1行ずつ追加(整形を保つ。日本語はMSゴシックをeastAsia指定)
+            for code_line in b["text"].split("\n"):
+                p = document.add_paragraph()
+                run = p.add_run(code_line if code_line else " ")
+                run.font.name = "MS Gothic"
+                run.font.size = Pt(9)
+                rPr = run._element.get_or_add_rPr()
+                rFonts = rPr.find(qn("w:rFonts"))
+                if rFonts is None:
+                    rFonts = OxmlElement("w:rFonts")
+                    rPr.append(rFonts)
+                rFonts.set(qn("w:eastAsia"), "ＭＳ ゴシック")
         elif b["type"] == "quote":
             p = document.add_paragraph(style="Intense Quote") if "Intense Quote" in [
                 s.name for s in document.styles
