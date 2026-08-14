@@ -271,9 +271,14 @@ function nf(v, d){
 function hms(sec){
   if (!Number.isFinite(sec)) return "—";
   const neg = sec < 0; sec = Math.abs(sec);
-  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  // Round to the displayed resolution FIRST: splitting 59.96s and then rounding
+  // the残り prints "00:00:60.0". After rounding, the carry lands in the minutes.
+  const frac = sec % 1 ? 1 : 0;
+  sec = Math.round(sec * (frac ? 10 : 1)) / (frac ? 10 : 1);
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60);
+  const s = Math.round((sec - h*3600 - m*60) * 10) / 10;
   return (neg?"-":"") + String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"
-    + (s<10?"0":"") + s.toFixed(s % 1 ? 1 : 0);
+    + (s<10?"0":"") + s.toFixed(frac);
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function clamp(v,a,b){ return v<a?a:v>b?b:v; }

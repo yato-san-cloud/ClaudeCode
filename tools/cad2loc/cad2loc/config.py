@@ -141,4 +141,12 @@ def load_config(path: str | Path | None) -> Config:
         raise Cad2locError(f"mapping.yaml を解釈できません: {p}", str(exc)) from exc
     if not isinstance(raw, dict):
         raise Cad2locError(f"mapping.yaml のトップレベルはマッピングである必要があります: {p}")
+    # サブキーの型も設定不備として即座に落とす: `layers:` にリスト等を書くと
+    # deep merge が既定値を黙って採用し「設定したのにラック0件・exit 0」という
+    # 追いにくい空振りになる（受け入れ監査の指摘）。
+    for key in ("layers", "units", "racks", "aisles"):
+        if key in raw and not isinstance(raw[key], dict):
+            raise Cad2locError(
+                f"mapping.yaml の `{key}:` はマッピングである必要があります"
+                f"（{type(raw[key]).__name__} が指定されています）: {p}")
     return Config(data=_deep_merge(DEFAULTS, raw), path=p)
