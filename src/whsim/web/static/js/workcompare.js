@@ -7,6 +7,8 @@
 import { esc, api } from './util.js';
 import * as echarts from 'echarts';
 import { startRunProgress } from './progress.js';
+// 採用の誠実性ガード（applied/skipped を見てから成功と言う）は全画面で1つ。
+import { applyEdits } from './adopt.js';
 // The ⚡自動掃引 section was extracted to a cohesive sub-module (facade precedent:
 // designer/*.js). It owns its own state and re-renders the panel via a callback.
 import { createSweepPanel } from './workcompare/sweep_panel.js';
@@ -15,6 +17,8 @@ const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const yen = (n) => (n == null || isNaN(n) ? '—' : '¥' + Math.round(n).toLocaleString('ja-JP'));
 const pctStr = (g) => (g == null ? '' : (g >= 0 ? '+' : '') + Math.round(g * 100) + '%');
+// completion_rate は 0–1 でも % でも届きうる（KPI源が2系統）ので比率に正規化。
+const ratio = (v) => (v == null || isNaN(v) ? null : (Math.abs(v) <= 1 ? Number(v) : Number(v) / 100));
 const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
 function tok(name, fb) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -48,6 +52,9 @@ function injectStyle() {
   .wc-tbl tr.rec td{background:var(--accent-tint,rgba(22,192,222,.08))}
   .wc-sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
   .wc-d-up{color:#34c97a;font-size:11px} .wc-d-dn{color:var(--warn,#f5b05a);font-size:11px}
+  /* 中立デルタ: 「安くなった」と読ませてはいけない差分（完了率が低い行の ¥/件）。 */
+  .wc-d-flat{color:var(--ink-tertiary);font-size:11px;cursor:help}
+  .wc-warn{color:var(--warn,#f5b05a);font-weight:700}
   .wc-adopt{padding:5px 12px;border-radius:8px;border:1px solid var(--accent);background:transparent;
     color:var(--accent);font:inherit;font-weight:700;font-size:12px;cursor:pointer}
   .wc-adopt:hover{background:var(--accent-tint-2,rgba(22,192,222,.14))}
@@ -241,18 +248,27 @@ export function mountWorkCompare(el, opts = {}) {
       + (rec.name ? `<div class="wc-rec">注文プロファイルからの推奨：<b>${esc(rec.name)}</b> — ${esc(rec.reason || '')}</div>` : '')
       + '<div class="wc-ec" data-ec></div>'
       + '<table class="wc-tbl"><thead><tr>'
-      + '<th>作業方法</th><th>¥/件</th><th>処理(件/時)</th><th>人員</th><th>稼働率</th>'
+      + '<th>作業方法</th><th>¥/件</th><th>処理(件/時)</th><th>完了率</th><th>人員</th><th>稼働率</th>'
       + '<th>移動/件(m)</th><th>仕分/件(s)</th><th>採用</th></tr></thead><tbody>'
       + methods.map((m) => {
         const k = m.kpis; const dl = m.delta || {};
+        // ¥/件 は **完了した注文** で割った値。捌けていない方式（完了率が低い）は
+        // 未完了ぶんのコストが分子から落ちるので「安く見える」— その緑の▼は改善
+        // ではないので、中立色にして理由を添える（緑のままだと嘘になる）。
+        const comp = ratio(k.completion_rate);
+        const partial = comp != null && comp < 0.9;
         const dcost = m.id === d.baseline_id ? '<span class="wc-note">基準</span>'
-          : `<span class="${dl.cost_per_order <= 0 ? 'wc-d-up' : 'wc-d-dn'}">${pctStr(dl.cost_per_order)}</span>`;
+          : partial
+            ? `<span class="wc-d-flat" title="完了率${fmt(comp * 100)}%: 完了分のみで割った値のため、`
+              + `安く見えているだけの可能性があります">${pctStr(dl.cost_per_order)} ⚠</span>`
+            : `<span class="${dl.cost_per_order <= 0 ? 'wc-d-up' : 'wc-d-dn'}">${pctStr(dl.cost_per_order)}</span>`;
         const apTag = (analyticPick && analyticPick.id === m.id)
           ? ' <span class="wc-note" style="color:var(--accent);font-weight:700">解析推奨</span>' : '';
         return `<tr class="${recRow(m) ? 'rec' : ''}">`
           + `<td><span class="wc-sw" style="background:${COLORS[m.id] || '#888'}"></span>${esc(m.label)}${apTag}</td>`
           + `<td class="num">${m.currency || '¥'}${fmt(k.cost_per_order, 1)} ${dcost}</td>`
           + `<td class="num">${fmt(k.throughput_per_hr, 0)}</td>`
+          + `<td class="num${partial ? ' wc-warn' : ''}">${comp == null ? '—' : `${fmt(comp * 100)}%`}</td>`
           + `<td class="num">${fmt(k.headcount)}名</td>`
           + `<td class="num">${fmt(k.picker_utilization * 100)}%</td>`
           + `<td class="num">${fmt(m.travel_per_order_m, 0)}</td>`
@@ -263,6 +279,9 @@ export function mountWorkCompare(el, opts = {}) {
       + '</tbody></table>'
       + '<div class="wc-note">※ 散布図：左下ほど移動・仕分けが少ない。トータルは移動最小だが仕分け工数が立つ＝トレードオフ。'
       + '「この方式で設計」でモデルのピッキング工程に反映し、再実行・原価へ繋がります。</div>'
+      + '<div class="wc-note">※ ¥/件・納期遵守率の分母は <b>完了した注文のみ</b>です'
+      + '（未完了ぶんは分子・分母の両方から落ちます）。完了率が低い行は ⚠ を付けています —'
+      + 'まず捌けているか（完了率）を見てからコストを比べてください。</div>'
       + sweepPanel.sweepHtml();
     buildScatter(root.querySelector('[data-ec]'), methods, rec.id);
     wireHead();
@@ -319,19 +338,19 @@ export function mountWorkCompare(el, opts = {}) {
     const m = (data && data.methods || []).find((x) => x.id === mid);
     if (!name || !m) return;
     try {
-      // Resolve the pick stage index from the model so the edit path is correct.
-      const model = await api(`/api/projects/${encodeURIComponent(name)}/model`);
-      // /model returns headline fields; fall back to index 2 (pick) — the apply
-      // endpoint is tolerant and skips a bad path, so this never corrupts data.
-      const presets = WORK_PRESETS;
-      const work = presets[mid];
+      const work = WORK_PRESETS[mid];
       if (!work) { toast('方式が見つかりません。', 'error'); return; }
-      const edits = {}; edits['process.stages.2.work'] = work;
-      await api(`/api/projects/${encodeURIComponent(name)}/apply`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ edits }) });
+      // Resolve the ピッキング工程's index from the model (id=="pick"); index 2 is
+      // only the usual case, and writing onto the wrong stage is invisible.
+      const full = await api(`/api/projects/${encodeURIComponent(name)}/full`);
+      const stages = (full && full.process && full.process.stages) || [];
+      const idx = stages.findIndex((s) => s && s.id === 'pick');
+      if (idx < 0) { toast('ピッキング工程が見つかりませんでした。', 'error'); return; }
+      // applyEdits verifies applied/skipped: /apply is tolerant, so a bad path
+      // returns 200 with nothing written — never say 反映 without checking.
+      await applyEdits(name, { [`process.stages.${idx}.work`]: work });
       toast(`「${m.label}」をピッキング工程に反映しました。実行で効果を確認できます。`, 'ok');
-      void model;
+      document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: {} }));
     } catch (e) { toast('反映に失敗: ' + (e && e.message ? e.message : e), 'error'); }
   }
 
@@ -358,9 +377,13 @@ export function mountWorkCompare(el, opts = {}) {
 }
 
 // 5-axis presets mirrored from whsim.workmethod.METHOD_PRESETS (for 採用 write-back).
-const WORK_PRESETS = {
+// ③生産性試算 (pickrate.js) の採用もここを import する — 同じ方式を2画面で別の
+// 辞書として持つと、比べた方式と採用される方式がズレる。
+// zone は **sequential**（サーバの METHOD_PRESETS と同じリレー）: 'parallel' と
+// 書いていた頃は、DESで比べたゾーン（逐次リレー）とは別物が採用されていた。
+export const WORK_PRESETS = {
   discrete: { orders_per_trip: 1, zoning: 'none', consolidation: 'pick', release: 'continuous' },
   multi: { orders_per_trip: 8, zoning: 'none', consolidation: 'pick', release: 'continuous' },
-  zone: { orders_per_trip: 4, zoning: 'parallel', consolidation: 'pick', release: 'continuous' },
+  zone: { orders_per_trip: 4, zoning: 'sequential', consolidation: 'pick', release: 'continuous' },
   total: { orders_per_trip: 16, zoning: 'none', consolidation: 'sort', release: 'continuous' },
 };

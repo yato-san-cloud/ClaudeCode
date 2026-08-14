@@ -49,6 +49,11 @@ function mark(cat, ok, text) {
   el.textContent = text;
   el.classList.toggle('is-ok', ok === true);
   el.classList.toggle('is-err', ok === false);
+  // ok === null ⇒ 取込中. The hub repaints its status lines from the server on
+  // every render; while a file is uploading there is nothing to read yet, so the
+  // in-flight line claims the slot until the result lands.
+  if (ok === null) el.dataset.busy = '1';
+  else delete el.dataset.busy;
 }
 const noProject = (cat) => {
   $('importLog').textContent = '先にプロジェクトを作成してください。';

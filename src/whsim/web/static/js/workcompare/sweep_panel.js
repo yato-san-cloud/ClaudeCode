@@ -10,6 +10,7 @@
 // (analytic evaluators), so we don't use the DES progress overlay — just a
 // lightweight inline state.
 import { esc, api } from '../util.js';
+import { applyEdits } from '../adopt.js';
 
 export function createSweepPanel(ctx) {
   const { fmt, yen, COLORS, WORK_PRESETS } = ctx;
@@ -97,11 +98,11 @@ export function createSweepPanel(ctx) {
       appliedCount = true;
     }
     try {
-      await api(`/api/projects/${encodeURIComponent(name)}/apply`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ edits }) });
+      // /apply は不正パスを黙って捨てるので、applied/skipped を検証してから成功と言う。
+      await applyEdits(name, edits);
       const cntMsg = appliedCount ? `・人員${r.pickers}名` : `（人員は${r.pickers}名目安で手動設定を）`;
       ctx.toast(`「${r.method_label}／${r.orders_per_trip}件/巡${cntMsg}」を反映。▶実行（DES）で裏取りしてください。`, 'ok');
+      document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: {} }));
     } catch (e) { ctx.toast('反映に失敗: ' + (e && e.message ? e.message : e), 'error'); }
   }
 

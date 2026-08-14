@@ -794,6 +794,117 @@ export function mountOverview(el, opts = {}) {
     }
   }
 
+  // ---- card status lines from the SERVER, not only from this browser ---------
+  // The band's chips read the model (provenance), the card bodies read the local
+  // 操作履歴 — so a ZIP that filled 出荷データ showed 「実績データ 済」 on top and
+  // 「未取込（テンプレの仮値で動作中）」 in the very card underneath (the ZIP
+  // handler only marks the レイアウト card). 履歴 is also per-browser, so any
+  // import made elsewhere read as 未取込.
+  //
+  // Rule: server evidence wins (件数・期間・ファイル名 from the analysis bundle +
+  // provenance), 履歴 fills in what the server cannot know (which file the user
+  // dropped for a ZIP/レイアウト), and 未取込 is said only when neither has
+  // anything. Fetch is best-effort and throttled — a failure just leaves the
+  // 履歴 text in place (never blocks).
+  let facts = null;          // last analysis bundle facts {project, meta, kpis, period}
+  let factsAt = 0;
+  let factsInflight = null;
+  const FACTS_TTL_MS = 3000;
+
+  async function loadFacts(project) {
+    if (!project) return null;
+    const fresh = facts && facts.project === project && (Date.now() - factsAt) < FACTS_TTL_MS;
+    if (fresh) return facts;
+    if (factsInflight) return factsInflight;
+    factsInflight = (async () => {
+      try {
+        const b = await api(`/api/projects/${encodeURIComponent(project)}/analysis/bundle`);
+        const trend = (b && b.trend_daily) || [];
+        const out = trend.filter((r) => !r.kind || r.kind === '出荷')
+          .map((r) => String(r.period || r.label || '')).filter(Boolean).sort();
+        facts = {
+          project,
+          available: !!(b && b.available),
+          imported: !!(b && b.orders_imported),
+          meta: (b && b.meta) || {},
+          kpis: (b && b.kpis) || {},
+          period: out.length ? { from: out[0], to: out[out.length - 1], days: new Set(out).size } : null,
+        };
+        factsAt = Date.now();
+      } catch (_e) {
+        facts = { project, available: false, imported: false, meta: {}, kpis: {}, period: null };
+        factsAt = Date.now();
+      } finally {
+        factsInflight = null;
+      }
+      return facts;
+    })();
+    return factsInflight;
+  }
+
+  const nfmt = (n) => (n == null || isNaN(n) ? null : Number(n).toLocaleString('ja-JP'));
+  function periodText(f) {
+    if (!f || !f.period) return null;
+    const { from, to, days } = f.period;
+    return from === to ? `期間 ${from}（1日）` : `期間 ${from}〜${to}（${days}日）`;
+  }
+
+  // What the server can say about one category, or null when it knows nothing.
+  function serverStatus(cat, d, f) {
+    const meta = (f && f.meta) || {};
+    const k = (f && f.kpis) || {};
+    const file = (key) => (meta[key] && meta[key].filename) || null;
+    const parts = [];
+    if (cat === 'actual') {
+      if (!d.hasOrders && !(f && f.imported)) return null;
+      if (file('shipments')) parts.push(file('shipments'));
+      if (k.total_orders) parts.push(`注文${nfmt(k.total_orders)}件`);
+      if (k.total_lines_out) parts.push(`明細${nfmt(k.total_lines_out)}行`);
+      const per = periodText(f);
+      if (per) parts.push(per);
+    } else if (cat === 'inbound') {
+      if (file('inbound')) parts.push(file('inbound'));
+      if (k.total_lines_in) parts.push(`明細${nfmt(k.total_lines_in)}行`);
+      if (!parts.length) return null;
+    } else if (cat === 'stock') {
+      if (file('inventory')) parts.push(file('inventory'));
+      if (meta.inventory && meta.inventory.rows) parts.push(`${nfmt(meta.inventory.rows)}行`);
+      if (!parts.length) return null;
+    } else if (cat === 'items') {
+      if (!d.hasItems) return null;
+      parts.push(k.sku_master ? `商品マスタ SKU${nfmt(k.sku_master)}件` : '商品マスタ取込済');
+    } else if (cat === 'layout') {
+      if (!d.hasLayout) return null;
+      parts.push('レイアウト取込済');
+    }
+    if (!parts.length) return null;
+    return `✓ ${parts.join(' — ')}`;
+  }
+
+  // Paint every card's status line for the current derived state (+ facts).
+  function paintStatuses(d, f) {
+    for (const cat of ['actual', 'inbound', 'stock', 'items', 'layout']) {
+      const st = root.querySelector(`[data-ihub-status="${cat}"]`);
+      if (!st) continue;
+      if (st.dataset.busy === '1') continue;      // an import is writing here now
+      const srv = serverStatus(cat, d, f);
+      const e = hist.latest(cat);
+      let text, ok = true;
+      if (srv) {
+        // Server facts lead; 履歴 only adds "when" (this browser's last import).
+        text = srv + (e && e.t ? `（${relTime(e.t)}）` : '');
+      } else if (e) {
+        text = `✓ ${e.text}（${relTime(e.t || 0)}）`;
+      } else {
+        text = '未取込（テンプレの仮値で動作中）';
+        ok = false;
+      }
+      st.textContent = text;
+      st.classList.toggle('is-ok', ok);
+      st.classList.remove('is-err');
+    }
+  }
+
   function patch(d) {
     const f = (k) => root.querySelector(`[data-f="${k}"]`);
     const name = f('name'); if (name) name.textContent = d.project || '';
@@ -854,7 +965,18 @@ export function mountOverview(el, opts = {}) {
     const cur = getState();
     if (!cur.project) return;  // project closed while the fetch was in flight
     if (mode !== 'hub') { buildHub(); mode = 'hub'; }
-    patch(derive(cur, prov));
+    const d = derive(cur, prov);
+    patch(d);
+    // First paint from what we already know (prov + 履歴), then upgrade the lines
+    // with the server's 件数・期間・ファイル名 when the bundle lands. Both passes
+    // are cheap and idempotent, so an import mid-flight simply repaints.
+    paintStatuses(d, facts && facts.project === cur.project ? facts : null);
+    loadFacts(cur.project).then((f) => {
+      const now = getState();
+      if (!now.project || now.project !== cur.project) return;
+      if (!root.querySelector('[data-ihub-status]')) return;   // rebuilt meanwhile
+      paintStatuses(d, f);
+    }).catch(() => { /* never blocks */ });
   }
 
   // First-run "✨ サンプルでためす": build + open the bundled demo project via the
@@ -875,7 +997,9 @@ export function mountOverview(el, opts = {}) {
   wireInputs();
   render();
   return {
-    refresh() { render(); },
+    // A refresh always follows something that may have CHANGED the data (import /
+    // generate / project switch), so the cached facts are dropped first.
+    refresh() { factsAt = 0; render(); },
     dispose() { closeImportDock(); parkAssets(); el.innerHTML = ''; },
   };
 }

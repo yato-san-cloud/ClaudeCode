@@ -99,6 +99,32 @@ const EXPORT_CSS = `
 }
 #export .export-desc { font-size: 11.5px; color: var(--x-ink-2); margin: 0; line-height: 1.5; }
 
+/* 未実行ロックの告知（理由 + 実行導線）。ボタンは disabled、ここが「なぜ」を持つ。 */
+#export .export-lock {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid var(--x-line-strong, var(--x-line));
+  background: var(--bg-sunken, rgba(127,127,127,.06));
+}
+#export .export-lock-t { flex: 1 1 220px; font-size: 12px; line-height: 1.5; color: var(--ink-secondary); }
+#export .export-lock-btn {
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--x-cyan); background: var(--x-cyan); color: #04121A;
+}
+#export .export-lock-btn:hover { filter: brightness(1.06); }
+#export .export-lock-btn:focus-visible { outline: 2px solid var(--x-cyan); outline-offset: 2px; }
+#export .export-doc-btn.is-locked {
+  opacity: 0.5; filter: grayscale(0.35);
+  background: transparent; border-style: dashed;
+}
+/* 図の代わりの文字プレースホルダ（404の <img> = 壊れた画像アイコン の置き換え）。 */
+#export .proposal-figure-ph {
+  margin: 18px 0 0; padding: 34px 18px; text-align: center;
+  border: 1px dashed var(--x-paper-line, #E7EBF1); border-radius: 6px;
+  background: var(--x-paper-tint, #F7F9FC);
+  color: var(--x-paper-ink-2, #8593A8); font-size: 12px; line-height: 1.6;
+}
 #export .export-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
 #export .export-actions-secondary {
   display: flex; flex-wrap: wrap; gap: 8px;
@@ -498,6 +524,8 @@ export class ExportView {
     this.root = null;
     this.replay = null;
     this.pngUrl = null;
+    // null = まだ判らない / true = 実行済み / false = 未実行（DLはロック）。
+    this.hasRun = null;
     this._objectUrls = [];
     this._reqToken = 0;
     this._motionTimers = [];
@@ -623,7 +651,13 @@ export class ExportView {
       .then((replay) => {
         if (token !== this._reqToken) return; // superseded by a newer refresh
         this.replay = replay && typeof replay === 'object' ? replay : {};
-        this.pngUrl = `/api/projects/${encodeURIComponent(name)}/png`;
+        // /replay answers 200 even with NO run — it falls back to a layout-only
+        // replay (the design as drawn). The document endpoints do not: PPTX/PDF/
+        // PNG all 404 until a run exists. Believing the 200 is what made 「提案書
+        // をダウンロード」 a button that silently 404s, so the run state is read
+        // from the payload and the downloads lock themselves until then.
+        this.hasRun = !replay.layout_only;
+        this.pngUrl = this.hasRun ? `/api/projects/${encodeURIComponent(name)}/png` : null;
         this._render(name);
       })
       .catch((err) => {
@@ -767,6 +801,13 @@ export class ExportView {
     head.appendChild(desc);
     panel.appendChild(head);
 
+    // 未実行のロック: the documents are built FROM a run, so say so before the
+    // click instead of after a 404 (a disabled button with a reason and a way
+    // out beats an enabled button that does nothing).
+    if (this.hasRun === false) {
+      panel.appendChild(this._runLockNotice());
+    }
+
     // Primary document downloads (server-generated).
     const docs = document.createElement('div');
     docs.className = 'export-actions';
@@ -774,6 +815,17 @@ export class ExportView {
     docs.appendChild(this._docBtn('提案書をダウンロード (PDF)', 'pdf', name, false));
     docs.appendChild(this._pngBtn('提案PNGを保存', name));
     docs.appendChild(this._viewerBtn(name));
+    if (this.hasRun === false) {
+      docs.querySelectorAll('button').forEach((b) => {
+        b.disabled = true;
+        b.title = '④検証で実行すると出力できます';
+        b.setAttribute('aria-disabled', 'true');
+        // A disabled button that still looks like the primary CTA reads as
+        // clickable — the locked state must be visible, not just enforced.
+        b.classList.remove('primary');
+        b.classList.add('is-locked');
+      });
+    }
     panel.appendChild(docs);
 
     // Secondary: data exports + print.
@@ -785,6 +837,29 @@ export class ExportView {
     panel.appendChild(more);
 
     return panel;
+  }
+
+  // 未実行の告知 + 実行導線. Uses the shell's own ▶実行 button (one run path for
+  // the whole app — the same trick the no-run placeholder uses).
+  _runLockNotice() {
+    const box = document.createElement('div');
+    box.className = 'export-lock';
+    const t = document.createElement('span');
+    t.className = 'export-lock-t';
+    t.textContent = '④検証で実行すると出力できます（提案書は実行結果から組み立てます）。';
+    box.appendChild(t);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'export-lock-btn';
+    btn.textContent = '▶ シミュレーションを実行';
+    btn.addEventListener('click', () => {
+      const rb = document.getElementById('runBtn');
+      if (rb && !rb.disabled) { rb.click(); return; }
+      this._toast(rb ? 'いま実行中です。完了までお待ちください。'
+        : 'プロジェクトを開いてから実行してください。', 'info');
+    });
+    box.appendChild(btn);
+    return box;
   }
 
   // A primary document-download button with a busy/spinner state. Fetches the
@@ -1123,8 +1198,17 @@ export class ExportView {
     // KPI card grid — the bare 2-column table promoted to big-number cards.
     sheet.appendChild(this._section('主要KPI', this._buildKpiGrid(k)));
 
-    // Proposal PNG
-    if (this.pngUrl) {
+    // Proposal PNG. 未実行のときは src を張らない: 404 の <img> はブラウザの
+    // 「壊れた画像」アイコンになり、提案書が壊れているように見える。何が入るのかを
+    // 文字で置く（ロックの理由はパネル上部の告知が持つ）。
+    if (this.hasRun === false) {
+      const ph = this._section('レイアウト縮図と混雑ヒートマップ', null);
+      const box = document.createElement('div');
+      box.className = 'proposal-figure-ph';
+      box.textContent = '④検証で実行すると、レイアウト縮図と混雑ヒートマップがここに入ります。';
+      ph.appendChild(box);
+      sheet.appendChild(ph);
+    } else if (this.pngUrl) {
       const figWrap = this._section('レイアウト縮図と混雑ヒートマップ', null);
       const fig = document.createElement('figure');
       fig.className = 'proposal-figure';

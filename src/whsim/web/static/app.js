@@ -173,7 +173,7 @@ async function openProject(name) {
   const m = await api(`/api/projects/${name}/model`);
   renderHeadline(m.headline_fields, m.headline_values);
   $('provenance').textContent = m.provenance_summary;
-  $('runBtn').disabled = false;
+  syncRunBtn();   // never re-enable ▶実行 while a run is still in flight
   $('status').textContent = `プロジェクト「${name}」を開きました。設計を調整して実行できます。`;
   updateProjMenuState();
   // Reset replay/analysis state and restore this project's chat thread.
@@ -338,6 +338,17 @@ async function doRun() {
 }
 async function runSim() {
   if (!S.project) return;
+  // 多重起動ガード: ▶実行 は6箇所（ヘッダ・①概要・phaseHint・ダッシュボード・
+  // ⑤エクスポート・チャット）から呼ばれる。押した側だけがボタンを busy にしていた
+  // ので、実行中に別の入口から呼ぶと doRun が例外を投げ、その finally が
+  // **走行中なのに** ヘッダのボタンを押せる状態へ戻していた（「実行中も▶実行が
+  // 押せる」の正体）。ここで先に弾き、状態を触らない。
+  if (S.running) {
+    $('status').textContent = '実行中です。完了までお待ちください。';
+    toast('いま実行中です。完了までお待ちください。', 'info');
+    syncRunBtn();
+    return;
+  }
   setBtnBusy($('runBtn'), true, '実行中…');
   $('status').textContent = '重厚なシミュレーションを実行中…';
   cody('thinking', 'シミュレーション中…動きを最後まで追ってるよ。');
@@ -356,8 +367,20 @@ async function runSim() {
     toast('シミュレーションに失敗しました: ' + e.message, 'error');
     cody('error', 'エラー: ' + e.message + ' — 落ち着いて直そう。');
   } finally {
-    setBtnBusy($('runBtn'), false);
+    // Only the call that actually ran may clear the busy state.
+    if (!S.running) setBtnBusy($('runBtn'), false);
   }
+}
+// The ▶実行 button's enabled state has ONE rule: a project is open and no run is
+// in flight. Anything that re-renders the shell (openProject after an import /
+// apply) goes through here instead of setting `.disabled` on its own, so a
+// refresh mid-run can never hand the user a second run.
+function syncRunBtn() {
+  const b = $('runBtn');
+  if (!b) return;
+  if (S.running) { setBtnBusy(b, true, '実行中…'); return; }
+  setBtnBusy(b, false);
+  b.disabled = !S.project;
 }
 async function loadReplay() {
   const rep = await api(`/api/projects/${S.project}/replay`);

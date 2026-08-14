@@ -10,6 +10,7 @@
 // 押されるまで叩かない (閉形式でも AisleGraph の構築が支配的) ＝ 既存表示は不変。
 import { esc, api } from './util.js';
 import { forkliftBusy } from './progress.js';
+import { applyEdits } from './adopt.js';
 
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -347,13 +348,12 @@ export function mountPickseq(el, opts = {}) {
     if (!name || !id) return;
     const label = ((rc && rc.policies && rc.policies[id]) || {}).label || id;
     try {
-      await api(`/api/projects/${encodeURIComponent(name)}/apply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ edits: { 'process.routing_policy': id } }),
-      });
+      // 応答の applied/skipped を検証してから成功と言う（adopt.js の共通ガード）。
+      await applyEdits(name, { 'process.routing_policy': id });
       toast(`経路方式「${label}」を採用しました。④検証の▶実行で裏取りできます。`, 'ok');
+      document.dispatchEvent(new CustomEvent('whsim:model-changed', { detail: {} }));
     } catch (e) {
-      toast('採用に失敗しました: ' + (e && e.message ? e.message : e), 'error');
+      toast('採用できませんでした: ' + (e && e.message ? e.message : e), 'error');
     }
   }
 

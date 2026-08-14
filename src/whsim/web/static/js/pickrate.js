@@ -4,6 +4,11 @@
 // 「どの作業方式が速いか」をこの場で当てる。EN comments / JA UI.
 import { esc, api } from './util.js';
 import * as echarts from 'echarts';
+// 採用は ④検証「作業方法比較」と同じ 5軸 work 辞書・同じ書込みパス・同じ検証を使う
+// （方式ごとの work は workcompare.js の WORK_PRESETS = サーバの
+// whsim.workmethod.METHOD_PRESETS の写しが唯一の口。ここで別に捏造しない）。
+import { WORK_PRESETS } from './workcompare.js';
+import { applyEdits } from './adopt.js';
 
 const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
   : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -248,27 +253,48 @@ export function mountPickrate(el, opts = {}) {
   // the reader adopts a method the same way wherever the comparison is shown, and
   // it is ANY row, not only the recommended one (a recommendation you cannot
   // overrule is a verdict, not advice).
+  //
+  // 3つの点で ④ と同じでなければならない（どれか1つ欠けると「押しても何も起きない
+  // 嘘ボタン」になる）:
+  //   1. 書くのは `process.stages.{pick}.work` に **辞書ごと**。5軸のうち1軸だけを
+  //      `…work.orders_per_trip` で狙うと、work が null の工程では丸ごと skip される。
+  //   2. stage index は決め打ちせずモデルから id=="pick" を探す。
+  //   3. 応答の applied/skipped を検証してから成功と言う（adopt.js）。
   async function applyMethod(id) {
     const name = getProject();
     if (!name || !data) return;
     const rec = (data.methods || []).find((m) => m.id === id);
     if (!rec) return;
-    const WORK = { discrete: { orders_per_trip: 1, consolidation: 'pick' },
-      multi: { orders_per_trip: 8, consolidation: 'pick' },
-      zone: { orders_per_trip: 4, zoning: 'parallel', consolidation: 'pick' },
-      total: { orders_per_trip: 16, consolidation: 'sort' } };
-    const work = WORK[rec.id] || {};
-    const edits = {};
-    for (const [k, v] of Object.entries(work)) edits[`process.stages.2.work.${k}`] = v;
+    // 5-axis work dict: the same catalogue ④ adopts from (server METHOD_PRESETS
+    // mirror), with the two axes THIS screen actually estimated on top — the
+    // table's まとめ数/採り方 and the model's must be the same numbers.
+    const preset = WORK_PRESETS[rec.id];
+    if (!preset) { toast('方式が見つかりません。', 'error'); return; }
+    const work = { ...preset };
+    if (rec.orders_per_trip != null) work.orders_per_trip = rec.orders_per_trip;
+    if (rec.consolidation) work.consolidation = rec.consolidation;
     try {
-      await api(`/api/projects/${encodeURIComponent(name)}/apply`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ edits }),
-      });
-      toast(`「${rec.label}」を採用しました。`, 'ok');
-      document.dispatchEvent(new CustomEvent('whsim:nav', { detail: { view: 'design' } }));
+      const idx = await pickStageIndex(name);
+      if (idx < 0) { toast('ピッキング工程が見つかりませんでした。', 'error'); return; }
+      await applyEdits(name, { [`process.stages.${idx}.work`]: work });
+      toast(`「${rec.label}」をピッキング工程に反映しました。`, 'ok');
+      // The model on disk changed: re-open so 採点表・原価・設計 pick it up.
+      document.dispatchEvent(new CustomEvent('whsim:model-changed',
+        { detail: { nav: 'design' } }));
     } catch (e) {
-      toast('採用に失敗しました: ' + (e && e.message ? e.message : e), 'error');
+      toast('採用できませんでした: ' + (e && e.message ? e.message : e), 'error');
+    }
+  }
+
+  // Resolve the ピッキング工程's index from the model (never hard-code 2 — a
+  // reordered or extended flow silently wrote onto the wrong stage).
+  async function pickStageIndex(name) {
+    try {
+      const full = await api(`/api/projects/${encodeURIComponent(name)}/full`);
+      const stages = (full && full.process && full.process.stages) || [];
+      return stages.findIndex((s) => s && s.id === 'pick');
+    } catch (_e) {
+      return -1;
     }
   }
 

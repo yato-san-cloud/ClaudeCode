@@ -131,6 +131,11 @@ function injectStyle() {
      eye reads 「何が言えるか」→「その根拠のかたち」 rather than decoding axes first. */
   .da-take{margin:0 0 10px;font-size:var(--fs-xs,12px);line-height:1.5;color:var(--ink-secondary,#52677c)}
   .da-take b{color:var(--ink-primary,#16202e);font-weight:700;font-variant-numeric:tabular-nums}
+  /* 観測日数が足りない数字に付ける「参考値」バッジ（断定と参考を見分ける印）。 */
+  .da-ref{display:inline-block;font-size:var(--fs-micro,10.5px);font-weight:700;
+    padding:1px 7px;border-radius:var(--r-pill,999px);white-space:nowrap;
+    color:var(--warn-ink,var(--warn,#8a5a00));border:1px solid var(--warn,#f5b05a);
+    background:color-mix(in srgb,var(--warn,#f5b05a) 14%,transparent)}
   .da-legend{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 8px}
   .da-legend span{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-micro,10.5px);
     color:var(--ink-tertiary,#8195a8)}
@@ -287,13 +292,22 @@ const slPct = (v) => String(+(Number(v) * 100).toFixed(1));
 function trendOption(rows) {
   if (!rows || !rows.length) return null;
   const p = palette();
-  const cats = rows.map((r) => r.label || '');
+  // x label: the standalone bundle ships `label`, the project bundle ships the
+  // period date — read both, or the axis is a row of blanks.
+  const cats = rows.map((r) => trendLabel(r));
   const vals = rows.map((r) => r.qty || 0);
+  // 観測1日: a line of one point with `showSymbol:false` drew NOTHING — the card
+  // looked like "no data" while the data was there. One day is still a fact:
+  // show the point, its value, and (in the take line) say it is one day.
+  const single = rows.length === 1;
   return {
     animation: !reduceMotion(),
     // containLabel: the y labels are 物量 (5-6 digits on a real warehouse), and a
     // fixed `left` clipped them to 「0,000」. Let ECharts measure the gutter.
-    grid: { left: 8, right: 18, top: 16, bottom: rows.length > 1 ? 46 : 20, containLabel: true },
+    // A single point carries its value as a label ABOVE the symbol, so the plot
+    // needs headroom or the number is clipped by the card edge.
+    grid: { left: 8, right: 18, top: single ? 34 : 16,
+      bottom: rows.length > 1 ? 46 : 20, containLabel: true },
     toolbox: toolbox(p),
     tooltip: { trigger: 'axis', ...tipStyle(p), formatter: (ps) => `<b>${esc(ps[0].axisValue)}</b> · ${fmt(ps[0].data)}` },
     dataZoom: rows.length > 8 ? [
@@ -306,15 +320,36 @@ function trendOption(rows) {
       axisLine: { lineStyle: { color: p.line } }, axisTick: { show: false } },
     yAxis: { type: 'value', axisLabel: { color: p.ink3, fontFamily: p.fontMono }, splitLine: { lineStyle: { color: p.line } } },
     series: [{
-      name: '物量', type: 'line', data: vals, showSymbol: false, symbol: 'circle', symbolSize: 4,
+      name: '物量', type: 'line', data: vals, showSymbol: single, symbol: 'circle',
+      symbolSize: single ? 11 : 4,
+      label: single ? { show: true, position: 'top', color: p.ink2, fontFamily: p.fontMono,
+        fontSize: 12, formatter: (d) => fmt(d.value) } : undefined,
       lineStyle: { color: p.accent, width: 2 }, itemStyle: { color: p.accent },
       areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
         { offset: 0, color: hexAlpha(p.accent, 0.22) }, { offset: 1, color: hexAlpha(p.accent, 0.02) }]) },
-      markPoint: { symbol: 'pin', symbolSize: 38, data: [{ type: 'max', name: '最大' }],
-        itemStyle: { color: p.accent }, label: { color: p.panel, fontSize: 9, fontFamily: p.fontMono } },
+      markPoint: single ? undefined
+        : { symbol: 'pin', symbolSize: 38, data: [{ type: 'max', name: '最大' }],
+          itemStyle: { color: p.accent }, label: { color: p.panel, fontSize: 9, fontFamily: p.fontMono } },
     }],
   };
 }
+
+// One row of 物量推移 → its x label (project bundle: `period`; standalone: `label`).
+function trendLabel(r) {
+  return String((r && (r.label || r.period || r.date)) || '');
+}
+// Distinct observed days in the daily trend (出荷 rows when the frame carries a
+// `kind`). This is the honest denominator behind 「日平均」 and 「平均比 ×N」: with
+// one observed day a weekday average over 7 buckets manufactures a ×7 peak.
+function observedDays(rows) {
+  if (!rows || !rows.length) return 0;
+  const out = rows.filter((r) => !r.kind || r.kind === '出荷');
+  const days = new Set((out.length ? out : rows).map((r) => trendLabel(r)).filter(Boolean));
+  return days.size || (out.length ? out.length : rows.length);
+}
+// 観測日数が少ないときに数字へ添える注記（断定しない）。
+const REF_BADGE = (days) =>
+  `<span class="da-ref">参考値（観測${days || 1}日）</span>`;
 
 // ABC: top-N SKU bars coloured by rank + cumulative % line (Pareto, dual axis)
 function abcOption(rows) {
@@ -457,7 +492,14 @@ function kpiCards(k) {
 // (no extra fetch, no new contract). They answer 「で、何が言えるの？」 before the
 // reader has to decode an axis. Empty string ⇒ the card just shows its title.
 function trendTake(rows) {
-  if (!rows || rows.length < 2) return '';
+  if (!rows || !rows.length) return '';
+  // 観測1日: 推移は語れないが、その1日の実績は語れる。空文字で黙るより、何日ぶんの
+  // データを見ているのかを言う（この後の ピーク/平均比 の注記と同じ土台）。
+  if (rows.length === 1) {
+    const r = rows[0];
+    return `観測 <b>1</b> 日（${esc(trendLabel(r))}）・物量 <b>${fmt(r.qty || 0)}</b>`
+      + ` ${REF_BADGE(1)} — 日次の推移は2日以上の実績で表示されます。`;
+  }
   const vals = rows.map((r) => r.qty || 0);
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
   let mi = 0;
@@ -467,18 +509,32 @@ function trendTake(rows) {
     + `（${esc(rows[mi].label || '')}）= 平均比 <b>×${ratio.toFixed(1)}</b>`
     + `${ratio >= 1.4 ? ' — 山日に人員を寄せる余地があります。' : ' — 日次の山は緩やかです。'}`;
 }
-function weekdayTake(rows) {
+// 曜日別ピーク: 「平均比 ×N」 divides by the average over ALL SEVEN weekday
+// buckets, so a single observed day always lands on ×7.0 — a peak that exists
+// only because six buckets are empty. Show the denominator (日平均 = 観測日で
+// 割った1日あたり), and when fewer than a week has been observed, drop the
+// assertion and label the number 参考値 instead.
+function weekdayTake(rows, days) {
   if (!rows || !rows.length) return '';
   const mx = rows.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), rows[0]);
-  const avg = rows.reduce((s, r) => s + (r.qty || 0), 0) / rows.length;
-  const ratio = avg > 0 ? (mx.qty || 0) / avg : 1;
-  return `最も多いのは <b>${esc(mx.weekday || '')}</b>（<b>${fmt(mx.qty)}</b>・平均比 <b>×${ratio.toFixed(1)}</b>）`;
+  const total = rows.reduce((s, r) => s + (r.qty || 0), 0);
+  const live = rows.filter((r) => (r.qty || 0) > 0).length;   // weekdays with volume
+  const obs = days || live;   // observed days (fallback: weekdays carrying volume)
+  const perDay = obs > 0 ? total / obs : 0;
+  const head = `最も多いのは <b>${esc(mx.weekday || '')}</b>（<b>${fmt(mx.qty)}</b>）`
+    + `／ 日平均 <b>${fmt(Math.round(perDay))}</b>（観測${fmt(obs)}日）`;
+  if (obs < 7) {
+    return `${head} ${REF_BADGE(obs)} — 曜日の山谷は1週間以上の実績で判定できます。`;
+  }
+  const ratio = perDay > 0 ? (mx.qty || 0) / perDay : 1;
+  return `${head}・平均比 <b>×${ratio.toFixed(1)}</b>`;
 }
-function hourTake(rows) {
+function hourTake(rows, days) {
   if (!rows || !rows.length) return '';
   const mx = rows.reduce((a, b) => ((b.qty || 0) > (a.qty || 0) ? b : a), rows[0]);
   const live = rows.filter((r) => (r.qty || 0) > 0).length;
-  return `ピークは <b>${esc(String(mx.hour))}時</b>（<b>${fmt(mx.qty)}</b>）／ 物量のある時間帯 <b>${live}</b> 時間`;
+  return `ピークは <b>${esc(String(mx.hour))}時</b>（<b>${fmt(mx.qty)}</b>）／ 物量のある時間帯 <b>${live}</b> 時間`
+    + (days && days < 2 ? ` ${REF_BADGE(days)}` : '');
 }
 function abcTake(rows) {
   if (!rows || !rows.length) return '';
@@ -570,8 +626,21 @@ function invBodyHtml(data, params) {
     ['z値', fmt(t.z)],
     ['観測日数', `${fmt(t.days_observed)} 日`],
   ];
+  // σ=0 の全SKU 0点表示は「安全在庫は要らない」ではなく「ばらつきを測れていない」。
+  // 観測日数が1〜数日だと需要のばらつきが立たず、SS = z·σ·√(LT+R) が全部 0 になる。
+  // 数字は出すが、断定はしない（never oversell）。
+  const days = Number(t.days_observed) || 0;
+  const allFlat = rows.length > 0 && rows.every((r) => !(Number(r.sigma_d) > 0));
+  const thin = days < 7 || allFlat;
+  const thinNote = thin
+    ? `<div class="da-inv-note">${REF_BADGE(days || 1)} 観測日数が${fmt(days)}日と少なく`
+      + `${allFlat ? '、需要のばらつき（σ）が全SKUで0のため安全在庫も0' : ''}になっています。`
+      + 'ばらつきは日々の実績が貯まるほど立ち上がるので、この値は参考値として扱ってください'
+      + '（①取込で期間の長い出荷実績を足すと精度が上がります）。</div>'
+    : '';
   return `<div class="da-inv-sum">${chips.map(([l, v]) =>
     `<span class="da-inv-chip"><i>${l}</i><b>${v}</b></span>`).join('')}</div>
+    ${thinNote}
     <div class="da-inv-tbl-wrap"><table class="da-inv-tbl">
       <thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead>
       <tbody>${body || `<tr><td colspan="${head.length}" class="da-inv-empty">対象SKUがありません</td></tr>`}</tbody>
@@ -814,11 +883,11 @@ export function mountDataAnalysis(el, opts = {}) {
            ${chartCard('物量推移（日次）', 'trend', !!(b.trend_daily && b.trend_daily.length), 'sp4',
     'clamp(220px,30vh,340px)', trendTake(b.trend_daily))}
            ${chartCard('曜日別ピーク', 'weekday', !!(b.peak && b.peak.by_weekday && b.peak.by_weekday.length), 'sp2',
-    'clamp(220px,30vh,340px)', weekdayTake(b.peak && b.peak.by_weekday))}
+    'clamp(220px,30vh,340px)', weekdayTake(b.peak && b.peak.by_weekday, observedDays(b.trend_daily)))}
            ${chartCard('ABCパレート（上位SKU）', 'abc', !!(b.abc_sku && b.abc_sku.length), 'sp4',
     'clamp(220px,30vh,340px)', abcTake(b.abc_sku), abcLegend())}
            ${chartCard('時間帯別ピーク', 'hour', !!(b.peak && b.peak.by_hour && b.peak.by_hour.length), 'sp2',
-    'clamp(220px,30vh,340px)', hourTake(b.peak && b.peak.by_hour))}
+    'clamp(220px,30vh,340px)', hourTake(b.peak && b.peak.by_hour, observedDays(b.trend_daily)))}
            ${staffingCard(b.staffing)}
            ${isProj ? invCardShell(invParams) : ''}
          </div>`;
