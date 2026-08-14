@@ -6,8 +6,9 @@
 |---|---|
 | **planner.html 作業計画ウィザード** | やりたいことを一言書く→作業タイプ別テンプレートから**手順の骨格・業務フロー・撮影指示書**を生成。「⚡すぐ作る」なら3クリックで簡易版（空欄は【要記入】表示）。骨格(.json)はそのままindex.htmlに取り込める。AI用プロンプトのコピーにも対応 |
 | **index.html マニュアル作成ツール** | 撮影→注釈→手順化→品質チェック→承認欄つきA4様式のHTML/PDF書き出し |
+| **Copilot 365 エージェント版（任意）** | 同じ計画機能をMicrosoft 365 Copilotのエージェント／エージェントスキル（SKILL.md）として提供。貼り付け用定義は [docs/copilot-planner-agent.md](docs/copilot-planner-agent.md)、スキル本体は `copilot/skills/genba-work-planner/` |
 
-**基本の流れ**：planner.htmlで計画（1分）→ 指示書を作業者に渡す → 作業者が実施・撮影 → 骨格(.json)をindex.htmlに取り込み → 写真を当てはめて完成 → 台帳へ提出。
+**基本の流れ**：planner.htmlで計画（1分）→ 指示書を作業者に渡す → 作業者が実施・撮影 → 骨格(.json)をindex.htmlに取り込み → 写真を当てはめて完成 → 台帳へ提出。計画はCopilotエージェント経由でも可（出力契約が同じため合流する）。
 
 ## 使い方（index.html）
 
@@ -41,8 +42,9 @@
 - 運用設計の背景・Teams/Kintone比較の詳細: [docs/operations-design.md](docs/operations-design.md)
 - RK連携のデータ契約（埋め込みJSON・台帳CSVスキーマ・作業指示書取込）: [docs/rk-interface-spec.md](docs/rk-interface-spec.md)
 - 市販ツール（Teachme Biz / tebiki 等）調査と設計判断・乗り換え条件: [docs/market-research.md](docs/market-research.md)
+- Copilot 365 エージェント版のビルド手順・受け入れテスト・費用: [docs/copilot-planner-agent.md](docs/copilot-planner-agent.md)
 
 ## 開発
 
 - 依存なしの素のHTML+CSS+JS（オフライン要件のため外部CDN禁止）
-- テスト: `node tests/smoke.js`（エディタ・ビューア） / `node tests/planner-smoke.js`（ウィザード＋クロス連携）
+- テスト: `node tests/smoke.js`（エディタ・ビューア） / `node tests/planner-smoke.js`（ウィザード＋クロス連携） / `node tests/copilot-agent-contract.js`（Copilotエージェント出力契約）
