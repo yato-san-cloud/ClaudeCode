@@ -108,3 +108,28 @@ D5(what-if I/F): scenarios.run_scenario がほぼ該当。diff→実行→サマ
 | 4 | ルーティング比較 | 合格（Held-Karp厳密DPで2-optの66mが真の最適と独立確認） |
 | 5 | 再現性 | 合格 |
 | 6 | シナリオ差し替え | 合格 |
+
+
+---
+
+# 第2ラン: GeoJSON/Deneb ＋ MCP実験装置（進行中）
+
+元指示3点: ①縛り理解した版 UPGRADE_PROMPT（既にDoD1〜6全合格 — 唯一の未充足
+だった `python -m whsim.sim scenario.json` ヘッドレスCLIを ba7dceb で実装済み）、
+②GeoJSONエクスポート層（AC-1〜4、段の扱いはOPEN ISSUE=決めずに両案実装して提示）、
+③PBI Deneb ビジュアル対応、④Phase2: MCPサーバー化（DoD1〜7）。
+
+## 決定事項
+
+- runs/<run_id>/ は repo 直下 runs/（gitignore済）。台帳 index.jsonl。
+  run_id = r<時刻>-<scenario_hash先頭8>。scenario_hash = 解決済シナリオの正準JSON sha256。
+- pip 追加は `mcp`（公式SDK・stdioサーバーの一次実装）のみ。optional group [lab]。
+- GeoJSON: 段の扱いは per-level（案A・既定）/ grouped（案B）の両実装 —
+  最終選択は人間（トレードオフ表を最終サマリに）。
+- Deneb は「実PBIでの動作は未検証」と明示（この環境にPBIが無い）。
+
+## 分担
+
+- 私: whsim.sim（済・ba7dceb）、統合、fresh監査（Phase2 DoD1〜7＋GeoJSON AC1〜4）、最終サマリ
+- Agent G: geoexport.py（GeoJSON両モード＋layout.csv）、Deneb spec＋docs、AC1〜4テスト
+- Agent M: mcp_server.py（8ツール契約）＋lab_report.py（比較・レポート・捏造遮断照合）＋E2E
