@@ -26,6 +26,9 @@ dependencies = [
 dev = ["pytest>=7.0", "ruff>=0.1", "httpx>=0.24", "pytest-cov>=4.0"]
 web = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9"]
 docs = ["ezdxf>=1.1", "python-pptx>=0.6", "reportlab>=4.0"]
+# MCP実験装置 (whsim.mcp_server): MCP公式Python SDK。stdioサーバー/クライアントの
+# 一次実装で、他に依存は足さない（図は既存の matplotlib Agg を使う）。
+lab = ["mcp>=1.2"]
 
 [project.scripts]
 whsim = "whsim.cli:app"
