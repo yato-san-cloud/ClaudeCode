@@ -1,0 +1,4 @@
+carrier,discount_rate,volume_kg_per_m3,fuel_surcharge_rate,min_fare,timed_delivery_fee
+A運輸,0.45,280,0.08,1000,500
+B急便,0.4,270,0.07,900,800
+C物流,0.5,300,0.09,1100,0
