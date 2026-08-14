@@ -21,46 +21,109 @@ function injectStyle() {
   const s = document.createElement('style');
   s.id = 'ps-style';
   s.textContent = `
-  .ps{display:flex;flex-direction:column;gap:14px;width:100%;padding:4px 2px 24px}
-  .ps-head h2{margin:0 0 2px;font-size:18px;color:var(--ink-primary)}
-  .ps-head .sub{font-size:12px;color:var(--ink-tertiary)}
-  .ps-verdict{padding:10px 14px;border-radius:11px;border:1px solid var(--accent,#16C0DE);
-    background:color-mix(in srgb,var(--accent,#16C0DE) 12%,transparent);color:var(--ink-primary);font-size:13.5px;font-weight:600}
+  .ps{display:flex;flex-direction:column;gap:16px;width:100%;padding:4px 2px 28px;
+    font-variant-numeric:tabular-nums}
+  .ps-head h2{margin:0 0 3px;font-size:20px;font-weight:600;letter-spacing:-.012em;color:var(--ink-primary)}
+  .ps-head .sub{font-size:12px;color:var(--ink-tertiary);line-height:1.55}
+  /* 判定文: a quiet plate with an accent spine — it is a conclusion, not an alert,
+     so it no longer paints a full accent-tinted block across the view. */
+  .ps-verdict{position:relative;padding:12px 16px 12px 18px;border-radius:var(--r-card,10px);
+    border:1px solid var(--line-hair);background:var(--bg-sunken);
+    color:var(--ink-primary);font-size:13.5px;font-weight:600;line-height:1.6;overflow:hidden}
+  .ps-verdict::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:var(--accent,#16C0DE)}
   .ps-hero{display:flex;gap:18px;flex-wrap:wrap;align-items:baseline}
-  .ps-hero .big{font-size:34px;font-weight:800;color:var(--accent,#16C0DE);font-variant-numeric:tabular-nums}
+  .ps-hero .big{font-size:34px;font-weight:700;letter-spacing:-.022em;
+    color:var(--accent-ink,#0B7A90);font-variant-numeric:tabular-nums}
   .ps-hero .cap{font-size:12px;color:var(--ink-tertiary)}
   .ps-modes{display:flex;flex-direction:column;gap:16px}
-  .ps-mode{border:1px solid var(--line-hair);border-radius:12px;background:var(--bg-panel);padding:12px 14px}
-  .ps-mode h3{margin:0 0 8px;font-size:14px;color:var(--ink-primary)}
-  .ps-bars{display:flex;flex-direction:column;gap:7px}
-  .ps-bar{display:grid;grid-template-columns:96px 1fr 120px;align-items:center;gap:10px;font-size:12.5px}
-  .ps-bar .nm{color:var(--ink-secondary)}
-  .ps-track{height:16px;border-radius:8px;background:var(--bg-sunken);overflow:hidden}
-  .ps-fill{height:100%;border-radius:8px;transition:width .3s ease}
+  .ps-mode{border:1px solid var(--line-hair);border-radius:var(--r-card,10px);
+    background:var(--bg-app);padding:16px 18px}
+  .ps-mode h3{margin:0 0 12px;font-size:14px;font-weight:600;color:var(--ink-primary)}
+  .ps-bars{display:flex;flex-direction:column;gap:8px}
+  .ps-bar{display:grid;grid-template-columns:142px 1fr 140px;align-items:center;gap:14px;font-size:12.5px}
+  .ps-bar .nm{color:var(--ink-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ps-track{height:14px;border-radius:var(--r-xs,4px);background:var(--bg-sunken);
+    border:1px solid var(--line-soft,var(--line-hair));overflow:hidden}
+  /* display:block is LOAD-BEARING — .ps-fill is a <span>, and width/height are
+     ignored on a non-replaced inline box, so every bar rendered as an empty
+     track. (.ps-track only ever had a height because .ps-bar is a grid and
+     blockified it; its child got no such rescue.) */
+  .ps-fill{display:block;height:100%;border-radius:var(--r-xs,4px);transition:width .3s ease}
   .ps-bar .val{text-align:right;color:var(--ink-primary);font-variant-numeric:tabular-nums}
-  .ps-cut{font-size:11px;color:var(--good,#2e7d32);font-weight:700;margin-left:6px}
-  .ps-tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
-  .ps-tbl th,.ps-tbl td{padding:6px 9px;border-bottom:1px solid var(--line-hair);text-align:right;font-variant-numeric:tabular-nums}
-  .ps-tbl th{color:var(--ink-secondary);font-weight:700;border-bottom:2px solid var(--line-hair)}
+  .ps-cut{font-size:11px;color:var(--ok,#2E7D55);font-weight:700;margin-left:6px}
+  /* ---- data table (shared by 手法別 and 経路方式比較) ---- */
+  .ps-tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  .ps-tbl th,.ps-tbl td{padding:10px 10px;text-align:right;font-variant-numeric:tabular-nums}
+  .ps-tbl td{border-bottom:1px solid var(--line-soft,var(--line-hair));color:var(--ink-primary)}
+  .ps-tbl th{color:var(--ink-tertiary);font-weight:600;font-size:11px;
+    letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+    border-bottom:1px solid var(--line-hair);padding-bottom:8px}
+  .ps-tbl th .u{margin-left:5px;font-weight:400;letter-spacing:.02em;
+    text-transform:none;color:var(--ink-faint)}
   .ps-tbl td.l,.ps-tbl th.l{text-align:left}
-  .ps-tbl tr.rec{background:color-mix(in srgb,var(--accent,#16C0DE) 9%,transparent)}
-  .ps-dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
-  .ps-tag{font-size:10px;font-weight:700;color:#fff;border-radius:999px;padding:1px 7px;margin-left:6px;background:var(--accent,#16C0DE)}
-  .ps-empty{padding:16px;border:1px dashed var(--line-strong);border-radius:12px;background:var(--bg-panel);
-    color:var(--ink-secondary);font-size:13px}
+  /* Rank sits clear of the .rec spine (inset box-shadow on the same cell). */
+  .ps-tbl th.ps-rank,.ps-tbl td.ps-rank{width:38px;text-align:left;padding-left:12px;
+    color:var(--ink-tertiary);font-size:12px}
+  .ps-tbl tr.rec .ps-rank{color:var(--accent-ink,#0B7A90);font-weight:700}
+  .ps-tbl .ps-gap{color:var(--ink-secondary)}
+  .ps-tbl tr.rec .ps-gap{color:var(--ink-tertiary)}
+  .ps-tbl td:first-child:not(.ps-rank),.ps-tbl th:first-child:not(.ps-rank){padding-left:0}
+  .ps-tbl td:last-child,.ps-tbl th:last-child{padding-right:0}
+  .ps-tbl tbody tr:last-child td{border-bottom:0}
+  .ps-tbl tbody tr:hover td{background:var(--bg-hover)}
+  /* 最短/推奨 row: an accent spine + a faint band. The band alone (old rule) put
+     four equally-loud rows on screen and the eye had to hunt for the winner. */
+  .ps-tbl tr.rec td{background:color-mix(in srgb,var(--accent,#16C0DE) 7%,transparent)}
+  .ps-tbl tr.rec td:first-child{box-shadow:inset 2px 0 0 var(--accent,#16C0DE)}
+  .ps-tbl tr.rec td.l{font-weight:600}
+  .ps-dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:8px;vertical-align:middle}
+  .ps-tag{font-size:10.5px;font-weight:700;line-height:1.5;border-radius:var(--r-pill,999px);
+    padding:1px 9px;margin-left:8px;white-space:nowrap;
+    color:var(--accent-ink,#0B7A90);background:var(--accent-tint,rgba(22,192,222,.12));
+    border:1px solid color-mix(in srgb,var(--accent,#16C0DE) 34%,transparent)}
+  .ps-empty{display:flex;gap:16px;align-items:center;
+    padding:22px 24px;border:1px dashed var(--line-strong);border-radius:var(--r-card,10px);
+    background:var(--bg-sunken);color:var(--ink-secondary);font-size:13px;line-height:1.7}
+  .ps-empty-ic{flex:none;color:var(--ink-faint)}
+  .ps-kicker{font-size:12px;font-weight:500;color:var(--ink-tertiary);margin-left:4px}
   /* 経路方式比較 (routecompare) — same card language as .ps-mode */
-  .ps-rc{border:1px solid var(--line-hair);border-radius:12px;background:var(--bg-panel);padding:12px 14px}
-  .ps-rc h3{margin:0 0 2px;font-size:14px;color:var(--ink-primary)}
-  .ps-rc .sub{font-size:11.5px;color:var(--ink-tertiary);line-height:1.6}
-  .ps-rc-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0 2px;min-height:30px}
-  .ps-btn{padding:7px 14px;border-radius:9px;border:1px solid var(--accent,#16C0DE);
-    background:color-mix(in srgb,var(--accent,#16C0DE) 14%,transparent);color:var(--accent,#16C0DE);
-    font:inherit;font-weight:700;font-size:12.5px;cursor:pointer}
-  .ps-btn:hover{background:color-mix(in srgb,var(--accent,#16C0DE) 24%,transparent)}
+  .ps-rc{border:1px solid var(--line-hair);border-radius:var(--r-card,10px);
+    background:var(--bg-app);padding:16px 18px 14px}
+  .ps-rc h3{margin:0 0 3px;font-size:15px;font-weight:600;color:var(--ink-primary)}
+  .ps-rc .sub{font-size:12px;color:var(--ink-tertiary);line-height:1.65;max-width:74ch}
+  .ps-rc-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0 2px;min-height:32px}
+  /* Buttons: ONE accent-filled action per table (the shortest route). Every
+     other 採用 is a neutral ghost, so the recommendation is legible at a glance. */
+  .ps-btn{padding:7px 15px;border-radius:var(--r-control,8px);
+    border:1px solid color-mix(in srgb,var(--accent,#16C0DE) 62%,transparent);
+    background:transparent;color:var(--accent-ink,#0B7A90);
+    font:inherit;font-weight:600;font-size:12.5px;cursor:pointer;white-space:nowrap;
+    transition:background var(--t-fast,.09s ease),border-color var(--t-fast,.09s ease)}
+  .ps-btn:hover:not(:disabled){background:var(--accent-tint);border-color:var(--accent,#16C0DE)}
   .ps-btn:disabled{opacity:.55;cursor:default}
-  .ps-btn.mini{padding:3px 10px;font-size:11px;border-radius:7px}
-  .ps-rc-meta{font-size:11.5px;color:var(--ink-tertiary)}
-  .ps-notes{margin:10px 0 0;padding-left:18px;font-size:11px;color:var(--ink-tertiary);line-height:1.65}
+  .ps-btn.mini{padding:4px 12px;font-size:11.5px}
+  .ps-btn.quiet{border-color:var(--line-strong);color:var(--ink-secondary);font-weight:500}
+  .ps-btn.quiet:hover:not(:disabled){background:var(--bg-hover);border-color:var(--line-strong);
+    color:var(--ink-primary)}
+  .ps-btn.on{background:var(--accent);border-color:var(--accent);color:var(--ink-onAccent,#04222c);
+    font-weight:700}
+  .ps-btn.on:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+  .ps-rc-meta{font-size:12px;color:var(--ink-tertiary)}
+  /* 前提: six always-open bullets buried the table. Folded by default; the count
+     stays on the summary so nothing feels hidden. */
+  .ps-fold{margin-top:14px;border-top:1px solid var(--line-soft,var(--line-hair));padding-top:10px}
+  .ps-fold>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:7px;
+    font-size:12px;color:var(--ink-secondary);user-select:none}
+  .ps-fold>summary::-webkit-details-marker{display:none}
+  .ps-fold>summary::before{content:"";width:0;height:0;flex:none;
+    border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent;
+    transition:transform var(--t-fast,.09s ease)}
+  .ps-fold[open]>summary::before{transform:rotate(90deg)}
+  .ps-fold>summary:hover{color:var(--ink-primary)}
+  .ps-fold-n{color:var(--ink-faint);font-variant-numeric:tabular-nums}
+  .ps-notes{margin:10px 0 2px;padding-left:18px;font-size:11.5px;color:var(--ink-tertiary);line-height:1.75}
+  .ps-foot{font-size:11.5px;color:var(--ink-tertiary);line-height:1.7}
   `;
   document.head.appendChild(s);
 }
@@ -93,10 +156,19 @@ export function mountPickseq(el, opts = {}) {
     appendRouteCompare();
   }
 
+  // A route glyph (depot → picks) so the empty state reads as "this view draws a
+  // tour", not as a failed panel. Decorative — hidden from assistive tech.
+  const ROUTE_GLYPH = '<svg class="ps-empty-ic" width="34" height="34" viewBox="0 0 24 24"'
+    + ' fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"'
+    + ' stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M4 19h4a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h4" stroke-dasharray="2.5 2.5"/>'
+    + '<circle cx="4" cy="19" r="1.6"/><circle cx="12" cy="7" r="1.6"/>'
+    + '<path d="M18 4.5 20.5 8 18 11.5 15.5 8Z"/></svg>';
+
   function renderEmpty(msg) {
     root.innerHTML = `<div class="ps-head"><h2>ピック順序最適化</h2>
       <div class="sub">棚距離でピック順序を2-optで最適化し、移動距離・所要時間を比較（実行不要）</div></div>
-      <div class="ps-empty">${esc(msg)}</div>`;
+      <div class="ps-empty">${ROUTE_GLYPH}<span>${esc(msg)}</span></div>`;
   }
 
   function bar(mode, mid, length, maxLen, color, cut) {
@@ -134,8 +206,9 @@ export function mountPickseq(el, opts = {}) {
         ${bar(m, 'optimized', opt, maxLen, METHOD_C.optimized, cutO)}
       </div>
       <table class="ps-tbl">
-        <tr><th class="l">手法</th><th>距離 m</th><th>所要 分</th><th>ピック数</th></tr>
-        ${rows}
+        <thead><tr><th class="l">手法</th><th>距離<span class="u">m</span></th>
+          <th>所要<span class="u">分</span></th><th>ピック数</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
     </div>`;
   }
@@ -144,14 +217,14 @@ export function mountPickseq(el, opts = {}) {
     if (!data.has_data) { renderEmpty(data.verdict); return; }
     const recJp = { order: 'シングル', multi: 'マルチ', total: 'トータル' }[data.recommend_mode] || 'シングル';
     root.innerHTML =
-      `<div class="ps-head"><h2>ピック順序最適化 <span style="font-size:12px;font-weight:500;color:var(--ink-tertiary)">2-opt・解析的</span></h2>
+      `<div class="ps-head"><h2>ピック順序最適化 <span class="ps-kicker">2-opt・解析的</span></h2>
         <div class="sub">棚距離（${data.wall_aware ? '壁考慮グラフ' : 'マンハッタン'}）でピック順序を最適化。ナイーブ／貪欲／2-optを ${esc(String(data.n_orders))} オーダーで比較。</div></div>
       <div class="ps-verdict">${esc(data.verdict)}</div>
       <div class="ps-hero">
         <div><div class="big">−${fmt(data.headline_reduction_pct, 0)}%</div><div class="cap">移動距離の削減（${esc(recJp)}ピック・2-opt vs 並び順）</div></div>
       </div>
       <div class="ps-modes">${data.modes.map(modeBlock).join('')}</div>
-      <div class="sub" style="font-size:11px;color:var(--ink-tertiary)">距離=巡回路長（最近傍を2-optで改善）。所要=移動/歩行速度＋ピック手扱い。④検証のDESで裏取りします。</div>`;
+      <div class="ps-foot">距離=巡回路長（最近傍を2-optで改善）。所要=移動/歩行速度＋ピック手扱い。④検証のDESで裏取りします。</div>`;
   }
 
   // ---- 経路方式比較 (POST …/routecompare) ----------------------------------
@@ -172,16 +245,27 @@ export function mountPickseq(el, opts = {}) {
     renderRouteCompare();
   }
 
+  // Rows are ordered shortest-first so the table reads as a ranking, and only the
+  // winner carries a filled 採用; the rest are neutral ghosts (four identical
+  // accent buttons gave the eye no answer to "which one should I press?").
   function policyRows(pol, best) {
-    return Object.keys(pol).map((id) => {
+    const ids = Object.keys(pol).sort((a, b) => {
+      const va = pol[a] && typeof pol[a].total_m === 'number' ? pol[a].total_m : Infinity;
+      const vb = pol[b] && typeof pol[b].total_m === 'number' ? pol[b].total_m : Infinity;
+      return va - vb;
+    });
+    return ids.map((id, i) => {
       const p = pol[id] || {};
       const isBest = id === best;
+      const label = p.label || id;
       return `<tr class="${isBest ? 'rec' : ''}">
-        <td class="l">${esc(p.label || id)}${isBest ? '<span class="ps-tag">最短</span>' : ''}</td>
+        <td class="ps-rank">${i + 1}</td>
+        <td class="l">${esc(label)}${isBest ? '<span class="ps-tag">最短</span>' : ''}</td>
         <td>${fmt(p.total_m)}</td>
         <td>${fmt(p.per_order_m, 1)}</td>
-        <td>${p.vs_best_pct ? '+' + fmt(p.vs_best_pct, 1) + '%' : '—'}</td>
-        <td><button class="ps-btn mini" data-adopt="${esc(id)}">採用</button></td>
+        <td class="ps-gap">${p.vs_best_pct ? '+' + fmt(p.vs_best_pct, 1) + '%' : '—'}</td>
+        <td><button class="ps-btn mini${isBest ? ' on' : ' quiet'}" data-adopt="${esc(id)}"
+          aria-label="${esc(label)}を採用">採用</button></td>
       </tr>`;
     }).join('');
   }
@@ -200,18 +284,23 @@ export function mountPickseq(el, opts = {}) {
       return;
     }
     const pol = (rc.policies && typeof rc.policies === 'object') ? rc.policies : {};
-    const notes = Array.isArray(rc.assumptions)
-      ? `<ul class="ps-notes">${rc.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : '';
+    const notes = (Array.isArray(rc.assumptions) && rc.assumptions.length)
+      ? `<details class="ps-fold"><summary>計算の前提
+          <span class="ps-fold-n">(${rc.assumptions.length})</span></summary>
+          <ul class="ps-notes">${rc.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>
+        </details>` : '';
     const table = Object.keys(pol).length
       ? `<div style="overflow-x:auto"><table class="ps-tbl">
-          <tr><th class="l">経路方式</th><th>総距離 m</th><th>1件あたり m</th><th>最短との差</th><th></th></tr>
-          ${policyRows(pol, rc.best)}
+          <thead><tr><th class="ps-rank"></th><th class="l">経路方式</th>
+            <th>総距離<span class="u">m</span></th><th>1件あたり<span class="u">m</span></th>
+            <th>最短との差</th><th></th></tr></thead>
+          <tbody>${policyRows(pol, rc.best)}</tbody>
         </table></div>`
       : '<div class="ps-empty">比較できる経路方式がありませんでした。</div>';
     const meta = rc.has_data
       ? `<span class="ps-rc-meta">対象 ${esc(String(rc.n_orders))} オーダー</span>` : '';
     sec.innerHTML = `${head}
-      <div class="ps-rc-bar"><button class="ps-btn" data-rcgo>再計算</button>${meta}</div>
+      <div class="ps-rc-bar"><button class="ps-btn quiet" data-rcgo>再計算</button>${meta}</div>
       ${table}${notes}`;
     wireRouteCompare();
   }

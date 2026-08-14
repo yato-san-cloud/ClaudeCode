@@ -74,6 +74,14 @@ function svgEl(tag, attrs) {
   return node;
 }
 
+// Tables keep their labels on one line (see .an-tbl rules), so a card too narrow
+// for the columns scrolls them sideways rather than wrapping them to shreds.
+function scrollWrap(node) {
+  const w = el('div', { class: 'an-tblwrap' });
+  w.appendChild(node);
+  return w;
+}
+
 // ---- scoped stylesheet (additive over styles.css; confined to #analysis) ----
 //
 // Everything here is namespaced under `#analysis` so it can only ever refine the
@@ -203,24 +211,40 @@ function injectStyle() {
 @media(hover:hover){
   #analysis .an-view .chart-card:hover{border-color:var(--line-strong,rgba(255,255,255,.14))}
 }
+/* A second-level heading INSIDE a card (a card can hold two read-outs; the
+   deck used to lean on an ad-hoc inline-styled .chart-sub for the break). */
+#analysis .an-view .an-subhead{
+  margin:var(--sp-6,24px) 0 2px;padding-top:var(--sp-4,16px);
+  border-top:1px solid var(--line-soft,var(--line-hair,rgba(255,255,255,.055)));
+  font-size:var(--fs-sm,13px);font-weight:var(--fw-semibold,600);
+  color:var(--ink-primary,inherit);letter-spacing:-.004em;
+}
+#analysis .an-view .an-subhead + .chart-sub{margin-top:2px;margin-bottom:var(--sp-3,12px)}
 
 /* ============================================================
    MOTION — enter-only, transform/opacity, ease-out
    ============================================================ */
 
-/* (1) stagger fade-in for hero cells + KPI cards (translateY 6px -> 0) */
+/* (1) stagger fade-in for hero cells + KPI cards (translateY 6px -> 0).
+   .an-stat cells sit inside a hairline-divided plate, so they fade only (a
+   translate would tear the shared 1px rules apart mid-flight). */
 #analysis .an-view .kpi-hero-cell,
 #analysis .an-view .kpi-card{
   opacity:0;transform:translateY(6px);will-change:transform,opacity;
 }
+#analysis .an-view .an-stat{opacity:0;will-change:opacity}
 #analysis .an-view .kpi-hero-cell.an-in,
 #analysis .an-view .kpi-card.an-in{
   opacity:1;transform:none;
   transition:opacity var(--an-d2) var(--an-ease),
     transform var(--an-d2) var(--an-ease);
 }
+#analysis .an-view .an-stat.an-in{
+  opacity:1;transition:opacity var(--an-d2) var(--an-ease);
+}
 #analysis .an-view .kpi-hero-cell.an-settled,
-#analysis .an-view .kpi-card.an-settled{will-change:auto}
+#analysis .an-view .kpi-card.an-settled,
+#analysis .an-view .an-stat.an-settled{will-change:auto}
 
 /* sections + callouts: gentle one-shot rise */
 #analysis .an-view .callout,
@@ -274,7 +298,11 @@ function injectStyle() {
 /* ============================================================
    STACKED-AREA chart card (per-stage processing composition)
    ============================================================ */
-/* Mono numerics everywhere in this module's numeric surfaces (Space Mono). */
+/* Numerals: the UI font (Inter) with TABULAR figures — columns still line up
+   digit-for-digit, but the page reads like a printed proposal instead of a
+   terminal. (This used to force --font-mono on every numeric surface; at
+   26-34px a typewriter face was the single loudest "tech demo" signal on the
+   screen.) Slight negative tracking keeps the big metrics compact. */
 #analysis .an-view .num,
 #analysis .an-view .delta,
 #analysis .an-view .c-metric,
@@ -282,8 +310,11 @@ function injectStyle() {
 #analysis .an-view .an-area-svg text,
 #analysis .an-view .an-tbl td,
 #analysis .an-view .an-tbl th{
-  font-family:var(--font-mono,"Space Mono",ui-monospace,SFMono-Regular,monospace);
+  font-family:var(--font-sans,inherit);
+  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
 }
+#analysis .an-view .c-metric,
+#analysis .an-view .kpi-value{letter-spacing:-.02em}
 
 /* inline legend (top), short colour bars */
 #analysis .an-view .an-legend{
@@ -307,22 +338,44 @@ function injectStyle() {
   width:100%;border-collapse:collapse;font-size:13px;
 }
 #analysis .an-view .an-tbl thead th{
-  font-family:var(--font-mono,"Space Mono",monospace);
-  font-weight:500;font-size:var(--fs-micro,11px);letter-spacing:.08em;text-transform:uppercase;
-  color:var(--ink-secondary,var(--ink-dim,#5C6675));
-  text-align:right;padding:0 0 9px;
-  border-bottom:1px solid var(--line,rgba(255,255,255,.08));
+  font-family:var(--font-sans,inherit);
+  font-weight:var(--fw-semibold,600);font-size:var(--fs-micro,11px);
+  letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-tertiary,var(--ink-dim,#5C6675));
+  text-align:right;padding:0 0 9px;white-space:nowrap;
+  border-bottom:1px solid var(--line-hair,rgba(255,255,255,.08));
 }
 #analysis .an-view .an-tbl thead th:first-child{text-align:left}
+/* Unit lives in the header, never repeated on every row. */
+#analysis .an-view .an-tbl thead th .u{
+  margin-left:5px;font-weight:var(--fw-regular,400);letter-spacing:.02em;
+  color:var(--ink-faint,rgba(150,150,150,.5));text-transform:none;
+}
 #analysis .an-view .an-tbl tbody td{
   padding:11px 0;text-align:right;
   border-bottom:1px solid var(--line-soft,var(--line-hair,rgba(255,255,255,.055)));
   color:var(--ink,inherit);font-variant-numeric:tabular-nums;
 }
+/* Column gutters. Every table gets a small one (with zero, 「ピッキング」 and
+   「90.8%」 touch); the wide full-width tables opt into a generous one via
+   .an-tbl--cols. Half-width cards keep the tight setting so their columns still
+   fit — and if they ever do not, .an-tblwrap scrolls rather than wraps. */
+#analysis .an-view .an-tbl thead th + th,
+#analysis .an-view .an-tbl tbody td + td{padding-left:var(--sp-3,12px)}
+#analysis .an-view .an-tbl--cols thead th + th,
+#analysis .an-view .an-tbl--cols tbody td + td{padding-left:var(--sp-5,20px)}
+/* Labels and verdict chips must never wrap mid-word, whatever the column width. */
+#analysis .an-view .an-tbl tbody td:first-child{white-space:nowrap}
+#analysis .an-view .an-vd{white-space:nowrap;display:inline-block}
+/* …which means a very narrow card scrolls the table instead of shredding it. */
+#analysis .an-view .an-tblwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 #analysis .an-view .an-tbl tbody td:first-child{
   text-align:left;font-family:var(--font-sans,inherit);font-weight:500;
 }
 #analysis .an-view .an-tbl tbody tr:last-child td{border-bottom:0}
+@media(hover:hover){
+  #analysis .an-view .an-tbl tbody tr:hover td{background:var(--bg-hover,rgba(255,255,255,.03))}
+}
 /* bottleneck row: structural, restrained — left rule + faint band, no loud colour */
 #analysis .an-view .an-tbl tbody tr.an-flag td:first-child{
   box-shadow:inset 2px 0 0 var(--warn,#F5B05A);
@@ -356,19 +409,124 @@ function injectStyle() {
   border-color:color-mix(in srgb,var(--warn,#F5B05A) 40%,transparent);
   color:var(--warn,#F5B05A);
 }
+/* Note under a table: a contained warn plate (it used to be a bare hairline +
+   grey run of text, which read as a footnote rather than as the caveat that
+   qualifies the numbers directly above it). */
 #analysis .an-view .an-tbl-note{
-  margin-top:13px;padding-top:12px;
-  border-top:1px solid var(--line-soft,var(--line-hair,rgba(255,255,255,.055)));
-  font-size:var(--fs-xs,12px);color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
-  display:flex;gap:8px;align-items:flex-start;line-height:1.5;
+  margin-top:16px;padding:11px 14px;border-radius:var(--r-card,10px);
+  border:1px solid var(--warn-line,rgba(245,176,90,.28));
+  background:var(--warn-tint,rgba(245,176,90,.08));
+  font-size:var(--fs-xs,12px);color:var(--warn-ink,#8A5A12);
+  display:flex;gap:10px;align-items:flex-start;line-height:1.6;
 }
-#analysis .an-view .an-tbl-note .an-ic{color:var(--warn,#F5B05A);flex:none;margin-top:1px}
+#analysis .an-view .an-tbl-note .an-ic{
+  flex:none;margin-top:1px;font-size:13px;line-height:1.3;
+  color:var(--warn,#F5B05A);
+}
+
+/* ============================================================
+   STAT PANEL — a hairline-divided instrument row (通路の混雑 ほか)
+   ------------------------------------------------------------
+   Replaces a 4-up grid of free-floating boxes that left an orphan row of two
+   and let a wrapping label shove one value a line lower than its neighbours.
+   One plate, 3 per row, fixed label height ⇒ every value sits on one baseline.
+   ============================================================ */
+#analysis .an-view .an-stats{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;
+  background:var(--line-hair,rgba(255,255,255,.08));
+  border:1px solid var(--line-hair,rgba(255,255,255,.08));
+  border-radius:var(--r-card,10px);overflow:hidden;margin-top:var(--sp-4,16px);
+}
+#analysis .an-view .an-stat{background:var(--bg-app,transparent);padding:13px 16px 15px;min-width:0}
+#analysis .an-view .an-stat-label{
+  display:flex;align-items:center;gap:7px;min-height:2.6em;
+  font-family:var(--font-sans,inherit);font-size:var(--fs-xs,12px);
+  line-height:1.3;color:var(--ink-secondary,var(--ink-mut,#9AA4B2));
+}
+#analysis .an-view .an-stat-value{
+  margin-top:5px;font-size:26px;line-height:1.1;
+  font-weight:var(--fw-semibold,600);letter-spacing:-.02em;
+  color:var(--ink-primary,inherit);
+}
+/* Unit scales WITH the value (em), so the detail row keeps the same optical
+   ratio as the headline row instead of a 14px unit next to a 19px number. */
+#analysis .an-view .an-stat-value .kpi-unit{
+  font-size:.56em;margin-left:4px;font-weight:var(--fw-medium,500);
+  letter-spacing:0;color:var(--ink-tertiary,#8195a8);
+}
+/* Detail tier: same plate, quieter type — hierarchy without a second widget. */
+#analysis .an-view .an-stats.is-detail{margin-top:var(--sp-2,8px)}
+#analysis .an-view .an-stats.is-detail .an-stat{padding:11px 16px 12px}
+#analysis .an-view .an-stats.is-detail .an-stat-label{min-height:0}
+#analysis .an-view .an-stats.is-detail .an-stat-value{font-size:19px;font-weight:var(--fw-semibold,600)}
+/* A stat that is itself the warning (強制通過>0) carries a warn dot + ink. */
+#analysis .an-view .an-stat.is-warn .an-stat-label::before{
+  content:"";flex:none;width:6px;height:6px;border-radius:50%;
+  background:var(--warn,#F5B05A);
+}
+#analysis .an-view .an-stat.is-warn .an-stat-value{color:var(--warn-ink,#8A5A12)}
+@media(max-width:880px){
+  #analysis .an-view .an-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:460px){
+  #analysis .an-view .an-stats{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ---- ranked-location table (最も混んだ通路) -------------------------------
+   The wait column reuses the .an-util bar vocabulary from 工程別分析 so "how
+   much worse is the worst one" is legible before the digits are read. */
+#analysis .an-view .an-tbl th.an-rank,
+#analysis .an-view .an-tbl td.an-rank{
+  width:38px;text-align:left;padding-left:12px;   /* clears the .an-flag spine */
+  color:var(--ink-tertiary,#8195a8);
+  font-size:var(--fs-xs,12px);font-variant-numeric:tabular-nums;font-weight:500;
+}
+#analysis .an-view .an-tbl tbody tr.an-flag td.an-rank{color:var(--warn-ink,#8A5A12);font-weight:700}
+/* The place name is the row's subject: left-aligned, and it absorbs the slack
+   so the numeric columns stay pinned to the right edge. */
+#analysis .an-view .an-tbl th.an-where,
+#analysis .an-view .an-tbl td.an-where{text-align:left;width:100%}
+
+/* ============================================================
+   PLACEHOLDER — no project / loading / failed fetch
+   ------------------------------------------------------------
+   These three states used to be one bare grey <p> each, which read as "the
+   page is broken" rather than "there is nothing here yet". Same plate as the
+   other empty states in the app: glyph + one line of what + one line of how.
+   ============================================================ */
+#analysis .an-ph{
+  display:flex;gap:18px;align-items:center;max-width:560px;margin:56px auto;
+  padding:22px 24px;border:1px dashed var(--line-strong,rgba(150,172,200,.22));
+  border-radius:var(--r-card,10px);background:var(--bg-sunken,transparent);
+}
+#analysis .an-ph-ic{flex:none;color:var(--ink-faint,#8195a8)}
+#analysis .an-ph-title{
+  font-size:var(--fs-body,14px);font-weight:var(--fw-semibold,600);
+  color:var(--ink-primary,inherit);line-height:1.5;
+}
+#analysis .an-ph-hint{
+  margin-top:4px;font-size:var(--fs-xs,12px);line-height:1.65;
+  color:var(--ink-tertiary,#8195a8);
+}
+#analysis .an-ph--loading{border-style:solid;border-color:var(--line-hair,rgba(255,255,255,.08))}
+#analysis .an-ph--loading .an-ph-ic{animation:an-ph-pulse 1.5s var(--ease,ease) infinite}
+@keyframes an-ph-pulse{0%,100%{opacity:.35}50%{opacity:.85}}
+#analysis .an-ph--error{
+  border-style:solid;border-color:var(--bad-line,rgba(255,90,120,.3));
+  background:var(--bad-tint,rgba(255,90,120,.08));
+}
+#analysis .an-ph--error .an-ph-ic{color:var(--bad,#C4453F)}
+#analysis .an-ph--error .an-ph-title{color:var(--bad-ink,#97322E)}
+@media (prefers-reduced-motion: reduce){
+  #analysis .an-ph--loading .an-ph-ic{animation:none;opacity:.6}
+}
 
 /* prefers-reduced-motion: stop all, land at resting state with real values */
 @media (prefers-reduced-motion: reduce){
   #analysis .an-view *{animation:none!important;transition:none!important}
   #analysis .an-view .kpi-hero-cell,
   #analysis .an-view .kpi-card,
+  #analysis .an-view .an-stat,
   #analysis .an-view .callout,
   #analysis .an-view .chart-card{opacity:1!important;transform:none!important}
   #analysis .an-view .an-spark polyline{stroke-dashoffset:0!important}
@@ -405,6 +563,34 @@ function iconSvg(name) {
   return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" '
     + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
     + 'stroke-linejoin="round">' + inner + '</svg>';
+}
+
+// ---- placeholder states (no project / loading / failed fetch) ---------------
+
+// 34px outline glyphs, decorative — the sentence beside them carries the meaning.
+const PH_GLYPH = {
+  empty: '<path d="M3 21h18"/><rect x="4" y="12" width="4" height="6" rx="1"/>'
+    + '<rect x="10" y="8" width="4" height="10" rx="1"/>'
+    + '<rect x="16" y="14" width="4" height="4" rx="1"/><path d="M4 6h7"/>',
+  loading: '<path d="M3 21h18"/><rect x="4" y="14" width="4" height="4" rx="1"/>'
+    + '<rect x="10" y="11" width="4" height="7" rx="1"/>'
+    + '<rect x="16" y="8" width="4" height="10" rx="1"/>',
+  error: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+};
+
+function buildPlaceholder(kind, title, hint) {
+  const box = el('div', { class: 'an-ph an-ph--' + kind });
+  const ic = el('div', { class: 'an-ph-ic' });
+  ic.innerHTML = '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" '
+    + 'stroke="currentColor" stroke-width="1.4" stroke-linecap="round" '
+    + 'stroke-linejoin="round" aria-hidden="true">'
+    + (PH_GLYPH[kind] || PH_GLYPH.empty) + '</svg>';
+  box.appendChild(ic);
+  const main = el('div', { class: 'an-ph-main' });
+  main.appendChild(el('div', { class: 'an-ph-title' }, title));
+  if (hint) main.appendChild(el('div', { class: 'an-ph-hint' }, hint));
+  box.appendChild(main);
+  return box;
 }
 
 // ---- callouts ("指摘 → 提案") -----------------------------------------------
@@ -458,7 +644,13 @@ function buildCallout(ins) {
   card.appendChild(main);
 
   if (ins.metric != null && ins.metric !== '') {
-    card.appendChild(el('div', { class: 'c-metric' }, String(ins.metric)));
+    const metric = el('div', { class: 'c-metric' }, String(ins.metric));
+    // Optional unit: a bare "3" floating at 22px reads as a decoration; "3 件"
+    // reads as a count. Additive — payload insights that omit it are unchanged.
+    if (ins.metric_unit) {
+      metric.appendChild(el('span', { class: 'c-metric-unit' }, ins.metric_unit));
+    }
+    card.appendChild(metric);
   }
   return card;
 }
@@ -503,16 +695,15 @@ function fmtCount(value, decimals) {
   return neg + g + (frac ? '.' + frac : '');
 }
 
-// A 60x20 sparkline whose slope encodes the delta direction. Purely a visual
-// flourish keyed off the existing delta.dir — it invents no data labels and is
-// drawn-on once. `dir` is 'up' | 'down'.
+// A 60x20 direction glyph whose slope encodes delta.dir. Deliberately a CLEAN
+// straight line: an earlier noisy 8-point version read as a tiny time series
+// sitting beside real numbers — on a page whose whole contract is "every figure
+// comes from the log", an invented wiggle is a lie in miniature. A straight
+// diagonal reads as iconography, not data. `dir` is 'up' | 'down'.
 function deltaSparkline(dir) {
   const up = dir === 'up';
-  // Gentle, slightly noisy monotone trend (8 points across 60px).
-  const ys = up
-    ? [15, 14, 14.5, 12, 12.5, 9, 9.5, 6]
-    : [6, 7, 6.5, 9, 8.5, 11, 11.5, 14];
-  const pts = ys.map((y, i) => `${(i * 60) / 7},${y}`).join(' ');
+  const ys = up ? [15, 5] : [5, 15];
+  const pts = ys.map((y, i) => `${i * 60},${y}`).join(' ');
   const svg = svgEl('svg', { class: 'an-spark', width: '60', height: '20',
     viewBox: '0 0 60 20', 'aria-hidden': 'true' });
   svg.appendChild(svgEl('polyline', { fill: 'none', stroke: 'currentColor',
@@ -907,7 +1098,10 @@ const STAGE_WAIT_KEY = {
 function buildStageTable(labels, values, peakLabel, raw) {
   const wrap = el('div', { class: 'chart-card' });
   wrap.appendChild(el('div', { class: 'chart-title' }, '工程別 分析'));
-  wrap.appendChild(el('div', { class: 'chart-sub' }, '差は色でなく構造（左罫線・帯・右揃え）で示す'));
+  // (was 「差は色でなく構造…で示す」— a note about how the table is DRAWN. The
+  // reader needs to know what it SAYS; the drawing speaks for itself.)
+  wrap.appendChild(el('div', { class: 'chart-sub' },
+    '工程ごとの稼働率と待ち。最繁忙（律速）の工程を強調しています。'));
 
   const table = el('table', { class: 'an-tbl' });
   const thead = el('thead');
@@ -962,7 +1156,7 @@ function buildStageTable(labels, values, peakLabel, raw) {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-  wrap.appendChild(table);
+  wrap.appendChild(scrollWrap(table));
 
   // restrained bottleneck note (only when a bottleneck row is present).
   if (bottleneckShown && peakLabel) {
@@ -1123,6 +1317,11 @@ function cellCentreM(cell, gridM) {
   return [Math.round((cell[0] + 0.5) * gridM), Math.round((cell[1] + 0.5) * gridM)];
 }
 
+// The six congestion read-outs, in reading order. The first three answer "how
+// bad" (headline tier); the rest are the breakdown behind them (detail tier) —
+// see buildStatPanels, which splits the list at LEAD_STATS.
+const LEAD_STATS = 3;
+
 function congestionKpiItems(raw) {
   const items = [];
   const push = (label, value, unit) => items.push({ label, value, unit });
@@ -1145,22 +1344,67 @@ function congestionKpiItems(raw) {
     const fp = raw.congestion_forced_passes;
     // レプリケーション平均は端数になる (10repで1回 ⇒ 0.1)。丸めて「0回」と
     // 言いながら直下で警告する矛盾を避け、端数はそのまま1桁で見せる。
-    push('強制通過', fp >= 1 ? Math.round(fp) : fp.toFixed(1), '回');
+    items.push({
+      label: '強制通過', value: fp >= 1 ? Math.round(fp) : fp.toFixed(1),
+      unit: '回', warn: true,
+    });
   }
   return items;
 }
 
+// One hairline-divided plate of stats. `detail` renders the quieter second tier.
+function buildStatPanel(items, detail) {
+  const panel = el('div', { class: 'an-stats' + (detail ? ' is-detail' : '') });
+  items.forEach((it) => {
+    const cell = el('div', { class: 'an-stat' + (it.warn ? ' is-warn' : '') });
+    cell.appendChild(el('div', { class: 'an-stat-label' }, it.label));
+    const v = el('div', { class: 'an-stat-value num' });
+    v.appendChild(valueSpan(it.value, it.unit));
+    cell.appendChild(v);
+    panel.appendChild(cell);
+  });
+  return panel;
+}
+
+// Headline plate + (when there are more) the breakdown plate under it. A single
+// short list stays one plate — never a plate of one cell next to empty space.
+function buildStatPanels(items) {
+  const out = [];
+  if (!items.length) return out;
+  if (items.length <= LEAD_STATS + 1) {
+    out.push(buildStatPanel(items, false));
+    return out;
+  }
+  out.push(buildStatPanel(items.slice(0, LEAD_STATS), false));
+  out.push(buildStatPanel(items.slice(LEAD_STATS), true));
+  return out;
+}
+
 // Top congested cells as a small table. `gridM` (the model's lattice pitch) turns
 // a cell index into floor metres; without it the cell is named as a cell.
+// A header cell whose unit is set apart from its label (so the unit never has to
+// be repeated on every row).
+function unitTh(label, unit) {
+  const th = el('th', null, label);
+  if (unit) th.appendChild(el('span', { class: 'u' }, unit));
+  return th;
+}
+
 function buildTopCellsTable(top, gridM) {
   const rows = top.slice(0, TOP_CELLS_SHOWN).filter((r) => r && typeof r === 'object');
   if (!rows.length) return null;
-  const table = el('table', { class: 'an-tbl' });
+  const table = el('table', { class: 'an-tbl an-tbl--cols' });
   const thead = el('thead');
   const htr = el('tr');
-  ['最も混んだ通路', '待ち(秒)', '待ち回数'].forEach((h) => htr.appendChild(el('th', null, h)));
+  htr.appendChild(el('th', { class: 'an-rank' }, ''));
+  htr.appendChild(el('th', { class: 'an-where' }, '最も混んだ通路'));
+  htr.appendChild(unitTh('待ち', '秒'));
+  htr.appendChild(unitTh('待ち回数', '回'));
   thead.appendChild(htr);
   table.appendChild(thead);
+  // Worst-first, so the bar length is read against the row that tops the list.
+  const worst = rows.reduce(
+    (a, r) => Math.max(a, isNum(r.wait_s) ? r.wait_s : 0), 0);
   const tbody = el('tbody');
   rows.forEach((r, i) => {
     const tr = el('tr', i === 0 ? { class: 'an-flag' } : null);
@@ -1168,9 +1412,25 @@ function buildTopCellsTable(top, gridM) {
     const where = m
       ? `約 (${group(m[0])}, ${group(m[1])}) m 付近`
       : (Array.isArray(r.cell) ? `格子セル (${r.cell.join(', ')})` : '—');
-    tr.appendChild(el('td', null, where));
-    tr.appendChild(el('td', { class: 'num' },
+    tr.appendChild(el('td', { class: 'an-rank' }, String(i + 1)));
+    tr.appendChild(el('td', { class: 'an-where' }, where));
+
+    // 待ち: number + a proportional bar (same .an-util vocabulary as 工程別分析)
+    // so "how much worse is the worst aisle" lands before the digits are read.
+    const waitTd = el('td');
+    const cell = el('span', { class: 'an-util' });
+    cell.appendChild(el('span', { class: 'num' },
       isNum(r.wait_s) ? group(Math.round(r.wait_s * 10) / 10) : '—'));
+    const bar = el('span', { class: 'an-util-bar' });
+    const fill = el('i', { class: i === 0 ? 'an-w' : '' });
+    const pct = (worst > 0 && isNum(r.wait_s))
+      ? Math.max(0, Math.min(100, (r.wait_s / worst) * 100)) : 0;
+    fill.style.width = pct + '%';
+    bar.appendChild(fill);
+    cell.appendChild(bar);
+    waitTd.appendChild(cell);
+    tr.appendChild(waitTd);
+
     tr.appendChild(el('td', { class: 'num' },
       isNum(r.hits) ? group(Math.round(r.hits * 10) / 10) : '—'));
     tbody.appendChild(tr);
@@ -1187,7 +1447,9 @@ function buildCongestionSection(raw, gridM) {
   if (!isNum(waits) || waits <= 0) return null;
 
   const sec = el('section', { class: 'an-section' });
-  sec.appendChild(el('h2', { class: 'an-section-title' }, '通路の混雑（通路干渉）'));
+  const title = el('h2', { class: 'an-section-title' }, '通路の混雑（通路干渉）');
+  title.appendChild(el('span', { class: 'sub' }, '実行時に計測した待ち'));
+  sec.appendChild(title);
 
   const card = el('div', { class: 'chart-card' });
   card.appendChild(el('div', { class: 'chart-title' }, '通路の待ち時間'));
@@ -1195,27 +1457,16 @@ function buildCongestionSection(raw, gridM) {
     '同じ通路を同じ向きに通ろうとして、他の作業者の後ろで待った時間です。'
     + '移動時間に占める割合が大きいほど、通路幅・動線・棚の配置を見直す余地があります。'));
 
-  const items = congestionKpiItems(raw);
-  if (items.length) {
-    const grid = el('div', { class: 'kpi-grid' });
-    items.forEach((it) => {
-      const c = el('div', { class: 'kpi-card' });
-      c.appendChild(el('div', { class: 'kpi-label' }, it.label));
-      const v = el('div', { class: 'kpi-value num' });
-      v.appendChild(valueSpan(it.value, it.unit));
-      c.appendChild(v);
-      grid.appendChild(c);
-    });
-    card.appendChild(grid);
-  }
+  buildStatPanels(congestionKpiItems(raw)).forEach((p) => card.appendChild(p));
 
   const top = (raw.congestion && Array.isArray(raw.congestion.top_cells))
     ? raw.congestion.top_cells : [];
   const tbl = buildTopCellsTable(top, gridM);
   if (tbl) {
-    card.appendChild(el('div', { class: 'chart-sub', style: 'margin-top:14px;margin-bottom:6px' },
-      '待ちが積み上がった場所です。「通路が狭い」ではなく「この通路」が直す対象になります。'));
-    card.appendChild(tbl);
+    card.appendChild(el('div', { class: 'an-subhead' }, '待ちが積み上がった場所'));
+    card.appendChild(el('div', { class: 'chart-sub' },
+      '「通路が狭い」ではなく「この通路」が直す対象になります。'));
+    card.appendChild(scrollWrap(tbl));
   }
   if (isNum(raw.congestion_forced_passes) && raw.congestion_forced_passes > 0) {
     const note = el('div', { class: 'an-tbl-note' });
@@ -1243,6 +1494,7 @@ function routeWarningCallouts(raw) {
       fact: `通路グラフで解決できず直線距離に縮退した移動が <span class="num">${group(Math.round(unroutable))}</span> 件。`
         + 'この分の移動距離・移動時間は実際より短く出ています。',
       metric: group(Math.round(unroutable)),
+      metric_unit: '件',
       action: '取込レイアウトの通路が塞がっていないか確認してください。',
     });
   }
@@ -1254,6 +1506,7 @@ function routeWarningCallouts(raw) {
       fact: `棚を突き抜けた移動が <span class="num">${group(Math.round(violations))}</span> 件。`
         + '経路グラフがその棚を見ていないため、移動距離が実際より短く出ています。',
       metric: group(Math.round(violations)),
+      metric_unit: '件',
       action: 'レイアウトの棚定義（位置・大きさ）を確認してください。',
     });
   }
@@ -1287,7 +1540,10 @@ function countUp(span, dur) {
 //    sparklines + rise charts once. No loops; will-change cleared on settle.
 function animateView(root) {
   const numSpans = Array.from(root.querySelectorAll('.num[data-count]'));
-  const cards = Array.from(root.querySelectorAll('.kpi-hero-cell, .kpi-card'));
+  // Every card that holds a stamped number MUST be in this list: the sequence
+  // zeroes each .num[data-count] up front and only the cards listed here ever
+  // count it back up (an omitted card renders a permanent 0).
+  const cards = Array.from(root.querySelectorAll('.kpi-hero-cell, .kpi-card, .an-stat'));
   const callouts = Array.from(root.querySelectorAll('.callout, .chart-card'));
   const sparks = Array.from(root.querySelectorAll('.an-spark'));
   const charts = Array.from(root.querySelectorAll('svg.an-chart-rise'));
@@ -1482,8 +1738,19 @@ function render(targetEl, payload) {
 
   // 経路の警告 (棚貫通 / 経路グラフ未解決): correctness first — these say the
   // run's own travel figures are understated, so they sit above the read-out
-  // they qualify. Nothing renders when both counters are zero/absent.
-  routeWarningCallouts(raw).forEach((ins) => root.appendChild(buildCallout(ins)));
+  // they qualify. Nothing renders when both counters are zero/absent. They get
+  // their own titled section: unlabelled red plates between the verdict and
+  // 「自動で見つけた注目ポイント」 read as part of neither.
+  const warnings = routeWarningCallouts(raw);
+  if (warnings.length) {
+    const wsec = el('section', { class: 'an-section' });
+    const wtitle = el('h2', { class: 'an-section-title' }, '先に確認したい点');
+    wtitle.appendChild(el('span', { class: 'sub' },
+      'この結果の移動距離は実際より短く出ています'));
+    wsec.appendChild(wtitle);
+    warnings.forEach((ins) => wsec.appendChild(buildCallout(ins)));
+    root.appendChild(wsec);
+  }
 
   root.appendChild(buildInsightsSection(insights));
   root.appendChild(buildKpiSection(kpis, data.ci, data.rep_day));
@@ -1505,15 +1772,17 @@ function render(targetEl, payload) {
 export async function mountAnalysis(targetEl, projectName) {
   if (!targetEl) return;
   // No project yet: show a friendly prompt instead of fetching /projects/null.
+  injectStyle();
   if (typeof projectName !== 'string' || !projectName.trim()) {
     disposeAnalysis(targetEl);
     targetEl.innerHTML = '';
-    targetEl.appendChild(el('p', { class: 'c-fact' },
-      '先にプロジェクトを作成して「実行」すると、ここに分析が表示されます。'));
+    targetEl.appendChild(buildPlaceholder('empty', 'まだ分析するデータがありません',
+      'プロジェクトを作成して「▶実行」すると、判定・KPI・改善提案がここに並びます。'));
     return;
   }
   targetEl.innerHTML = '';
-  targetEl.appendChild(el('p', { class: 'chart-sub' }, '分析を読み込み中…'));
+  targetEl.appendChild(buildPlaceholder('loading', '分析を読み込み中…',
+    '実行結果からKPIと注目ポイントを組み立てています。'));
 
   let payload = null;
   try {
@@ -1523,8 +1792,8 @@ export async function mountAnalysis(targetEl, projectName) {
     payload = await res.json();
   } catch (err) {
     targetEl.innerHTML = '';
-    targetEl.appendChild(el('p', { class: 'c-fact' },
-      '分析データを取得できませんでした。'));
+    targetEl.appendChild(buildPlaceholder('error', '分析データを取得できませんでした',
+      '通信に失敗した可能性があります。ページを再読み込みするか、もう一度「▶実行」してください。'));
     return;
   }
 

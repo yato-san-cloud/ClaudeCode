@@ -3,133 +3,349 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>chrono-lens v1</title>
+<title>chrono-lens</title>
+<meta name="color-scheme" content="dark">
 <style>
-/* ============================================================ 意匠は最小限。
-   v1 は機構優先: 動く・正しい・軽い。                                        */
+/* ============================================================================
+   chrono-lens v2 — 意匠。プロセスマイニング×倉庫の「分析ツール」の品位を狙う:
+   落ち着いた暗色1本 (ライト対応はしない)・情報階層 (ラン→KPI→ビュー)・
+   等幅数字・角丸/余白/罫線の統一。組み立ては
+     ① トークン (色/半径/影/字)  ② プリミティブ (btn/field/chip/badge/kbd)
+     ③ レイアウト (header / side / center / views)  ④ 画面固有
+   キャンバスは CSS 変数を読めないので、描画色は JS の `C` と対で持つ
+   (§0 のコメント参照。片方だけ変えない)。外部依存ゼロ: フォントもCDNも読まない。
+   ========================================================================= */
 :root{
-  --bg:#0d1117; --bg2:#141b24; --bg3:#1b2532; --line:#2a3644;
-  --fg:#e6edf3; --fg2:#9fb0c3; --fg3:#6b7f95;
-  --accent:#4fc3f7; --warn:#ffb74d; --err:#ff6b6b; --ok:#7bd88f;
-  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  /* 面: 奥から手前へ 4段 */
+  --bg:#0e1217; --panel:#151b24; --elev:#19202a; --ctl:#1c2530; --ctl-h:#25303e;
+  --line:#26313f; --line-soft:#1d2632;
+  /* 文字: 主/従/補 */
+  --fg:#e4eaf1; --fg2:#9dabbb; --fg3:#69788a;
+  /* 意味色: 青=選択/主軸, 橙=待機(警告), 赤=違反, 緑=一致。
+     青×橙は色覚多様性でも分離する組 (Okabe-Ito 由来)。アクタ色は橙帯を空ける。 */
+  --accent:#5aa9e6; --accent-soft:rgba(90,169,230,.14); --accent-line:rgba(90,169,230,.45);
+  --wait:#e8a33d; --err:#f0736f; --ok:#57bd91;
+  --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,"DejaVu Sans Mono","Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",
+         Meiryo,system-ui,sans-serif;
+  --r-s:6px; --r-m:9px; --r-l:14px;
+  --sh:0 1px 2px rgba(0,0,0,.45),0 10px 28px rgba(0,0,0,.38);
+  --head:52px;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);
-  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
-  overflow:hidden}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.55 var(--sans);overflow:hidden;
+  -webkit-font-smoothing:antialiased}
 .hidden{display:none !important}
-button,.btn{background:var(--bg3);color:var(--fg);border:1px solid var(--line);
-  border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px}
-button:hover,.btn:hover{background:#243244;border-color:#3d5068}
-button:disabled{opacity:.45;cursor:default}
-button.on{background:var(--accent);color:#04121b;border-color:var(--accent);font-weight:600}
-select,input[type=number]{background:var(--bg3);color:var(--fg);border:1px solid var(--line);
-  border-radius:4px;padding:3px 5px;font-size:12px;font-family:var(--mono)}
-input[type=range]{accent-color:var(--accent);vertical-align:middle}
-.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+::selection{background:rgba(90,169,230,.32)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+*::-webkit-scrollbar{width:11px;height:11px}
+*::-webkit-scrollbar-thumb{background:#2a3543;border:3px solid transparent;background-clip:content-box;
+  border-radius:8px}
+*::-webkit-scrollbar-thumb:hover{background:#3a4859;background-clip:content-box}
+*::-webkit-scrollbar-track{background:transparent}
 
-#top{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--bg2);
-  border-bottom:1px solid var(--line);height:44px}
-#top h1{margin:0;font-size:15px;letter-spacing:.06em;font-weight:600}
-#top h1 em{font-style:normal;color:var(--accent)}
-#top .ver{font-size:10px;color:var(--fg3);margin-left:4px}
-#runinfo{font-family:var(--mono);font-size:11px;color:var(--fg2);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;max-width:46vw}
+/* ---------------------------------------------------- ② プリミティブ */
+button,.btn{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  background:var(--ctl);color:var(--fg);border:1px solid var(--line);border-radius:var(--r-s);
+  padding:5px 11px;font:500 12px/1.25 var(--sans);cursor:pointer;white-space:nowrap;
+  transition:background .12s ease,border-color .12s ease,color .12s ease}
+button:hover,.btn:hover{background:var(--ctl-h);border-color:#35455a}
+button:disabled{opacity:.4;cursor:default}
+button.on{background:var(--accent-soft);border-color:var(--accent-line);color:#cfe6fa}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#07131d;font-weight:600}
+.btn.primary:hover{background:#71b8ee;border-color:#71b8ee}
+.btn.quiet{background:transparent;border-color:transparent;color:var(--fg2)}
+.btn.quiet:hover{background:var(--ctl);border-color:var(--line);color:var(--fg)}
+select,input[type=number],input[type=text]{background:var(--ctl);color:var(--fg);
+  border:1px solid var(--line);border-radius:var(--r-s);padding:4px 7px;font-size:12px;
+  font-family:var(--mono);font-variant-numeric:tabular-nums}
+select{font-family:var(--sans);padding-right:4px}
+select:hover,input:hover{border-color:#35455a}
+input[type=number]::-webkit-inner-spin-button{opacity:.3}
+input[type=range]{-webkit-appearance:none;appearance:none;height:16px;background:transparent;cursor:pointer;
+  vertical-align:middle}
+input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:#222c39}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--accent);border:2px solid #0e1217;margin-top:-4px}
+input[type=range]:hover::-webkit-slider-thumb{background:#7cbcee}
+.chk{display:inline-flex;align-items:center;gap:6px;color:var(--fg2);font-size:11.5px;cursor:pointer;
+  user-select:none;padding:4px 8px;border:1px solid transparent;border-radius:var(--r-s)}
+.chk:hover{background:var(--ctl);border-color:var(--line);color:var(--fg)}
+.chk input{accent-color:var(--accent);margin:0}
+.field{display:inline-flex;align-items:center;height:27px;padding:0 9px;background:var(--ctl);
+  border:1px solid var(--line);border-radius:var(--r-s)}
+.field>span{color:var(--fg3);font-size:11px;margin-right:8px}
+.field>em{font-style:normal;color:var(--fg3);font-size:11px;margin-left:5px}
+.field input{background:transparent;border:0;padding:0;width:74px;text-align:right;color:var(--fg);
+  font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px}
+.field input:focus{outline:none}
+.field:focus-within{border-color:var(--accent-line);background:#1e2836}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+  background:var(--ctl);border:1px solid var(--line);color:var(--fg2);
+  font:11px/1.4 var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip b{color:var(--fg);font-weight:600}
+.chip .k{color:var(--fg3)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:999px;
+  font:600 10.5px/1.7 var(--sans);border:1px solid;white-space:nowrap}
+.badge.ok{color:#8ee0bb;border-color:rgba(87,189,145,.42);background:rgba(87,189,145,.11)}
+.badge.warn{color:#f0c281;border-color:rgba(232,163,61,.42);background:rgba(232,163,61,.11)}
+.badge.error{color:#ff9f9b;border-color:rgba(240,115,111,.42);background:rgba(240,115,111,.11)}
+.badge.info,.badge.mute{color:var(--fg3);border-color:var(--line);background:transparent}
+.kbd{display:inline-block;min-width:16px;padding:1px 4px;border-radius:4px;border:1px solid var(--line);
+  background:#1a222d;color:var(--fg3);font:10px/1.35 var(--mono);text-align:center}
+.help{position:relative;display:inline-flex;align-items:center;justify-content:center;
+  width:18px;height:18px;border-radius:50%;border:1px solid var(--line);background:var(--ctl);
+  color:var(--fg3);font:10px/1 var(--sans);cursor:help;user-select:none}
+.help:hover{color:var(--fg);border-color:#3a4b60}
+.help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 8px);
+  background:#101822;border:1px solid var(--line);border-radius:var(--r-s);padding:8px 10px;
+  font:11px/1.75 var(--sans);color:var(--fg2);white-space:pre;box-shadow:var(--sh);
+  opacity:0;pointer-events:none;transition:opacity .12s ease;z-index:40}
+.help:hover::after{opacity:1}
+.lg{display:inline-flex;align-items:center;gap:6px;font:11px/1 var(--sans);color:var(--fg3)}
+.lg i{display:block;width:15px;height:4px;border-radius:2px;background:var(--wait)}
+.legend{display:inline-flex;align-items:center;gap:7px;font:10.5px/1 var(--mono);color:var(--fg3);
+  font-variant-numeric:tabular-nums}
+.legend canvas{display:block;border-radius:3px;border:1px solid var(--line)}
 .spacer{flex:1}
+.readout{font:11px/1.4 var(--mono);font-variant-numeric:tabular-nums;color:var(--fg3);white-space:nowrap;
+  min-width:0;overflow:hidden;text-overflow:ellipsis}  /* 折り返さず縮む (ツールバーは1行) */
+.readout b{color:var(--fg2);font-weight:600}
+.readout .sp{color:#39485a;margin:0 6px}
 
-#drop{position:absolute;inset:44px 0 0 0;display:flex;align-items:center;justify-content:center;
-  flex-direction:column;gap:14px;text-align:center;padding:24px}
-#drop .box{border:2px dashed var(--line);border-radius:12px;padding:34px 50px;max-width:760px}
-#drop h2{margin:0 0 8px;font-size:18px;font-weight:600}
-#drop p{margin:5px 0;color:var(--fg2);font-size:12.5px}
-#drop code{font-family:var(--mono);color:var(--accent);font-size:12px}
-body.dragging #drop .box{border-color:var(--accent);background:#12202c}
+/* ---------------------------------------------------- ③ ヘッダ */
+#top{display:flex;align-items:center;gap:14px;height:var(--head);padding:0 14px;
+  background:linear-gradient(180deg,#181f29,#131922);border-bottom:1px solid var(--line);
+  position:relative;z-index:12}
+#brand{display:flex;align-items:center;gap:10px;flex:none}
+#brand svg{width:23px;height:23px;color:var(--accent)}
+#brand h1{margin:0;font:600 15px/1.15 var(--sans);letter-spacing:.015em}
+#brand h1 em{font-style:normal;color:var(--accent);padding:0 1px}
+#brand .ver{display:block;margin-top:2px;font:9.5px/1 var(--mono);color:var(--fg3);letter-spacing:.04em}
+#runinfo{display:flex;align-items:center;gap:6px;overflow:hidden;min-width:0}
+#runinfo .chip{max-width:34vw}
+#runinfo .chip b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-#report{position:absolute;inset:44px 0 0 0;overflow:auto;padding:16px 20px;background:var(--bg)}
-#report h2{margin:0 0 4px;font-size:16px}
-#report .lead{color:var(--fg2);margin:0 0 14px;font-size:12.5px}
-table.rep{border-collapse:collapse;width:100%;max-width:1200px;font-size:12px}
-table.rep th,table.rep td{border:1px solid var(--line);padding:5px 8px;text-align:left;
-  vertical-align:top}
-table.rep th{background:var(--bg3);color:var(--fg2);font-weight:600;white-space:nowrap}
-table.rep td.sev{white-space:nowrap;font-weight:600}
-td.sev.error{color:var(--err)} td.sev.warn{color:var(--warn)} td.sev.info{color:var(--fg3)}
-table.rep td.ex{font-family:var(--mono);font-size:11px;color:var(--fg2);white-space:pre-wrap;
-  word-break:break-all;max-width:430px}
-.badge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;
-  font-family:var(--mono);border:1px solid}
-.badge.error{color:var(--err);border-color:var(--err)}
-.badge.warn{color:var(--warn);border-color:var(--warn)}
-.badge.ok{color:var(--ok);border-color:var(--ok)}
+/* ---------------------------------------------------- ④ 空状態 (ドロップ) */
+#drop{position:absolute;inset:var(--head) 0 0 0;display:flex;align-items:center;justify-content:center;
+  padding:28px;overflow:auto}
+#drop .box{width:min(820px,100%);border:1px dashed #303e50;border-radius:var(--r-l);
+  background:linear-gradient(180deg,#151c26,#111721);padding:30px 34px 26px;box-shadow:var(--sh);
+  transition:border-color .15s ease,background .15s ease}
+body.dragging #drop .box{border-color:var(--accent);background:linear-gradient(180deg,#16242f,#121b26)}
+#drop h2{margin:0 0 6px;font:600 19px/1.35 var(--sans);letter-spacing:.01em}
+#drop .sub{margin:0 0 20px;color:var(--fg2);font-size:12.5px}
+#drop code{font-family:var(--mono);color:#9ccdf0;font-size:12px}
+.dz-files{display:grid;grid-template-columns:auto 1fr auto;align-items:center;
+  border:1px solid var(--line-soft);border-radius:var(--r-m);background:#12181f;padding:4px 13px}
+.dz-files>*{padding:7px 0;border-bottom:1px solid var(--line-soft)}   /* 列間隔は padding で
+  取る (grid-gap にすると罫線が列ごとに途切れて、表として読めなくなる) */
+.dz-files>*:nth-last-child(-n+3){border-bottom:0}
+.dz-files .f{font:11.5px/1.6 var(--mono);color:var(--fg);padding-right:16px}
+.dz-files .d{font-size:11.5px;color:var(--fg3);padding-right:14px}
+.dz-files .r{text-align:right}
+.badge.req{color:#a9cdec;border-color:var(--accent-line);background:var(--accent-soft)}
+.dz-views{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0 18px}
+.dz-views div{border:1px solid var(--line-soft);border-radius:var(--r-m);padding:10px 12px;
+  background:#12181f}
+.dz-views b{display:block;font:600 12px/1.5 var(--sans);color:var(--fg)}
+.dz-views b i{font-style:normal;color:var(--accent);margin-right:5px}
+.dz-views span{display:block;margin-top:3px;font-size:11px;color:var(--fg3);line-height:1.6}
+.dz-act{display:flex;align-items:center;gap:9px;margin:0 0 14px}
+.dz-act .or{color:var(--fg3);font-size:11.5px}
+.fine{margin:0;padding-top:13px;border-top:1px solid var(--line-soft);color:var(--fg3);
+  font-size:11px;line-height:1.7}
 
-#app{position:absolute;inset:44px 0 0 0;display:flex}
-#side{width:266px;min-width:266px;border-right:1px solid var(--line);background:var(--bg2);
-  overflow:auto;padding:10px 11px 30px}
-#side h3{margin:12px 0 6px;font-size:11px;letter-spacing:.09em;color:var(--fg3);
-  text-transform:uppercase;font-weight:700}
+/* ---------------------------------------------------- ④ 契約違反レポート */
+#report{position:absolute;inset:var(--head) 0 0 0;overflow:auto;padding:24px 26px 60px;background:var(--bg)}
+.rep-head{display:flex;gap:14px;align-items:flex-start;max-width:1180px;margin:0 0 16px}
+.rep-ic{flex:none;width:34px;height:34px;border-radius:var(--r-m);display:flex;align-items:center;
+  justify-content:center;font-size:16px;background:rgba(232,163,61,.12);
+  border:1px solid rgba(232,163,61,.34);color:#f0c281}
+.rep-ic.err{background:rgba(240,115,111,.12);border-color:rgba(240,115,111,.34);color:#ff9f9b}
+#report h2{margin:0 0 5px;font:600 17px/1.35 var(--sans)}
+#report .lead{color:var(--fg2);margin:0;font-size:12.5px;line-height:1.75;max-width:70ch}
+.rep-counts{margin-left:auto;display:flex;gap:6px;flex:none;padding-top:3px}
+table.rep{border-collapse:separate;border-spacing:0;width:100%;max-width:1180px;font-size:12px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-m);overflow:hidden}
+table.rep th{position:sticky;top:0;z-index:2;background:#1b222c;color:var(--fg2);
+  font:600 11px/1.7 var(--sans);text-align:left;padding:8px 11px;white-space:nowrap;
+  border-bottom:1px solid var(--line)}
+table.rep td{padding:8px 11px;vertical-align:top;border-bottom:1px solid var(--line-soft)}
+table.rep tbody tr:last-child td{border-bottom:0}
+table.rep tbody tr:hover{background:#1a212b}
+table.rep td.sev{white-space:nowrap}
+table.rep td.file,table.rep td.code{white-space:nowrap;font-family:var(--mono);font-size:11px}
+table.rep td.file{color:var(--fg2)}
+table.rep td.code code{background:#212b38;border:1px solid var(--line);border-radius:4px;
+  padding:1px 6px;color:#a8bed4;font-size:10.5px}
+table.rep td.msg{color:var(--fg);line-height:1.65;min-width:22ch}
+table.rep td.cnt{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;
+  color:var(--fg2);white-space:nowrap}
+table.rep td.ex{max-width:470px}
+table.rep td.ex code{display:block;font-family:var(--mono);font-size:10.5px;color:var(--fg2);
+  line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}  /* break-all は識別子の
+  途中で切れて実値が読めなくなるので、必要なときだけ折る */
+table.rep td.ex code+code{margin-top:3px}
+.lineno{display:inline-block;margin-right:7px;padding:0 5px;border-radius:4px;background:#243040;
+  color:#96acc2;font-size:10px}
+.rep-actions{display:flex;gap:8px;align-items:center;margin-top:16px;max-width:1180px}
+
+/* ---------------------------------------------------- ③ 本体 */
+#app{position:absolute;inset:var(--head) 0 0 0;display:flex}
+
+/* --- 左パネル: 「読む」場所 --- */
+#side{width:300px;min-width:300px;border-right:1px solid var(--line);background:var(--panel);
+  overflow:auto;padding:15px 15px 42px}
+#side h3{display:flex;align-items:center;gap:9px;margin:22px 0 9px;
+  font:700 10.5px/1 var(--sans);letter-spacing:.09em;color:var(--fg3)}
+#side h3::after{content:"";flex:1;height:1px;background:var(--line-soft)}
 #side h3:first-child{margin-top:0}
-.kv{display:flex;justify-content:space-between;gap:8px;padding:2px 0;font-size:12px}
-.kv .k{color:var(--fg2)}
-.kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
-.kv .v small{color:var(--fg3);font-size:10px}
-.srcnote{font-size:10.5px;color:var(--fg3);margin:3px 0 0;line-height:1.45}
-.util{display:grid;grid-template-columns:44px 1fr 44px;gap:5px;align-items:center;
-  font-size:11px;font-family:var(--mono);margin:2px 0}
-.util .bar{height:7px;background:var(--bg3);border-radius:3px;overflow:hidden}
-.util .bar i{display:block;height:100%;background:var(--accent)}
+.kv{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:3.5px 0;
+  font-size:12px}
+.kv+.kv{border-top:1px solid rgba(255,255,255,.03)}
+.kv .k{color:var(--fg2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv .v{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;
+  color:var(--fg)}
+.kv .v small{color:var(--fg3);font-size:10px;margin-left:3px}
+.kv .v .badge{margin-left:5px;vertical-align:1px}
+.kpi{background:var(--elev);border:1px solid var(--line-soft);border-radius:var(--r-m);
+  padding:10px 12px 9px;margin-bottom:8px}
+.kpi-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.kpi-k{color:var(--fg2);font-size:11.5px}
+.kpi-src{color:var(--fg3);font-size:10px;font-family:var(--mono)}
+.kpi-v{display:flex;align-items:baseline;gap:5px;margin-top:3px}
+.kpi-v b{font:600 19px/1.15 var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.01em;
+  color:var(--fg)}
+.kpi-v em{font-style:normal;color:var(--fg3);font-size:11px}
+.kpi-cmp{display:flex;align-items:center;gap:7px;margin-top:7px;padding-top:7px;
+  border-top:1px solid var(--line-soft);font-size:10.5px;color:var(--fg3)}
+.kpi-cmp .g{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg2)}
+.srcnote{font-size:10.5px;color:var(--fg3);margin:7px 0 0;line-height:1.7}
+.srcnote a{color:var(--accent);text-decoration:none}
+.srcnote a:hover{text-decoration:underline}
+.util{display:grid;grid-template-columns:9px 62px 1fr 34px;gap:8px;align-items:center;margin:4px 0;
+  font:11px/1.4 var(--mono);font-variant-numeric:tabular-nums}
+.util .dot{width:9px;height:9px;border-radius:2px}
+.util .id{color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.util .bar{height:6px;background:#202936;border-radius:3px;overflow:hidden}
+.util .bar i{display:block;height:100%;border-radius:3px;
+  background:linear-gradient(90deg,#3d78ab,var(--accent))}
+.util .pct{text-align:right;color:var(--fg2)}
+.ck{display:flex;align-items:center;gap:8px;padding:3.5px 0;font-size:12px}
+.ck .m{flex:none;width:15px;text-align:center;font-size:11px}
+.ck .m.ok{color:var(--ok)} .ck .m.no{color:var(--err)}
+.ck .k{color:var(--fg2);flex:1}
+.ck .v{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg)}
 
+/* --- 中央 --- */
 #center{flex:1;display:flex;flex-direction:column;min-width:0}
-#rangebar{padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg2)}
-#rangeCanvasWrap{position:relative;height:46px}
-#rangeCanvas{width:100%;height:46px;display:block;cursor:crosshair}
-#rangeCtl{display:flex;align-items:center;gap:8px;margin-top:5px;flex-wrap:wrap;font-size:11.5px}
-#rangeCtl .lbl{color:var(--fg3)}
-#tabs{display:flex;gap:2px;padding:6px 10px 0;background:var(--bg2);border-bottom:1px solid var(--line)}
-#tabs button{border-bottom-left-radius:0;border-bottom-right-radius:0;padding:5px 14px}
+#rangebar{padding:10px 13px 9px;background:var(--panel);border-bottom:1px solid var(--line)}
+#rangeCanvasWrap{position:relative;height:56px;border:1px solid var(--line-soft);
+  border-radius:var(--r-s);overflow:hidden;background:#111721}
+#rangeCanvas{width:100%;height:56px;display:block;cursor:crosshair}
+#rangeCtl{display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap}
+#rInfo{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+
+#tabs{display:flex;gap:3px;padding:9px 13px 0;background:var(--panel);
+  border-bottom:1px solid var(--line)}
+#tabs button{margin-bottom:-1px;border-radius:var(--r-s) var(--r-s) 0 0;background:transparent;
+  border-color:transparent;color:var(--fg2);padding:7px 15px 8px;font-size:12.5px}
+#tabs button:hover{background:var(--ctl);color:var(--fg)}
+#tabs button.on{background:var(--bg);color:var(--fg);border-color:var(--line);
+  border-bottom-color:var(--bg);font-weight:600}
+#tabs button .no{color:var(--fg3);font-weight:700;margin-right:5px}
+#tabs button.on .no{color:var(--accent)}
+#tabs button .kbd{margin-left:8px}
+
 #views{flex:1;position:relative;min-height:0}
 .view{position:absolute;inset:0;display:flex;flex-direction:column}
-.viewbar{display:flex;align-items:center;gap:9px;padding:5px 10px;background:var(--bg2);
-  border-bottom:1px solid var(--line);flex-wrap:wrap;font-size:11.5px}
-.viewbar .lbl{color:var(--fg3)}
+.viewbar{display:flex;align-items:center;gap:8px;padding:7px 13px;background:var(--panel);
+  border-bottom:1px solid var(--line);flex-wrap:wrap;min-height:41px}
+.grp{display:inline-flex;align-items:center;gap:7px}
+.lab{color:var(--fg3);font-size:11px;white-space:nowrap}
+.sep{width:1px;height:19px;background:var(--line);margin:0 3px}
 .cvwrap{flex:1;position:relative;min-height:0;background:var(--bg)}
 .cvwrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-.tip{position:absolute;pointer-events:none;background:#0b1219ee;border:1px solid var(--line);
-  border-radius:4px;padding:4px 7px;font-family:var(--mono);font-size:11px;white-space:pre;
-  z-index:5;color:var(--fg)}
-.hint{color:var(--fg3);font-size:10.5px}
-#loading{position:absolute;inset:44px 0 0 0;background:#0d1117f2;display:flex;
-  align-items:center;justify-content:center;flex-direction:column;gap:10px;z-index:20}
-#loading .bar{width:340px;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
-#loading .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s}
-#loadMsg{font-family:var(--mono);font-size:12px;color:var(--fg2)}
-.legend{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px}
-.legend .ramp{width:120px;height:9px;border:1px solid var(--line);border-radius:2px}
-.swatchrow{display:flex;flex-wrap:wrap;gap:3px 8px;padding:2px 0 0}
-.swatch{display:flex;align-items:center;gap:3px;font-family:var(--mono);font-size:10px;
-  color:var(--fg2)}
-.swatch i{width:9px;height:9px;border-radius:2px;display:block}
+.tip{position:absolute;pointer-events:none;background:rgba(14,20,28,.96);border:1px solid var(--line);
+  border-radius:var(--r-s);padding:6px 9px;font:11px/1.65 var(--mono);font-variant-numeric:tabular-nums;
+  white-space:pre;z-index:6;color:var(--fg);box-shadow:var(--sh)}
+#pSeekRow{display:flex;align-items:center;gap:13px;padding:8px 13px;background:var(--panel);
+  border-bottom:1px solid var(--line)}
+#pSeek{flex:1}
+#pPlay.on{background:var(--ctl);border-color:var(--line);color:var(--fg);font-weight:500}
+#pPlay.on:hover{background:var(--ctl-h)}
+#pClock{font:13px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--fg);min-width:196px;
+  text-align:right}
+#pClock i{font-style:normal;color:var(--fg3)}
+
+/* --- 読み込み中 --- */
+#loading{position:absolute;inset:var(--head) 0 0 0;background:rgba(14,18,23,.9);display:flex;
+  align-items:center;justify-content:center;z-index:20;backdrop-filter:blur(3px)}
+#loading .card{width:400px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r-l);padding:19px 21px;box-shadow:var(--sh)}
+#loading .ttl{font:600 12.5px/1.4 var(--sans);color:var(--fg);margin-bottom:11px;
+  display:flex;align-items:center;gap:8px}
+#loading .ttl::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);
+  animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+#loading .bar{height:5px;background:#202936;border-radius:3px;overflow:hidden}
+#loading .bar i{display:block;height:100%;width:0;border-radius:3px;
+  background:linear-gradient(90deg,#3d78ab,var(--accent));transition:width .12s ease}
+#loading .foot{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:9px}
+#loadMsg{font:11.5px/1.5 var(--mono);color:var(--fg2);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+#loadPct{font:11.5px/1.5 var(--mono);font-variant-numeric:tabular-nums;color:var(--fg3);flex:none}
 </style>
 </head>
 <body>
 
 <header id="top">
-  <h1>chrono<em>·</em>lens<span class="ver">v1 / WHSIM_CONTRACTS 1.0</span></h1>
+  <div id="brand">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.3" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M12 6.9V12l3.5 2.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M2.6 12h1.9M19.5 12h1.9M12 2.6v1.9M12 19.5v1.9" stroke="currentColor"
+            stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
+    </svg>
+    <div>
+      <h1>chrono<em>·</em>lens</h1>
+      <span class="ver">WHSIM_CONTRACTS 1.0</span>
+    </div>
+  </div>
   <div id="runinfo"></div>
   <div class="spacer"></div>
   <label class="btn">ファイル選択<input id="fileInput" type="file" multiple hidden
     accept=".geojson,.jsonl,.json"></label>
   <label class="btn">フォルダ選択<input id="dirInput" type="file" webkitdirectory hidden></label>
-  <button id="clearBtn" class="hidden">閉じる</button>
+  <button id="clearBtn" class="btn quiet hidden">閉じる</button>
 </header>
 
 <div id="drop">
   <div class="box">
-    <h2>runs/&lt;run_id&gt;/ をここにドロップ</h2>
-    <p>または右上の「ファイル選択」「フォルダ選択」から読み込む。</p>
-    <p>必須: <code>layout.geojson</code> / <code>events.jsonl</code> / <code>positions.jsonl</code>
-       　任意: <code>summary.json</code> / <code>meta.json</code> / <code>scenario.json</code></p>
-    <p class="hint">単一HTML・外部依存ゼロ。file:// のまま完全にオフラインで動く。
+    <h2><code>runs/&lt;run_id&gt;/</code> をここにドロップ</h2>
+    <p class="sub">WHSIM_CONTRACTS v1.0 のラン成果物を、<b>空間 × 時間</b>で読む。</p>
+    <div class="dz-views">
+      <div><b><i>①</i>ダイヤ (Marey)</b><span>誰が・いつ・どこで止まったか。待機は水平区間。</span></div>
+      <div><b><i>②</i>フロアヒートマップ</b><span>滞在/待機の秒数を平面に重ねる。最大セルを明示。</span></div>
+      <div><b><i>③</i>再生</b><span>軌跡をそのまま流す。残像とグローで流れを掴む。</span></div>
+    </div>
+    <div class="dz-files">
+      <span class="f">layout.geojson</span><span class="d">ラック/ノード/通路/ゾーン (local-meters)</span><span class="r"><span class="badge req">必須</span></span>
+      <span class="f">events.jsonl</span><span class="d">ダイヤの骨格・待機区間・KPI再計算</span><span class="r"><span class="badge req">必須</span></span>
+      <span class="f">positions.jsonl</span><span class="d">再生・ヒートマップ・移動距離</span><span class="r"><span class="badge req">必須</span></span>
+      <span class="f">summary.json</span><span class="d">記載KPI (再計算値と突き合わせる)</span><span class="r"><span class="badge mute">任意</span></span>
+      <span class="f">meta.json</span><span class="d">run_id / seed / generator</span><span class="r"><span class="badge mute">任意</span></span>
+      <span class="f">scenario.json</span><span class="d">アクタ数 / 速度 / dispatch</span><span class="r"><span class="badge mute">任意</span></span>
+    </div>
+    <div class="dz-act" style="margin-top:18px">
+      <button id="dzFile" class="btn primary">ファイルを選択</button>
+      <span class="or">または</span>
+      <button id="dzDir" class="btn">フォルダごと選択</button>
+    </div>
+    <p class="fine">単一HTML・外部依存ゼロ。<code>file://</code> のまま完全にオフラインで動く。
       読み込んだファイルはブラウザ内だけで処理され、どこにも送信しない。</p>
   </div>
 </div>
@@ -137,8 +353,11 @@ table.rep td.ex{font-family:var(--mono);font-size:11px;color:var(--fg2);white-sp
 <div id="report" class="hidden"></div>
 
 <div id="loading" class="hidden">
-  <div id="loadMsg">読み込み中…</div>
-  <div class="bar"><i id="loadBar"></i></div>
+  <div class="card">
+    <div class="ttl">ランを読み込み中</div>
+    <div class="bar"><i id="loadBar"></i></div>
+    <div class="foot"><span id="loadMsg">読み込み中…</span><span id="loadPct">0%</span></div>
+  </div>
 </div>
 
 <main id="app" class="hidden">
@@ -147,88 +366,117 @@ table.rep td.ex{font-family:var(--mono);font-size:11px;color:var(--fg2);white-sp
     <div id="rangebar">
       <div id="rangeCanvasWrap"><canvas id="rangeCanvas"></canvas></div>
       <div id="rangeCtl">
-        <span class="lbl">時間範囲</span>
-        <input id="rT0" type="number" step="1" style="width:92px">
-        <span class="lbl">〜</span>
-        <input id="rT1" type="number" step="1" style="width:92px">
-        <span class="lbl">秒</span>
-        <button id="rAll">全体</button>
-        <span id="rInfo" class="hint"></span>
+        <span class="lab">時間範囲</span>
+        <label class="field"><span>開始</span><input id="rT0" type="number" step="1"><em>s</em></label>
+        <label class="field"><span>終了</span><input id="rT1" type="number" step="1"><em>s</em></label>
+        <button id="rAll" class="btn quiet">全体に戻す</button>
+        <span class="help" data-tip="ミニマップ: ドラッグで範囲選択 / 選択の端をつまんで伸縮 / 中をドラッグで移動&#10;ダブルクリックで全体。3ビューと左パネルは同じ範囲を見る。">?</span>
+        <span id="rInfo"></span>
       </div>
     </div>
     <nav id="tabs">
-      <button data-view="marey" class="on">① ダイヤ (Marey)</button>
-      <button data-view="heat">② フロアヒートマップ</button>
-      <button data-view="play">③ 再生</button>
+      <button data-view="marey" class="on"><span class="no">①</span>ダイヤ (Marey)<span class="kbd">1</span></button>
+      <button data-view="heat"><span class="no">②</span>フロアヒートマップ<span class="kbd">2</span></button>
+      <button data-view="play"><span class="no">③</span>再生<span class="kbd">3</span></button>
     </nav>
     <div id="views">
 
       <div class="view" id="v-marey">
         <div class="viewbar">
-          <span class="lbl">縦軸</span>
-          <select id="mYMode">
-            <option value="node">ノード列 (events)</option>
-            <option value="proj">経路上位置 (positions)</option>
-          </select>
-          <label><input type="checkbox" id="mShowWait" checked> 待機を強調</label>
-          <label><input type="checkbox" id="mShowPts"> イベント点</label>
-          <span class="lbl">アクタ</span>
-          <select id="mActor"><option value="">全て</option></select>
-          <button id="mReset">全体表示</button>
-          <span class="hint">ホイール=時間ズーム / ドラッグ=パン / Shift+ドラッグ=範囲選択 / ダブルクリック=全体</span>
+          <div class="grp">
+            <span class="lab">縦軸</span>
+            <select id="mYMode">
+              <option value="node">ノード列 (events)</option>
+              <option value="proj">経路上位置 (positions)</option>
+            </select>
+          </div>
+          <div class="sep"></div>
+          <div class="grp">
+            <label class="chk"><input type="checkbox" id="mShowWait" checked>待機を強調</label>
+            <label class="chk"><input type="checkbox" id="mShowPts">イベント点</label>
+          </div>
+          <div class="sep"></div>
+          <div class="grp">
+            <span class="lab">アクタ</span>
+            <select id="mActor"><option value="">全て</option></select>
+          </div>
+          <button id="mReset" class="btn quiet">全体表示</button>
+          <span class="help" data-tip="ホイール = 時間ズーム&#10;ドラッグ = パン&#10;Shift+ドラッグ = 範囲選択&#10;ダブルクリック = 全体">?</span>
           <span class="spacer"></span>
-          <span id="mInfo" class="hint num"></span>
+          <span class="lg"><i></i>待機</span>
+          <div class="sep"></div>
+          <span id="mInfo" class="readout"></span>
         </div>
         <div class="cvwrap" id="mWrap"><canvas id="mCanvas"></canvas></div>
       </div>
 
       <div class="view hidden" id="v-heat">
         <div class="viewbar">
-          <span class="lbl">指標</span>
-          <select id="hMode">
-            <option value="dwell">滞在時間</option>
-            <option value="wait">待機時間</option>
-          </select>
-          <span class="lbl">セル</span>
-          <select id="hCell">
-            <option value="0.5">0.5 m</option>
-            <option value="1" selected>1.0 m</option>
-            <option value="2">2.0 m</option>
-            <option value="4">4.0 m</option>
-          </select>
-          <span class="lbl">濃度</span>
-          <input id="hAlpha" type="range" min="10" max="100" value="82" style="width:80px">
-          <label><input type="checkbox" id="hLog"> 対数</label>
-          <button id="hFit">全体表示</button>
-          <span class="legend"><span>0</span><canvas id="hRamp" class="ramp" width="120" height="9"></canvas><span id="hMax" class="num"></span></span>
+          <div class="grp">
+            <span class="lab">指標</span>
+            <select id="hMode">
+              <option value="dwell">滞在時間</option>
+              <option value="wait">待機時間</option>
+            </select>
+          </div>
+          <div class="sep"></div>
+          <div class="grp">
+            <span class="lab">セル</span>
+            <select id="hCell">
+              <option value="0.5">0.5 m</option>
+              <option value="1" selected>1.0 m</option>
+              <option value="2">2.0 m</option>
+              <option value="4">4.0 m</option>
+            </select>
+          </div>
+          <div class="grp">
+            <span class="lab">濃度</span>
+            <input id="hAlpha" type="range" min="10" max="100" value="82" style="width:78px">
+            <label class="chk"><input type="checkbox" id="hLog">対数</label>
+          </div>
+          <div class="sep"></div>
+          <span class="legend"><span id="hMetric">滞在</span><span>0</span>
+            <canvas id="hRamp" width="140" height="10"></canvas><span id="hMax"></span></span>
+          <button id="hFit" class="btn quiet">全体表示</button>
+          <span class="help" data-tip="ホイール = ズーム / ドラッグ = パン&#10;カーソルを乗せるとセルの秒数&#10;白丸 = 最大セル (値は再計算)">?</span>
           <span class="spacer"></span>
-          <span id="hInfo" class="hint num"></span>
+          <span id="hInfo" class="readout"></span>
         </div>
         <div class="cvwrap" id="hWrap"><canvas id="hCanvas"></canvas></div>
       </div>
 
       <div class="view hidden" id="v-play">
         <div class="viewbar">
-          <button id="pPlay">▶ 再生</button>
-          <span class="lbl">速度</span>
-          <select id="pSpeed">
-            <option value="0.5">0.5×</option><option value="1">1×</option>
-            <option value="2">2×</option><option value="5">5×</option>
-            <option value="10">10×</option><option value="30" selected>30×</option>
-            <option value="60">60×</option><option value="240">240×</option>
-          </select>
-          <span class="lbl">残像</span>
-          <input id="pTrail" type="range" min="1" max="120" value="30" style="width:80px">
-          <label><input type="checkbox" id="pGlow" checked> 加算グロー</label>
-          <label><input type="checkbox" id="pLabel"> ID表示</label>
-          <button id="pFit">全体表示</button>
+          <button id="pPlay" class="btn primary" style="min-width:98px">▶ 再生</button>
+          <div class="sep"></div>
+          <div class="grp">
+            <span class="lab">速度</span>
+            <select id="pSpeed">
+              <option value="0.5">0.5×</option><option value="1">1×</option>
+              <option value="2">2×</option><option value="5">5×</option>
+              <option value="10">10×</option><option value="30" selected>30×</option>
+              <option value="60">60×</option><option value="240">240×</option>
+            </select>
+          </div>
+          <div class="grp">
+            <span class="lab">残像</span>
+            <input id="pTrail" type="range" min="1" max="120" value="30" style="width:78px">
+          </div>
+          <div class="sep"></div>
+          <div class="grp">
+            <label class="chk"><input type="checkbox" id="pGlow" checked>加算グロー</label>
+            <label class="chk"><input type="checkbox" id="pLabel">ID表示</label>
+          </div>
+          <button id="pFit" class="btn quiet">全体表示</button>
+          <span class="help" data-tip="Space = 再生/一時停止&#10;ホイール = ズーム / ドラッグ = パン&#10;橙の輪 = 待機中のアクタ">?</span>
           <span class="spacer"></span>
-          <span id="pInfo" class="hint num"></span>
+          <span class="lg"><i style="border-radius:50%;width:9px;height:9px;background:none;border:1.5px solid var(--wait)"></i>待機中</span>
+          <div class="sep"></div>
+          <span id="pInfo" class="readout"></span>
         </div>
-        <div style="padding:4px 10px;background:var(--bg2);border-bottom:1px solid var(--line);
-                    display:flex;align-items:center;gap:8px">
-          <input id="pSeek" type="range" min="0" max="1000" value="0" style="flex:1">
-          <span id="pClock" class="num" style="font-size:12px;min-width:190px;text-align:right"></span>
+        <div id="pSeekRow">
+          <input id="pSeek" type="range" min="0" max="1000" value="0">
+          <span id="pClock"></span>
         </div>
         <div class="cvwrap" id="pWrap">
           <canvas id="pBase"></canvas><canvas id="pTrailCv"></canvas>
@@ -260,6 +508,30 @@ const REQUIRED_FILES = ["layout.geojson","events.jsonl","positions.jsonl"];
 const OPTIONAL_FILES = ["summary.json","meta.json","scenario.json"];
 const CRS_EXPECTED = "local-meters";
 
+/* 描画色。キャンバスは CSS 変数を読めないので :root と対で持つ (片方だけ変えない)。
+   意味づけ: 青=選択/主軸、橙=待機(警告)、灰青=躯体。すべて暗色地の上で読める明度。 */
+const C = {
+  ground:"#0e1217", plot:"#111823", frame:"#2b3644",
+  gridMajor:"#1f2937", gridMinor:"#182029", axis:"#6d7c8e", axisDim:"#55647a",
+  accent:"#5aa9e6", accentFill:"rgba(90,169,230,.16)", accentLine:"rgba(90,169,230,.7)",
+  wait:"#e8a33d", waitCap:"#ffc873", waitBand:"rgba(232,163,61,.85)",
+  rackFill:"rgba(124,146,172,.15)", rackLine:"rgba(150,172,196,.34)",
+  edge:"#2c3847", node:"#3d5063",
+  zoneFill:"rgba(90,169,230,.05)", zoneLine:"rgba(90,169,230,.3)", zoneText:"#51687d",
+  hist:"#2b4d68", histHi:"#3f7099", mask:"rgba(11,15,20,.68)",
+  mark:"#eaf2fa", plate:"rgba(12,18,25,.88)", label:"#c9d7e5"
+};
+const MONO = `ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace`;
+const fmono = (px, w) => `${w ? w + " " : ""}${px}px ${MONO}`;
+function roundRect(ctx, x, y, w, h, r){
+  const rr = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
+  ctx.beginPath();
+  ctx.moveTo(x+rr, y); ctx.lineTo(x+w-rr, y); ctx.quadraticCurveTo(x+w, y, x+w, y+rr);
+  ctx.lineTo(x+w, y+h-rr); ctx.quadraticCurveTo(x+w, y+h, x+w-rr, y+h);
+  ctx.lineTo(x+rr, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-rr);
+  ctx.lineTo(x, y+rr); ctx.quadraticCurveTo(x, y, x+rr, y); ctx.closePath();
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function isNum(v){ return typeof v === "number" && Number.isFinite(v); }
 function nf(v, d){
@@ -282,9 +554,15 @@ function hms(sec){
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+/* アクタ色。色相環を等分すると (a) 赤/緑が並んで色覚多様性で潰れ、(b) 待機の橙と
+   同じ帯に入って「アクタの線」と「待機の意味」が混ざる。そこで橙〜赤 (約 0-100°) を
+   空け、青緑〜青〜紫の帯だけを巡回し、周回ごとに明度/彩度を変えて分離を稼ぐ。 */
+const ACTOR_HUES = [203, 168, 258, 140, 288, 218, 184, 312, 236, 156];
+const ACTOR_TONE = [[66,62],[80,50],[54,74],[70,44]];   /* [彩度%, 明度%] */
 function actorColor(i, n){
-  const h = (i * 360 / Math.max(1, Math.min(n, 24)) + i * 47) % 360;
-  return `hsl(${h.toFixed(1)},72%,${58 + (i % 3) * 6}%)`;
+  const h = ACTOR_HUES[i % ACTOR_HUES.length];
+  const tone = ACTOR_TONE[Math.floor(i / ACTOR_HUES.length) % ACTOR_TONE.length];
+  return `hsl(${h},${tone[0]}%,${tone[1]}%)`;
 }
 /* pT[lo..hi) の中で t 以上になる最初の位置 */
 function lowerBound(arr, lo, hi, t){
@@ -973,7 +1251,7 @@ function setRange(t0, t1, src){
 const Marey = (() => {
   const cv = $("#mCanvas"), wrap = $("#mWrap");
   let tip = null, drag = null;
-  const M = {l: 94, r: 16, t: 12, b: 30};
+  const M = {l: 102, r: 20, t: 16, b: 40};
 
   function geom(){
     const r = wrap.getBoundingClientRect();
@@ -999,29 +1277,33 @@ const Marey = (() => {
     const ys = yScale(D);
     const yOf = (v) => M.t + g.ph - (v - ys.min) / Math.max(1e-9, ys.max - ys.min) * g.ph;
 
+    /* 作図領域を一段持ち上げて、軸の外 (パネル) と地を分ける */
+    ctx.fillStyle = C.plot; ctx.fillRect(M.l, M.t, g.pw, g.ph);
     /* 背景グリッド */
-    ctx.strokeStyle = "#1d2734"; ctx.lineWidth = 1; ctx.fillStyle = "#6b7f95";
-    ctx.font = "10px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.lineWidth = 1; ctx.font = fmono(10); ctx.textAlign = "center"; ctx.textBaseline = "top";
     const ticks = niceTicks(S.range.t0, S.range.t1, Math.max(3, Math.round(g.pw/110)));
     for (const t of ticks){
       const x = Math.round(xOf(t, g)) + .5;
+      ctx.strokeStyle = C.gridMajor;
       ctx.beginPath(); ctx.moveTo(x, M.t); ctx.lineTo(x, M.t+g.ph); ctx.stroke();
-      ctx.fillText(hms(t), x, M.t + g.ph + 5);
+      ctx.strokeStyle = C.frame;
+      ctx.beginPath(); ctx.moveTo(x, M.t+g.ph); ctx.lineTo(x, M.t+g.ph+4); ctx.stroke();
+      ctx.fillStyle = C.axis; ctx.fillText(hms(t), x, M.t + g.ph + 8);
     }
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
     if (S.marey.yMode === "node"){
       const nodes = D.layout.nodes, N = D.nodeOrder.length;
-      const step = Math.max(1, Math.ceil(N / Math.max(4, Math.floor(g.ph / 13))));
+      const step = Math.max(1, Math.ceil(N / Math.max(4, Math.floor(g.ph / 14))));
       for (let r = 0; r < N; r += step){
         const y = Math.round(yOf(r)) + .5;
-        ctx.strokeStyle = "#18202b"; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(M.l+g.pw, y); ctx.stroke();
-        ctx.fillStyle = "#6b7f95"; ctx.fillText(nodes[D.nodeOrder[r]].id, M.l - 6, y);
+        ctx.strokeStyle = C.gridMinor; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(M.l+g.pw, y); ctx.stroke();
+        ctx.fillStyle = C.axisDim; ctx.fillText(nodes[D.nodeOrder[r]].id, M.l - 8, y);
       }
     } else {
       for (const v of niceTicks(ys.min, ys.max, Math.max(3, Math.round(g.ph/40)))){
         const y = Math.round(yOf(v)) + .5;
-        ctx.strokeStyle = "#18202b"; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(M.l+g.pw, y); ctx.stroke();
-        ctx.fillStyle = "#6b7f95"; ctx.fillText(nf(v,1), M.l - 6, y);
+        ctx.strokeStyle = C.gridMinor; ctx.beginPath(); ctx.moveTo(M.l, y); ctx.lineTo(M.l+g.pw, y); ctx.stroke();
+        ctx.fillStyle = C.axisDim; ctx.fillText(nf(v,1), M.l - 8, y);
       }
     }
     ctx.save(); ctx.beginPath(); ctx.rect(M.l, M.t, g.pw, g.ph); ctx.clip();
@@ -1079,31 +1361,37 @@ const Marey = (() => {
           let i = lowerBound(D.pos.T, s, e, w.t0); if (i >= e) i = e-1;
           y = yOf(D.proj(D.pos.X[i], D.pos.Y[i]));
         }
-        const x0 = xOf(w.t0, g), x1 = xOf(w.t1, g);
-        ctx.strokeStyle = "#ffb74d"; ctx.lineWidth = 3.4;
-        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(Math.max(x1, x0 + 1), y); ctx.stroke();
-        ctx.strokeStyle = "#ff8a3d"; ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.moveTo(x0, y-3.4); ctx.lineTo(x0, y+3.4); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(Math.max(x1,x0+1), y-3.4); ctx.lineTo(Math.max(x1,x0+1), y+3.4); ctx.stroke();
+        const x0 = xOf(w.t0, g), x1 = Math.max(xOf(w.t1, g), x0 + 1);
+        ctx.strokeStyle = C.wait; ctx.lineWidth = 3.6;
+        ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+        ctx.strokeStyle = C.waitCap; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(x0, y-4); ctx.lineTo(x0, y+4); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x1, y-4); ctx.lineTo(x1, y+4); ctx.stroke();
         waitSegs++;
       }
       ctx.lineCap = "butt";
     }
     ctx.restore(); ctx.globalAlpha = 1;
     /* 枠と軸ラベル */
-    ctx.strokeStyle = "#2a3644"; ctx.strokeRect(M.l+.5, M.t+.5, g.pw, g.ph);
-    ctx.save(); ctx.translate(11, M.t + g.ph/2); ctx.rotate(-Math.PI/2);
-    ctx.fillStyle = "#6b7f95"; ctx.font = "10px monospace"; ctx.textAlign = "center";
-    ctx.fillText(ys.label, 0, 0); ctx.restore();
+    ctx.strokeStyle = C.frame; ctx.lineWidth = 1;
+    ctx.strokeRect(M.l+.5, M.t+.5, g.pw, g.ph);
+    ctx.save(); ctx.translate(12, M.t + g.ph/2); ctx.rotate(-Math.PI/2);
+    ctx.fillStyle = C.axisDim; ctx.font = fmono(10); ctx.textAlign = "center";
+    ctx.textBaseline = "middle"; ctx.fillText(ys.label, 0, 0); ctx.restore();
+    ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = C.axisDim; ctx.font = fmono(10);
+    ctx.fillText("時刻 →", M.l + g.pw, M.t + g.ph + 26);
 
     if (drag && drag.mode === "brush"){
       const x0 = Math.min(drag.x0, drag.x1), x1 = Math.max(drag.x0, drag.x1);
-      ctx.fillStyle = "rgba(79,195,247,.18)"; ctx.fillRect(x0, M.t, x1-x0, g.ph);
-      ctx.strokeStyle = "#4fc3f7"; ctx.strokeRect(x0+.5, M.t+.5, x1-x0, g.ph);
+      ctx.fillStyle = C.accentFill; ctx.fillRect(x0, M.t, x1-x0, g.ph);
+      ctx.strokeStyle = C.accent; ctx.strokeRect(x0+.5, M.t+.5, x1-x0, g.ph);
+      ctx.fillStyle = C.accent; ctx.font = fmono(10, "600"); ctx.textAlign = "center";
+      ctx.fillText(nf(Math.abs(tOf(x1,g)-tOf(x0,g)),1) + " s", (x0+x1)/2, M.t + 12);
     }
-    $("#mInfo").textContent =
-      `表示: ${drawnActors}アクタ / ${drawnPts.toLocaleString()}点 / 待機区間 ${waitSegs}件`
-      + `　全待機 ${D.waits.length}件`;
+    $("#mInfo").innerHTML =
+      `<b>${drawnActors}</b> アクタ<span class="sp">/</span><b>${drawnPts.toLocaleString()}</b> 点`
+      + `<span class="sp">/</span>待機 <b>${waitSegs}</b> 件<span class="sp">/</span>全 ${D.waits.length} 件`;
     S.marey.lastWaitSegs = waitSegs;
   }
 
@@ -1167,8 +1455,10 @@ const Marey = (() => {
     if (best && best.d < 14){
       tip = document.createElement("div"); tip.className = "tip";
       const wnow = D.waitsByActor[best.a].find((w)=>t >= w.t0 && t <= w.t1);
-      tip.textContent = `${D.actorIds[best.a]}  t=${hms(t)}\n${best.label}`
-        + (wnow ? `\n待機中 ${nf(wnow.t1-wnow.t0,1)}s` : "");
+      tip.innerHTML =
+        `<span style="color:${D.colors[best.a]}">■</span> ${esc(D.actorIds[best.a])}   t=${hms(t)}\n`
+        + `${esc(best.label)}`
+        + (wnow ? `\n<span style="color:var(--wait)">待機中 ${nf(wnow.t1-wnow.t0,1)} s</span>` : "");
       tip.style.left = (e.offsetX + 12) + "px"; tip.style.top = (best.y + 10) + "px";
       wrap.appendChild(tip);
     }
@@ -1179,17 +1469,32 @@ const Marey = (() => {
 
 /* ------------------------------------------------------------------ §10
    フロアヒートマップ                                                       */
-function rampColor(u){            /* 0..1 -> 暗青→シアン→黄→赤 の連続ランプ */
-  u = clamp(u, 0, 1);
-  const stops = [[0,28,52,112],[0.25,20,125,170],[0.5,45,205,175],[0.75,245,215,95],[1,255,80,60]];
-  for (let i = 1; i < stops.length; i++){
-    if (u <= stops[i][0]){
-      const a = stops[i-1], b = stops[i];
-      const f = (u - a[0]) / (b[0] - a[0] || 1);
-      return [a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f, a[3]+(b[3]-a[3])*f];
-    }
+/* 連続量のランプは知覚一様・色覚多様性対応のものを使う (虹色は順序が読めない)。
+   滞在=viridis 系 (青→緑→黄)、待機=inferno 系 (紫→橙→淡黄) で「待機は暖色=警告」を保つ。
+   ただし両方とも暗端 (#440154 / #000004) は地の色より暗く、暗色UIでは「薄い値」が
+   消える。地より明るい所から始まる区間だけを使い、明度が単調に上がるようにした。
+   256段の LUT に焼いてから引く (セルごとに補間しない)。                        */
+const RAMPS = {
+  dwell: [[0,"#26456e"],[0.28,"#2a788e"],[0.55,"#22a884"],[0.8,"#7ad151"],[1,"#fde725"]],
+  wait:  [[0,"#6a2a6e"],[0.3,"#a52c60"],[0.58,"#e2523a"],[0.8,"#f9950c"],[1,"#fde9a4"]]
+};
+function bakeRamp(stops){
+  const hex = (s)=>[parseInt(s.slice(1,3),16), parseInt(s.slice(3,5),16), parseInt(s.slice(5,7),16)];
+  const pts = stops.map(([p,s])=>[p].concat(hex(s)));
+  const lut = new Uint8Array(256*3);
+  for (let k = 0; k < 256; k++){
+    const u = k/255;
+    let i = 1; while (i < pts.length-1 && u > pts[i][0]) i++;
+    const a = pts[i-1], b = pts[i], f = (u-a[0])/((b[0]-a[0])||1);
+    lut[k*3] = a[1]+(b[1]-a[1])*f; lut[k*3+1] = a[2]+(b[2]-a[2])*f; lut[k*3+2] = a[3]+(b[3]-a[3])*f;
   }
-  return [255,80,60];
+  return lut;
+}
+const RAMP_LUT = {dwell: bakeRamp(RAMPS.dwell), wait: bakeRamp(RAMPS.wait)};
+function rampColor(u, which){
+  const lut = RAMP_LUT[which] || RAMP_LUT.dwell;
+  const k = clamp(Math.round(u*255), 0, 255) * 3;
+  return [lut[k], lut[k+1], lut[k+2]];
 }
 const Cam = {
   make(){ return {k:1, tx:0, ty:0, ready:false}; },
@@ -1208,17 +1513,26 @@ const Cam = {
 function drawLayout(ctx, cam, L, opt){
   const o = opt || {};
   ctx.lineWidth = 1;
+  /* 建屋の外形 (bounds) を薄く敷いて、図面としての地面を出す */
+  if (o.envelope !== false){
+    const b = L.bounds;
+    const ex = Cam.sx(cam, b.minx), ey = Cam.sy(cam, b.maxy);
+    const ew = Cam.sx(cam, b.maxx) - ex, eh = Cam.sy(cam, b.miny) - ey;
+    ctx.fillStyle = "rgba(180,205,230,.022)"; ctx.fillRect(ex, ey, ew, eh);
+    ctx.strokeStyle = C.gridMajor; ctx.strokeRect(ex+.5, ey+.5, ew, eh);
+  }
   for (const z of L.zones){
     ctx.beginPath();
     z.ring.forEach((c,i)=>{ const x = Cam.sx(cam,c[0]), y = Cam.sy(cam,c[1]);
       i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
     ctx.closePath();
-    ctx.fillStyle = "rgba(79,195,247,.06)"; ctx.fill();
-    ctx.strokeStyle = "rgba(79,195,247,.35)"; ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
-    if (z.label){ ctx.fillStyle = "#4a6076"; ctx.font = "10px monospace"; ctx.textAlign = "left";
-      ctx.fillText(z.label, Cam.sx(cam, z.bbox[0]) + 3, Cam.sy(cam, z.bbox[3]) + 11); }
+    ctx.fillStyle = C.zoneFill; ctx.fill();
+    ctx.strokeStyle = C.zoneLine; ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+    if (z.label){ ctx.fillStyle = C.zoneText; ctx.font = fmono(10); ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(z.label, Cam.sx(cam, z.bbox[0]) + 4, Cam.sy(cam, z.bbox[3]) + 13); }
   }
-  ctx.strokeStyle = o.edgeColor || "#2e3d4e"; ctx.lineWidth = o.edgeWidth || 1;
+  ctx.strokeStyle = o.edgeColor || C.edge; ctx.lineWidth = o.edgeWidth || 1;
   ctx.beginPath();
   for (const e of L.edges){
     e.pts.forEach((c,i)=>{ const x = Cam.sx(cam,c[0]), y = Cam.sy(cam,c[1]);
@@ -1230,11 +1544,11 @@ function drawLayout(ctx, cam, L, opt){
     r.ring.forEach((c,i)=>{ const x = Cam.sx(cam,c[0]), y = Cam.sy(cam,c[1]);
       i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
     ctx.closePath();
-    ctx.fillStyle = o.rackFill || "rgba(120,140,165,.16)"; ctx.fill();
-    ctx.strokeStyle = o.rackLine || "rgba(140,165,190,.42)"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = o.rackFill || C.rackFill; ctx.fill();
+    ctx.strokeStyle = o.rackLine || C.rackLine; ctx.lineWidth = 1; ctx.stroke();
   }
   if (o.nodes !== false){
-    ctx.fillStyle = o.nodeColor || "#3d5165";
+    ctx.fillStyle = o.nodeColor || C.node;
     for (const n of L.nodes){
       const x = Cam.sx(cam,n.x), y = Cam.sy(cam,n.y);
       ctx.fillRect(x-1.2, y-1.2, 2.4, 2.4);
@@ -1287,7 +1601,7 @@ const Heat = (() => {
       const p = ((ny-1-gy)*nx + gx) * 4;       /* 画像は上下反転 (y上向き) */
       if (v <= 0){ img.data[p+3] = 0; continue; }
       const u = denom > 0 ? (lg ? Math.log1p(v)/denom : v/denom) : 0;
-      const c = rampColor(u);
+      const c = rampColor(u, S.heat.mode);
       img.data[p] = c[0]; img.data[p+1] = c[1]; img.data[p+2] = c[2];
       img.data[p+3] = Math.round(255 * (0.42 + 0.58*Math.sqrt(u)));
     }
@@ -1297,9 +1611,10 @@ const Heat = (() => {
   function drawRamp(){
     const c = $("#hRamp"), x = c.getContext("2d");
     for (let i = 0; i < c.width; i++){
-      const col = rampColor(i/(c.width-1));
+      const col = rampColor(i/(c.width-1), S.heat.mode);
       x.fillStyle = `rgb(${col[0]|0},${col[1]|0},${col[2]|0})`; x.fillRect(i,0,1,c.height);
     }
+    $("#hMetric").textContent = S.heat.mode === "wait" ? "待機" : "滞在";
     $("#hMax").textContent = nf(S.heat.max, 1) + " s";
   }
   function draw(){
@@ -1309,7 +1624,7 @@ const Heat = (() => {
     const r = wrap.getBoundingClientRect(), w = r.width, h = r.height;
     cv.width = Math.max(1,Math.round(w*dpr)); cv.height = Math.max(1,Math.round(h*dpr));
     const ctx = cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.fillStyle = "#0d1117"; ctx.fillRect(0,0,w,h);
+    ctx.fillStyle = C.ground; ctx.fillRect(0,0,w,h);
     if (!cam.ready) Cam.fit(cam, D.layout.bounds, w, h, 26);
     drawLayout(ctx, cam, D.layout, {});
     if (off){
@@ -1320,20 +1635,34 @@ const Heat = (() => {
       ctx.drawImage(off, x0, y0, S.heat.nx*cell*cam.k, S.heat.ny*cell*cam.k);
       ctx.globalAlpha = 1;
     }
-    /* 最大セルの印 (計算結果) */
+    /* 最大セルの印 (計算結果)。引出線 + 値プレートで、地の色に埋もれさせない */
     if (S.heat.argmax >= 0){
       const gx = S.heat.argmax % S.heat.nx, gy = Math.floor(S.heat.argmax / S.heat.nx);
       const cx = Cam.sx(cam, S.heat.ox + (gx+0.5)*S.heat.cell);
       const cy = Cam.sy(cam, S.heat.oy + (gy+0.5)*S.heat.cell);
-      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI*2); ctx.stroke();
-      ctx.fillStyle = "#fff"; ctx.font = "10px monospace"; ctx.textAlign = "left";
-      ctx.fillText(`最大 ${nf(S.heat.max,1)}s @ (${nf(S.heat.ox+(gx+0.5)*S.heat.cell,1)}, ${nf(S.heat.oy+(gy+0.5)*S.heat.cell,1)})`,
-                   cx + 12, cy - 10);
+      ctx.strokeStyle = C.mark; ctx.lineWidth = 1.3; ctx.globalAlpha = .9;
+      ctx.beginPath(); ctx.arc(cx, cy, 8.5, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 6.5, cy - 6.5); ctx.lineTo(cx + 15, cy - 15); ctx.stroke();
+      ctx.globalAlpha = 1;
+      const label = `最大 ${nf(S.heat.max,1)} s`;
+      const sub = `(${nf(S.heat.ox+(gx+0.5)*S.heat.cell,1)}, ${nf(S.heat.oy+(gy+0.5)*S.heat.cell,1)}) m`;
+      ctx.font = fmono(10.5, "600");
+      const w1 = ctx.measureText(label).width;
+      ctx.font = fmono(10);
+      const bw = Math.max(w1, ctx.measureText(sub).width) + 16;
+      /* 画面端でプレートが切れないように収める */
+      const bx = clamp(cx + 15, 4, Math.max(4, w - bw - 4));
+      const by = clamp(cy - 49, 4, Math.max(4, h - 38));
+      ctx.fillStyle = C.plate; ctx.strokeStyle = "rgba(150,175,200,.3)"; ctx.lineWidth = 1;
+      roundRect(ctx, bx, by, bw, 34, 5); ctx.fill(); ctx.stroke();
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = C.mark; ctx.font = fmono(10.5, "600"); ctx.fillText(label, bx + 8, by + 14);
+      ctx.fillStyle = C.axis; ctx.font = fmono(10); ctx.fillText(sub, bx + 8, by + 27);
     }
-    $("#hInfo").textContent =
-      `セル ${S.heat.nx}×${S.heat.ny} / 非ゼロ ${S.heat.nz.toLocaleString()} / `
-      + `合計 ${nf(S.heat.sum,0)}s / 集計 ${S.heat.used.toLocaleString()}区間 / ${nf(S.heat.ms,1)}ms`;
+    $("#hInfo").innerHTML =
+      `<b>${S.heat.nx}×${S.heat.ny}</b> セル<span class="sp">/</span>非ゼロ <b>${S.heat.nz.toLocaleString()}</b>`
+      + `<span class="sp">/</span>合計 <b>${nf(S.heat.sum,0)}</b> s<span class="sp">/</span>`
+      + `${S.heat.used.toLocaleString()} 区間<span class="sp">/</span><b>${nf(S.heat.ms,1)}</b> ms`;
   }
   cv.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -1353,9 +1682,10 @@ const Heat = (() => {
     if (gx >= 0 && gy >= 0 && gx < S.heat.nx && gy < S.heat.ny){
       const v = S.heat.grid[gy*S.heat.nx+gx];
       tip = document.createElement("div"); tip.className = "tip";
-      tip.textContent = `(${nf(S.heat.ox+(gx+.5)*S.heat.cell,1)}, ${nf(S.heat.oy+(gy+.5)*S.heat.cell,1)}) m`
-        + `\nセル[${gx}, ${gy}]  ${nf(v,2)} s`
-        + (S.heat.max > 0 ? `\n最大比 ${nf(100*v/S.heat.max,1)}%` : "");
+      tip.innerHTML = `${nf(v,2)} s  <span style="color:var(--fg3)">(${S.heat.mode==="wait"?"待機":"滞在"})</span>`
+        + `\n<span style="color:var(--fg3)">位置</span> ${nf(S.heat.ox+(gx+.5)*S.heat.cell,1)}, ${nf(S.heat.oy+(gy+.5)*S.heat.cell,1)} m`
+        + `\n<span style="color:var(--fg3)">セル</span> [${gx}, ${gy}]`
+        + (S.heat.max > 0 ? `  <span style="color:var(--fg3)">最大比</span> ${nf(100*v/S.heat.max,1)}%` : "");
       tip.style.left = (e.offsetX+12)+"px"; tip.style.top = (e.offsetY+12)+"px";
       wrap.appendChild(tip);
     }
@@ -1396,8 +1726,8 @@ const Play = (() => {
   function drawBase(){
     const ctx = base.getContext("2d");
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.fillStyle = "#0d1117"; ctx.fillRect(0,0,W,H);
-    drawLayout(ctx, cam, S.D.layout, {rackFill:"rgba(120,140,165,.13)"});
+    ctx.fillStyle = C.ground; ctx.fillRect(0,0,W,H);
+    drawLayout(ctx, cam, S.D.layout, {rackFill:"rgba(124,146,172,.12)"});
   }
   function clearTrail(){
     const ctx = trail.getContext("2d");
@@ -1453,21 +1783,22 @@ const Play = (() => {
       if (isWaiting(a, t)){
         waiting++;
         ctx.globalCompositeOperation = "source-over";
-        ctx.strokeStyle = "#ffb74d"; ctx.lineWidth = 1.6;
+        ctx.strokeStyle = C.wait; ctx.lineWidth = 1.6;
         ctx.beginPath(); ctx.arc(x, y, 7.5, 0, Math.PI*2); ctx.stroke();
         ctx.globalCompositeOperation = S.play.glow ? "lighter" : "source-over";
       }
       if (S.play.label){
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = "#c8d6e5"; ctx.font = "9px monospace"; ctx.textAlign = "center";
-        ctx.fillText(D.actorIds[a], x, y - 9);
+        ctx.fillStyle = C.label; ctx.font = fmono(9); ctx.textAlign = "center";
+        ctx.fillText(D.actorIds[a], x, y - 10);
         ctx.globalCompositeOperation = S.play.glow ? "lighter" : "source-over";
       }
     }
     ctx.globalCompositeOperation = "source-over";
-    $("#pClock").textContent = `t=${hms(t)} / ${hms(S.range.t1)}　${nf(S.play.fps,1)} fps`;
-    $("#pInfo").textContent = `表示中 ${live}/${nA} アクタ　待機中 ${waiting}`
-      + `　描画 ${nf(S.play.frameMs,2)} ms/frame`;
+    /* 毎フレーム書くので textContent 固定 (innerHTML はここでは使わない) */
+    $("#pClock").textContent = `${hms(t)} / ${hms(S.range.t1)}`;
+    $("#pInfo").textContent = `表示 ${live}/${nA} アクタ　·　待機 ${waiting}　·　`
+      + `${nf(S.play.fps,1)} fps　·　${nf(S.play.frameMs,2)} ms/frame`;
     const f = (t - S.range.t0) / Math.max(1e-9, S.range.t1 - S.range.t0);
     $("#pSeek").value = String(Math.round(f * 1000));
   }
@@ -1526,6 +1857,8 @@ const Play = (() => {
 const RangeBar = (() => {
   const cv = $("#rangeCanvas");
   let drag = null, hist = null, histN = 0;
+  const GRAB = 7;                      /* 端をつまめる幅 (px) */
+  let wrib = null;
   function buildHist(){
     const D = S.D; if (!D) return;
     histN = 600; hist = new Float64Array(histN);
@@ -1534,7 +1867,20 @@ const RangeBar = (() => {
       const k = clamp(Math.floor((D.events.t[i]-D.tMin)/span*histN), 0, histN-1);
       hist[k]++;
     }
+    /* 待機は「区間を1本ずつ塗る」と件数が増えたとき帯が飽和して density が読めない。
+       バケットごとの待機秒数にして、濃さで密度を出す (最大バケットで正規化)。 */
+    wrib = new Float64Array(histN);
+    const bw = span / histN;
+    for (const w of D.waits){
+      const k0 = clamp(Math.floor((w.t0-D.tMin)/span*histN), 0, histN-1);
+      const k1 = clamp(Math.floor((w.t1-D.tMin)/span*histN), 0, histN-1);
+      for (let k = k0; k <= k1; k++){
+        const a = Math.max(w.t0, D.tMin + k*bw), b = Math.min(w.t1, D.tMin + (k+1)*bw);
+        if (b > a) wrib[k] += b - a;
+      }
+    }
   }
+  function xOf(t, w){ const D = S.D; return (t-D.tMin)/(D.tMax-D.tMin)*w; }
   function draw(){
     const D = S.D; if (!D) return;
     if (!hist) buildHist();
@@ -1542,39 +1888,97 @@ const RangeBar = (() => {
     const r = cv.getBoundingClientRect(), w = r.width, h = r.height;
     cv.width = Math.max(1,Math.round(w*dpr)); cv.height = Math.max(1,Math.round(h*dpr));
     const ctx = cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.fillStyle = "#111823"; ctx.fillRect(0,0,w,h);
+    const axisH = 14, top = 11, base = h - axisH;     /* 上=待機帯 / 中=密度 / 下=時刻軸 */
+    ctx.fillStyle = C.plot; ctx.fillRect(0,0,w,h);
+
+    /* 時刻グリッドと目盛 (端だけでなく等間隔で読めるように) */
+    const ticks = niceTicks(D.tMin, D.tMax, Math.max(3, Math.round(w/130)));
+    ctx.font = fmono(9.5); ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (const t of ticks){
+      const x = Math.round(xOf(t, w)) + .5;
+      ctx.strokeStyle = C.gridMinor;
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, base); ctx.stroke();
+      if (x > 16 && x < w - 16){ ctx.fillStyle = C.axisDim; ctx.fillText(hms(t), x, base + 2); }
+    }
+    ctx.strokeStyle = C.gridMajor;
+    ctx.beginPath(); ctx.moveTo(0, base+.5); ctx.lineTo(w, base+.5); ctx.stroke();
+
+    /* イベント密度 */
     let max = 0; for (const v of hist) if (v > max) max = v;
-    ctx.fillStyle = "#26506b";
+    const bh0 = base - top - 2;
     for (let i = 0; i < histN; i++){
+      if (!hist[i]) continue;
       const x = i/histN*w, bw = w/histN + .6;
-      const bh = max > 0 ? hist[i]/max*(h-16) : 0;
-      ctx.fillRect(x, h-4-bh, bw, bh);
+      const bh = max > 0 ? hist[i]/max*bh0 : 0;
+      ctx.fillStyle = hist[i] >= max*0.75 ? C.histHi : C.hist;
+      ctx.fillRect(x, base-bh, bw, bh);
     }
-    /* 待機区間の帯 */
-    ctx.fillStyle = "rgba(255,183,77,.75)";
-    const span = D.tMax - D.tMin;
-    for (const wt of D.waits){
-      const x0 = (wt.t0-D.tMin)/span*w, x1 = (wt.t1-D.tMin)/span*w;
-      ctx.fillRect(x0, 2, Math.max(1, x1-x0), 4);
+    /* 待機リボン (橙=待機の意味を全ビューで共有)。濃さ=そのバケットの待機秒数 */
+    let wmax = 0; for (const v of wrib) if (v > wmax) wmax = v;
+    if (wmax > 0){
+      const bw = w/histN + .6;
+      for (let i = 0; i < histN; i++){
+        if (!wrib[i]) continue;
+        ctx.globalAlpha = 0.28 + 0.72*(wrib[i]/wmax);
+        ctx.fillStyle = C.wait; ctx.fillRect(i/histN*w, 3, bw, 5);
+      }
+      ctx.globalAlpha = 1;
     }
-    const sx0 = (S.range.t0-D.tMin)/span*w, sx1 = (S.range.t1-D.tMin)/span*w;
-    ctx.fillStyle = "rgba(13,17,23,.62)";
-    ctx.fillRect(0,0,sx0,h); ctx.fillRect(sx1,0,w-sx1,h);
-    ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 1;
+
+    /* 選択範囲: 外を落として、端に掴めるハンドルを立てる */
+    const sx0 = xOf(S.range.t0, w), sx1 = xOf(S.range.t1, w);
+    ctx.fillStyle = C.mask; ctx.fillRect(0,0,sx0,h); ctx.fillRect(sx1,0,w-sx1,h);
+    ctx.fillStyle = "rgba(90,169,230,.07)"; ctx.fillRect(sx0, 0, Math.max(1,sx1-sx0), h);
+    ctx.strokeStyle = C.accentLine; ctx.lineWidth = 1;
     ctx.strokeRect(sx0+.5, .5, Math.max(1,sx1-sx0), h-1);
-    ctx.fillStyle = "#6b7f95"; ctx.font = "9px monospace"; ctx.textAlign = "left";
-    ctx.fillText(hms(D.tMin), 3, 10); ctx.textAlign = "right"; ctx.fillText(hms(D.tMax), w-3, 10);
+    ctx.fillStyle = C.accent;
+    for (const hx of [sx0, sx1]){
+      roundRect(ctx, clamp(hx-2, 0, w-4), h/2-10, 4, 20, 2); ctx.fill();
+    }
+    /* 掴んでいる間だけ現在の窓を書く (静止時は入力欄とチップに出ているので重ねない) */
+    if (drag && sx1 - sx0 > 96){
+      const lab = `${hms(S.range.t0)} – ${hms(S.range.t1)}   ${nf(S.range.t1-S.range.t0,1)} s`;
+      ctx.font = fmono(9.5, "600"); ctx.textAlign = "center"; ctx.textBaseline = "top";
+      const tw = ctx.measureText(lab).width;
+      ctx.fillStyle = C.plate; ctx.strokeStyle = C.accentLine; ctx.lineWidth = 1;
+      roundRect(ctx, (sx0+sx1)/2 - tw/2 - 7, h/2 - 9, tw + 14, 17, 4); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#c6dff5"; ctx.fillText(lab, (sx0+sx1)/2, h/2 - 5);
+    }
   }
   function tAt(px){ const D = S.D, r = cv.getBoundingClientRect();
     return D.tMin + clamp(px/r.width, 0, 1)*(D.tMax-D.tMin); }
-  cv.addEventListener("mousedown", (e) => { drag = {a: tAt(e.offsetX)}; });
+  function zoneAt(px){
+    const D = S.D; if (!D) return "new";
+    const w = cv.getBoundingClientRect().width;
+    const sx0 = xOf(S.range.t0, w), sx1 = xOf(S.range.t1, w);
+    if (Math.abs(px - sx0) <= GRAB) return "l";
+    if (Math.abs(px - sx1) <= GRAB) return "r";
+    if (px > sx0 && px < sx1) return "m";
+    return "new";
+  }
+  const CURSOR = {l:"ew-resize", r:"ew-resize", m:"grab", new:"crosshair"};
+  cv.addEventListener("mousedown", (e) => {
+    const z = zoneAt(e.offsetX);
+    drag = {mode:z, x:e.offsetX, t0:S.range.t0, t1:S.range.t1, a:tAt(e.offsetX)};
+    cv.style.cursor = z === "m" ? "grabbing" : CURSOR[z];
+  });
+  cv.addEventListener("mousemove", (e) => { if (!drag) cv.style.cursor = CURSOR[zoneAt(e.offsetX)]; });
   window.addEventListener("mousemove", (e) => {
     if (!drag) return;
-    const r = cv.getBoundingClientRect();
-    const b = tAt(e.clientX - r.left);
-    if (Math.abs(b - drag.a) > 1e-9) setRange(Math.min(drag.a,b), Math.max(drag.a,b), "rangebar");
+    const D = S.D; if (!D) return;
+    const r = cv.getBoundingClientRect(), px = e.clientX - r.left, t = tAt(px);
+    const eps = Math.max(1e-3, (D.tMax - D.tMin) * 1e-4);
+    if (drag.mode === "l") setRange(Math.min(t, drag.t1 - eps), drag.t1, "rangebar");
+    else if (drag.mode === "r") setRange(drag.t0, Math.max(t, drag.t0 + eps), "rangebar");
+    else if (drag.mode === "m"){
+      const span = drag.t1 - drag.t0;
+      const dt = (px - drag.x) / r.width * (D.tMax - D.tMin);
+      const nt0 = clamp(drag.t0 + dt, D.tMin, Math.max(D.tMin, D.tMax - span));
+      setRange(nt0, nt0 + span, "rangebar");
+    } else if (Math.abs(t - drag.a) > 1e-9)
+      setRange(Math.min(drag.a,t), Math.max(drag.a,t), "rangebar");
   });
-  window.addEventListener("mouseup", () => { drag = null; });
+  window.addEventListener("mouseup", () => { drag = null; cv.style.cursor = "crosshair"; });
   cv.addEventListener("dblclick", () => { const D = S.D; if (D) setRange(D.tMin, D.tMax, "rangebar"); });
   return {draw, invalidate(){ hist = null; }};
 })();
@@ -1582,79 +1986,86 @@ const RangeBar = (() => {
 /* ------------------------------------------------------------------ §12
    サイドパネル (KPI) — 記載値 (summary.json) と 再計算値 を並べる          */
 function renderSide(){
-  const D = S.D, C = D.calc, s = D.summary;
+  const D = S.D, K = D.calc, s = D.summary;
   const row = (k, v, note) => `<div class="kv"><span class="k">${esc(k)}</span>`
-    + `<span class="v">${v}${note ? `<small> ${esc(note)}</small>` : ""}</span></div>`;
-  const cmpRow = (k, given, calc, unit, digits) => {
-    const g = isNum(given) ? nf(given, digits) : "—";
-    const c = nf(calc, digits);
-    let badge = "";
-    if (isNum(given)){
-      const base = Math.max(1e-9, Math.abs(calc));
-      const d = Math.abs(given - calc) / base;
-      badge = d <= 0.05 ? `<span class="badge ok">一致</span>` :
-              `<span class="badge warn">差 ${nf(d*100,1)}%</span>`;
-    } else badge = `<span class="badge warn">記載なし</span>`;
-    return `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${c} ${esc(unit)}</span></div>`
-      + `<div class="kv"><span class="k" style="padding-left:9px;color:#57697d">summary記載</span>`
-      + `<span class="v" style="color:#9fb0c3">${g} ${badge}</span></div>`;
+    + `<span class="v">${v}${note ? `<small>${esc(note)}</small>` : ""}</span></div>`;
+  /* 一致バッジ: 再計算値が主・summary記載が従。5%以上ずれたら差を出す (契約 §6 の確認) */
+  const matchBadge = (given, calc) => {
+    if (!isNum(given)) return `<span class="badge mute">記載なし</span>`;
+    const d = Math.abs(given - calc) / Math.max(1e-9, Math.abs(calc));
+    return d <= 0.05 ? `<span class="badge ok">✓ 一致</span>`
+                     : `<span class="badge warn">差 ${nf(d*100,1)}%</span>`;
   };
-  const ty = Array.from(C.typeCount.entries()).sort((a,b)=>b[1]-a[1]);
+  const kpiCard = (label, src, given, calc, unit, digits) =>
+    `<div class="kpi"><div class="kpi-h"><span class="kpi-k">${esc(label)}</span>`
+    + `<span class="kpi-src">${esc(src)}</span></div>`
+    + `<div class="kpi-v"><b>${nf(calc, digits)}</b><em>${esc(unit)}</em></div>`
+    + `<div class="kpi-cmp"><span>summary 記載</span>`
+    + `<span class="g">${isNum(given) ? nf(given, digits) : "—"}</span>${matchBadge(given, calc)}</div></div>`;
+  const cmpKv = (label, given, calc, unit, digits) =>
+    `<div class="kv"><span class="k">${esc(label)}</span><span class="v">${nf(calc, digits)}`
+    + `<small>${esc(unit)}</small>${matchBadge(given, calc)}</span></div>`;
+  const check = (ok, label, value) =>
+    `<div class="ck"><span class="m ${ok ? "ok" : "no"}">${ok ? "✓" : "✕"}</span>`
+    + `<span class="k">${esc(label)}</span><span class="v">${esc(value)}</span></div>`;
+  const ty = Array.from(K.typeCount.entries()).sort((a,b)=>b[1]-a[1]);
+  const wt = (s && s.wait_time_s) || {};
   let h = "";
+
   h += `<h3>ラン</h3>`;
   h += row("run_id", esc(D.runId || "—"));
   if (D.meta && D.meta.generator) h += row("generator", esc(String(D.meta.generator)));
   if (D.meta && D.meta.seed !== undefined) h += row("seed", esc(String(D.meta.seed)));
-  h += row("時間範囲", `${hms(D.tMin)} 〜 ${hms(D.tMax)}`);
-  h += row("全体長", `${nf(C.span,1)} s`);
+  h += row("時間範囲", `${hms(D.tMin)} – ${hms(D.tMax)}`);
+  h += row("全体長", `${nf(K.span,1)}<small>s</small>`);
   h += row("アクタ", `${D.actorIds.length}`);
   h += row("イベント", `${D.events.n.toLocaleString()}`);
   h += row("位置サンプル", `${D.pos.n.toLocaleString()}`);
   if (D.scenario && D.scenario.actors && isNum(D.scenario.actors.speed_mps))
-    h += row("scenario.speed", `${nf(D.scenario.actors.speed_mps,2)} m/s`);
+    h += row("scenario.speed", `${nf(D.scenario.actors.speed_mps,2)}<small>m/s</small>`);
 
-  h += `<h3>KPI (ログ再計算 / 記載値)</h3>`;
-  h += cmpRow("行/時 (pick_end基準)", s && s.rows_per_hour, C.rows_per_hour, "行/h", 1);
-  h += cmpRow("総移動距離", s && s.total_distance_m, C.total_distance_m, "m", 1);
-  h += `<p class="srcnote">再計算は positions.jsonl の連続サンプル間距離の総和、
-        行/時 は pick_end 件数 ÷ ログ全体長。</p>`;
+  h += `<h3>KPI — ログ再計算</h3>`;
+  h += kpiCard("行/時", "pick_end ÷ 全体長", s && s.rows_per_hour, K.rows_per_hour, "行/h", 1);
+  h += kpiCard("総移動距離", "positions 差分の総和", s && s.total_distance_m, K.total_distance_m, "m", 1);
+  h += `<p class="srcnote">画面の数値はすべて読み込んだログからの計算値。
+        summary 記載は従として併記し、5% 以上ずれたら差を出す (契約 §6)。</p>`;
 
-  h += `<h3>待機 (wait_start〜wait_end)</h3>`;
-  h += row("区間数", `${C.wait.n}`);
-  h += cmpRow("合計", s && s.wait_time_s && s.wait_time_s.total, C.wait.total, "s", 1);
-  h += cmpRow("平均", s && s.wait_time_s && s.wait_time_s.mean, C.wait.mean, "s", 1);
-  h += cmpRow("p50", s && s.wait_time_s && s.wait_time_s.p50, C.wait.p50, "s", 1);
-  h += cmpRow("p95", s && s.wait_time_s && s.wait_time_s.p95, C.wait.p95, "s", 1);
+  h += `<h3>待機 <span style="color:#4c5b6c;letter-spacing:0">wait_start〜wait_end</span></h3>`;
+  h += kpiCard("待機 合計", `${K.wait.n} 区間`, wt.total, K.wait.total, "s", 1);
+  h += cmpKv("平均", wt.mean, K.wait.mean, "s", 1);
+  h += cmpKv("p50", wt.p50, K.wait.p50, "s", 1);
+  h += cmpKv("p95", wt.p95, K.wait.p95, "s", 1);
   h += row("全体に占める割合",
-    `${nf(100*C.wait.total/Math.max(1e-9, C.span*D.actorIds.length),2)} %`);
+    `${nf(100*K.wait.total/Math.max(1e-9, K.span*D.actorIds.length),2)}<small>%</small>`);
 
   h += `<h3>選択範囲</h3><div id="selStats"></div>`;
+
+  h += `<h3>稼働率 <span style="color:#4c5b6c;letter-spacing:0">task_assign→pick_end</span></h3>`;
+  const ids = D.actorIds.map((id,i)=>[id,i]).sort((a,b)=>K.utilization[b[0]]-K.utilization[a[0]]);
+  for (const [id,i] of ids.slice(0, 60)){
+    const u = K.utilization[id];
+    const given = s && s.utilization && isNum(s.utilization[id]) ? s.utilization[id] : null;
+    h += `<div class="util"><i class="dot" style="background:${D.colors[i]}"></i>`
+      + `<span class="id">${esc(id)}</span>`
+      + `<span class="bar"><i style="width:${(u*100).toFixed(1)}%"></i></span>`
+      + `<span class="pct">${nf(u*100,0)}%</span></div>`;
+    if (given !== null && Math.abs(given - u) > 0.05)
+      h += `<div class="srcnote" style="margin:-2px 0 4px 79px">summary記載 ${nf(given*100,0)}%</div>`;
+  }
+  if (ids.length > 60) h += `<p class="srcnote">…他 ${ids.length-60} アクタ</p>`;
 
   h += `<h3>イベント種別</h3>`;
   for (const [k,v] of ty) h += row(k, v.toLocaleString());
 
-  h += `<h3>稼働率 (task_assign→pick_end)</h3>`;
-  const ids = D.actorIds.map((id,i)=>[id,i]).sort((a,b)=>C.utilization[b[0]]-C.utilization[a[0]]);
-  for (const [id,i] of ids.slice(0, 60)){
-    const u = C.utilization[id];
-    const given = s && s.utilization && isNum(s.utilization[id]) ? s.utilization[id] : null;
-    h += `<div class="util"><span style="color:${D.colors[i]}">${esc(id)}</span>`
-      + `<span class="bar"><i style="width:${(u*100).toFixed(1)}%"></i></span>`
-      + `<span>${nf(u*100,0)}%</span></div>`;
-    if (given !== null && Math.abs(given - u) > 0.05)
-      h += `<div class="srcnote" style="margin:-2px 0 3px 46px">summary記載 ${nf(given*100,0)}%</div>`;
-  }
-  if (ids.length > 60) h += `<p class="srcnote">…他 ${ids.length-60} アクタ</p>`;
-
   h += `<h3>契約チェック</h3>`;
-  h += row("edge × rack 交差", `${D.layout.crossN}`);
-  h += row("軌跡 × rack 交差", `${D.posInRack}`);
-  h += row("meta.crs", esc(D.layout.crs || "(無し)"));
+  h += check(D.layout.crossN === 0, "edge × rack 交差", `${D.layout.crossN} 件`);
+  h += check(D.posInRack === 0, "軌跡 × rack 交差", `${D.posInRack} 件`);
+  h += check(D.layout.crs === CRS_EXPECTED, "meta.crs", D.layout.crs || "(無し)");
   h += row("読込 (取得/解析/索引)",
-    `${nf(S.perf.read,0)}/${nf(S.perf.parse,0)}/${nf(S.perf.index,0)} ms`);
-  h += row("読込 合計", `${nf(S.perf.total,0)} ms`);
-  if (D.warnCount) h += `<p class="srcnote"><span class="badge warn">警告 ${D.warnCount}件</span>
-      <a href="#" id="showRep" style="color:#4fc3f7">詳細</a></p>`;
+    `${nf(S.perf.read,0)} / ${nf(S.perf.parse,0)} / ${nf(S.perf.index,0)}<small>ms</small>`);
+  h += row("読込 合計", `${nf(S.perf.total,0)}<small>ms</small>`);
+  if (D.warnCount) h += `<p class="srcnote"><span class="badge warn">警告 ${D.warnCount} 件</span>
+      <a href="#" id="showRep">詳細を見る</a></p>`;
   $("#side").innerHTML = h;
   const sr = $("#showRep");
   if (sr) sr.onclick = (e) => { e.preventDefault(); showReport(D.lastReport, true); };
@@ -1692,40 +2103,59 @@ function renderSelStats(){
     }
   }
   const row = (k,v)=>`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
-  el.innerHTML = row("範囲", `${hms(R0)} 〜 ${hms(R1)}`)
-    + row("長さ", `${nf(R1-R0,1)} s`)
+  el.innerHTML = row("範囲", `${hms(R0)} – ${hms(R1)}`)
+    + row("長さ", `${nf(R1-R0,1)}<small>s</small>`)
     + row("イベント", evN.toLocaleString())
     + row("位置サンプル", samp.toLocaleString())
-    + row("移動距離", `${nf(dist,1)} m`)
-    + row("待機 (重なり)", `${waitN} 件 / ${nf(waitS,1)} s`);
-  $("#rInfo").textContent = `長さ ${nf(R1-R0,1)}s / イベント ${evN.toLocaleString()} / サンプル ${samp.toLocaleString()}`;
+    + row("移動距離", `${nf(dist,1)}<small>m</small>`)
+    + row("待機 (重なり)", `${waitN}<small>件</small> ${nf(waitS,1)}<small>s</small>`);
+  $("#rInfo").innerHTML =
+      `<span class="chip"><span class="k">長さ</span><b>${nf(R1-R0,1)}</b> s</span>`
+    + `<span class="chip"><span class="k">イベント</span><b>${evN.toLocaleString()}</b></span>`
+    + `<span class="chip"><span class="k">サンプル</span><b>${samp.toLocaleString()}</b></span>`
+    + `<span class="chip"><span class="k">待機</span><b>${waitN}</b> 件</span>`;
 }
 
 /* --------------------------------------------------------------- 検証レポート表示 */
 function showReport(rep, asWarnings){
   const errs = rep.count("error"), warns = rep.count("warn");
+  /* 例は「行N: 実値」の形で来る。行番号をチップに分けて、実値だけを読める行にする */
+  const example = (x) => {
+    const m = /^(行\s*[\d,]+)\s*:\s*([\s\S]*)$/.exec(String(x));
+    return m ? `<code><span class="lineno">${esc(m[1])}</span>${esc(m[2])}</code>`
+             : `<code>${esc(x)}</code>`;
+  };
   const rows = rep.list().map((e) => {
     const sevJa = {error:"エラー", warn:"警告", info:"情報"}[e.sev];
-    return `<tr><td class="sev ${e.sev}">${sevJa}</td><td class="num">${esc(e.file)}</td>`
-      + `<td class="num">${esc(e.code)}</td><td>${esc(e.msg)}</td>`
-      + `<td class="num" style="text-align:right">${e.count.toLocaleString()}</td>`
-      + `<td class="ex">${e.examples.map(esc).join("\n")}</td></tr>`;
+    return `<tr><td class="sev"><span class="badge ${e.sev}">${sevJa}</span></td>`
+      + `<td class="file">${esc(e.file)}</td>`
+      + `<td class="code"><code>${esc(e.code)}</code></td><td class="msg">${esc(e.msg)}</td>`
+      + `<td class="cnt">${e.count.toLocaleString()}</td>`
+      + `<td class="ex">${e.examples.map(example).join("")}</td></tr>`;
   }).join("");
   const head = asWarnings
-    ? `<h2>検証レポート <span class="badge warn">警告 ${warns}</span></h2>
-       <p class="lead">契約 (WHSIM_CONTRACTS v1.0) の必須項目は満たしている。以下は注意点。</p>`
-    : `<h2>読み込みを中止した <span class="badge error">エラー ${errs}</span>
-       <span class="badge warn">警告 ${warns}</span></h2>
-       <p class="lead">WHSIM_CONTRACTS v1.0 に反するフィールド、または必須ファイルの不足がある。
-        どのファイルのどの行のどのフィールドがどう違反しているかを下に出す。修正して読み直すこと。</p>`;
+    ? `<div class="rep-head"><div class="rep-ic">i</div><div>
+         <h2>検証レポート</h2>
+         <p class="lead">契約 (WHSIM_CONTRACTS v1.0) の必須項目は満たしている。
+           以下は「読めたが気になる点」— 表示は続けられる。</p></div>
+         <div class="rep-counts"><span class="badge warn">警告 ${warns}</span></div></div>`
+    : `<div class="rep-head"><div class="rep-ic err">!</div><div>
+         <h2>このランは読み込めない</h2>
+         <p class="lead">WHSIM_CONTRACTS v1.0 に反するフィールド、または必須ファイルの不足がある。
+           白画面にはせず、<b>どのファイルの・どの行の・どのフィールドが・どう違反しているか</b>を
+           下に出す。同じ違反が続く場合はコード単位でまとめ、件数と実例だけを載せる。</p></div>
+         <div class="rep-counts"><span class="badge error">エラー ${errs}</span>`
+      + `<span class="badge warn">警告 ${warns}</span></div></div>`;
   $("#report").innerHTML = head
     + `<table class="rep"><thead><tr><th>種別</th><th>ファイル</th><th>コード</th>`
-    + `<th>内容</th><th>件数</th><th>例</th></tr></thead><tbody>${rows}</tbody></table>`
-    + `<p style="margin-top:14px">`
-    + (asWarnings ? `<button id="backBtn">ビューに戻る</button>`
-                  : `<button id="againBtn">別のランを読み込む</button>`
-                    + (window.__CL_PARTIAL ? ` <button id="forceBtn">違反を承知で表示する</button>` : ""))
-    + `</p>`;
+    + `<th>内容</th><th style="text-align:right">件数</th><th>例 (行番号 / 実値)</th></tr></thead>`
+    + `<tbody>${rows}</tbody></table>`
+    + `<div class="rep-actions">`
+    + (asWarnings ? `<button id="backBtn" class="btn primary">ビューに戻る</button>`
+                  : `<button id="againBtn" class="btn primary">別のランを読み込む</button>`
+                    + (window.__CL_PARTIAL
+                       ? `<button id="forceBtn" class="btn quiet">違反を承知で表示する (デバッグ)</button>` : ""))
+    + `</div>`;
   $("#report").classList.remove("hidden");
   $("#app").classList.add("hidden"); $("#drop").classList.add("hidden");
   const b1 = $("#backBtn"); if (b1) b1.onclick = () => {
@@ -1740,7 +2170,11 @@ function showReport(rep, asWarnings){
 function setLoading(on, msg, frac){
   $("#loading").classList.toggle("hidden", !on);
   if (msg !== undefined) $("#loadMsg").textContent = msg;
-  if (frac !== undefined) $("#loadBar").style.width = (clamp(frac,0,1)*100).toFixed(1) + "%";
+  if (frac !== undefined){
+    const p = clamp(frac,0,1)*100;
+    $("#loadBar").style.width = p.toFixed(1) + "%";
+    $("#loadPct").textContent = p.toFixed(0) + "%";
+  }
 }
 function pickFiles(fileList){
   const want = new Map(), extra = [];
@@ -1865,9 +2299,12 @@ function mount(D){
   S.D = D;
   $("#report").classList.add("hidden"); $("#drop").classList.add("hidden");
   $("#app").classList.remove("hidden"); $("#clearBtn").classList.remove("hidden");
-  $("#runinfo").textContent =
-    `${D.runId || "(run_id不明)"}　events ${D.events.n.toLocaleString()} / positions ${D.pos.n.toLocaleString()}`
-    + ` / actors ${D.actorIds.length}`;
+  $("#runinfo").innerHTML =
+      `<span class="chip"><b>${esc(D.runId || "(run_id 不明)")}</b></span>`
+    + `<span class="chip"><span class="k">events</span><b>${D.events.n.toLocaleString()}</b></span>`
+    + `<span class="chip"><span class="k">positions</span><b>${D.pos.n.toLocaleString()}</b></span>`
+    + `<span class="chip"><span class="k">actors</span><b>${D.actorIds.length}</b></span>`
+    + (D.warnCount ? `<span class="badge warn">警告 ${D.warnCount}</span>` : "");
   const sel = $("#mActor");
   sel.innerHTML = `<option value="-1">全て</option>`
     + D.actorIds.map((id,i)=>`<option value="${i}">${esc(id)}</option>`).join("");
@@ -1902,6 +2339,8 @@ function switchView(name){
 
 /* --------------------------------------------------------------- イベント配線 */
 $$("#tabs button").forEach((b)=>b.onclick = ()=>switchView(b.dataset.view));
+$("#dzFile").onclick = () => $("#fileInput").click();
+$("#dzDir").onclick = () => $("#dirInput").click();
 $("#fileInput").onchange = (e) => { if (e.target.files.length) loadFiles(e.target.files); };
 $("#dirInput").onchange = (e) => { if (e.target.files.length) loadFiles(e.target.files); };
 $("#clearBtn").onclick = () => {

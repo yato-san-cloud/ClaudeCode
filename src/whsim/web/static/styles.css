@@ -2574,3 +2574,109 @@ button.primary:disabled,
 /* NOTE: the sidebar already scrolls (see .sidebar above, overflow-y:auto); no
    extra rule is needed here, and adding overscroll-behavior made automated
    scroll-into-view hang against this container. */
+
+/* =============================================================================
+   VISUAL POLISH PASS — 提案書に耐える落ち着き (calm, not cyber)
+   -----------------------------------------------------------------------------
+   Not a re-theme: the dark/light token ramps above are untouched. This section
+   only settles the SHAPE / SPACING / TYPE layer that had drifted apart because
+   every JS module ships its own injected CSS:
+
+     · one card radius + one control radius (modules had 6/8/9/11/12px side by
+       side, which reads as "assembled" rather than "designed");
+     · the signature backdrop keeps its blueprint grid but loses the cyan cast —
+       a neutral slate rule at half strength still says "drawing", without the
+       sci-fi glow behind a customer-facing proposal;
+     · callouts get a real internal rhythm (metric with a unit, an action chip
+       that is a chip rather than a translucent smear).
+
+   Placed last so it wins ties against the earlier rules it refines. Module
+   <style> tags are injected at runtime and STILL win over this file, so any
+   rule that must beat a module carries the host panel's #id (same trick as the
+   button-hierarchy section above).
+   ============================================================================= */
+:root {
+  /* Shape scale, expressed on top of the existing --r-* ramp so a single edit
+     moves every card/control in the app. */
+  --r-card:    10px;   /* content cards, plates, tables, callouts */
+  --r-control:  8px;   /* buttons, inputs, chips that are not pills */
+}
+
+/* ---- one radius for content cards ------------------------------------------ */
+.chart-card,
+.kpi-hero,
+.kpi-card,
+.tbl-wrap,
+.callout,
+#pickseq .ps-mode,
+#pickseq .ps-rc,
+#pickseq .ps-empty,
+#pickseq .ps-verdict {
+  border-radius: var(--r-card);
+}
+/* ---- one radius for controls ----------------------------------------------- */
+#pickseq .ps-btn,
+#analysis .an-view .an-prod-btn {
+  border-radius: var(--r-control);
+}
+#pickseq .ps-btn.mini { border-radius: var(--r-sm); }
+
+/* ---- Callout: internal rhythm ---------------------------------------------- */
+/* The metric column is the callout's headline number; give it a baseline with
+   the title instead of letting it float against the top padding, and let a unit
+   ride along at label weight. */
+.callout { padding: 15px 18px 15px 20px; gap: var(--sp-4); }
+.callout::before { width: 3px; }
+.c-metric { letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.c-metric-unit {
+  margin-left: 3px;
+  font-size: 0.55em;
+  font-weight: var(--fw-medium);
+  letter-spacing: 0;
+  opacity: 0.75;
+}
+/* The recommended action is a SENTENCE, not a control (it has no handler —
+   `cursor:default`). It used to be painted as a filled chip sitting right next
+   to the real 「適用して再実行」 button, so the callout offered two identical
+   affordances and only one of them did anything. Stripped back to an arrowed
+   line of text; the button beside it is now the only thing that looks pressable. */
+.c-action {
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  margin-top: 9px;
+  font-weight: var(--fw-medium);
+}
+html[data-theme="dark"] .c-action { background: transparent; }
+.callout .c-action + .c-apply { margin-left: var(--sp-4); }
+.c-fact { line-height: 1.65; }
+
+/* ---- Backdrop: keep the blueprint, drop the neon ---------------------------- */
+html[data-theme="dark"] body::before {
+  background-image:
+    linear-gradient(rgba(160,180,205,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(160,180,205,.045) 1px, transparent 1px),
+    linear-gradient(rgba(160,180,205,.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(160,180,205,.018) 1px, transparent 1px);
+}
+html[data-theme="dark"] body::after {
+  background: radial-gradient(ellipse 60% 45% at 50% -8%,
+              rgba(96,132,180,.07), transparent 70%);
+}
+
+/* ---- Section headings: one hierarchy --------------------------------------- */
+/* The `.sub` after a section title is a caption, not a second title — pin it to
+   the title's baseline and give it the caption ink. */
+.an-section-title { align-items: baseline; }
+.an-section-title .sub { font-size: var(--fs-xs); color: var(--ink-tertiary); }
+
+/* ---- Focus: one visible ring everywhere ------------------------------------ */
+/* Several modules paint their own :focus (or none). The global :focus-visible
+   rule at the top of this file is the contract; re-assert it for the injected
+   module controls that would otherwise show a UA ring or nothing at all. */
+#pickseq .ps-btn:focus-visible,
+#analysis .an-view .an-prod-btn:focus-visible,
+#analysis .an-view .c-apply:focus-visible {
+  outline: 2px solid var(--line-focus);
+  outline-offset: 2px;
+}
