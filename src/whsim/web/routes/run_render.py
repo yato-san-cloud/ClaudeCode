@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse, JSONResponse
 
 from ._common import _call_export, _open, _proposal_extras, _safe_name
@@ -128,6 +128,25 @@ def _order_pts(model, sku_xy):
         if pts:
             out.append(pts)
     return out
+
+
+@router.post("/api/projects/{name}/routecompare")
+def api_routecompare(name: str, body: dict | None = None):
+    """ピッカー経路方式の比較表: 同一オーダー集合を各方式（S字/折り返し/
+    最大ギャップ/2-opt）で歩いた総距離（閉形式・DES不要）。
+
+    never-blocks: ロケーション未配置/オーダー無しでも has_data:false を返す
+    （500 にしない）。採用は `process.routing_policy` への1フィールド書込みで
+    エンジンまで届く（schema/build/processes 配線済み）。"""
+    from whsim import routecompare
+    body = body or {}
+    model = _open(name).load_model()
+    return routecompare.compare(
+        model,
+        policies=tuple(body.get("policies") or routecompare.DEFAULT_POLICIES),
+        n_orders=int(body.get("n_orders", 50)),
+        seed=int(body.get("seed", 42)),
+    )
 
 
 @router.get("/api/projects/{name}/pickseq")
@@ -257,6 +276,35 @@ def api_pickseq(name: str):
         "headline_reduction_pct": headline,
         "verdict": verdict,
     })
+
+
+@router.get("/api/projects/{name}/runs/{run}/events.{fmt}")
+def api_run_events(name: str, run: str, fmt: str):
+    """生イベントログのダウンロード — その KPI が何から出たのかを開ける形で渡す。
+
+    ``run`` は run ディレクトリ名（``latest`` で最新）。``jsonl`` はエンジンが
+    書いたものをそのまま（1行1イベント・無加工）、``json`` は同じ内容の配列、
+    ``csv`` は日本語Excelが開ける BOM 付き（共通5列＋残りは meta の JSON 列）。
+    never-blocks: ログを持たない過去の run は 404（500 にしない）。"""
+    from whsim import eventlog
+    if fmt not in ("jsonl", "json", "csv"):
+        raise HTTPException(404, "unknown format")
+    proj = _open(name)
+    rd = (proj.latest_run_dir() if run == "latest"
+          else proj.runs_dir / _safe_name(run))
+    if rd is None or not (rd / eventlog.EVENTS_JSONL).is_file():
+        raise HTTPException(404, "no event log for this run")
+    if fmt == "jsonl":
+        return FileResponse(rd / eventlog.EVENTS_JSONL,
+                            media_type="application/x-ndjson",
+                            filename=f"{name}_{rd.name}_events.jsonl")
+    events = eventlog.load(rd)
+    if fmt == "json":
+        return JSONResponse(events)
+    return Response(
+        eventlog.to_csv(events), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{rd.name}_events.csv"'})
 
 
 @router.get("/api/projects/{name}/png")

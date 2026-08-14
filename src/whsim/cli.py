@@ -139,6 +139,20 @@ def estimate(name: str):
     typer.echo(json.dumps(est, ensure_ascii=False, indent=2))
 
 
+@app.command("routecompare")
+def routecompare_cmd(
+    name: str,
+    orders: int = typer.Option(50, "--orders", "-n", help="比較に使うオーダー件数"),
+    seed: int = typer.Option(42, "--seed", help="出荷実績が無い場合の生成シード"),
+):
+    """ピッカー経路方式の総距離比較（S字/折り返し/最大ギャップ/2-opt、DES不要）。"""
+    from whsim import routecompare
+    proj = _open_project(name)
+    typer.echo(json.dumps(
+        routecompare.compare(proj.load_model(), n_orders=orders, seed=seed),
+        ensure_ascii=False, indent=2))
+
+
 @app.command()
 def settings(name: str):
     """Print the project's cost-model settings as JSON (``{}`` if none set)."""
@@ -167,6 +181,8 @@ def run(name: str):
     from whsim.render.replay import build_replay
     replay = build_replay(model, results[0], metrics)
     (run_dir / "replay.json").write_text(json.dumps(replay, ensure_ascii=False), "utf-8")
+    from whsim import eventlog
+    eventlog.dump(results[0].events, run_dir)   # raw event log beside the KPIs
 
     typer.echo(f"run -> {run_dir.name}")
     typer.echo("  verdict: " + metrics["verdict"])

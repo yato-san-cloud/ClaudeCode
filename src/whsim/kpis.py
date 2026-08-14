@@ -125,6 +125,111 @@ def _cost_params(res: RunResult, model: WarehouseModel | None) -> dict:
     }
 
 
+# --- 通路干渉 (aisle congestion) ---------------------------------------------
+# The waiting an agent does because someone else is already in the aisle cell it
+# needs. Kept as ONE pure function over a raw event log rather than inline in
+# ``_one``, because it is also the aggregation pipeline the queueing-theory
+# cross-check exercises: feed it a single-server M/M/1 log and its mean wait must
+# reproduce Wq = ρ/(μ-λ) (hence Lq = λ·Wq = ρ²/(1-ρ)). A statistic nobody can
+# validate against a closed form is a statistic nobody should sell.
+
+# How many worst cells the congestion read-out names. Enough to point at an aisle,
+# short enough to read — the fix is always "widen/re-route THAT stretch".
+TOP_CELLS = 10
+
+# Congestion advisory threshold: waiting more than this share of travel time is a
+# layout problem the proposal must disclose, not a rounding error.
+CONGESTION_VERDICT_SHARE = 0.15
+
+
+def wait_stats(events, travel_time_s: float = 0.0,
+               wait_events: tuple[str, ...] = ("aisle_wait", "aisle_pass_forced"),
+               top_n: int = TOP_CELLS) -> dict:
+    """Aggregate 通路干渉 waiting out of a raw event log.
+
+    ``travel_time_s`` is the agents' unencumbered travel time (what the walk would
+    have cost with the aisles empty), so ``share`` answers 「移動時間のうち何割が
+    待ちか」 against ``travel + wait`` — the total time actually spent getting
+    around. With no travel measured it degrades to 0.0 rather than dividing by
+    zero (never-blocks).
+
+    A forced pass (the never-blocks escape from a stuck cell) waited too, so its
+    seconds count towards the total while its COUNT is reported separately — a run
+    that only gets through by forcing is not a run that flowed.
+
+    Pure over the log: no model, no engine state. Zeros and an empty ``top_cells``
+    for a run with no congestion events at all, which is every run with the
+    feature off.
+    """
+    waits: list[float] = []
+    forced = 0
+    cells: dict[tuple, dict] = {}
+    for e in events or ():
+        if e.get("event") not in wait_events:
+            continue
+        wv = float(e.get("wait", 0.0) or 0.0)
+        waits.append(wv)
+        if e.get("event") == "aisle_pass_forced":
+            forced += 1
+        cell = e.get("cell")
+        key = tuple(cell) if isinstance(cell, (list, tuple)) else (cell,)
+        row = cells.setdefault(key, {"cell": list(key), "wait_s": 0.0, "hits": 0})
+        row["wait_s"] += wv
+        row["hits"] += 1
+    total = sum(waits)
+    denom = max(float(travel_time_s), 0.0) + total
+    # Ties break on the cell's repr, not the cell itself: a hand-written event with
+    # no ``cell`` yields ``[None]``, and comparing that against ``[3, 4]`` would
+    # raise. A read-out must never be the thing that breaks the KPI call.
+    top = sorted(cells.values(), key=lambda r: (-r["wait_s"], repr(r["cell"])))[:top_n]
+    return {
+        "wait_total_s": total,
+        "wait_share": (total / denom) if denom > 1e-9 else 0.0,
+        "waits": len(waits),
+        "wait_mean_s": statistics.fmean(waits) if waits else 0.0,
+        "wait_p95_s": _pct(waits, 0.95),
+        "forced_passes": forced,
+        "top_cells": top,
+    }
+
+
+def _congestion_kpis(events, travel_time_s: float) -> dict:
+    """:func:`wait_stats` under the KPI layer's public key names."""
+    s = wait_stats(events, travel_time_s)
+    return {
+        "congestion_wait_total_s": s["wait_total_s"],
+        "congestion_wait_share": s["wait_share"],
+        "congestion_waits": s["waits"],
+        "congestion_wait_mean_s": s["wait_mean_s"],
+        "congestion_wait_p95_s": s["wait_p95_s"],
+        "congestion_forced_passes": s["forced_passes"],
+        "congestion": {"top_cells": s["top_cells"]},
+    }
+
+
+def _merge_congestion(per: list[dict]) -> dict:
+    """Average the congestion read-out across replications.
+
+    ``compute``'s generic loop only averages TOP-LEVEL numerics, so without this
+    the worst-cells table would silently report replication #1 alone — the same
+    trap ``_merge_per_belt`` exists for. A cell absent from a rep contributes zero
+    to that rep, so the mean is per-replication (comparable to the averaged
+    totals beside it), not a sum over reps.
+    """
+    n = max(len(per), 1)
+    acc: dict[tuple, dict] = {}
+    for rep in per:
+        for row in (rep or {}).get("top_cells", []) or []:
+            key = tuple(row.get("cell") or ())
+            cur = acc.setdefault(key, {"cell": list(key), "wait_s": 0.0, "hits": 0.0})
+            cur["wait_s"] += float(row.get("wait_s", 0.0) or 0.0)
+            cur["hits"] += float(row.get("hits", 0) or 0)
+    top = [{"cell": v["cell"], "wait_s": v["wait_s"] / n, "hits": v["hits"] / n}
+           for v in acc.values()]
+    top.sort(key=lambda r: (-r["wait_s"], repr(r["cell"])))
+    return {"top_cells": top[:TOP_CELLS]}
+
+
 def _pct(values: list[float], q: float) -> float:
     if not values:
         return 0.0
@@ -222,6 +327,15 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     agv_deadlock_events = [e for e in res.events if e["event"] == "agv_deadlock_warning"]
     agv_wait_s = (sum(e.get("wait", 0.0) for e in agv_conflict_events)
                   + sum(e.get("wait", 0.0) for e in agv_deadlock_events))
+
+    # --- 通路干渉 (aisle congestion) -----------------------------------------
+    # Populated only when ``simulation.aisle_interference`` was on (aisle_wait /
+    # aisle_pass_forced events exist); otherwise every field is 0 and top_cells is
+    # empty — additive, no legacy KPI shifts. The denominator is the pickers' own
+    # unencumbered travel time (the only agent class whose distance the log
+    # carries), so the share reads as 「移動時間のうち待ちの割合」.
+    breakdown = _picker_breakdown(res, model, picker_busy, completed)
+    congestion = _congestion_kpis(res.events, breakdown["picker_walk_s"])
 
     on_time = sum(
         1 for e in completes if e.get("due") is None or e["t"] <= e["due"]
@@ -342,7 +456,12 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         # 生産性の内訳 (要素作業分解): picker time = 移動 + 手扱い + 手待ち。
         # 移動 = pick trip distance ÷ 歩行速度; 手扱い = busy − 移動 (ピック+仕分+荷渡し);
         # 手待ち = 在席時間 − busy。エンジン変更なしでイベントログから純粋に導出。
-        **_picker_breakdown(res, model, picker_busy, completed),
+        **breakdown,
+        # 通路干渉: 待ち合計/割合/回数/p95 + 最混雑セル (top_cells).
+        **congestion,
+        # 経路拘束の実行時検査: how many replay legs went through the racking (0 on
+        # a healthy layout; a non-zero count is surfaced in the verdict).
+        "path_violations": len(getattr(res, "path_violations", None) or ()),
         # 実測生産性 (this layout) per process, for the 想定→実測 feedback loop.
         "measured_productivity": _measured_productivity(
             res, model, picker_busy, packer_busy, completed),
@@ -562,6 +681,8 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     # dict (it would keep replication #1 only) and a "when" that is ``None`` when
     # the run never jammed (it would keep whatever rep #1 happened to say).
     agg["conveyors"] = _merge_per_belt([p["conveyors"] for p in per])
+    # 通路干渉: same trap, same fix — the worst-cells table is a nested dict.
+    agg["congestion"] = _merge_congestion([p["congestion"] for p in per])
     _firsts = [p["conveyor_time_to_first_block_s"] for p in per
                if isinstance(p["conveyor_time_to_first_block_s"], (int, float))]
     agg["conveyor_time_to_first_block_s"] = (statistics.fmean(_firsts)
@@ -666,4 +787,26 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
                 else f"手待ち率 {agg['conveyor_block_ratio'] * 100:.0f}%")
         where = f", ベルト{min(belts)[1]}" if belts else ""
         agg["verdict"] += f"。コンベアに滞留が出ています（{when}{where}）"
+    # 通路干渉: when agents spend a material share of their travel time queueing
+    # behind each other, say so AND say where — 「通路が狭い」 is not actionable,
+    # 「この座標の通路」 is. Off (or an uncongested floor) ⇒ share 0 ⇒ nothing
+    # appended, so the verdict stays byte-identical. The cell is reported at its
+    # centre in floor metres, using the same lattice pitch the engine contended on.
+    if agg.get("congestion_wait_share", 0.0) > CONGESTION_VERDICT_SHARE:
+        pct = round(agg["congestion_wait_share"] * 100)
+        grid = float(getattr(model.simulation, "heatmap_grid_m", 1.0) or 1.0) if model else 1.0
+        top = (agg.get("congestion") or {}).get("top_cells") or []
+        where = ""
+        if top and len(top[0].get("cell") or ()) == 2:
+            cx, cy = top[0]["cell"]
+            where = f"（最混雑: 約 ({(cx + 0.5) * grid:.0f}, {(cy + 0.5) * grid:.0f}) m 付近）"
+        agg["verdict"] += f"。通路の混雑で移動時間の {pct}% が待ちです{where}"
+    # 経路拘束: an agent drawn walking THROUGH a rack means the routing graph did
+    # not see that rack, so the travel behind every number in this run is
+    # understated. That is a correctness warning, not a tuning hint.
+    if agg.get("path_violations"):
+        agg["verdict"] += (
+            f"。⚠ 経路が棚を貫通しています（{agg['path_violations']:.0f}件）"
+            "— レイアウトの棚定義を確認してください"
+        )
     return agg

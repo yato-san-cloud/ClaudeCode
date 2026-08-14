@@ -128,7 +128,7 @@ class ConveyorLine:
                 t = 0.0
             else:
                 t = ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)
-                t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+                t = 0.0 if t < 0.0 else (min(t, 1.0))
             qx, qy = a[0] + dx * t, a[1] + dy * t
             d2 = (px - qx) ** 2 + (py - qy) ** 2
             if d2 < best_d2:
@@ -151,7 +151,7 @@ class ConveyorLine:
             if arc <= acc + seg + 1e-9:
                 a, b = self.points[i], self.points[i + 1]
                 t = ((arc - acc) / seg) if seg > 1e-12 else 0.0
-                t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+                t = 0.0 if t < 0.0 else (min(t, 1.0))
                 out = [(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)]
                 for p in self.points[i + 1:]:
                     if math.dist(p, out[-1]) > 1e-9:   # drop a coincident head/corner
@@ -396,6 +396,20 @@ class World:
     # n_agvs > 1.
     aisle_locks: dict | None = None
     agv_deadlock_s: float = 120.0           # lock wait past this ⇒ warn + force-proceed
+    # 通路干渉 (walking agents contend for aisle cells). None = disabled: every
+    # ``_walk`` takes the legacy single-timeout path and the run is byte-identical.
+    # When present it is a dict of lazily-created capacity-1 SimPy Resources keyed
+    # by ``(cell_x, cell_y, direction)`` — the SAME lattice the congestion heatmap
+    # rasterises (``simulation.heatmap_grid_m``) plus the travel direction, so two
+    # agents crossing the same cell the same way queue while an agent going the
+    # other way (or across) passes freely (aisles are wide enough to pass, not to
+    # overtake). Built from ``simulation.aisle_interference``. See
+    # ``processes._walk`` for the traversal protocol and its forced-pass escape.
+    aisle_cells: dict | None = None
+    # Forced-pass threshold as a MULTIPLE of the cell's own traversal time: an
+    # agent that has waited this long at a cell boundary walks through anyway and
+    # logs ``aisle_pass_forced`` (never-blocks — a simulation must not stall).
+    aisle_wait_cap: float = 3.0
     _helper_seq: int = 0                    # monotonic id source for helper tracks
 
     def log(self, **kw) -> None:
@@ -412,7 +426,7 @@ class World:
             return None
         return self.replen_faces.get(self._face_key(xy))
 
-    def helper_for(self, w: "Worker", zone: int) -> "Worker":
+    def helper_for(self, w: Worker, zone: int) -> Worker:
         """A lightweight replay-only sub-worker track for one concurrent zone leg
         of `w`. Parallel zoning runs several legs at the SAME simulated time, so
         they cannot share `w.kf` (their keyframes would interleave and the worker
@@ -485,7 +499,7 @@ class World:
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s
 
-    def new_tote(self, order_id: str) -> "Tote | None":
+    def new_tote(self, order_id: str) -> Tote | None:
         """A replay track for one tote — or ``None`` when we are outside the replay
         window or past ``tote_cap`` (MAX_TOTE_TRACKS). Callers treat ``None`` as
         "move it, don't draw it", so the physics never depend on recording."""
@@ -495,13 +509,24 @@ class World:
         self.totes.append(t)
         return t
 
-    def aisle_lock(self, seg) -> "simpy.Resource":
+    def aisle_lock(self, seg) -> simpy.Resource:
         """The mutex (capacity-1 Resource) for a coarse aisle segment, created on
         first use. Only reached when ``aisle_locks`` is not None (interference on)."""
         lk = self.aisle_locks.get(seg)
         if lk is None:
             lk = simpy.Resource(self.env, capacity=1)
             self.aisle_locks[seg] = lk
+        return lk
+
+    def aisle_cell(self, key) -> simpy.Resource:
+        """The capacity-1 Resource for one ``(cell_x, cell_y, direction)``, created
+        on first use — so only the cells agents actually walk through ever exist
+        (a 100x50 m floor would otherwise pre-allocate 20,000 resources nobody
+        touches). Only reached when ``aisle_cells`` is not None (通路干渉 on)."""
+        lk = self.aisle_cells.get(key)
+        if lk is None:
+            lk = simpy.Resource(self.env, capacity=1)
+            self.aisle_cells[key] = lk
         return lk
 
 
@@ -521,6 +546,14 @@ def build(
     pick with picktour's 2-opt instead — strictly shorter tours, opt-in only, so
     every existing run is byte-identical when left at the default."""
     env = env or simpy.Environment()
+
+    # "default" resolves to the MODEL's own routing_policy, so a scenario JSON
+    # edit of `process.routing_policy` switches disciplines with no code change.
+    # The schema default "nearest" lands on the same nearest-neighbour branch the
+    # literal "default" always took, so plumbing the model value through changes
+    # nothing for existing models. An explicit kwarg still wins (tests use it).
+    if routing_policy == "default":
+        routing_policy = str(getattr(model.process, "routing_policy", "nearest") or "nearest")
 
     workers = model.resources.workers
     n_pickers = sum(w.count for w in workers if w.role == "picker") or 1
@@ -562,7 +595,7 @@ def build(
 
     sku_xy: dict[str, tuple[float, float]] = {}
     sku_pick: dict[str, tuple] = {}
-    sku_loc: dict[str, "object"] = {}       # sku -> the Location backing its pick face
+    sku_loc: dict[str, object] = {}       # sku -> the Location backing its pick face
     for it in model.items:
         if it.default_location and it.default_location in loc_by_id:
             loc = loc_by_id[it.default_location]
@@ -773,6 +806,11 @@ def build(
     aisle_locks = ({} if (model.process.agv_interference and use_graph and n_agvs > 1)
                    else None)
 
+    # 通路干渉: walking agents contend for aisle cells. Strictly opt-in — with the
+    # flag off this stays None and every ``_walk`` runs the legacy single-timeout
+    # body, so the event log, the RNG draw order and the keyframes are unchanged.
+    aisle_cells = {} if model.simulation.aisle_interference else None
+
     has_conveyor = bool(conveyor_lines)
 
     return World(
@@ -807,4 +845,5 @@ def build(
         replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
         n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,
         aisle_locks=aisle_locks,
+        aisle_cells=aisle_cells,
     )

@@ -29,10 +29,208 @@ def _accumulate_heat(world: World, a, b) -> None:
             world.heat[gy, gx] += 1.0
 
 
+# --- 通路干渉 (aisle interference) ------------------------------------------
+# Direction names for the 4-neighbour lattice a walk decomposes into. A cell is
+# contended PER DIRECTION, so two agents crossing the same cell the other way (or
+# across it) never queue — a real aisle is wide enough to pass someone coming the
+# other way, but not wide enough to overtake someone ahead of you.
+_DIR_X = ("-x", "+x")
+_DIR_Y = ("-y", "+y")
+
+# Never-blocks guard: a single walk longer than this many cells falls back to the
+# un-contended single timeout. At a 1 m pitch that is a 4 km leg, i.e. only a
+# degenerate coordinate can reach it — but a walk must never turn into an
+# unbounded pile of SimPy events.
+MAX_CELL_STEPS = 4000
+
+# A stand-still longer than this earns its own replay keyframe, so the drawn agent
+# visibly STOPS instead of gliding through the cell it queued in front of. Shorter
+# waits are left out on purpose: one keyframe per metre-scale hesitation would bury
+# the replay payload in frames nobody can see.
+WAIT_KEYFRAME_S = 2.0
+
+
+def _axis_steps(u0: float, u1: float, fixed: float, grid: float, axis: int) -> list:
+    """``[(cell, direction, metres)]`` for one straight run along a single axis.
+
+    Splits the run at the lattice boundaries so each entry is the stretch spent
+    inside ONE cell — which is what makes a cell a capacity-1 resource an agent
+    holds for exactly as long as it is physically inside it."""
+    out: list[tuple[tuple[int, int], str, float]] = []
+    if abs(u1 - u0) <= 1e-9:
+        return out
+    up = u1 > u0
+    dirn = (_DIR_X if axis == 0 else _DIR_Y)[1 if up else 0]
+    fixed_i = math.floor(fixed / grid)
+    u = u0
+    for _ in range(MAX_CELL_STEPS + 1):
+        if (u >= u1 - 1e-9) if up else (u <= u1 + 1e-9):
+            break
+        if up:
+            ci = math.floor(u / grid)
+            nxt = min((ci + 1) * grid, u1)
+        else:
+            # Moving down, a position exactly on a boundary is LEAVING the cell
+            # above it, so the cell it is in is the one below.
+            ci = math.ceil(u / grid) - 1
+            nxt = max(ci * grid, u1)
+        seg = abs(nxt - u)
+        if seg > 1e-9:
+            out.append((((ci, fixed_i) if axis == 0 else (fixed_i, ci)), dirn, seg))
+        u = nxt
+    return out
+
+
+def _route_steps(pts, grid: float) -> tuple[list, dict]:
+    """``(steps, corners)`` for a route: the cells it occupies and where it turns.
+
+    ``corners`` maps a step INDEX to the route corner reached after that step, so
+    the replay can keep emitting exactly one keyframe per corner while the walk
+    itself is executed cell by cell. Both come out of one pass on purpose: two
+    passes that disagree would put the drawn turn on the wrong cell."""
+    if grid <= 0:
+        grid = 1.0
+    steps: list[tuple[tuple[int, int], str, float]] = []
+    corners: dict[int, tuple[float, float]] = {}
+    for a, b in zip(pts, pts[1:]):
+        steps += _axis_steps(a[0], b[0], a[1], grid, 0)   # horizontal at y = ay
+        steps += _axis_steps(a[1], b[1], b[0], grid, 1)   # vertical at x = bx
+        if len(steps) > MAX_CELL_STEPS:
+            return [], {}                                 # never-blocks (see above)
+        corners[len(steps)] = (float(b[0]), float(b[1]))
+    return steps, corners
+
+
+def _cell_steps(pts, grid: float) -> list:
+    """``[(cell, direction, metres)]`` an agent traverses along the route ``pts``.
+
+    Same lattice as :func:`routing.leg_cells` (the congestion heatmap's, pitched
+    by ``simulation.heatmap_grid_m``) and the same L-shaped x-then-y decomposition
+    of a non-axis-aligned leg, so a walk's contended cells and its heat cannot
+    disagree. Graph routes are already axis-aligned, so their legs yield one axis
+    run each and the L never fires."""
+    return _route_steps(pts, grid)[0]
+
+
+def _walk_contended(world: World, w: Worker, d: float, total_t: float,
+                    state: str, emit, emit_wait, pts) -> float:
+    """Walk the route ``pts`` cell by cell, queueing behind whoever is in the way.
+
+    **The model.** Each ``(cell, direction)`` of the walking lattice is a capacity-1
+    resource. An agent seizes the cell it is about to enter, holds it for that
+    cell's share of the leg's travel time, then releases it. A second agent
+    entering the same cell the same way therefore waits for the first to clear —
+    the aisle congestion the free-passage engine could not see. Opposite and
+    crossing directions are independent: an aisle is wide enough to pass someone
+    coming towards you, not wide enough to overtake someone ahead of you.
+
+    **Deadlock is structural, not lucky.** The wait happens at the cell BOUNDARY
+    and the agent holds nothing while it waits — the cell behind it is released
+    *before* the next one is requested. Hold-and-wait, one of the four necessary
+    conditions for circular wait, therefore never occurs, so no set of agents can
+    close a cycle no matter how the routes are drawn. The forced pass below exists
+    only for the residual liveness risk (several agents released at the same
+    instant contending for one cell), never for correctness.
+
+    **never-blocks.** Waiting past ``aisle_wait_cap`` x this cell's own traversal
+    time gives up the request and walks through anyway, logging
+    ``aisle_pass_forced``. A simulation that stalls tells the salesperson nothing.
+
+    **What is in scope.** Everything that travels through ``_walk``: pickers (the
+    pick sweep and the carry to pack/belt), 仮置き/梱包 carries, forklift putaway
+    and 補充要員 replenishment trips. AGV travel does NOT go through ``_walk`` —
+    it has its own coarser segment-mutex model (``process.agv_interference`` /
+    :func:`_agv_travel`), which stays exactly as it was.
+
+    Distance is untouched (``d`` is the same routed distance the free-passage walk
+    charged); only TIME grows, by the seconds actually spent waiting.
+    """
+    env = world.env
+    # ``corners`` keeps the replay at ONE keyframe per route corner: a keyframe per
+    # cell would multiply the payload by the leg length in metres for no visible gain.
+    steps, corners = _route_steps(pts, world.grid_m)
+    span = sum(s[2] for s in steps)
+    if not steps or span <= 1e-9:
+        # Degenerate route (a zero-length walk, or a leg too long for the lattice
+        # guard): fall back to the free-passage single timeout, exactly as the
+        # legacy body does for a zero-length path.
+        yield env.timeout(total_t)
+        if world.recording():
+            emit(pts[-1][0], pts[-1][1])
+        return d
+    for i, (cell, dirn, seg_m) in enumerate(steps):
+        dt = total_t * seg_m / span
+        if dt > 1e-9:
+            lock = world.aisle_cell((cell[0], cell[1], dirn))
+            req = lock.request()
+            wait_start = env.now
+            # Reneging request: race the cell against the forced-pass deadline. The
+            # agent holds NOTHING here — the cell behind it was released last
+            # iteration, so it can never be part of a hold-and-wait cycle.
+            result = yield req | env.timeout(world.aisle_wait_cap * dt)
+            waited = env.now - wait_start
+            acquired = req in result
+            if not acquired:
+                # Give the request up completely. ``cancel`` alone is not enough:
+                # if the cell was granted in the SAME instant the deadline fired,
+                # the condition resolves on the timeout while the request is
+                # already triggered — and a triggered request cancel() ignores
+                # would hold that cell for the rest of the run, permanently
+                # jamming an aisle nobody is standing in. ``release`` is the other
+                # half of what ``with resource.request()`` does on exit, and it
+                # tolerates a request that was never granted.
+                req.cancel()
+                lock.release(req)
+                world.log(t=env.now, event="aisle_pass_forced", resource="aisle",
+                          worker=w.id, cell=[cell[0], cell[1]], dirn=dirn, wait=waited)
+            elif waited > 1e-9:
+                world.log(t=env.now, event="aisle_wait", resource="aisle",
+                          worker=w.id, cell=[cell[0], cell[1]], dirn=dirn, wait=waited)
+            # A long stand-still is worth drawing: without it the replay lerps the
+            # agent smoothly across a cell it actually stood still in front of.
+            # "idle" is deliberate — the replay contract has no "wait" state and
+            # inventing one would break every existing viewer.
+            if waited > WAIT_KEYFRAME_S and world.recording():
+                here = _step_point(pts, steps, i)
+                emit_wait(here[0], here[1])
+            yield env.timeout(dt)
+            if acquired:
+                lock.release(req)
+        corner = corners.get(i + 1)
+        if corner is not None and world.recording():
+            emit(corner[0], corner[1])
+    return d
+
+
+def _step_point(pts, steps, i: int) -> tuple[float, float]:
+    """Where the agent stands at the START of step ``i`` — the boundary it waits at.
+
+    Walks the route's arc length up to that step. Replay-only (it never touches the
+    clock), so an approximation here can never move a number."""
+    want = sum(s[2] for s in steps[:i])
+    acc = 0.0
+    for a, b in zip(pts, pts[1:]):
+        leg = [(a[0], a[1]), (b[0], a[1]), (b[0], b[1])]
+        for p, q in zip(leg, leg[1:]):
+            seg = abs(q[0] - p[0]) + abs(q[1] - p[1])
+            if seg <= 1e-9:
+                continue
+            if acc + seg >= want - 1e-9:
+                f = (want - acc) / seg
+                return (p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f)
+            acc += seg
+    return (float(pts[-1][0]), float(pts[-1][1]))
+
+
 def _walk(world: World, w: Worker, frm, to, speed: float, state: str, also=None):
     """``also`` (optional) mirrors every emitted keyframe onto extra replay tracks
     (the totes riding in this agent's hands), so goods follow the SAME real route
-    as the worker carrying them. Replay-only: timing is untouched."""
+    as the worker carrying them. Replay-only: timing is untouched.
+
+    With ``simulation.aisle_interference`` on, the walk is handed to
+    :func:`_walk_contended`, which queues the agent behind whoever else is in the
+    same aisle cell. OFF (the default) the body below is untouched — same single
+    timeout, same keyframes, same RNG draw order."""
     d = world.dist(frm, to)            # measured override > wall-aware graph > Manhattan
     _accumulate_heat(world, frm, to)
     total_t = (d / speed) if speed > 0 else 0.0
@@ -41,6 +239,22 @@ def _walk(world: World, w: Worker, frm, to, speed: float, state: str, also=None)
         w.kf(world.env.now, x, y, state)
         for tk in (also or ()):
             tk.kf(world.env.now, x, y, state)
+
+    def _emit_wait(x, y):
+        """A stand-still keyframe: the WORKER is idle, but the totes in its hands
+        are still being carried — their state vocabulary has no 'idle'."""
+        w.kf(world.env.now, x, y, "idle")
+        for tk in (also or ()):
+            tk.kf(world.env.now, x, y, state)
+
+    if world.aisle_cells is not None and total_t > 1e-9:
+        # 通路干渉 ON: same route, same distance, same corner keyframes — the walk
+        # is merely interrupted wherever another agent is already in the cell.
+        pts = world.path(frm, to)
+        if world.recording():
+            _emit(pts[0][0], pts[0][1])
+        yield from _walk_contended(world, w, d, total_t, state, _emit, _emit_wait, pts)
+        return d
 
     if not world.recording():
         yield world.env.timeout(total_t)
@@ -78,6 +292,12 @@ def _route_order(world: World, start, pts: list) -> list[int]:
     if world.routing_policy == "optimized" and len(pts) > 2:
         from whsim.picktour import optimize
         return optimize(start, pts, world.dist)
+    # Named picker-routing disciplines (s_shape / return / largest_gap): pure
+    # visit-order policies over the pick points' own aisle structure. ADDITIVE —
+    # any other value falls through to the historical branches below.
+    if world.routing_policy in ("s_shape", "return", "largest_gap") and pts:
+        from whsim.engine.pickroute import route_order
+        return route_order(world.routing_policy, start, pts)
     if world.pick_strategy == "zone" and pts:
         # rank by actual aisle column (distinct x positions), serpentine in y
         cols = sorted({round(p[0], 1) for p in pts})

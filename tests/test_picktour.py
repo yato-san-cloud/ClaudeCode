@@ -107,10 +107,14 @@ def test_optimized_build_flag_only_shortens_and_is_opt_in():
 
     from whsim.engine.build import build
     m = templates.load_template_model("ecommerce_small")
-    # default build => legacy policy
+    # default build => the MODEL's policy (schema default "nearest" = the same
+    # nearest-neighbour branch "default" always took). A scenario JSON that sets
+    # `process.routing_policy` now reaches the engine with no code change.
     w_default = build(m, simpy.Environment())
-    assert w_default.routing_policy == "default"
-    # opt-in build => optimized policy (the only way to switch the branch on)
+    assert w_default.routing_policy == "nearest"
+    m.process.routing_policy = "s_shape"
+    assert build(m, simpy.Environment()).routing_policy == "s_shape"
+    # opt-in build kwarg still wins over the model value
     w_opt = build(m, simpy.Environment(), routing_policy="optimized")
     assert w_opt.routing_policy == "optimized"
 

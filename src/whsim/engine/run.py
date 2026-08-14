@@ -72,6 +72,10 @@ class RunResult:
     n_replenishers: int = 0                 # 補充要員 servers (0 = replenishment off)
     staging_capacity: int = 0               # 仮置き buffer capacity (0 = disabled)
     replay_window_s: float = 0.0
+    # 経路拘束の実行時検査: replay legs that go THROUGH the drawn racking. Always
+    # measured (no flag), always empty on a healthy layout. Detection and honest
+    # reporting is the whole job — a violation never aborts the run.
+    path_violations: list[str] = field(default_factory=list)
     cost: dict = field(default_factory=dict)
     # Busiest-day disclosure metadata: None for single-day/profile demand (the
     # pass-through path stays byte-identical), a dict when a multi-day import was
@@ -156,6 +160,33 @@ def rep_day_meta(model: WarehouseModel) -> dict | None:
     }
 
 
+def validate_no_penetration(world, model: WarehouseModel, tracks=None) -> list[str]:
+    """Did any agent this run walk THROUGH the racking? (empty = no.)
+
+    The invariant "agents travel the aisles, not the shelves" is pinned offline
+    for every bundled template (``tests/test_no_rack_penetration.py``), but the
+    layouts that matter commercially are the ones that DON'T ship: an imported
+    MapMaker floor, a hand-dragged rack, a rack placed after the graph was built.
+    On those, a re-opened rack understates travel — which overstates productivity
+    and throughput, i.e. it makes the proposal optimistic in the customer's favour
+    and wrong. So the same measurement runs on every replication that recorded a
+    trajectory, and its findings ride out on ``RunResult.path_violations``.
+
+    ``tracks`` defaults to the world's own picker/helper tracks; ``run_once``
+    passes the full cast (forklifts, AGVs, packers, inspectors) so the check
+    covers every agent the replay draws. Never raises and never aborts: detection
+    and reporting is the job (never-blocks).
+    """
+    from whsim.rackgeom import track_penetrations
+    try:
+        if tracks is None:
+            tracks = list(getattr(world, "workers", None) or ()) + \
+                     list(getattr(world, "helpers", None) or ())
+        return track_penetrations(model, [t for t in tracks if getattr(t, "keyframes", None)])
+    except Exception:      # noqa: BLE001 — a diagnostic must never break a run
+        return []
+
+
 def run_once(
     model: WarehouseModel,
     seed: int | None = None,
@@ -236,6 +267,13 @@ def run_once(
             _report(progress, env.now, duration)
     else:
         env.run(until=duration)
+    # 経路拘束の実行時検査 (always on). Only a rep that RECORDED a trajectory has
+    # anything to check — replications 1..n run with an empty replay window, so
+    # they carry no keyframes and the call is a no-op there.
+    violations = validate_no_penetration(
+        world, model,
+        tracks=[*world.workers, *world.helpers, *agvs, *forklifts,
+                *packers, *inspectors])
     return RunResult(
         events=world.events, heat=world.heat,
         n_pickers=world.n_pickers, n_packers=world.n_packers,
@@ -256,6 +294,7 @@ def run_once(
         n_replenishers=world.n_replenishers,
         staging_capacity=world.staging_capacity,
         replay_window_s=window, cost=_cost_inputs(model),
+        path_violations=violations,
         rep_day=rep_meta,
     )
 

@@ -55,7 +55,7 @@ def rack_rects(model) -> list[tuple[float, float, float, float]]:
     sense of it) simply yields no obstacles, so callers keep working.
     """
     try:
-        from whsim.render.shelves import shelf_runs   # lazy: avoids an import cycle
+        from whsim.render.shelves import shelf_runs  # lazy: avoids an import cycle
         runs = shelf_runs(model) or []
     except Exception:      # noqa: BLE001 — geometry is advisory, never fatal
         return []
@@ -68,6 +68,103 @@ def rack_rects(model) -> list[tuple[float, float, float, float]]:
         if rect is not None:
             out.append(rect)
     return out
+
+
+# --- 貫通検査 (do the drawn paths walk through the drawn racking?) ------------
+# ``tests/test_no_rack_penetration.py`` measured this offline for every template
+# and pinned it at zero. The same measurement belongs in the RUN, because the
+# offline pin only covers the layouts that ship: a customer's imported floor, a
+# hand-edited rack, a new routing policy can all re-open the racks and nobody
+# would know until the 3D replay showed a picker inside a shelf. The numbers here
+# are the test's own: sample a leg every ``STEP_M`` and count samples that land
+# inside a rack rectangle SHRUNK by ``SHRINK_M`` — the shrink is what lets an
+# agent legitimately stand at (and reach into) a pick face.
+STEP_M = 0.15
+SHRINK_M = 0.15
+# A leg may not penetrate by more than this before it is reported. Zero legs are
+# expected to reach it on a healthy layout.
+MAX_LEG_PENETRATION_M = 0.3
+
+
+def shrunk_rack_rects(model, shrink_m: float = SHRINK_M) -> list:
+    """:func:`rack_rects` with each rectangle inset by ``shrink_m`` on all sides.
+
+    Standing at a pick face is not walking through the rack, so the check has to
+    be run against the rack's interior, not its footprint. Rectangles too thin to
+    survive the inset are dropped (they have no interior to penetrate)."""
+    out = []
+    for (x, y, w, h) in rack_rects(model):
+        x, y = x + shrink_m, y + shrink_m
+        w, h = w - 2 * shrink_m, h - 2 * shrink_m
+        if w > 0 and h > 0:
+            out.append((x, y, w, h))
+    return out
+
+
+def _point_inside(rects, x: float, y: float) -> bool:
+    for (rx, ry, rw, rh) in rects:
+        if rx <= x <= rx + rw and ry <= y <= ry + rh:
+            return True
+    return False
+
+
+def segment_penetration_m(rects, a, b, step_m: float = STEP_M) -> float:
+    """Metres of the segment ``a→b`` that lie inside any of ``rects``.
+
+    Sampled at ``step_m`` — the same resolution the offline guard measures at, so
+    the two agree. O(samples x rects) with an early bounding-box reject, which is
+    what keeps a whole replay's worth of legs cheap enough to check every run."""
+    ax, ay = float(a[0]), float(a[1])
+    bx, by = float(b[0]), float(b[1])
+    length = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+    if length < 1e-9 or not rects:
+        return 0.0
+    lo_x, hi_x = (bx, ax) if ax > bx else (ax, bx)
+    lo_y, hi_y = (by, ay) if ay > by else (ay, by)
+    near = [r for r in rects
+            if r[0] <= hi_x and r[0] + r[2] >= lo_x
+            and r[1] <= hi_y and r[1] + r[3] >= lo_y]
+    if not near:
+        return 0.0
+    n = max(int(length / max(step_m, 1e-6)), 1)
+    hits = sum(1 for i in range(n + 1)
+               if _point_inside(near, ax + (bx - ax) * i / n, ay + (by - ay) * i / n))
+    return hits * (length / n) if hits else 0.0
+
+
+def track_penetrations(model, tracks, rects=None,
+                       max_reports: int = 20) -> list[str]:
+    """Human-readable reports of every replay leg that goes through the racking.
+
+    ``tracks`` is an iterable of objects with ``id`` and ``keyframes`` — the replay
+    tracks the engine already produces. Returns one Japanese line per offending
+    leg (capped at ``max_reports`` so a systematically broken layout reports a
+    readable sample, not a hundred thousand lines) and ``[]`` for a healthy run.
+
+    Never raises: geometry is advisory and the report is a diagnostic, so a model
+    the renderer cannot make sense of simply yields no findings.
+    """
+    try:
+        if rects is None:
+            rects = shrunk_rack_rects(model)
+        if not rects:
+            return []
+        out: list[str] = []
+        for tr in tracks or ():
+            kf = getattr(tr, "keyframes", None) or ()
+            tid = getattr(tr, "id", "?")
+            for p, q in zip(kf, kf[1:]):
+                pen = segment_penetration_m(rects, (p[1], p[2]), (q[1], q[2]))
+                if pen > MAX_LEG_PENETRATION_M:
+                    out.append(
+                        f"{tid}: t={p[0]:.1f}s ({p[1]:.1f}, {p[2]:.1f})→"
+                        f"({q[1]:.1f}, {q[2]:.1f}) が棚を {pen:.2f} m 貫通しています"
+                    )
+                    if len(out) >= max_reports:
+                        return out
+        return out
+    except Exception:      # noqa: BLE001 — a diagnostic must never break a run
+        return []
 
 
 def aisle_block(model) -> dict | None:

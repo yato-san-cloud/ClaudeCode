@@ -56,7 +56,7 @@ ZoneType = Literal[
     "receiving", "storage", "picking", "packing", "shipping", "staging"
 ]
 PickStrategy = Literal["discrete", "batch", "zone", "wave"]
-RoutingPolicy = Literal["s_shape", "return", "nearest"]
+RoutingPolicy = Literal["s_shape", "return", "largest_gap", "nearest", "optimized"]
 
 
 class Units(BaseModel):
@@ -513,6 +513,12 @@ class Simulation(BaseModel):
     random_seed: int = 42
     replications: int = 1
     heatmap_grid_m: float = 1.0
+    # 通路干渉: agents contend for aisle cells (one per direction per cell) and
+    # WAIT when another agent is crossing — measured as `aisle_wait` events and
+    # congestion KPIs. False (default) = legacy free passage, byte-identical
+    # runs; turn on per-scenario. See engine/processes.py for the model and the
+    # timeout escape that makes gridlock structurally impossible.
+    aisle_interference: bool = False
     currency: str = "¥"
     amortize_capex_months: int = 36  # spread equipment capex over N months
     work_days_per_month: int = 25    # to scale a one-shift run to a monthly cost
