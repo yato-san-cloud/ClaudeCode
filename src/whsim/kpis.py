@@ -462,6 +462,9 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         # 経路拘束の実行時検査: how many replay legs went through the racking (0 on
         # a healthy layout; a non-zero count is surfaced in the verdict).
         "path_violations": len(getattr(res, "path_violations", None) or ()),
+        # 経路グラフで解けず直線に縮退した移動 (取込レイアウトの通路が塞がって
+        # いる兆候)。0 が健全。>0 のとき判定文が警告する。
+        "unroutable_legs": float(getattr(res, "unroutable_legs", 0) or 0),
         # 実測生産性 (this layout) per process, for the 想定→実測 feedback loop.
         "measured_productivity": _measured_productivity(
             res, model, picker_busy, packer_busy, completed),
@@ -804,6 +807,11 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     # 経路拘束: an agent drawn walking THROUGH a rack means the routing graph did
     # not see that rack, so the travel behind every number in this run is
     # understated. That is a correctness warning, not a tuning hint.
+    if agg.get("unroutable_legs"):
+        agg["verdict"] += (
+            f"。⚠ 通路グラフで解決できず直線距離に縮退した移動が "
+            f"{agg['unroutable_legs']:.0f} 件あります"
+            "（取込レイアウトの通路が塞がっていないか確認してください）")
     if agg.get("path_violations"):
         agg["verdict"] += (
             f"。⚠ 経路が棚を貫通しています（{agg['path_violations']:.0f}件）"

@@ -657,7 +657,20 @@ def agv_agent(world: World, a: Worker):
         item = yield world.order_store.get()
         order = item["order"]
         points, _, _, _ = _order_points(world, order)
-        route = [points[i] for i in nearest_neighbor_route(world.agv_home, points)]
+        # The AGV honours the SAME routing_policy dial as the pickers, so a
+        # scenario JSON switches the fleet's discipline too. Only the EXPLICIT
+        # policies divert; anything else (incl. the zone strategy's serpentine,
+        # which is a picker-band concept) keeps the historical NN tour, so an
+        # unstated policy is byte-identical.
+        if world.routing_policy in ("s_shape", "return", "largest_gap") and points:
+            from whsim.engine.pickroute import route_order as _pr_order
+            route = [points[i] for i in _pr_order(world.routing_policy,
+                                                  world.agv_home, points)]
+        elif world.routing_policy == "optimized" and len(points) > 2:
+            from whsim.picktour import optimize
+            route = [points[i] for i in optimize(world.agv_home, points, world.dist)]
+        else:
+            route = [points[i] for i in nearest_neighbor_route(world.agv_home, points)]
         trip_start = env.now
         cur = world.agv_home
         for dest in route:

@@ -90,6 +90,26 @@ def dump(events, run_dir) -> Path | None:
         return None
 
 
+def dump_all(results, run_dir) -> int:
+    """Write EVERY replication's event log (``events.jsonl`` = rep 0 as before,
+    ``events_rep01.jsonl``… for the rest). Returns how many files were written.
+
+    A ``kpis.json`` averaged over N replications can only be re-derived from N
+    logs — keeping just rep 0 made the shipped KPI unauditable against the
+    shipped log. rep 0's filename is unchanged so every existing reader (the
+    download endpoint, ``load``) keeps working.
+    """
+    n = 0
+    for i, res in enumerate(results or ()):
+        try:
+            name = EVENTS_JSONL if i == 0 else f"events_rep{i:02d}.jsonl"
+            (Path(run_dir) / name).write_text(to_jsonl(res.events), "utf-8")
+            n += 1
+        except Exception:  # noqa: BLE001 — an artifact write must never fail a run
+            continue
+    return n
+
+
 def load(run_dir) -> list[dict]:
     """Read back an ``events.jsonl`` (``[]`` when absent or unreadable).
 

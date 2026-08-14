@@ -266,7 +266,7 @@ def _run_blocking(proj: Project, name: str | None = None) -> dict:
     (run_dir / "replay.json").write_text(
         json.dumps(replay, ensure_ascii=False), "utf-8")
     from whsim import eventlog
-    eventlog.dump(res.events, run_dir)          # raw event log beside the KPIs
+    eventlog.dump_all(results, run_dir)          # raw event log beside the KPIs
     render_png(model, heat, metrics, proj.load_provenance().summary(),
                run_dir / "layout_heatmap.png")
     return {"kpis": metrics, "estimate": est, "run": run_dir.name}

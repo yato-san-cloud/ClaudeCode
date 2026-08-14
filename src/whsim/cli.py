@@ -182,7 +182,7 @@ def run(name: str):
     replay = build_replay(model, results[0], metrics)
     (run_dir / "replay.json").write_text(json.dumps(replay, ensure_ascii=False), "utf-8")
     from whsim import eventlog
-    eventlog.dump(results[0].events, run_dir)   # raw event log beside the KPIs
+    eventlog.dump_all(results, run_dir)   # raw event log beside the KPIs
 
     typer.echo(f"run -> {run_dir.name}")
     typer.echo("  verdict: " + metrics["verdict"])

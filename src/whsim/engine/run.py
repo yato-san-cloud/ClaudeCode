@@ -76,6 +76,10 @@ class RunResult:
     # measured (no flag), always empty on a healthy layout. Detection and honest
     # reporting is the whole job — a violation never aborts the run.
     path_violations: list[str] = field(default_factory=list)
+    # 経路グラフで解けず直線距離/直線経路に縮退した問い合わせの数 (このrepの分)。
+    # 0 が健全。>0 は「軌跡が通路グラフのエッジ上のみ」という主張が、その件数だけ
+    # 破れているという実行時の信号 — 検出はKPIと判定文に出る (kpis.py)。
+    unroutable_legs: int = 0
     cost: dict = field(default_factory=dict)
     # Busiest-day disclosure metadata: None for single-day/profile demand (the
     # pass-through path stays byte-identical), a dict when a multi-day import was
@@ -210,6 +214,9 @@ def run_once(
     window = DEFAULT_REPLAY_WINDOW_S if replay_window_s is None else replay_window_s
     window = min(window, model.simulation.duration_s)
     world = build(model, env, replay_window_s=window, graph=graph)
+    # The routing graph is SHARED across replications (see run_replications), so
+    # its unroutable counters accumulate; this rep's own count is the delta.
+    _unroutable0 = world.graph.unroutable_count if world.graph is not None else 0
 
     for i in range(world.n_pickers):
         w = Worker(id=f"picker-{i+1}", role="picker")
@@ -274,6 +281,8 @@ def run_once(
         world, model,
         tracks=[*world.workers, *world.helpers, *agvs, *forklifts,
                 *packers, *inspectors])
+    unroutable = ((world.graph.unroutable_count - _unroutable0)
+                  if world.graph is not None else 0)
     return RunResult(
         events=world.events, heat=world.heat,
         n_pickers=world.n_pickers, n_packers=world.n_packers,
@@ -286,6 +295,7 @@ def run_once(
         sorter_channels=(world.sorter["channels"]
                          if (world.consolidation == "sort" and world.sorter is not None) else 0),
         consolidation=world.consolidation, pick_method=world.pick_method,
+        unroutable_legs=max(0, unroutable),
         workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
         packers=packers, inspectors=inspectors, n_inspectors=world.n_inspectors,
         totes=world.totes,

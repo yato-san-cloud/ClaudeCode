@@ -887,11 +887,24 @@ function buildStageLegend(labels, peakLabel) {
 // ---- per-stage analysis table (difference by structure, not colour) --------
 //
 // HONEST DATA: built from the real per-stage utilisation in `charts.stages`
-// (labels + values, peak_label). The payload exposes no per-stage processing
-// counts or per-stage waits, so those columns render an em dash rather than a
-// fabricated number — the DOM contract (5 columns) is preserved either way.
+// (labels + values, peak_label). 処理(件) has no per-stage source anywhere, so
+// it still renders an em dash rather than a fabricated number. 平均待ち(s) DOES
+// have one for the stages the engine measures a queue wait for — the raw run
+// KPIs carry `pick_wait_mean_s` / `sort_wait_mean_s` — so those two rows show
+// the measured figure and every other stage keeps its em dash (梱包 and AGV搬送
+// have no per-stage mean wait in the log; `agv_wait_s` is a TOTAL, not a mean,
+// and printing it in a "平均待ち" column would be a different statistic wearing
+// this column's label). The DOM contract (5 columns) is preserved either way.
 // 判定 is derived from the real utilisation and the (real) bottleneck label.
-function buildStageTable(labels, values, peakLabel) {
+
+// 工程ラベル → その工程の「平均待ち」を持つ生KPIキー。ここに無い工程は em dash。
+// ラベルは `_analysis_payload` が組む charts.stages.labels と同一の語彙。
+const STAGE_WAIT_KEY = {
+  'ピッキング': 'pick_wait_mean_s',
+  '種まき仕分け': 'sort_wait_mean_s',
+};
+
+function buildStageTable(labels, values, peakLabel, raw) {
   const wrap = el('div', { class: 'chart-card' });
   wrap.appendChild(el('div', { class: 'chart-title' }, '工程別 分析'));
   wrap.appendChild(el('div', { class: 'chart-sub' }, '差は色でなく構造（左罫線・帯・右揃え）で示す'));
@@ -929,10 +942,14 @@ function buildStageTable(labels, values, peakLabel) {
     utilTd.appendChild(cell);
     tr.appendChild(utilTd);
 
-    // 処理(件) — no honest per-stage source in payload → em dash.
+    // 処理(件) — no honest per-stage source anywhere → em dash.
     tr.appendChild(el('td', { class: 'num' }, '—'));
-    // 平均待ち(s) — no honest per-stage source in payload → em dash.
-    tr.appendChild(el('td', { class: 'num' }, '—'));
+    // 平均待ち(s) — measured per-stage queue wait from the raw run KPIs when the
+    // engine logs one for this stage; em dash otherwise (never a stand-in).
+    const waitKey = STAGE_WAIT_KEY[lab];
+    const waitVal = (waitKey && raw && typeof raw === 'object') ? raw[waitKey] : null;
+    tr.appendChild(el('td', { class: 'num' },
+      isNum(waitVal) ? group(Math.round(waitVal * 10) / 10) : '—'));
 
     // 判定 — derived from real utilisation + bottleneck flag.
     const vtd = el('td');
@@ -1012,7 +1029,7 @@ function buildProductivityCard(prod) {
   return card;
 }
 
-function buildChartsSection(charts, currency) {
+function buildChartsSection(charts, currency, raw) {
   const stages = charts.stages || {};
   const cost = charts.cost || null;
   const prod = charts.productivity || null;
@@ -1049,7 +1066,7 @@ function buildChartsSection(charts, currency) {
     grid.appendChild(card);
 
     // Per-stage analysis table (structure, not colour).
-    grid.appendChild(buildStageTable(labels, values, peak));
+    grid.appendChild(buildStageTable(labels, values, peak, raw));
   }
 
   if (hasCost) {
@@ -1068,6 +1085,176 @@ function buildChartsSection(charts, currency) {
 
   sec.appendChild(grid);
   return sec;
+}
+
+// ---- 通路の混雑 (通路干渉) + 経路の警告 -------------------------------------
+//
+// These read the run's RAW KPI document (`kpis.json`, fetched alongside the
+// reshaped analysis payload — see mountAnalysis), because the reshaped payload
+// deliberately carries only the headline hierarchy. Three read-outs live there
+// and had no display at all:
+//
+//   congestion_wait_* / congestion.top_cells — how long agents queued behind
+//     each other in the aisles, and WHERE. Only ever non-zero when
+//     `simulation.aisle_interference` was on AND the floor actually contended,
+//     so the gate is the VALUE (waits > 0), not the flag: a run with the flag on
+//     and an empty floor renders nothing, exactly as before.
+//   path_violations — replay legs drawn THROUGH a rack (the routing graph did
+//     not see that rack ⇒ every travel figure in the run is understated).
+//   unroutable_legs — legs the aisle graph could not solve, degraded to a
+//     straight line (same understatement, different cause).
+//
+// The last two are correctness warnings, not tuning hints, so they render as
+// danger callouts at the top of the view. All three are absent-by-default: a run
+// without them adds not one pixel.
+
+// The worst cells worth naming on screen. The payload carries up to 10; three is
+// enough to point at an aisle and short enough to read.
+const TOP_CELLS_SHOWN = 3;
+
+// Grid cell (index) → its centre in floor metres, using the same lattice pitch
+// the engine contended on (`simulation.heatmap_grid_m`). Returns null when the
+// pitch is unknown or the cell is not a 2-tuple, so the caller can fall back to
+// naming the raw cell instead of inventing a coordinate.
+function cellCentreM(cell, gridM) {
+  if (!isNum(gridM) || gridM <= 0) return null;
+  if (!Array.isArray(cell) || cell.length !== 2) return null;
+  if (!isNum(cell[0]) || !isNum(cell[1])) return null;
+  return [Math.round((cell[0] + 0.5) * gridM), Math.round((cell[1] + 0.5) * gridM)];
+}
+
+function congestionKpiItems(raw) {
+  const items = [];
+  const push = (label, value, unit) => items.push({ label, value, unit });
+  if (isNum(raw.congestion_wait_total_s)) {
+    push('通路の待ち 合計', Math.round(raw.congestion_wait_total_s / 60 * 10) / 10, '分');
+  }
+  if (isNum(raw.congestion_wait_share)) {
+    push('移動時間に占める待ち', Math.round(raw.congestion_wait_share * 1000) / 10, '%');
+  }
+  if (isNum(raw.congestion_wait_p95_s)) {
+    push('待ちの p95', Math.round(raw.congestion_wait_p95_s * 10) / 10, '秒');
+  }
+  if (isNum(raw.congestion_waits)) {
+    push('待ちの発生回数', Math.round(raw.congestion_waits), '回');
+  }
+  if (isNum(raw.congestion_wait_mean_s) && raw.congestion_wait_mean_s > 0) {
+    push('1回あたりの待ち', Math.round(raw.congestion_wait_mean_s * 10) / 10, '秒');
+  }
+  if (isNum(raw.congestion_forced_passes) && raw.congestion_forced_passes > 0) {
+    push('強制通過', Math.round(raw.congestion_forced_passes), '回');
+  }
+  return items;
+}
+
+// Top congested cells as a small table. `gridM` (the model's lattice pitch) turns
+// a cell index into floor metres; without it the cell is named as a cell.
+function buildTopCellsTable(top, gridM) {
+  const rows = top.slice(0, TOP_CELLS_SHOWN).filter((r) => r && typeof r === 'object');
+  if (!rows.length) return null;
+  const table = el('table', { class: 'an-tbl' });
+  const thead = el('thead');
+  const htr = el('tr');
+  ['最も混んだ通路', '待ち(秒)', '待ち回数'].forEach((h) => htr.appendChild(el('th', null, h)));
+  thead.appendChild(htr);
+  table.appendChild(thead);
+  const tbody = el('tbody');
+  rows.forEach((r, i) => {
+    const tr = el('tr', i === 0 ? { class: 'an-flag' } : null);
+    const m = cellCentreM(r.cell, gridM);
+    const where = m
+      ? `約 (${group(m[0])}, ${group(m[1])}) m 付近`
+      : (Array.isArray(r.cell) ? `格子セル (${r.cell.join(', ')})` : '—');
+    tr.appendChild(el('td', null, where));
+    tr.appendChild(el('td', { class: 'num' },
+      isNum(r.wait_s) ? group(Math.round(r.wait_s * 10) / 10) : '—'));
+    tr.appendChild(el('td', { class: 'num' },
+      isNum(r.hits) ? group(Math.round(r.hits * 10) / 10) : '—'));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+}
+
+function buildCongestionSection(raw, gridM) {
+  if (!raw || typeof raw !== 'object') return null;
+  // Gate on the VALUE, not on the aisle-interference flag: a run with no
+  // measured waiting has nothing to say here (and the flag is not in the KPIs).
+  const waits = raw.congestion_waits;
+  if (!isNum(waits) || waits <= 0) return null;
+
+  const sec = el('section', { class: 'an-section' });
+  sec.appendChild(el('h2', { class: 'an-section-title' }, '通路の混雑（通路干渉）'));
+
+  const card = el('div', { class: 'chart-card' });
+  card.appendChild(el('div', { class: 'chart-title' }, '通路の待ち時間'));
+  card.appendChild(el('div', { class: 'chart-sub' },
+    '同じ通路を同じ向きに通ろうとして、他の作業者の後ろで待った時間です。'
+    + '移動時間に占める割合が大きいほど、通路幅・動線・棚の配置を見直す余地があります。'));
+
+  const items = congestionKpiItems(raw);
+  if (items.length) {
+    const grid = el('div', { class: 'kpi-grid' });
+    items.forEach((it) => {
+      const c = el('div', { class: 'kpi-card' });
+      c.appendChild(el('div', { class: 'kpi-label' }, it.label));
+      const v = el('div', { class: 'kpi-value num' });
+      v.appendChild(valueSpan(it.value, it.unit));
+      c.appendChild(v);
+      grid.appendChild(c);
+    });
+    card.appendChild(grid);
+  }
+
+  const top = (raw.congestion && Array.isArray(raw.congestion.top_cells))
+    ? raw.congestion.top_cells : [];
+  const tbl = buildTopCellsTable(top, gridM);
+  if (tbl) {
+    card.appendChild(el('div', { class: 'chart-sub', style: 'margin-top:14px;margin-bottom:6px' },
+      '待ちが積み上がった場所です。「通路が狭い」ではなく「この通路」が直す対象になります。'));
+    card.appendChild(tbl);
+  }
+  if (isNum(raw.congestion_forced_passes) && raw.congestion_forced_passes > 0) {
+    const note = el('div', { class: 'an-tbl-note' });
+    note.appendChild(el('span', { class: 'an-ic' }, '⚠'));
+    note.appendChild(el('span', null,
+      '待ちが上限に達して強制的に通過させた区間があります。実際の現場では、'
+      + 'その通路で行き詰まり（すれ違い待ち）が起きる想定です。'));
+    card.appendChild(note);
+  }
+  sec.appendChild(card);
+  return sec;
+}
+
+// 経路の警告: correctness counters that mean "the travel behind every number in
+// this run is understated". Returned as insight-shaped objects so they render
+// through the SAME callout builder as the rest of the view.
+function routeWarningCallouts(raw) {
+  if (!raw || typeof raw !== 'object') return [];
+  const out = [];
+  const unroutable = raw.unroutable_legs;
+  if (isNum(unroutable) && unroutable > 0) {
+    out.push({
+      severity: 'danger', icon: 'alert',
+      title: '通路グラフで解けなかった移動があります',
+      fact: `通路グラフで解決できず直線距離に縮退した移動が <span class="num">${group(Math.round(unroutable))}</span> 件。`
+        + 'この分の移動距離・移動時間は実際より短く出ています。',
+      metric: group(Math.round(unroutable)),
+      action: '取込レイアウトの通路が塞がっていないか確認してください。',
+    });
+  }
+  const violations = raw.path_violations;
+  if (isNum(violations) && violations > 0) {
+    out.push({
+      severity: 'danger', icon: 'alert',
+      title: '経路が棚を貫通しています',
+      fact: `棚を突き抜けた移動が <span class="num">${group(Math.round(violations))}</span> 件。`
+        + '経路グラフがその棚を見ていないため、移動距離が実際より短く出ています。',
+      metric: group(Math.round(violations)),
+      action: 'レイアウトの棚定義（位置・大きさ）を確認してください。',
+    });
+  }
+  return out;
 }
 
 // ---- motion controller (enter-only; transform/opacity; CLS=0) ---------------
@@ -1216,6 +1403,44 @@ function buildProdFeedback(compare, targetEl) {
 
 // ---- mount ------------------------------------------------------------------
 
+// The run's RAW KPI document (`kpis.json`) for THIS project. `/analysis` reshapes
+// the KPIs into the headline hierarchy and drops the rest, so the congestion /
+// routing read-outs are read from the project's own run artifact instead. Scoped
+// to the project name (never a module-level cache) so switching projects can
+// never show the previous project's run. Returns null for a project with no run
+// (and on any failure — these read-outs are additive, never load-bearing).
+async function fetchRawKpis(projectName) {
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/model`);
+    if (!res.ok) return null;
+    const m = await res.json();
+    if (!m || !m.has_run || !m.kpis || typeof m.kpis !== 'object') return null;
+    return m.kpis;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// The congestion lattice pitch (`simulation.heatmap_grid_m`) — the metres per
+// cell the engine contended on, needed to name a congested cell in floor metres.
+// Fetched LAZILY and only when there is actually a congested cell to name, since
+// it costs a full model read; without it the cells are named as cells, never as
+// a guessed coordinate.
+async function fetchGridPitch(projectName, raw) {
+  const top = (raw && raw.congestion && Array.isArray(raw.congestion.top_cells))
+    ? raw.congestion.top_cells : [];
+  if (!top.length) return null;
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectName)}/full`);
+    if (!res.ok) return null;
+    const md = await res.json();
+    const g = md && md.simulation ? md.simulation.heatmap_grid_m : null;
+    return isNum(g) && g > 0 ? g : null;
+  } catch (_e) {
+    return null;
+  }
+}
+
 function render(targetEl, payload) {
   injectStyle();
   targetEl.innerHTML = '';
@@ -1225,6 +1450,12 @@ function render(targetEl, payload) {
   const insights = Array.isArray(data.insights) ? data.insights : [];
   const kpis = data.kpis && typeof data.kpis === 'object' ? data.kpis : {};
   const charts = data.charts && typeof data.charts === 'object' ? data.charts : {};
+  // The run's RAW KPI document + the lattice pitch its congestion cells are on,
+  // stashed by mountAnalysis. Both null for the analytic estimate / a project
+  // with no run — every consumer below degrades to rendering nothing.
+  const raw = (targetEl && targetEl._anKpis && typeof targetEl._anKpis === 'object')
+    ? targetEl._anKpis : null;
+  const gridM = (targetEl && isNum(targetEl._anGridM)) ? targetEl._anGridM : null;
 
   // Headline verdict banner (plain-language, from whsim's KPIs).
   if (typeof data.verdict === 'string' && data.verdict) {
@@ -1246,9 +1477,17 @@ function render(targetEl, payload) {
     root.appendChild(note);
   }
 
+  // 経路の警告 (棚貫通 / 経路グラフ未解決): correctness first — these say the
+  // run's own travel figures are understated, so they sit above the read-out
+  // they qualify. Nothing renders when both counters are zero/absent.
+  routeWarningCallouts(raw).forEach((ins) => root.appendChild(buildCallout(ins)));
+
   root.appendChild(buildInsightsSection(insights));
   root.appendChild(buildKpiSection(kpis, data.ci, data.rep_day));
-  const chartsSec = buildChartsSection(charts, data.currency);
+  // 通路の混雑: only present when the run actually measured aisle waiting.
+  const congSec = buildCongestionSection(raw, gridM);
+  if (congSec) root.appendChild(congSec);
+  const chartsSec = buildChartsSection(charts, data.currency, raw);
   if (chartsSec) root.appendChild(chartsSec);
   const prodSec = buildProdFeedback(data.productivity_compare, targetEl);
   if (prodSec) root.appendChild(prodSec);
@@ -1290,6 +1529,8 @@ export async function mountAnalysis(targetEl, projectName) {
   // always re-renders the CURRENT data, not the payload captured on first mount.
   targetEl._anPayload = payload;
   targetEl._anProject = projectName;  // for the 生産性フィードバック 採用 button
+  targetEl._anKpis = await fetchRawKpis(projectName);
+  targetEl._anGridM = await fetchGridPitch(projectName, targetEl._anKpis);
   render(targetEl, payload);
 
   // Re-render on theme change so the self-drawn SVG charts pick up new
@@ -1316,4 +1557,6 @@ function disposeAnalysis(targetEl) {
     targetEl._anThemeHandler = null;
   }
   targetEl._anPayload = null;
+  targetEl._anKpis = null;
+  targetEl._anGridM = null;
 }

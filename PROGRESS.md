@@ -59,8 +59,26 @@ D5(what-if I/F): scenarios.run_scenario がほぼ該当。diff→実行→サマ
   scenarios.whatif（D5）、tests/test_scenario_reproducibility.py（DoD5/6, 6 passed）、
   tests/test_display_kpi_literals.py（DoD3機械監査, 2 passed — 実リテラル0件、
   仕込み違反の検出対照つき）
-- [ ] Agent R/I 実装（並列中）
-- [ ] 配線・統合・全テスト
-- [ ] D単位コミット（D1: ルーティング, D2+D3: 干渉+ログ, D4+D5+D6: シナリオ/what-if/監査）
-- [ ] fresh opus 監査 → 修正
-- [ ] 最終サマリ（結果→DoD合否表→既知の制限）
+- [x] Agent R 実装完了: pickroute/routecompare/17テスト（手計算一致:
+  S字70m・折返し102m・最大ギャップ70m・2-opt66m）
+- [x] Agent I 実装完了: 干渉（OFFバイト同一をリテラル固定・M/M/1 Lq誤差1.3%・
+  4台リング追走で完走）・実行時貫通検査（12〜16万kfで0.3s未満）・events.jsonl/CSV
+- [x] 配線・統合: /routecompare・/runs/{run}/events.{jsonl,json,csv}・
+  whsim routecompare・E2E確認（TestClient）。干渉のシナリオdiff起動を実測
+  （待機237回・top_cells出力）
+- [x] 全テスト 1117 passed。lint: 新規ファイル0件・変更ファイル正味削減
+  （残りはzip慣用句=家風とHEAD既存分）
+- [x] コミット: 26d6485 (D1-D3), e82238e (D4-D6) — push済み
+- [x] fresh opus 監査 完了。判定: 基準2/4/5 合格、6 合格(AGV除く)、1 条件付き、
+  3 留保つき。特筆: 監査官が Held-Karp 厳密DPで 2-opt の66mが真の最適と独立確認。
+- [x] 監査指摘の修正（エンジン側）:
+  1. unroutable_legs を rep 単位で RunResult→KPI→判定文へ（縮退した移動は
+     もう黙らない）。「構造的に不可能」の主張は「グラフ由来の脚は構成上エッジ上
+     ＋縮退はKPIで開示＋録画分は貫通検査＋全テンプレのオフラインpin」の4点で担保。
+  2. eventlog.dump_all: 全レプリケーションのログを保存（events.jsonl=rep0 名は
+     不変、events_repNN.jsonl 追加）→ 出荷KPI(平均)が出荷ログから再導出可能に。
+  3. AGV が routing_policy に追従（明示 policy のみ分岐・既定はNNバイト同一、
+     spy テストで固定）。tests/test_audit_fixups.py 4 passed。
+- [ ] 監査指摘の修正（UI側 — opus agent 実装中）: 渋滞KPI・path_violations・
+  unroutable の表示、ルーティング比較表のUI
+- [ ] 再監査（同じ監査官に修正点だけ再照合）→ 最終サマリ
