@@ -88,7 +88,8 @@ def run_scenario_dict(scenario: dict, seed: int | None = None,
     ``summary.json``), whose every number is a ``kpis.compute`` output over the
     run's own event log.
     """
-    from whsim import eventlog, kpis as kpi_mod
+    from whsim import eventlog
+    from whsim import kpis as kpi_mod
     from whsim.engine.run import run_replications
 
     scenario = dict(scenario or {})
@@ -100,13 +101,16 @@ def run_scenario_dict(scenario: dict, seed: int | None = None,
                 "duration_s": model.simulation.duration_s}
     scenario_hash = canonical_hash(resolved)
 
-    started = _dt.datetime.now().isoformat(timespec="seconds")
+    # Local wall clock on purpose: the ledger sits next to MapMaker-style
+    # artifacts a human reads on this machine.
+    started = _dt.datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005
     results, _heat = run_replications(model)
     kpis = kpi_mod.compute(results, model)
 
     base = Path(runs_dir) if runs_dir is not None else DEFAULT_RUNS_DIR
     base.mkdir(parents=True, exist_ok=True)
-    run_id = f"r{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}-{scenario_hash[:8]}"
+    run_id = (f"r{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"  # noqa: DTZ005
+              f"-{scenario_hash[:8]}")
     # A same-second re-run of the same scenario must not overwrite its twin.
     run_dir = base / run_id
     n = 1
@@ -146,7 +150,7 @@ def run_scenario_file(path: str | Path, seed: int | None = None,
                       runs_dir: Path | str | None = None) -> dict:
     scenario = json.loads(Path(path).read_text("utf-8"))
     if not isinstance(scenario, dict):
-        raise ValueError("シナリオJSONはオブジェクトである必要があります")
+        raise ValueError("シナリオJSONはオブジェクトである必要があります")  # noqa: TRY004 — CLI が ValueError で受ける
     return run_scenario_dict(scenario, seed=seed, runs_dir=runs_dir)
 
 

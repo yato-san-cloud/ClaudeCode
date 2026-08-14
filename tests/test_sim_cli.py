@@ -71,7 +71,7 @@ def test_module_entrypoint_runs_a_scenario_file(tmp_path):
     # -m 実行は DEFAULT_RUNS_DIR に書くので、ここでは import 経由で runs_dir を
     # 渡した上で、CLI は引数検証だけ subprocess で確かめる（リポジトリの runs/
     # をテストが汚さない）。
-    out = subprocess.run([sys.executable, "-m", "whsim.sim"],
+    out = subprocess.run([sys.executable, "-m", "whsim.sim"], check=False,
                          capture_output=True, text=True,
                          cwd=str(Path(__file__).resolve().parents[1]))
     assert out.returncode == 2 and "usage" in out.stderr
@@ -82,7 +82,7 @@ def test_module_entrypoint_runs_a_scenario_file(tmp_path):
 def test_broken_scenario_is_a_clean_error_not_a_traceback(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text("[1,2,3]", "utf-8")
-    out = subprocess.run([sys.executable, "-m", "whsim.sim", str(bad)],
+    out = subprocess.run([sys.executable, "-m", "whsim.sim", str(bad)], check=False,
                          capture_output=True, text=True,
                          cwd=str(Path(__file__).resolve().parents[1]))
     assert out.returncode == 1
