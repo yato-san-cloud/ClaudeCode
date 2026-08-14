@@ -10,6 +10,9 @@ dist/
 # Generated project workspaces (the simulator's runtime data)
 projects/
 
+# Headless scenario-run artifacts (whsim.sim / MCP lab) — run outputs, never source
+runs/
+
 # Generated demo data
 examples/*.zip
 
