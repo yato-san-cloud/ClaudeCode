@@ -447,6 +447,89 @@ def test_verify_report_catches_a_number_that_is_in_no_ledger(pair, tmp_path):
     assert res["ok"] is False and "9999" in res["unbacked_numbers"]
 
 
+def test_verify_report_catches_a_cell_swapped_for_another_legitimate_number(pair, tmp_path):
+    """監査で見つかった穴の回帰: 本文のある数値を、**レポート内の別の正当な数値**
+    に入れ替える改竄（到着オーダー数のセルに seed の値を置く）。
+
+    数値トークンの集合所属だけを見る照合はこれを素通りする（置いた数字も台帳に
+    「居る」から）。行ラベル×列のセル位置まで見て初めて落ちる。
+    """
+    a, b = pair
+    out = M.generate_report([a["run_id"], b["run_id"]], out_dir=str(tmp_path / "rep6"))
+    d = Path(out["report_dir"])
+    assert M.verify_report(str(d))["ok"] is True          # 対照: 素のままは通る
+    led = json.loads((d / "numbers.json").read_text("utf-8"))
+    seed_text = next(r["text"] for r in led["numbers"]
+                     if r["source"].get("path") == ["seed"])
+
+    md = d / "report.md"
+    lines = md.read_text("utf-8").splitlines()
+    i = next(n for n, x in enumerate(lines) if x.startswith("| 到着オーダー数 |"))
+    cells = lines[i].split("|")
+    assert cells[2].strip() != seed_text                   # そもそも別の数値である
+    cells[2] = f" {seed_text} "                            # 故意のすり替え
+    lines[i] = "|".join(cells)
+    md.write_text("\n".join(lines) + "\n", "utf-8")
+
+    res = M.verify_report(str(d))
+    assert res["ok"] is False
+    assert res["unbacked_numbers"] == []      # 集合判定は素通りする（＝この穴）
+    assert res["mismatches"] == []            # 台帳→成果物も素通りする
+    bad = res["misplaced_numbers"]
+    assert bad and all(x["anchor"]["row"] == "到着オーダー数" for x in bad)
+    assert bad[0]["in_report"] == seed_text and bad[0]["expected"] != seed_text
+
+
+def test_verify_report_catches_two_cells_swapped_with_each_other(pair, tmp_path):
+    a, b = pair
+    out = M.generate_report([a["run_id"], b["run_id"]], out_dir=str(tmp_path / "rep7"))
+    d = Path(out["report_dir"])
+    md = d / "report.md"
+    lines = md.read_text("utf-8").splitlines()
+    i = next(n for n, x in enumerate(lines) if x.startswith("| 完了オーダー数 |"))
+    cells = lines[i].split("|")
+    cells[2], cells[3] = cells[3], cells[2]                # 基準列と比較列を入れ替え
+    lines[i] = "|".join(cells)
+    md.write_text("\n".join(lines) + "\n", "utf-8")
+    res = M.verify_report(str(d))
+    assert res["ok"] is False and res["unbacked_numbers"] == []
+    assert {x["anchor"]["row"] for x in res["misplaced_numbers"]} == {"完了オーダー数"}
+
+
+def test_verify_report_catches_a_deleted_table_row(pair, tmp_path):
+    a, b = pair
+    out = M.generate_report([a["run_id"], b["run_id"]], out_dir=str(tmp_path / "rep8"))
+    d = Path(out["report_dir"])
+    md = d / "report.md"
+    lines = [x for x in md.read_text("utf-8").splitlines()
+             if not x.startswith("| 通路待ち回数 |")]
+    md.write_text("\n".join(lines) + "\n", "utf-8")
+    res = M.verify_report(str(d))
+    assert res["ok"] is False
+    assert any(x["reason"] == "本文に該当セルがありません"
+               for x in res["misplaced_numbers"])
+
+
+def test_every_table_cell_is_anchored_to_its_source(pair, tmp_path):
+    """位置照合の網羅性: 比較表の数値セルは1つ残らず台帳のアンカーを持つ。"""
+    a, b = pair
+    out = M.generate_report([a["run_id"], b["run_id"]], out_dir=str(tmp_path / "rep9"))
+    d = Path(out["report_dir"])
+    led = json.loads((d / "numbers.json").read_text("utf-8"))
+    anchors = {(r["anchor"]["table"], r["anchor"]["row"], r["anchor"]["col"],
+                r["anchor"].get("part", 0)) for r in led["numbers"] if r.get("anchor")}
+    tables = {t["name"]: t for t in lab.parse_tables((d / "report.md").read_text("utf-8"))}
+    assert set(tables) >= {lab.T_SETUP, lab.T_KPI}
+    for name in (lab.T_SETUP, lab.T_KPI):
+        for row_key, row in tables[name]["rows"].items():
+            for col, cell in row.items():
+                for part, txt in enumerate(cell.split(lab.CELL_SEP)):
+                    if not lab._NUM_RE.fullmatch(txt.strip()):
+                        continue          # 識別子・名前・「—」は数値セルではない
+                    assert (name, row_key, col, part) in anchors, (name, row_key, col)
+    assert out["verification"]["anchored"] == len(anchors)
+
+
 def test_verify_report_catches_a_tampered_run_artifact(pair, runs, tmp_path, monkeypatch):
     a, b = pair
     ids = [a["run_id"], b["run_id"]]

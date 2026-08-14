@@ -235,6 +235,70 @@ def test_ac3_grouped_mode_folds_levels_into_one_feature_per_bay():
     assert len(set(ids)) == len(ids)
 
 
+def _multilevel_model() -> WarehouseModel:
+    """TWO authored shelves on 軽量棚 (light: bay=0.9m, depth=0.45m, **levels=5**).
+
+    A deliberately multi-level fixture: every bundled template materialises a
+    single 段, so grouped and per-level agree there and a regression that
+    collapsed the two modes into one would still show green. Here they must
+    differ by exactly the level count.
+
+      shelf A  x=1.0 y=1.0 w=0.45 h=3.6  → vertical, y centres 1.45/2.35/3.25/4.15 → 4 bays
+      shelf B  x=3.0 y=1.0 w=0.45 h=1.8  → vertical, y centres 1.45/2.35           → 2 bays
+      => 6 間口列 x 5 段 = 30 locations
+    """
+    model = WarehouseModel(
+        layout=Layout(
+            bounds=Bounds(width=20.0, depth=10.0),
+            zones=[Zone(id="storage", type="storage", x=0.0, y=0.0, w=20.0, h=10.0,
+                        shelves=[ShelfArea(id="a", name="A-01", x=1.0, y=1.0,
+                                           w=0.45, h=3.6, rack_type="light"),
+                                 ShelfArea(id="b", name="A-02", x=3.0, y=1.0,
+                                           w=0.45, h=1.8, rack_type="light")])],
+        ),
+        simulation=Simulation(duration_s=600.0),
+    )
+    return design.materialize_racks(model)
+
+
+def test_grouped_really_folds_a_five_level_rack():
+    """多段 (5段) で per-level と grouped が段数分だけ食い違うことを固定する。"""
+    model = _multilevel_model()
+    bays = {(round(loc.x, 3), round(loc.y, 3)) for loc in model.locations}
+    assert len(bays) == 6                                  # 4 + 2 間口列
+    assert len(model.locations) == 30 == len(bays) * 5     # x 5 段
+    assert {loc.level for loc in model.locations} == {1, 2, 3, 4, 5}
+
+    per_level = geoexport.to_geojson(model, level_mode="per-level")
+    grouped = geoexport.to_geojson(model, level_mode="grouped")
+
+    # (1) per-level: 1 Feature = 1 間口
+    assert len(per_level["features"]) == len(model.locations) == 30
+    # (2) grouped: 段数分の1 に減り、levels の合計が間口総数に戻る
+    assert len(grouped["features"]) == len(bays) == 6
+    assert len(grouped["features"]) * 5 == len(per_level["features"])
+    assert sum(len(f["properties"]["levels"]) for f in grouped["features"]) == 30
+    assert sum(f["properties"]["level_count"] for f in grouped["features"]) == 30
+    assert all(f["properties"]["levels"] == [1, 2, 3, 4, 5] for f in grouped["features"])
+    # (3) 畳んでも間口を1つも落とさない: id の全集合が一致する
+    per_ids = {f["properties"]["location_id"] for f in per_level["features"]}
+    folded_ids = {lid for f in grouped["features"] for lid in f["properties"]["location_ids"]}
+    assert folded_ids == per_ids
+    assert len(per_ids) == 30
+
+    # 段を畳んでも矩形は同じ 1 間口分（重ね描きが消えるだけ）
+    for f in grouped["features"]:
+        ring = f["geometry"]["coordinates"][0]
+        assert ring[1][0] - ring[0][0] == pytest.approx(0.45, abs=1e-6)   # depth
+        assert ring[2][1] - ring[1][1] == pytest.approx(0.9, abs=1e-6)    # bay
+    errors, warnings = validate_geojson(grouped)
+    assert errors == [] and warnings == []
+
+    # CSV は per-level と同じ粒度（間口1行）のままであること
+    csv_rows = geoexport.to_layout_csv(model).strip("\r\n").split("\r\n")
+    assert len(csv_rows) - 1 == 30
+
+
 def test_unknown_level_mode_is_rejected_loudly():
     with pytest.raises(ValueError):
         geoexport.to_geojson(templates.load_template_model("ecommerce_small"), level_mode="nope")

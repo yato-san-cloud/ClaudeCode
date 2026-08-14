@@ -139,23 +139,34 @@ runs/
 ```json
 {"id": "n0007", "text": "444.943625", "value": 444.943625, "format": "num",
  "source": {"kind": "artifact", "run_id": "r…", "file": "summary.json",
-            "path": ["kpis", "pick_wait_mean_s"]}}
+            "path": ["kpis", "pick_wait_mean_s"]},
+ "anchor": {"table": "KPI比較", "row": "ピッキング待ち平均（秒）", "col": "-f04f193f"}}
 ```
 
 の形で並び、差・変化率は `{"kind": "arithmetic", "op": "pct_change",
-"operands": [...]}` として**出所ごと**残る。照合は両方向で見る:
+"operands": [...]}` として**出所ごと**残る。`anchor` は「その数値が本文の
+どのセルに居るべきか」（表の見出し × 行ラベル × 列。1セルに複数並ぶ列は
+`part` で位置まで）。照合は3方向で見る:
 
 1. 台帳 → 成果物（記録した値が本当にそのrunの値か、算術は本当に再計算できるか）
 2. 本文 → 台帳（紙に載った数字が1つ残らず台帳にあるか）
+3. 台帳 → 本文の**位置**（表のそのセルに、その出所の値が居るか）
+
+3 が要るのは、2 が「数値トークンの集合所属」判定だから — 本文のある数値を
+**レポート内の別の正当な数値**に入れ替える改竄（到着オーダー数のセルに seed の
+値を置く）は、置いた数字も台帳に「居る」ので集合判定を素通りする。セル位置まで
+見て初めて落ちる（`misplaced_numbers`）。表以外の本文数値は 2 の集合判定のまま。
 
 ```bash
 python -c "import json,whsim.lab_report as L; \
 print(json.dumps(L.verify_report('runs/reports/<report_id>'), ensure_ascii=False))"
 ```
 
-`{"ok": true, "checked": 84, "mismatches": [], "unbacked_numbers": []}` が
-通った状態。数字を1つ書き換えれば必ず落ちる（`tests/test_mcp_lab.py` に
-故意に改竄した対照が入っている）。
+`{"ok": true, "checked": 86, "anchored": 84, "mismatches": [],
+"unbacked_numbers": [], "misplaced_numbers": []}` が通った状態。数字を1つ
+書き換えれば必ず落ちる — `tests/test_mcp_lab.py` に故意に改竄した対照が
+6種入っている（台帳の値／本文に無い数字を追記／run成果物の改竄／**別の正当な
+数値へのすり替え**／2セルの入れ替え／行の削除）。
 
 なお識別子・時刻・シナリオ名はコードスパン（`` ` ``）で表記し、照合対象は
 本文の数値だけにしている。

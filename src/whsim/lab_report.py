@@ -307,19 +307,24 @@ class NumberLedger:
     def value(self, run_id: str, path: Sequence[Any], file: str = SUMMARY_JSON) -> Any:
         return get_by_path(self._artifact(run_id, file), path)
 
-    def cite(self, run_id: str, path: Sequence[Any], file: str = SUMMARY_JSON,
-             fmt: str = "num") -> str:
-        v = self.value(run_id, path, file)
-        text = FORMATS[fmt](v)
-        self.records.append({
-            "id": f"n{len(self.records) + 1:04d}",
-            "text": text, "value": v, "format": fmt,
-            "source": {"kind": "artifact", "run_id": run_id, "file": file,
-                       "path": list(path)},
-        })
+    def _record(self, text: str, value: Any, fmt: str, source: dict,
+                anchor: dict | None) -> str:
+        rec = {"id": f"n{len(self.records) + 1:04d}",
+               "text": text, "value": value, "format": fmt, "source": source}
+        if anchor:
+            rec["anchor"] = dict(anchor)
+        self.records.append(rec)
         return text
 
-    def arith(self, op: str, operands: Sequence[dict], fmt: str = "num") -> str:
+    def cite(self, run_id: str, path: Sequence[Any], file: str = SUMMARY_JSON,
+             fmt: str = "num", anchor: dict | None = None) -> str:
+        v = self.value(run_id, path, file)
+        return self._record(FORMATS[fmt](v), v, fmt,
+                            {"kind": "artifact", "run_id": run_id, "file": file,
+                             "path": list(path)}, anchor)
+
+    def arith(self, op: str, operands: Sequence[dict], fmt: str = "num",
+              anchor: dict | None = None) -> str:
         """転記どうしの算術。operand は ``{run_id, file?, path}``。"""
         if op not in OPS:
             raise LabError(f"未知の演算です: {op}")
@@ -327,13 +332,8 @@ class NumberLedger:
                  "path": list(o["path"])} for o in operands]
         vals = [self.value(r["run_id"], r["path"], r["file"]) for r in refs]
         v = OPS[op](*vals)
-        text = FORMATS[fmt](v)
-        self.records.append({
-            "id": f"n{len(self.records) + 1:04d}",
-            "text": text, "value": v, "format": fmt,
-            "source": {"kind": "arithmetic", "op": op, "operands": refs},
-        })
-        return text
+        return self._record(FORMATS[fmt](v), v, fmt,
+                            {"kind": "arithmetic", "op": op, "operands": refs}, anchor)
 
     def as_dict(self, run_ids: Sequence[str], report_id: str) -> dict:
         return {
@@ -396,12 +396,101 @@ def strip_code(md: str) -> str:
     return _CODE_SPAN_RE.sub(" ", _FENCE_RE.sub(" ", md))
 
 
+# --- 表のセル単位の照合（位置まで見る） -------------------------------------
+# 「本文の数値が台帳の集合に居るか」だけでは、**レポート内の別の正当な数値に
+# 入れ替える**改竄（到着オーダー数のセルに seed の値を置く）が素通りする。
+# どのセルにどの出所が居るべきかは台帳が知っているので、表をパースして
+# 「その位置に、その出所の値が居るか」まで見る。
+_HEADING_RE = re.compile(r"^#{1,6}\s+(.*)$")
+_SEP_CELL_RE = re.compile(r"^:?-{2,}:?$")
+CELL_SEP = " / "        # 1セルに複数の数値を並べるときの区切り（3run以上の差分列）
+
+
+def _cells(line: str) -> list[str]:
+    s = line.strip().removeprefix("|").removesuffix("|")
+    return [c.strip().replace("`", "") for c in s.split("|")]
+
+
+def _is_separator(line: str) -> bool:
+    cs = [c for c in _cells(line) if c]
+    return bool(cs) and all(_SEP_CELL_RE.match(c.replace(" ", "")) for c in cs)
+
+
+def parse_tables(md: str) -> list[dict]:
+    """Markdownのパイプ表を ``{name, columns, rows{行キー: {列名: セル}}}`` に。
+
+    ``name`` は直前の見出し（``## KPI比較`` 等）。行キーは各行の先頭セル、列名は
+    ヘッダ行のセルで、どちらもバッククォートを外して正規化する（run_id や
+    短縮IDはコードスパンで書かれているため）。
+    """
+    tables: list[dict] = []
+    lines = md.splitlines()
+    name = ""
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        head = _HEADING_RE.match(line)
+        if head:
+            name = head.group(1).strip()
+            i += 1
+            continue
+        if line.startswith("|") and i + 1 < len(lines) and _is_separator(lines[i + 1]):
+            cols = _cells(line)
+            rows: dict[str, dict[str, str]] = {}
+            j = i + 2
+            while j < len(lines) and lines[j].strip().startswith("|"):
+                vals = _cells(lines[j])
+                if vals:
+                    rows[vals[0]] = {cols[k]: vals[k]
+                                     for k in range(1, min(len(cols), len(vals)))}
+                j += 1
+            tables.append({"name": name, "columns": cols, "rows": rows})
+            i = j
+            continue
+        i += 1
+    return tables
+
+
+def verify_placement(ledger: dict, md: str) -> list[dict]:
+    """台帳の ``anchor`` つき数値が、本文の**そのセル**に居ることを確かめる。
+
+    集合所属の判定を補う位置照合 — 表のセルを入れ替えても、別の正当な数値で
+    上書きしても、ここで落ちる。
+    """
+    cells: dict[tuple[str, str, str], str] = {}
+    for t in parse_tables(md):
+        for rk, row in t["rows"].items():
+            for ck, txt in row.items():
+                cells[(t["name"], rk, ck)] = txt
+    bad: list[dict] = []
+    for rec in ledger.get("numbers", []):
+        a = rec.get("anchor")
+        if not a:
+            continue
+        key = (a.get("table", ""), a.get("row", ""), a.get("col", ""))
+        if key not in cells:
+            bad.append({"id": rec.get("id"), "reason": "本文に該当セルがありません",
+                        "anchor": a})
+            continue
+        parts = [p.strip() for p in cells[key].split(CELL_SEP)]
+        pos = int(a.get("part", 0))
+        got = parts[pos] if 0 <= pos < len(parts) else None
+        if got != rec.get("text"):
+            bad.append({"id": rec.get("id"), "reason": "セルの値が台帳と違います",
+                        "anchor": a, "expected": rec.get("text"), "in_report": got})
+    return bad
+
+
 def verify_report(report_dir: str | Path, base: str | Path | None = None) -> dict:
     """レポート照合: 台帳の全数値が成果物と一致し、かつ**本文の全数値が台帳にある**。
 
-    2方向で見る — (1) 台帳→成果物（記録した値が本当にそのrunの値か）、
-    (2) 本文→台帳（紙に載った数字が1つ残らず台帳にあるか）。片方だけでは
-    「台帳に無い数字を本文に足す」捏造を許してしまう。
+    3方向で見る — (1) 台帳→成果物（記録した値が本当にそのrunの値か。算術は
+    出所から再計算する）、(2) 本文→台帳（紙に載った数字が1つ残らず台帳に
+    あるか）、(3) 台帳→本文の**位置**（表のどのセルにどの出所が居るべきか）。
+
+    (2) だけでは「本文のある数値を、レポート内の**別の正当な数値**に入れ替える」
+    改竄（到着オーダー数のセルに seed の値を置く）が集合所属の判定を素通りする。
+    (3) がその穴を塞ぐ。表以外の本文数値は (2) の集合判定のまま。
     """
     d = Path(report_dir)
     npath, rpath = d / NUMBERS_JSON, d / REPORT_MD
@@ -417,11 +506,14 @@ def verify_report(report_dir: str | Path, base: str | Path | None = None) -> dic
     allowed = {rec.get("text") for rec in ledger["numbers"]}
     tokens = _NUM_RE.findall(strip_code(md))
     unbacked = sorted({t for t in tokens if t not in allowed})
+    misplaced = verify_placement(ledger, md)
     return {
-        "ok": bool(res["ok"]) and not unbacked,
+        "ok": bool(res["ok"]) and not unbacked and not misplaced,
         "checked": res["checked"],
+        "anchored": sum(1 for r in ledger["numbers"] if r.get("anchor")),
         "mismatches": res["mismatches"],
         "unbacked_numbers": unbacked,
+        "misplaced_numbers": misplaced,
         "report": str(rpath),
         "numbers": str(npath),
     }
@@ -513,6 +605,17 @@ def _chart_delta(path: Path, cmp: dict, metrics: Sequence[str]) -> Path | None:
 # レポート本体
 # --------------------------------------------------------------------------
 
+# 表の見出しと列名。台帳の ``anchor`` はこの文字列で位置を指すので、書く側と
+# 照合する側で同じ定数を使う（片方だけ直すと位置照合が総崩れになる）。
+T_SETUP = "前提条件"
+T_KPI = "KPI比較"
+COL_SEED = "seed"
+COL_REPS = "反復"
+COL_DURATION = "実験時間（秒）"
+COL_DELTA = "差（対基準）"
+COL_PCT = "変化率（％）"
+
+
 def _code(v: Any) -> str:
     """識別子・文字列・真偽値はコードスパンで出す（照合対象は本文の数値のみ）。"""
     s = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
@@ -553,17 +656,23 @@ def generate_report(run_ids: Sequence[str], out_dir: str | Path | None = None,
       f" / runs: {_code(str(runs_dir(base)))}\n\n")
     w("この文書の数値は全て run成果物（`summary.json` / `scenario.json`）からの"
       "転記です。出所は `numbers.json` に1件ずつ記録され、"
-      "`whsim.lab_report.verify_report()` で機械照合できます"
+      "`whsim.lab_report.verify_report()` で機械照合できます — 値そのもの"
+      "（出所から再計算）に加え、**表のセルは行ラベル×列で位置まで**照合します"
       "（識別子・時刻・シナリオ名はコードスパンで表記＝照合対象外）。\n\n")
 
     w("## 前提条件\n\n")
-    w("| run_id | 名前 | seed | 反復 | 実験時間（秒） | scenario_hash |\n")
+    w(f"| run_id | 名前 | {COL_SEED} | {COL_REPS} | {COL_DURATION} | scenario_hash |\n")
     w("|---|---|---|---|---|---|\n")
     for r in cmp["runs"]:
         rid = r["run_id"]
+
+        def at(col: str, rid: str = rid) -> dict:
+            return {"table": T_SETUP, "row": rid, "col": col}
+
         w(f"| {_code(rid)} | {_code(r['name'] or '（無題）')} "
-          f"| {led.cite(rid, ['seed'])} | {led.cite(rid, ['reps'])} "
-          f"| {led.cite(rid, ['duration_s'])} "
+          f"| {led.cite(rid, ['seed'], anchor=at(COL_SEED))} "
+          f"| {led.cite(rid, ['reps'], anchor=at(COL_REPS))} "
+          f"| {led.cite(rid, ['duration_s'], anchor=at(COL_DURATION))} "
           f"| {_code((r['scenario_hash'] or '')[:16])} |\n")
     w("\n")
     for rid in ids:
@@ -578,27 +687,34 @@ def generate_report(run_ids: Sequence[str], out_dir: str | Path | None = None,
         w("\n")
     w("\n")
 
-    w("## KPI比較\n\n")
+    w(f"## {T_KPI}\n\n")
     w(f"基準（baseline）: {_code(bl)}\n\n")
     head = " | ".join(_code(_short(r)) for r in ids)
-    w(f"| 指標 | {head} | 差（対基準） | 変化率（％） |\n")
+    w(f"| 指標 | {head} | {COL_DELTA} | {COL_PCT} |\n")
     w("|---" * (len(ids) + 3) + "|\n")
     for k in keys:
         row = next(r for r in cmp["metrics"] if r["metric"] == k)
+        label = row["label"]
         cells = []
         for rid in ids:
             v = row["values"].get(rid)
-            cells.append(led.cite(rid, ["kpis", k]) if isinstance(v, (int, float))
-                         and not isinstance(v, bool) else "—")
+            cells.append(
+                led.cite(rid, ["kpis", k],
+                         anchor={"table": T_KPI, "row": label, "col": _short(rid)})
+                if isinstance(v, (int, float)) and not isinstance(v, bool) else "—")
         others = [r for r in ids if r != bl]
-        dcell = " / ".join(
+        # 3run以上だと1セルに複数の数値が並ぶので、セル内の位置(part)まで記録する。
+        dcell = CELL_SEP.join(
             led.arith("delta", [{"run_id": r, "path": ["kpis", k]},
-                                {"run_id": bl, "path": ["kpis", k]}]) for r in others)
-        pcell = " / ".join(
+                                {"run_id": bl, "path": ["kpis", k]}],
+                      anchor={"table": T_KPI, "row": label, "col": COL_DELTA, "part": i})
+            for i, r in enumerate(others))
+        pcell = CELL_SEP.join(
             led.arith("pct_change", [{"run_id": r, "path": ["kpis", k]},
-                                     {"run_id": bl, "path": ["kpis", k]}], fmt="pct")
-            for r in others)
-        w(f"| {row['label']} | " + " | ".join(cells)
+                                     {"run_id": bl, "path": ["kpis", k]}], fmt="pct",
+                      anchor={"table": T_KPI, "row": label, "col": COL_PCT, "part": i})
+            for i, r in enumerate(others))
+        w(f"| {label} | " + " | ".join(cells)
           + f" | {dcell or '—'} | {pcell or '—'} |\n")
     w("\n")
 

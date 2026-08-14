@@ -133,3 +133,30 @@ D5(what-if I/F): scenarios.run_scenario がほぼ該当。diff→実行→サマ
 - 私: whsim.sim（済・ba7dceb）、統合、fresh監査（Phase2 DoD1〜7＋GeoJSON AC1〜4）、最終サマリ
 - Agent G: geoexport.py（GeoJSON両モード＋layout.csv）、Deneb spec＋docs、AC1〜4テスト
 - Agent M: mcp_server.py（8ツール契約）＋lab_report.py（比較・レポート・捏造遮断照合）＋E2E
+
+## 第2ラン実装完了（監査待ち）
+
+- [x] Agent G: geoexport.py（GeoJSON per-level/grouped＋layout.csv＋attach_metrics）、
+  Deneb spec＋docs、AC1〜4テスト24本。座標系はコードの事実で決着（モデルは
+  y上向き左下原点＝GeoJSON無変換。CSV経路 reflectY不要／geoshape経路のみ必要）。
+- [x] Agent M: mcp_server.py（10ツール・stdio・mcp 1.x/2.x両対応）、
+  lab_report.py（NumberLedger 捏造遮断・両方向照合・改竄3種の検出対照）、
+  E2E「台数1台減→ピッキング待ち+90秒・通路待ち164→333回」を成果物と件数照合。
+  62テスト。pip追加は mcp のみ（optional [lab]）。
+- [x] 統合: grouped/metrics クエリを bool 化（?grouped=true の422罠を除去）、
+  全体 1214 passed、コミット 53f0742（GeoJSON/Deneb）・5643cb9（MCP lab）。
+- [x] fresh監査完了: **全11項目合格**（A1〜A7・B1〜B4）。監査官は自前MCP
+  クライアントで stdio 接続、KPI 10項目をイベントログから素で再計算して一致、
+  RFC7946 バリデータを新規に書いて12種の破壊で武装確認、AST走査で
+  「数値生成ロジックの不在」まで検証。
+- [x] 監査の改善提案2件を即修正:
+  1. verify_report に指標ラベル単位の位置照合（「別の正当な数値への入替」改竄を
+     検出 — 監査官の実測ケースを回帰テスト化、mcp 62→66テスト）
+  2. grouped の多段フィクスチャ（5段ラックで 30間口→6Feature・levels合計30を
+     固定 — 退行しても緑のままだった穴を閉鎖、geo 24→25テスト）
+- [x] 残る既知の制限: init_state_from_snapshot は形式検証のみのスタブ
+  （engine_supported:false を明示・実WMS較正は別ラン）、Power BI 実機は未検証、
+  ruff の repo 全体192件は既存ベースライン（本納品5ファイルは0件）。
+
+# 第2ラン 完了（受け入れ判定: 全11項目合格）
+
