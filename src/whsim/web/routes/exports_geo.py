@@ -72,3 +72,30 @@ def api_layout_csv(name: str, metrics: bool = True):
     body = geoexport.to_layout_csv(model, metrics=_metrics_for(model, metrics))
     return Response(body, media_type="text/csv; charset=utf-8",
                     headers=_disposition(name, "layout.csv"))
+
+
+@router.get("/api/projects/{name}/runs.csv")
+def api_runs_csv(name: str):
+    """Power BI 用スタースキーマの次元表: プロジェクトの全 run（1行1run）。
+
+    kpi_facts.csv と run_id で結合する。never-blocks: run が無ければヘッダのみ。"""
+    from whsim import geoexport
+    proj = _open(name)
+    return Response(geoexport.to_runs_csv(geoexport.project_run_summaries(proj)),
+                    media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{name}_runs.csv"'})
+
+
+@router.get("/api/projects/{name}/kpi-facts.csv")
+def api_kpi_facts_csv(name: str):
+    """Power BI 用ファクト表（long format: run_id × kpi × value）。
+
+    値は各 run の kpis.json（イベントログ集計）からの転記のみ — この層は
+    集計しない。ベルト別などの入れ子は dotted key（conveyors.spur1n.…）。"""
+    from whsim import geoexport
+    proj = _open(name)
+    return Response(geoexport.to_kpi_facts_csv(geoexport.project_run_summaries(proj)),
+                    media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{name}_kpi_facts.csv"'})

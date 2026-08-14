@@ -59,7 +59,10 @@ from __future__ import annotations
 
 import copy
 import csv
+import datetime as _dt
 import io
+import json
+import math
 
 from whsim import design, locmaster
 
@@ -526,3 +529,97 @@ def to_layout_csv(model, metrics: dict | None = None) -> str:
         m = table.get(r["location_id"]) or {}
         w.writerow(vals + ["" if m.get(k) is None else m[k] for k in extra])
     return BOM + buf.getvalue()
+
+
+# --------------------------------------------------------------------------- #
+# Power BI star schema: runs dimension + KPI facts (long format)
+# --------------------------------------------------------------------------- #
+# The floor visual reads layout.csv (one row per 間口). The KPI side of a Power
+# BI model wants the OTHER star: a runs dimension (who/when/which scenario) and
+# a long fact table (run_id × kpi × value) so a measure is one filter away and
+# a new KPI never adds a column. Values are copied verbatim out of each run's
+# own kpis.json / summary.json — this module aggregates nothing (invariant:
+# every displayed number is an event-log aggregate computed by kpis.compute).
+
+# Dimension columns for runs.csv. "source" tells the analyst which artifact the
+# row came from (project run vs headless lab run) — the two ledgers coexist.
+RUNS_DIM_COLUMNS = ("run_id", "source", "name", "started", "seed",
+                    "scenario_hash", "verdict")
+KPI_FACTS_COLUMNS = ("run_id", "kpi", "value")
+
+
+def _flatten_numeric(kpis: dict, prefix: str = "") -> list[tuple[str, float]]:
+    """Numeric leaves of a KPI dict as ``(dotted_key, value)`` rows.
+
+    Nested read-outs (``kpis["conveyors"]["spur1n"]["block_ratio"]``…) flatten to
+    dotted keys so belt-level facts survive the long format. Booleans are skipped
+    (they are verdict inputs, not measures); strings are skipped (the verdict
+    sentence lives in the runs dimension, not the fact table).
+    """
+    out: list[tuple[str, float]] = []
+    for k, v in (kpis or {}).items():
+        key = f"{prefix}{k}"
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            if math.isfinite(float(v)):
+                out.append((key, float(v)))
+        elif isinstance(v, dict):
+            out.extend(_flatten_numeric(v, prefix=f"{key}."))
+    return out
+
+
+def project_run_summaries(project) -> list[dict]:
+    """One summary dict per stored run of a Project (oldest first).
+
+    Shaped like ``whsim.sim`` summaries (run_id/name/started/seed/kpis) so the
+    same CSV writers serve both ledgers. Runs whose ``kpis.json`` is missing or
+    unreadable are skipped — an old artifact must not block today's export.
+    """
+    out: list[dict] = []
+    for _idx, rd in project._run_dirs():
+        try:
+            kpis = json.loads((rd / "kpis.json").read_text("utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        cfg = {}
+        try:
+            cfg = json.loads((rd / "config.json").read_text("utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+        out.append({
+            "run_id": rd.name, "source": "project",
+            "name": project.meta().get("name", "") if hasattr(project, "meta") else "",
+            "started": _dt.datetime.fromtimestamp(  # noqa: DTZ006 — local artifact clock
+                rd.stat().st_mtime).isoformat(timespec="seconds"),
+            "seed": cfg.get("random_seed"),
+            "scenario_hash": "",
+            "kpis": kpis,
+        })
+    return out
+
+
+def to_runs_csv(summaries) -> str:
+    """runs.csv — the dimension table (BOM付きUTF-8, one row per run)."""
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(RUNS_DIM_COLUMNS)
+    for s in summaries or ():
+        kpis = s.get("kpis") or {}
+        w.writerow([s.get("run_id", ""), s.get("source", "lab"),
+                    s.get("name", ""), s.get("started", ""),
+                    s.get("seed", ""), s.get("scenario_hash", ""),
+                    kpis.get("verdict", "")])
+    return "﻿" + buf.getvalue()
+
+
+def to_kpi_facts_csv(summaries) -> str:
+    """kpi_facts.csv — long format (run_id × kpi × value), values verbatim."""
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\r\n")
+    w.writerow(KPI_FACTS_COLUMNS)
+    for s in summaries or ():
+        rid = s.get("run_id", "")
+        for key, val in _flatten_numeric(s.get("kpis") or {}):
+            w.writerow([rid, key, val])
+    return "﻿" + buf.getvalue()

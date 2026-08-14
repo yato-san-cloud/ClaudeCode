@@ -138,3 +138,23 @@ Power BI 実機は未検証だが、Deneb が内蔵するのと同じ Vega-Lite 
 メトリクス未取込のレイアウトが真っ白になる。同梱 spec は
 `mark.invalid: null` ＋ `color.condition`（null→#d9d9d9）で回避している —
 Deneb に自作 spec を書くときも同じ罠に注意。
+
+
+## KPI 側のスタースキーマ（runs × kpi_facts）
+
+床の絵（layout.csv）と対になる、数字側のモデル:
+
+- `GET /api/projects/{name}/runs.csv` — **次元表**（1行1run: run_id・実行日時・
+  seed・判定文）
+- `GET /api/projects/{name}/kpi-facts.csv` — **ファクト表**（long format:
+  run_id × kpi × value）。値は各 run の kpis.json（イベントログ集計）からの
+  転記のみで、この層は集計しない。ベルト別・混雑セル別などの入れ子 KPI は
+  dotted key（例 `conveyors.spur1n.block_ratio`）で並ぶので、新しい KPI が
+  増えても**列は増えない**。
+
+Power BI 側: kpi_facts[run_id] → runs[run_id] のリレーションを張り、
+メジャーは `CALCULATE(AVERAGE(kpi_facts[value]), kpi_facts[kpi]="throughput_per_hr")`
+の形で切る。シナリオ比較は runs をスライサーにするだけ。ヘッドレス実験
+（`python -m whsim.sim` / MCP lab）の runs/ 台帳も同じ書式なので、
+`whsim.geoexport.to_runs_csv` / `to_kpi_facts_csv` に summary の list を
+渡せば同じ2枚が出る。

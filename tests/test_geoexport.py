@@ -640,3 +640,63 @@ def test_layout_csv_endpoint_is_bom_utf8_and_matches_the_geojson(client):
 
     fc = client.get("/api/projects/p/layout.geojson").json()
     assert len(body) - 1 == len(fc["features"])
+
+
+# ---------------------------------------------- Power BI star schema (runs × KPI)
+
+
+def test_kpi_facts_are_verbatim_long_format(tmp_path):
+    """kpi_facts.csv は run_id × kpi × value の long format で、値は kpis.json
+    からの転記のみ（この層は集計しない — 数値は全てイベントログ集計由来）。"""
+    import csv as _csv
+    import io as _io
+
+    from whsim import geoexport
+
+    summ = {"run_id": "r1", "name": "t", "started": "2026-08-14", "seed": 7,
+            "scenario_hash": "ab",
+            "kpis": {"throughput_per_hr": 100.5, "verdict": "ok",
+                     "jams": True,   # bool は measure ではない → 出さない
+                     "conveyors": {"spur1n": {"block_ratio": 0.125}}}}
+    txt = geoexport.to_kpi_facts_csv([summ]).lstrip("﻿")
+    rows = list(_csv.DictReader(_io.StringIO(txt)))
+    got = {r["kpi"]: float(r["value"]) for r in rows}
+    assert got["throughput_per_hr"] == 100.5
+    assert got["conveyors.spur1n.block_ratio"] == 0.125   # 入れ子は dotted key
+    assert "verdict" not in got and "jams" not in got
+    dim = geoexport.to_runs_csv([summ]).lstrip("﻿")
+    drow = next(iter(_csv.DictReader(_io.StringIO(dim))))
+    assert drow["run_id"] == "r1" and drow["verdict"] == "ok"
+
+
+def test_project_runs_feed_the_star_schema(tmp_path, monkeypatch):
+    """実プロジェクトの run 成果物から次元表とファクト表が出て、run_id で結合できる。"""
+    import csv as _csv
+    import io as _io
+
+    import whsim.project as project_mod
+    from whsim import geoexport
+    from whsim import kpis as kpi_mod
+    from whsim.engine.run import run_replications
+
+    monkeypatch.setattr(project_mod, "PROJECTS_DIR", tmp_path / "projects")
+    proj = project_mod.Project.create("star", "ecommerce_small")
+    m = proj.load_model()
+    m.simulation.duration_s = 600.0
+    results, _ = run_replications(m)
+    k = kpi_mod.compute(results, m)
+    rd = proj.new_run_dir()
+    (rd / "kpis.json").write_text(json.dumps(k, ensure_ascii=False), "utf-8")
+
+    summaries = geoexport.project_run_summaries(proj)
+    assert len(summaries) == 1
+    facts = list(_csv.DictReader(_io.StringIO(
+        geoexport.to_kpi_facts_csv(summaries).lstrip("﻿"))))
+    dims = list(_csv.DictReader(_io.StringIO(
+        geoexport.to_runs_csv(summaries).lstrip("﻿"))))
+    assert dims[0]["run_id"] == rd.name
+    assert all(f["run_id"] == rd.name for f in facts)
+    # 転記の証明: ファクト値が kpis.json の値そのもの
+    got = {f["kpi"]: float(f["value"]) for f in facts}
+    assert got["throughput_per_hr"] == k["throughput_per_hr"]
+    assert got["picker_utilization"] == k["picker_utilization"]
