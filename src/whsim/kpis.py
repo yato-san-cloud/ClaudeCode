@@ -545,6 +545,12 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     per = [_one(r, model) for r in results]
     agg = {}
     for k in per[0]:
+        # ``conveyor_time_to_first_block_s`` is numeric in a rep that blocked and
+        # ``None`` in one that did not — the same run can hold BOTH (that is what
+        # "at this demand it sometimes jams" looks like), so testing rep #1 alone
+        # and fmean-ing would crash on the mixed case. It is merged below.
+        if k == "conveyor_time_to_first_block_s":
+            continue
         if isinstance(per[0][k], (int, float)):
             agg[k] = statistics.fmean(p[k] for p in per)
         else:

@@ -436,3 +436,21 @@ def test_per_belt_read_out_is_averaged_over_replications_not_taken_from_the_firs
     assert merged["a"]["time_to_first_block_s"] == pytest.approx(60.0)
     assert merged["b"]["time_to_first_block_s"] is None
     assert math.isclose(merged["b"]["boardings"], 4.0)
+
+
+def test_rep_merge_survives_a_jam_in_only_one_replication():
+    """2 reps at a demand where blocking is marginal: one rep may block (float)
+    while the other never does (None). The KPI merge must average the reps that
+    saw a block — not crash on the mixed case, not let rep #1 speak for both."""
+    from whsim import kpis as kpi_mod, templates
+    from whsim.engine.run import run_replications
+
+    m = templates.load_template_model("line_inspection")
+    m.orders.profile.rate_per_hr = 700.0
+    m.orders.profile.peak_factor = 1.0
+    m.simulation.duration_s = 4 * 3600.0
+    m.simulation.replications = 2
+    results, _ = run_replications(m)
+    k = kpi_mod.compute(results, m)   # ← crashed before the fix
+    t = k["conveyor_time_to_first_block_s"]
+    assert t is None or t > 0.0
