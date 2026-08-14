@@ -97,3 +97,36 @@ def test_agv_follows_the_routing_policy(monkeypatch):
     run_replications(_agv_model("s_shape"))
     assert calls and all(c == "s_shape" for c in calls), \
         "routing_policy=s_shape が AGV のツアーに届いていない"
+
+
+# -------------------------------- (4) 閉鎖した引き込みが幻の梱包能力を生まない
+
+
+def test_closing_a_spurs_benches_reduces_capacity_not_increases_it():
+    """引き込みのベンチを count=0 で閉めたとき、そのトートが共有プールへ落ちて
+    容量が二重計上される穴があった（実測: 稼働率1.28・詰まりが消える）。
+    閉鎖した引き込みはダイバートから外れ、残りのベンチだけで捌く —
+    だから稼働率は1以下のまま、詰まりは同じか悪化する。"""
+    from whsim.engine.scenarios import apply_scenario
+    from whsim.schema.model import Scenario
+
+    def run(close: bool):
+        m = templates.load_template_model("line_inspection")
+        m.orders.profile.rate_per_hr = 950.0
+        m.orders.profile.peak_factor = 1.0
+        m.simulation.duration_s = 2 * 3600.0
+        if close:
+            m = apply_scenario(m, Scenario(name="close", edits={
+                f"resources.stations.{i}.count": 0 for i in (16, 17, 18, 19)}))
+        results, _ = run_replications(m)
+        return kpi_mod.compute(results, m)
+
+    k20 = run(False)
+    k16 = run(True)
+    assert k16["n_packers"] == 16 and k20["n_packers"] == 20
+    # 稼働率は物理量: 1を超えたら容量の二重計上
+    assert k16["packer_utilization"] <= 1.0 + 1e-9
+    # ベンチを減らして詰まりが軽くなることはない
+    assert k16["conveyor_block_ratio"] >= k20["conveyor_block_ratio"] - 1e-9
+    # スループットが増えることもない
+    assert k16["throughput_per_hr"] <= k20["throughput_per_hr"] + 1e-9

@@ -108,6 +108,11 @@ class ConveyorLine:
     host: ConveyorLine | None = None
     bench: simpy.Resource | None = None
     n_bench: int = 0
+    # True = benches ARE drawn at this spur's end but every count is 0 — the
+    # pull-in is deliberately unmanned. A closed spur takes no totes (its
+    # junction is not wired), which is different from bench=None-with-no-
+    # stations (half-drawn line → shared-pool fallback keeps it running).
+    closed: bool = False
     divert_wake: simpy.Event | None = None
 
     def project(self, p) -> tuple[tuple[float, float], float]:
@@ -264,15 +269,25 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
     stations = list(getattr(model.resources, "stations", None) or [])
     for s in spurs:
         end = s.points[-1]
-        n = sum(max(0, int(st.count)) for st in stations
-                if math.dist((float(st.x), float(st.y)), end) <= BENCH_REACH_M)
+        nearby = [st for st in stations
+                  if math.dist((float(st.x), float(st.y)), end) <= BENCH_REACH_M]
+        n = sum(max(0, int(st.count)) for st in nearby)
         if n > 0:
             s.n_bench = n
             s.bench = simpy.Resource(env, capacity=n)
+        elif nearby:
+            # Benches exist at this spur but every count is 0: the scenario
+            # closed them. Falling back to the shared pool here would hand the
+            # spur the WHOLE bench line's capacity a second time (measured:
+            # packer_utilization 1.28 and a jam that vanished when benches were
+            # REMOVED). A closed pull-in takes no totes instead.
+            s.closed = True
 
     # 枝分かれ: hang each spur off the trunk its infeed touches. Spurs are never
     # junction hosts — a 引き込み feeds benches, not another 引き込み.
     for s in spurs:
+        if s.closed:
+            continue             # an unmanned pull-in diverts nothing
         hit = _attach_to(lines, s.points[0], exclude=spur_ids)
         if hit is not None:
             hit[0].junctions.append((hit[1], s))

@@ -160,3 +160,22 @@ D5(what-if I/F): scenarios.run_scenario がほぼ該当。diff→実行→サマ
 
 # 第2ラン 完了（受け入れ判定: 全11項目合格）
 
+
+## 仕上げラン（全てやり切る）
+
+- [x] Deneb 実レンダ検証: vl-convert（Deneb と同じ Vega-Lite エンジン、venv のみの
+  検証ツール — pyproject には足さない）で layout.csv 実データを描画。
+  **罠を発見して修正**: Vega-Lite は color=null の行をマークごと落とす
+  → mark.invalid:null ＋ 条件色（未計測=灰色）で「床は常に全部見える」に。
+  レイアウトのみ（全灰）とヒートマップ（実測色＋灰混在）の両面を目視確認。
+- [x] Power BI スタースキーマ: runs.csv（次元）＋ kpi_facts.csv（long format、
+  転記のみ・入れ子は dotted key）。GET /runs.csv・/kpi-facts.csv。
+- [x] MCP 実デモ（ライン検品 950件/h・「梱包台20→16に減らすと？」）:
+  apply_diff→run→compare→report を MCP クライアント越しに実走。
+  **デモがエンジンの実バグを発見**: 引き込みの全ベンチを count=0 で閉めると
+  共有プールへ落ちて容量が二重計上（稼働率1.28・詰まり消滅という物理破綻）。
+  修正: ベンチが描かれていて全て count=0 の引き込みは「閉鎖」— ダイバートから
+  外れる（描かれていない場合の共有プールfallbackは half-drawn 用として維持）。
+  修正後: 16台 → 722件/h・完了率74%・block 0.864・初詰まり69秒早い、
+  稼働率≤1。回帰テストで固定（物理不変条件: 台数減で詰まりは軽くならない）。
+  なお unapplied_edits ガードがデモ中に実際に誤diffを1回捕まえた（設計の実証）。
