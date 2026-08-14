@@ -61,7 +61,9 @@
 - `provenance.py` — 出所追跡。
 
 ### エンジン（SimPy DES）
-- `engine/`：`processes.py` / `graph.py`（壁考慮グリッド＋Dijkstra＝**timing権威**）/ `navnet.py`（MapMaker風 Delaunay waypoint網＝**viz層**、facing開放面ピック点）/ `build.py` / `run.py` / `routing.py` / `scenarios.py`（dotted-path what-if）。
+- `engine/`：`processes.py` / `graph.py`（壁考慮グリッド＋Dijkstra＝**timing権威**）/ `navnet.py`（MapMaker風 Delaunay waypoint網＝**viz層**、facing開放面ピック点）/ `build.py` / `run.py` / `routing.py` / `pickroute.py`（S字/折り返し/最大ギャップの訪問順序＝純関数; `process.routing_policy` で切替、既定 nearest は不変。`routecompare.py` が4方式＋2-optの距離比較表） / `scenarios.py`（dotted-path what-if ＋ `whatif(base, edits)`=diff→ヘッドレス実行→サマリ）。
+  **通路干渉**（`simulation.aisle_interference`, 既定 False=バイト同一）: 歩行レグをセル×進行方向の容量1リソースに分解し、同方向の2台目は**待つ**（`aisle_wait` イベント）。待機中は何も保持しない（ノードで待つ）＝循環待ちが構造的に不可能、それでも 3×通過時間で強制通過＋`aisle_pass_forced`（never-blocks）。KPI: `congestion_*`（待ち合計/共有率/p95/top_cells）、判定文は待ち共有率>15%で1文追加。集計器 `kpis.wait_stats` は M/M/1 の Lq=ρ²/(1−ρ) と±5%で突合済（`tests/test_aisle_interference.py`）。逆方向は独立（通路幅で離合可能の仮定）。解析オラクルは干渉・非既定ルーティングを**まだ**映さない（既定OFF/nearestなのでカタログpin不変 — 既知の制限）。
+  **実行時貫通検査**（常時）: 各 rep 後に replay キーフレーム×描かれたラック矩形の貫通を検査（`rackgeom.track_penetrations`）、`RunResult.path_violations`→KPI・判定文へ。**イベントログは run 成果物**（`events.jsonl`、`eventlog.py`; `GET …/runs/{run}/events.{jsonl|json|csv}`）。
 
 ### 設計 / 在庫
 - `design.py`（`materialize_racks`：parametric/authored shelves→concrete locations、棚名→ロケ名伝播）/ `slotting.py`（ABC割付）/ `datagen.py`（不足生成）/ `racktypes.py`（9種プリセット＝**JS のミラー源**、`/api/racktypes`；台あたり間口/設備単価/償却月の unit economics 付き）。

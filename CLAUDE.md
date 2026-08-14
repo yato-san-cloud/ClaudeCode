@@ -55,6 +55,19 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   data); the simulator is the source of truth, the analysis tool just supplies ZIPs.
 - `engine/` — SimPy DES: `routing.py`, `build.py`, `processes.py`, `run.py`, `scenarios.py`,
   `graph.py` (wall-aware aisle grid + Dijkstra; `World.dist` = measured override > graph > Manhattan).
+  `pickroute.py` — SPRP visit-order policies (s_shape/return/largest_gap; pure, rng-free)
+  keyed off `process.routing_policy` (default nearest = byte-identical legacy);
+  `routecompare.py` compares all 4 (+2-opt) as a closed-form distance table
+  (`POST /routecompare`, `whsim routecompare`). **通路干渉** `simulation.aisle_interference`
+  (default False = byte-identical): walk legs contend per cell×direction (capacity 1,
+  same-direction), waiters hold nothing (deadlock-free by construction) + 3×crossing
+  timeout force-pass; `aisle_wait` events → `congestion_*` KPIs; `kpis.wait_stats`
+  validated vs M/M/1 Lq within ±5%. Runtime rack-penetration check every rep
+  (`rackgeom.track_penetrations` → `path_violations` KPI + verdict). Event log is a
+  run artifact (`events.jsonl` + `/runs/{run}/events.{jsonl,json,csv}`, `eventlog.py`);
+  `scenarios.whatif(base, edits)` = diff→headless run→summary (D5 I/F). Analytic does
+  NOT yet mirror interference/non-default routing (defaults unchanged ⇒ catalogue pins
+  hold — known limitation, see PROGRESS.md).
 - `distances.py` — tolerant import of a measured shelf-to-shelf distance matrix (CSV/JSON).
   Pickers and AGVs are individual agents (AGV mode is a pipeline: AGV agents fetch totes →
   ready queue → pickers handle), emitting trajectory keyframes for replay. Batch/zone/wave

@@ -68,6 +68,32 @@ def run_scenario(base: WarehouseModel, scenario: Scenario,
     return results[0], metrics
 
 
+def whatif(base: WarehouseModel, edits: dict, reps: int = 2,
+           progress=None) -> dict:
+    """What-if I/F: scenario-JSON diff in → headless run → summary out.
+
+    ``edits`` is the same dotted-path dict a :class:`Scenario` carries
+    (e.g. ``{"resources.workers.0.count": 12, "process.routing_policy":
+    "s_shape"}``). Nothing here reads or writes the UI — it is the function a
+    future advisory layer calls: propose a diff, get the numbers, explain them.
+    The summary is intentionally small (headline KPIs + the verdict sentence);
+    the full KPI dict rides along under ``"kpis"`` for callers that want more.
+    """
+    scenario = Scenario(name="whatif", edits=dict(edits or {}))
+    _rep0, kpis = run_scenario(base, scenario, reps=reps, progress=progress)
+    return {
+        "edits": dict(edits or {}),
+        "verdict": kpis.get("verdict", ""),
+        "throughput_per_hr": kpis.get("throughput_per_hr"),
+        "completion_rate": kpis.get("completion_rate"),
+        "picker_utilization": kpis.get("picker_utilization"),
+        "packer_utilization": kpis.get("packer_utilization"),
+        "walk_total_m": kpis.get("walk_total_m"),
+        "walk_per_order_m": kpis.get("walk_per_order_m"),
+        "kpis": kpis,
+    }
+
+
 def payback_months(baseline_kpis: dict, alt_kpis: dict) -> float | None:
     """Months to recoup the alternative's capex from monthly OPERATING savings.
 
