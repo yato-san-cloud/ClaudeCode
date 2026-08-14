@@ -179,3 +179,42 @@ D5(what-if I/F): scenarios.run_scenario がほぼ該当。diff→実行→サマ
   修正後: 16台 → 722件/h・完了率74%・block 0.864・初詰まり69秒早い、
   稼働率≤1。回帰テストで固定（物理不変条件: 台数減で詰まりは軽くならない）。
   なお unapplied_edits ガードがデモ中に実際に誤diffを1回捕まえた（設計の実証）。
+
+
+---
+
+# 第3ラン: 単独ツール3本（RUN A/B/C — WHSIM_CONTRACTS v1.0 準拠）
+
+契約は docs/WHSIM_CONTRACTS.md に固定（変更禁止）。3本とも whsim 本体非依存の
+tools/ 配下・opus5並列実装・コミット済（5060eb4 / 9e07872 / d83779a）。
+
+- **cad2loc**（RUN A）: DXF→layout.geojson。29 tests。合成DXF 3種ラウンドトリップ
+  centroid誤差0.0mm。edge×rack交差0はフィルタの性質として保証。
+- **log-forge**（RUN B）: WMS実績→orders/events/calibration。85 tests。
+  真値回収 s=0.4002/scale=12.001、決定性バイト一致。DTZ lint はツール配下で
+  opt-out（ナイーブ壁時計が契約 — tools/logforge/.ruff.toml に根拠）。
+- **chrono-lens**（RUN C）: 単一HTML 3ビュー。1,440,050行を1.39秒読込・60fps。
+  契約違反は24コードで行番号つき安全拒否。
+
+## 契約v1.1への提案（3ツール合計21件 — 主要なもの）
+
+- **layout**: `wall` 種別が無い（建屋外形を残せない）／`edge` の有向性未規定
+  （`oneway?`）／`node.role`（aisle/location/depot/dock — A・C両方から同じ要望）／
+  `meta` の任意キー規定（generator/source/units）。
+- **events**: 拡張typeの名前空間規約（`x_` 接頭辞必須を推奨）／order_id・loc_id・
+  sku を meta の予約キーに／t同値のタイブレーク規約／`wait_start.meta.reason` 推奨キー。
+- **positions**: 行順の明記（全体t昇順 or アクタ別 — Cは全体昇順と解釈）／
+  各アクタ最終サンプルの重み（`meta.sample_dt_s` か `duration_s`）。
+- **summary**: `rows_per_hour` の分母・`utilization` の定義文。
+- **calibration**: `fitted_at` が決定性と衝突（データ窓終端に改名を）／
+  パラメータ名規約（scipy準拠で `scipy.stats.<dist>(**params)` が動く形 — Bの採用）。
+- **meta/§5**: t0 の書式（ISO 8601 ナイーブ）／全ファイルが同一t0を共有すると明記／
+  error_table.csv と counts を任意成果物に。
+- **§7**: アサーションの適用対象は「出力ファイルの座標」と明記。
+
+## 統合メモ
+
+- tools の pytest はツールごとに個別実行（`pytest tools/<name>/tests`）。合同収集は
+  テストモジュール名の衝突で不可 — 単独ツールなので仕様どおり個別が正。
+- ルートの pytest（testpaths=tests）は tools を収集しない（whsim 本体 1222 passed 不変）。
+- [ ] fresh監査×3（並列中）→ 修正 → 最終サマリ
