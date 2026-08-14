@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 
-from whsim import eventlog, kpis as kpi_mod, templates
+from whsim import eventlog, templates
+from whsim import kpis as kpi_mod
 from whsim.engine.run import run_replications
 
 
