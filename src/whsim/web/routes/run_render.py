@@ -279,26 +279,30 @@ def api_pickseq(name: str):
 
 
 @router.get("/api/projects/{name}/runs/{run}/events.{fmt}")
-def api_run_events(name: str, run: str, fmt: str):
+def api_run_events(name: str, run: str, fmt: str, rep: int = 0):
     """生イベントログのダウンロード — その KPI が何から出たのかを開ける形で渡す。
 
     ``run`` は run ディレクトリ名（``latest`` で最新）。``jsonl`` はエンジンが
     書いたものをそのまま（1行1イベント・無加工）、``json`` は同じ内容の配列、
     ``csv`` は日本語Excelが開ける BOM 付き（共通5列＋残りは meta の JSON 列）。
-    never-blocks: ログを持たない過去の run は 404（500 にしない）。"""
+    ``?rep=N`` で N 番目のレプリケーションのログ（既定 0）— kpis.json は全rep
+    平均なので、監査は全 rep を取れなければ再導出にならない。
+    never-blocks: ログを持たない過去の run・存在しない rep は 404（500 にしない）。"""
     from whsim import eventlog
     if fmt not in ("jsonl", "json", "csv"):
         raise HTTPException(404, "unknown format")
     proj = _open(name)
     rd = (proj.latest_run_dir() if run == "latest"
           else proj.runs_dir / _safe_name(run))
-    if rd is None or not (rd / eventlog.EVENTS_JSONL).is_file():
-        raise HTTPException(404, "no event log for this run")
+    fname = eventlog.EVENTS_JSONL if rep <= 0 else f"events_rep{rep:02d}.jsonl"
+    if rd is None or not (rd / fname).is_file():
+        raise HTTPException(404, "no event log for this run/rep")
     if fmt == "jsonl":
-        return FileResponse(rd / eventlog.EVENTS_JSONL,
+        return FileResponse(rd / fname,
                             media_type="application/x-ndjson",
-                            filename=f"{name}_{rd.name}_events.jsonl")
-    events = eventlog.load(rd)
+                            filename=f"{name}_{rd.name}_{fname}")
+    events = [json.loads(x) for x in
+              (rd / fname).read_text("utf-8").splitlines() if x.strip()]
     if fmt == "json":
         return JSONResponse(events)
     return Response(

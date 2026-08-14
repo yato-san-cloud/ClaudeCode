@@ -1142,7 +1142,10 @@ function congestionKpiItems(raw) {
     push('1回あたりの待ち', Math.round(raw.congestion_wait_mean_s * 10) / 10, '秒');
   }
   if (isNum(raw.congestion_forced_passes) && raw.congestion_forced_passes > 0) {
-    push('強制通過', Math.round(raw.congestion_forced_passes), '回');
+    const fp = raw.congestion_forced_passes;
+    // レプリケーション平均は端数になる (10repで1回 ⇒ 0.1)。丸めて「0回」と
+    // 言いながら直下で警告する矛盾を避け、端数はそのまま1桁で見せる。
+    push('強制通過', fp >= 1 ? Math.round(fp) : fp.toFixed(1), '回');
   }
   return items;
 }
