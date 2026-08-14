@@ -1,0 +1,577 @@
+<title>WMS 現場ナビ — ONEsLOGI クラウドWMS 運用者ツール</title>
+<style>
+:root{
+  --ink:#242b35; --ink2:#5b6572; --paper:#f7f5f1; --card:#ffffff;
+  --line:#e2ded5; --acc:#e8630a; --acc-ink:#ffffff; --acc-soft:#fdeadd;
+  --ok:#2e7d5b; --warn:#9a7100; --err:#c43d3d; --info:#3a6ea5;
+  --chip:#edeae2; --code:#f0eee7; --hl:#fff3c4;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --ink:#e9e7e1; --ink2:#9aa3ad; --paper:#15181e; --card:#1e232b;
+  --line:#323a45; --acc:#ff7a1a; --acc-ink:#1a1206; --acc-soft:#3a2716;
+  --ok:#5cbe94; --warn:#d9a821; --err:#e07070; --info:#7aa7d4;
+  --chip:#2a313b; --code:#262c35; --hl:#4a3d14;}}
+:root[data-theme="dark"]{
+  --ink:#e9e7e1; --ink2:#9aa3ad; --paper:#15181e; --card:#1e232b;
+  --line:#323a45; --acc:#ff7a1a; --acc-ink:#1a1206; --acc-soft:#3a2716;
+  --ok:#5cbe94; --warn:#d9a821; --err:#e07070; --info:#7aa7d4;
+  --chip:#2a313b; --code:#262c35; --hl:#4a3d14;}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic UI",Meiryo,system-ui,sans-serif;
+  font-size:15px;line-height:1.75;-webkit-text-size-adjust:100%}
+button{font-family:inherit}
+
+header{position:sticky;top:0;z-index:30;background:var(--paper);border-bottom:2px solid var(--acc);padding:8px 14px}
+.hrow{display:flex;gap:10px;align-items:center;max-width:960px;margin:0 auto}
+.logo{font-weight:800;font-size:15px;letter-spacing:.02em;white-space:nowrap;cursor:pointer;user-select:none}
+.logo small{color:var(--acc);display:block;font-size:9.5px;letter-spacing:.18em;font-weight:700}
+#q{flex:1;min-width:120px;padding:9px 14px;border:1.5px solid var(--line);border-radius:8px;
+  background:var(--card);color:var(--ink);font-size:15px}
+#q::placeholder{color:var(--ink2)}
+#q:focus{outline:2px solid var(--acc);outline-offset:1px}
+.navchips{display:flex;gap:4px;overflow-x:auto;max-width:960px;margin:8px auto 0;padding-bottom:2px;scrollbar-width:none}
+.navchips::-webkit-scrollbar{display:none}
+.navchips button{white-space:nowrap;border:1px solid var(--line);background:var(--card);color:var(--ink2);
+  border-radius:99px;padding:5px 14px;font-size:13px;cursor:pointer;font-weight:600}
+.navchips button.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink)}
+
+main{max-width:960px;margin:0 auto;padding:18px 14px 90px}
+h2{font-size:20px;margin:8px 0 4px;text-wrap:balance}
+h2 .eye{display:block;font-size:10.5px;letter-spacing:.16em;color:var(--acc);font-weight:700}
+h3{font-size:16px;margin:20px 0 8px}
+.lead{color:var(--ink2);margin:0 0 16px;max-width:64ch;font-size:14px}
+
+/* home */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin:14px 0 6px}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;cursor:pointer;
+  text-align:left;display:flex;flex-direction:column;gap:4px;border-bottom:3px solid var(--line)}
+.tile:hover{border-color:var(--acc)}
+.tile .ti{font-size:16.5px;font-weight:800}
+.tile .td{color:var(--ink2);font-size:13px;line-height:1.6}
+.tile .ic{font-size:22px}
+.rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;margin:10px 0}
+.rule{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px}
+.rule b{display:block;font-size:14px}
+.rule .n{color:var(--acc);font-weight:800;margin-right:6px}
+
+/* chips & cards */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chips button{border:1px solid var(--line);background:var(--card);color:var(--ink2);border-radius:99px;
+  padding:4px 13px;font-size:13px;cursor:pointer;font-weight:600}
+.chips button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.count{color:var(--ink2);font-size:12.5px;margin:4px 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:0 0 10px;overflow:hidden}
+.card.open{border-color:var(--acc)}
+.chead{width:100%;text-align:left;background:none;border:none;color:var(--ink);cursor:pointer;
+  padding:12px 14px;font-size:15px;font-weight:700;display:flex;gap:9px;align-items:baseline;line-height:1.5}
+.chead .arr{color:var(--acc);flex-shrink:0;transition:transform .12s;font-size:13px}
+@media (prefers-reduced-motion:reduce){.chead .arr{transition:none}}
+.card.open .chead .arr{transform:rotate(90deg)}
+.chead .cat{margin-left:auto;flex-shrink:0;background:var(--chip);color:var(--ink2);font-size:11px;
+  font-weight:700;border-radius:99px;padding:1px 10px;align-self:center}
+.cbody{display:none;padding:0 16px 14px;border-top:1px solid var(--line)}
+.card.open .cbody{display:block}
+.where{color:var(--ink2);font-size:13px;margin:10px 0 2px}
+.where b{color:var(--ink)}
+ol.steps{margin:8px 0;padding:0;counter-reset:s;list-style:none}
+ol.steps li{counter-increment:s;position:relative;padding:4px 0 4px 36px;max-width:66ch}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:7px;width:23px;height:23px;border-radius:50%;
+  background:var(--chip);font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;
+  font-variant-numeric:tabular-nums}
+.note{border-left:4px solid var(--warn);background:var(--code);padding:7px 12px;margin:8px 0;border-radius:0 8px 8px 0;
+  font-size:13.5px;max-width:66ch}
+.note.danger{border-left-color:var(--err)}
+.note.info{border-left-color:var(--info)}
+.note .nt{font-size:11px;font-weight:800;letter-spacing:.08em;color:var(--warn)}
+.note.danger .nt{color:var(--err)}
+.note.info .nt{color:var(--info)}
+
+/* wizard */
+.wz{background:var(--card);border:1.5px solid var(--acc);border-radius:12px;padding:18px;margin:12px 0}
+.wz .bc{font-size:12.5px;color:var(--ink2);margin-bottom:10px;line-height:1.9}
+.wz .bc span{background:var(--chip);border-radius:6px;padding:2px 8px;margin-right:6px;display:inline-block}
+.wz .q{font-size:17px;font-weight:800;margin:2px 0 14px;text-wrap:balance}
+.wzopts{display:flex;flex-direction:column;gap:8px;max-width:520px}
+.wzopts button{text-align:left;border:1.5px solid var(--line);background:var(--paper);color:var(--ink);
+  border-radius:10px;padding:11px 16px;font-size:14.5px;cursor:pointer;font-weight:600}
+.wzopts button:hover{border-color:var(--acc)}
+.wzback{margin-top:14px;display:flex;gap:8px}
+.ghost{border:1px solid var(--line);background:none;color:var(--ink2);border-radius:8px;padding:6px 14px;
+  font-size:13px;cursor:pointer}
+.result .cause{background:var(--acc-soft);border-radius:8px;padding:10px 14px;margin:6px 0 12px;font-size:14px}
+.result .cause b{color:var(--acc)}
+.result h4{margin:12px 0 4px;font-size:14px}
+.prevent{border-left:4px solid var(--ok);background:var(--code);padding:7px 12px;border-radius:0 8px 8px 0;font-size:13.5px}
+.prevent b{color:var(--ok);font-size:11px;letter-spacing:.08em}
+
+/* status */
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 16px}
+.flow .st{background:var(--card);border:1.5px solid var(--line);border-radius:8px;padding:5px 13px;font-size:13px;font-weight:700}
+.flow .st.hl{border-color:var(--acc);color:var(--acc)}
+.flow .ar{color:var(--ink2)}
+.opgrid{display:grid;gap:8px}
+.oprow{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:14px}
+.oprow b{display:block;margin-bottom:2px}
+.oprow .cond{color:var(--ink2);font-size:13.5px}
+.oprow .cond em{font-style:normal;color:var(--ink);font-weight:600}
+
+/* checklist */
+.cktabs{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+.ckwrap{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.ckitem{display:flex;gap:11px;align-items:flex-start;padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+.ckitem:last-of-type{border-bottom:none}
+.ckitem input{width:19px;height:19px;margin-top:4px;accent-color:var(--acc);flex-shrink:0;cursor:pointer}
+.ckitem .kt{font-size:14.5px;font-weight:600}
+.ckitem .kd{font-size:13px;color:var(--ink2)}
+.ckitem.done .kt{text-decoration:line-through;color:var(--ink2)}
+.ckbar{display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px;gap:10px}
+.ckprog{font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.ckprog b{color:var(--acc);font-size:16px}
+
+/* params */
+.pcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 10px}
+.pcard .sym{font-size:14.5px;font-weight:700;text-wrap:balance}
+.pcard .sym::before{content:"こんな現象 → ";color:var(--acc);font-size:11.5px;font-weight:800;letter-spacing:.05em}
+.pcard .pn{margin:7px 0 1px;font-size:13.5px}
+.pcard .pn b{background:var(--code);border-radius:5px;padding:1px 8px}
+.pcard .pw{color:var(--ink2);font-size:12.5px}
+.pcard .pe{font-size:13.5px;margin-top:5px;max-width:70ch}
+
+/* terms */
+.term{padding:9px 2px;border-bottom:1px solid var(--line);max-width:72ch}
+.term dt{font-weight:800;font-size:14.5px;display:flex;gap:8px;align-items:baseline}
+.term dt .cat{background:var(--chip);color:var(--ink2);font-size:10.5px;border-radius:99px;padding:0 9px;font-weight:700}
+.term dd{margin:2px 0 0;color:var(--ink2);font-size:13.5px}
+
+/* search results */
+.sr h3{display:flex;gap:8px;align-items:baseline}
+.sr h3 small{color:var(--ink2);font-weight:normal;font-size:12px}
+.srow{display:block;width:100%;text-align:left;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 14px;margin:0 0 8px;cursor:pointer;color:var(--ink);font-size:14px}
+.srow:hover{border-color:var(--acc)}
+.srow b{display:block}
+.srow small{color:var(--ink2);font-size:12.5px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+mark{background:var(--hl);color:inherit;border-radius:3px;padding:0 1px}
+.empty{color:var(--ink2);background:var(--card);border:1px dashed var(--line);border-radius:10px;padding:18px;text-align:center}
+
+.twrap{overflow-x:auto;margin:10px 0}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--chip);font-size:12.5px}
+kbd{background:var(--code);border:1px solid var(--line);border-radius:4px;padding:0 6px;font-size:12.5px;font-family:inherit}
+footer{color:var(--ink2);font-size:11.5px;padding:22px 14px;border-top:1px solid var(--line);max-width:960px;margin:20px auto 0}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.topbtn{position:fixed;right:14px;bottom:14px;z-index:25;border:1px solid var(--line);background:var(--card);color:var(--ink2);
+  border-radius:99px;width:42px;height:42px;font-size:17px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+@media print{
+  header,.navchips,.topbtn,footer,.chips,.cktabs,#q{display:none!important}
+  body{background:#fff;color:#000}
+  .card{break-inside:avoid}
+  .card .cbody{display:block!important}
+}
+</style>
+
+<header>
+  <div class="hrow">
+    <div class="logo" id="logo">WMS 現場ナビ<small>ONEsLOGI GUIDE</small></div>
+    <input id="q" type="search" enterkeyhint="search" placeholder="なんでも検索：症状・作業・用語（例: 検品 固まった）" aria-label="全体検索">
+  </div>
+  <nav class="navchips" id="nav" aria-label="メニュー"></nav>
+</header>
+<main id="app" aria-live="polite"></main>
+<button class="topbtn" id="topbtn" title="上へ戻る" aria-label="上へ戻る">↑</button>
+<footer>出典: Box「三生」フォルダ内 ONEsLOGI クラウドWMS 公式マニュアル一式（PC編・共通操作編・HT編・SD編・EC受注業務編・トラブルシューティング編・ヘルプ編・荷札用紙設定編）／ご利用の手引き／機能一覧 Ver4.6／用語辞書／ステータス遷移表。挙動はセンタ・荷主のパラメータマスタ設定に依存するため、細部は原本と自倉庫の設定を優先してください。チェックリストのチェック状態はこの端末のブラウザにのみ保存されます。</footer>
+
+<script>
+const DB = __DB__;
+</script>
+<script>
+/* ============ 固定データ ============ */
+const VIEWS = [
+  {id:'home', label:'ホーム'},
+  {id:'tasks', label:'手順'},
+  {id:'sos', label:'困った'},
+  {id:'status', label:'ステータス'},
+  {id:'check', label:'チェックリスト'},
+  {id:'params', label:'設定辞典'},
+  {id:'terms', label:'用語'},
+];
+
+const RULES = [
+  {t:'ボタンは1回だけ', d:'二度押しで同じ処理が2回動く。処理が終わるまで待つ。F5で入力は全消え。'},
+  {t:'検品中のブラウザ「戻る」は厳禁', d:'「検品中」のまま固まる。押してしまったら→ 困った「検品の続きができない」へ。'},
+  {t:'「戻る」「×」でも処理は止まらない', d:'登録が始まったら閉じても処理は続く。取消は必ず画面の機能（取消・訂正）で。'},
+  {t:'『画面』と【ボタン】', d:'このツールでは『』=画面名、【】=ボタン名。メニューは マスタ/入荷/出荷/在庫/棚卸/日次/運用/ヘルプ の8つ。'},
+  {t:'青=正常・赤=エラー・黄=警告', d:'「マスタに存在しません」系は登録漏れか削除済みが原因。エラーチェックで解消。'},
+  {t:'挙動の違いは設定のせい', d:'欠品時の動き・ラベル自動出力・HTの画面フローはパラメータマスタ次第。→ 設定辞典で逆引き。'},
+  {t:'最後は日次締', d:'庫内業務が全部終わってから『日次締処理』。忘れると翌日ログイン時に警告。'},
+];
+
+const STATUS = {
+  nyuka: {
+    label:'入荷', flow:['未入荷','入荷中（一部計上）','入荷済'],
+    extra:'ほかに「エラー有」（進捗上は未入荷扱い）「入荷削除」。',
+    ops:[
+      {op:'入荷予定を修正したい', cond:'<em>未入荷またはエラー有のみ</em>。『伝票別入荷一覧』で伝票を1件だけチェック→【入荷予定修正】。'},
+      {op:'入荷予定を削除したい', cond:'<em>未入荷またはエラー有のみ</em>。チェック→【入荷予定削除】（削除行は赤背景）。'},
+      {op:'分納・打切りにしたい', cond:'<em>入荷中（一部計上済）のみ</em>。『入荷未完了一覧』でチェック→分納/打切りを指定→【指示】→【登録】。'},
+      {op:'入荷を取り消したい', cond:'【入荷実績入力】画面の【入荷取消】。ただし<em>入庫後に在庫を動かして入庫時より減っていると不可</em>→先に在庫を戻す。'},
+      {op:'実績の数量を直したい', cond:'一覧→【入荷実績入力】→訂正して【登録】。複数ロケは【明細分割】。'},
+    ]},
+  shukka: {
+    label:'出荷', flow:['未出荷','出庫指示済','出荷検品済','出荷確定済'],
+    extra:'ほかに「キャンセル」「エラー有」「出荷停止」「欠品（青文字）」。確定済になると出荷業務は一切不可。',
+    ops:[
+      {op:'出荷指示を修正・キャンセルしたい', cond:'<em>未出荷（エラー有含む）のみ</em>。出庫指示済なら先に【出庫指示解除】で未出荷に戻す。'},
+      {op:'出庫指示（引当）をかけたい', cond:'<em>未出荷・エラーなし</em>。『出庫指示一覧』でチェック→【出庫指示】。'},
+      {op:'出庫指示を解除したい', cond:'<em>出庫指示済〜検品中</em>。【出庫指示解除】→未出荷へ戻る。'},
+      {op:'検品をやり直したい', cond:'『出庫指示一覧』で<em>1件だけチェック</em>→【出荷検品解除】→出庫指示済に戻る。'},
+      {op:'作業日・出荷日・配送コースを変えたい', cond:'<em>出荷確定前のみ</em>。一覧でチェック→一括変更欄→【選択行更新】。'},
+      {op:'出荷確定したい', cond:'<em>出荷検品済のみ</em>【出荷確定】。未検品（目視のみ）は【強制確定】。ここで在庫が引き落とされる。'},
+      {op:'確定を取り消したい', cond:'<em>出荷確定済のみ</em>。『出荷確定一覧』を「全件表示」で検索→チェック→【出荷確定解除】。'},
+      {op:'欠品表示を消したい', cond:'<em>未出荷に対して</em>【欠品解除】。根本解決は在庫を直すか指示修正→再度出庫指示。'},
+    ]},
+  tana: {
+    label:'棚卸', flow:['データ作成','入力','差異確認','在庫調整'],
+    extra:'棚卸は入出荷作業がすべて終わってから。引当済がある在庫は引当可能数だけが対象。',
+    ops:[
+      {op:'棚卸数を入力・修正したい', cond:'<em>在庫調整フラグ「未調整」の行のみ</em>。調整済の行は再入力不可。'},
+      {op:'棚卸データを作り直したい', cond:'再作成すると<em>棚卸数量は保持され在庫数だけ最新化</em>。増えた在庫は行追加される。'},
+      {op:'差異を在庫に反映したい', cond:'1件ずつ=『棚卸入力』でチェック→【在庫調整】。まとめて=『棚卸在庫一括更新』→【在庫一括更新】（作成後に在庫が動いた行は赤背景）。'},
+    ]},
+};
+
+const CHECKLISTS = [
+  {id:'open', label:'業務開始前', items:[
+    {t:'前日の日次締が済んでいるか', d:'ログイン時に警告が出たら先に『日次締処理』を実行してから業務開始。'},
+    {t:'『ログ一覧』で夜間・前日処理のエラー確認', d:'運用メニュー→『ログ一覧』。エラー行はダブルクリックで明細。'},
+    {t:'入荷予定の取込とエラーチェック', d:'『伝票別入荷一覧』→【エラーチェック】。「マスタに存在しません」は先に潰す。'},
+    {t:'出荷指示の取込とエラーチェック', d:'『出庫指示一覧』→【エラーチェック】。エラー有は出庫指示にかけられない。'},
+    {t:'HT・プリンタの用紙とラベル残量', d:'荷札はプリンタごとに用紙サイズ・センサタイプが正しいか（→設定辞典/荷札）。'},
+  ]},
+  {id:'close', label:'業務終了（日次締前）', items:[
+    {t:'入荷の入力漏れがないか', d:'『入荷未完了一覧』を確認。予定に届かない分は分納か打切りを判断。'},
+    {t:'「検品中」のまま残っている伝票がないか', d:'『出庫指示一覧』でステータス確認。残っていたら検品完了させるか【出荷検品解除】。'},
+    {t:'出荷確定の漏れがないか', d:'『出荷確定一覧』で未確定を確認。検品済は【出荷確定】、目視のみは【強制確定】。'},
+    {t:'在庫移動・補充の完了処理漏れがないか', d:'『在庫移動一覧』で「作業中」が残っていないか。【完了】または【取消】。'},
+    {t:'日次締の実行と結果確認', d:'『日次締処理』→【締切】→『ログ一覧』で正常終了を確認。荷主間で日付がずれないよう全荷主まとめて。'},
+  ]},
+  {id:'tana', label:'棚卸の前日・当日', items:[
+    {t:'入出荷作業がすべて完了しているか', d:'データ作成後に在庫が動くと差異の原因。予定登録は可、作業は棚卸後。'},
+    {t:'「検品中」「作業中」のデータが残っていないか', d:'『出庫指示一覧』『在庫移動一覧』を確認。'},
+    {t:'引当済数がある在庫を把握したか', d:'棚卸対象は引当可能数のみ。現物と合わない棚はピッキング済でないか先に確認。'},
+    {t:'棚卸データ作成は作業直前に', d:'『棚卸データ作成』。範囲を絞るなら循環棚卸（ロケ・ゾーン・受払日指定）。'},
+    {t:'先付棚卸で荷動きが出たら作り直し', d:'再度『棚卸データ作成』から（棚卸数量は保持される）。'},
+  ]},
+  {id:'newitem', label:'新商品・新取引先の受入前', items:[
+    {t:'商品マスタの登録', d:'ロット管理・期限日管理フラグ、入数（ケース>ボール）、荷姿・寸法・重量。ここを間違うと実績入力で詰まる。'},
+    {t:'取引先マスタの登録', d:'納品先/仕入先フラグ、配送コース、出荷停止フラグが立っていないか。'},
+    {t:'ロケーションと補充設定', d:'ピックロケ/バックロケの割当。定期補充するなら補充点・最大格納数を設定。'},
+    {t:'バーコードの確認', d:'商品にJAN等がない場合は商品ラベル発行の運用を決める（パラメータで自動出力可）。'},
+    {t:'テストで1周まわす', d:'入荷予定→実績→出荷指示→出庫指示→検品→確定を少量で通し、エラーが出ないか確認。'},
+  ]},
+];
+
+const SYN = [
+  ['欠品','引当できない','在庫不足','足りない','ひきあて'],
+  ['ハンディ','ハンディターミナル','ht'],
+  ['スマホ','タブレット','スマートデバイス','sd'],
+  ['賞味期限','消費期限','期限切れ','期限日'],
+  ['送り状','荷札','ラベル'],
+  ['棚','ロケ','ロケーション','番地'],
+  ['バーコード','ソースcd','jan','スキャン'],
+  ['取消','キャンセル','取り消し'],
+  ['締め','日次','締切','クローズ'],
+  ['ピック','ピッキング','集品'],
+  ['固まった','止まった','フリーズ','動かない','再開できない'],
+  ['印刷','発行','プリンタ','出力'],
+  ['楽天','yahoo','ヤフー','amazon','アマゾン','ec','通販','ネットショップ','受注'],
+  ['差異','数が合わない','合わない','ズレ'],
+  ['戻る','ブラウザ'],
+  ['エラー','排他','競合','おかしい'],
+  ['入庫no','入庫ラベル','入庫番号'],
+  ['返品','戻り'],
+  ['補充','リプレニ'],
+  ['伝票','指示','オーダー'],
+];
+
+/* ============ ユーティリティ ============ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function norm(s){
+  s = String(s||'').normalize('NFKC').toLowerCase();
+  return s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0)-0x60));
+}
+function expandQuery(q){
+  const words = norm(q).split(/[\s、。,]+/).filter(Boolean);
+  return words.map(w => {
+    const set = new Set([w]);
+    SYN.forEach(g => { if(g.some(t => norm(t).includes(w) || w.includes(norm(t)))) g.forEach(t => set.add(norm(t))); });
+    return [...set];
+  });
+}
+function store(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function load(k,d){ try{ const v = localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }
+
+/* ============ 検索インデックス ============ */
+const INDEX = [];
+function buildIndex(){
+  (DB.tasks||[]).forEach(t => INDEX.push({type:'task', ref:t,
+    f:[[t.title,3],[ (t.kw||[]).join(' '),2.5],[t.cat,1.5],[t.where,1],[(t.steps||[]).join(' '),1],[(t.notes||[]).map(n=>n.text).join(' '),1]]}));
+  (DB.trouble||[]).forEach(t => {
+    let body = '';
+    if(t.result) body = t.result.cause+' '+(t.result.steps||[]).join(' ');
+    if(t.nodes) Object.values(t.nodes).forEach(n=>{ body += ' '+n.q+' '+(n.opts||[]).map(o=>o.label+' '+(o.result?o.result.cause+' '+(o.result.steps||[]).join(' '):'')).join(' '); });
+    INDEX.push({type:'sos', ref:t, f:[[t.title,3.5],[(t.kw||[]).join(' '),2.5],[body,1]]});
+  });
+  (DB.params||[]).forEach(p => INDEX.push({type:'param', ref:p,
+    f:[[p.symptom,3],[p.name,2.5],[(p.kw||[]).join(' '),2],[p.effect,1]]}));
+  (DB.glossary||[]).forEach((g,i) => INDEX.push({type:'term', ref:g, idx:i,
+    f:[[g.term,3],[g.def,1]]}));
+  Object.entries(STATUS).forEach(([k,s]) => s.ops.forEach((o,i)=>INDEX.push({type:'status', ref:{k,i,o,label:s.label},
+    f:[[o.op,3],[o.cond.replace(/<[^>]+>/g,''),1.2]]})));
+  INDEX.forEach(it => { it.nf = it.f.map(([txt,w]) => [norm(txt), w]); });
+}
+function search(q){
+  const groups = expandQuery(q);
+  if(!groups.length) return [];
+  const out = [];
+  INDEX.forEach(it => {
+    let score = 0;
+    const okAll = groups.every(alts => {
+      let best = 0;
+      it.nf.forEach(([txt,w]) => { alts.forEach(a => { if(a && txt.includes(a)) best = Math.max(best, w * (a.length>=2?1:.5)); }); });
+      score += best;
+      return best > 0;
+    });
+    if(okAll) out.push({it, score});
+  });
+  out.sort((a,b)=>b.score-a.score);
+  return out;
+}
+
+/* ============ ルーター & 描画 ============ */
+const app = $('#app');
+let openTask = null, wizardState = null, curCat = 'すべて', curTermCat = 'すべて', curCheck = 'open';
+
+let suppressHash = false;
+function go(hash){
+  if(location.hash !== '#'+hash){ suppressHash = true; location.hash = hash; }
+  route();
+}
+function route(){
+  const h = decodeURIComponent(location.hash.slice(1)) || 'home';
+  const [view, arg] = h.split('/', 2).length ? [h.split('/')[0], h.split('/').slice(1).join('/')] : ['home',''];
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.v===view || (view==='search'&&b.dataset.v==='home')));
+  if(view!=='sos') wizardState = null;
+  if(view==='home') renderHome();
+  else if(view==='tasks'){ openTask = arg||openTask; renderTasks(); }
+  else if(view==='sos') renderSos(arg);
+  else if(view==='status') renderStatus(arg||'shukka');
+  else if(view==='check'){ if(arg) curCheck = arg; renderCheck(); }
+  else if(view==='params') renderParams();
+  else if(view==='terms') renderTerms(arg);
+  else if(view==='search') renderSearch(arg);
+  else renderHome();
+  if(!(view==='tasks'&&arg)) window.scrollTo(0,0);
+}
+
+function renderHome(){
+  app.innerHTML = `
+  <h2><span class="eye">ONESLOGI CLOUD WMS</span>今なにをしたい？</h2>
+  <p class="lead">上の検索窓に困りごとや作業名を入れるのが最速。ボタンからも辿れます。</p>
+  <div class="tiles">
+    <button class="tile" data-go="tasks"><span class="ic">📋</span><span class="ti">手順をさがす</span><span class="td">「〜したい」から探す全業務の操作手順。画面名・ボタン名つき。</span></button>
+    <button class="tile" data-go="sos"><span class="ic">🚨</span><span class="ti">困った・エラー</span><span class="td">症状を選んで質問に答えると、原因と対処にたどり着く診断モード。</span></button>
+    <button class="tile" data-go="status"><span class="ic">🚦</span><span class="ti">できる？できない？</span><span class="td">「なぜこの操作が拒否される？」の答え。ステータス別の可否早見。</span></button>
+    <button class="tile" data-go="check"><span class="ic">✅</span><span class="ti">チェックリスト</span><span class="td">始業前・終業・棚卸前・新商品受入。チェック状態はこの端末に保存。</span></button>
+    <button class="tile" data-go="params"><span class="ic">⚙️</span><span class="ti">設定辞典</span><span class="td">「あの倉庫と挙動が違う」の正体。現象から設定を逆引き。</span></button>
+    <button class="tile" data-go="terms"><span class="ic">📖</span><span class="ti">用語辞書</span><span class="td">全${(DB.glossary||[]).length}語。分からない言葉はここ。</span></button>
+  </div>
+  <h3>初日に覚える7つの掟</h3>
+  <div class="rules">${RULES.map((r,i)=>`<div class="rule"><b><span class="n">${i+1}</span>${esc(r.t)}</b>${esc(r.d)}</div>`).join('')}</div>`;
+  app.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', ()=>go(b.dataset.go)));
+}
+
+function renderTasks(){
+  const cats = ['すべて', ...new Set((DB.tasks||[]).map(t=>t.cat))];
+  const list = (DB.tasks||[]).filter(t => curCat==='すべて' || t.cat===curCat);
+  app.innerHTML = `
+  <h2><span class="eye">HOW-TO</span>手順をさがす</h2>
+  <p class="lead">タイトルを押すと手順が開きます。⚠は知らないと事故るポイント。</p>
+  <div class="chips">${cats.map(c=>`<button data-c="${esc(c)}" class="${c===curCat?'on':''}">${esc(c)}</button>`).join('')}</div>
+  <div class="count">${list.length} 件</div>
+  ${list.map(t=>taskCard(t)).join('')}`;
+  app.querySelectorAll('.chips button').forEach(b => b.addEventListener('click', ()=>{ curCat=b.dataset.c; openTask=null; renderTasks(); }));
+  bindTaskCards(app);
+  if(openTask){ const el = document.getElementById('t-'+openTask); if(el){ el.classList.add('open'); el.scrollIntoView({block:'center'}); } }
+}
+function taskCard(t){
+  return `<div class="card" id="t-${esc(t.id)}">
+    <button class="chead" data-t="${esc(t.id)}"><span class="arr">▶</span><span>${(t.notes||[]).some(n=>n.type==='danger')?'⚠ ':''}${esc(t.title)}</span><span class="cat">${esc(t.cat)}</span></button>
+    <div class="cbody">
+      ${t.where?`<div class="where">入口: <b>${esc(t.where)}</b></div>`:''}
+      <ol class="steps">${(t.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+      ${(t.notes||[]).map(n=>`<div class="note ${esc(n.type||'warn')}"><span class="nt">${n.type==='danger'?'事故注意':n.type==='info'?'ヒント':'注意'}</span> ${esc(n.text)}</div>`).join('')}
+    </div></div>`;
+}
+function bindTaskCards(root){
+  root.querySelectorAll('.chead[data-t]').forEach(b => b.addEventListener('click', ()=>{
+    const card = b.closest('.card'); const was = card.classList.contains('open');
+    card.classList.toggle('open', !was);
+    openTask = was ? null : b.dataset.t;
+    history.replaceState(null,'', '#tasks'+(openTask?'/'+openTask:''));
+  }));
+}
+
+function renderSos(arg){
+  const tree = (DB.trouble||[]).find(t=>t.id===arg);
+  if(!tree){
+    wizardState = null;
+    app.innerHTML = `
+    <h2><span class="eye">TROUBLE</span>困った・エラー診断</h2>
+    <p class="lead">近い症状を選んでください。いくつか質問に答えると原因と対処が出ます。</p>
+    ${(DB.trouble||[]).map(t=>`<button class="srow" data-s="${esc(t.id)}"><b>${esc(t.title)}</b></button>`).join('')}`;
+    app.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', ()=>go('sos/'+b.dataset.s)));
+    return;
+  }
+  if(!wizardState || wizardState.id!==tree.id) wizardState = {id:tree.id, path:[], node:tree.start||null, result:tree.result||null};
+  const st = wizardState;
+  let inner = '';
+  const bc = st.path.map(p=>`<span>${esc(p)}</span>`).join('');
+  if(st.result){
+    const r = st.result;
+    inner = `<div class="result">
+      ${bc?`<div class="bc">${bc}</div>`:''}
+      <div class="cause"><b>原因:</b> ${esc(r.cause)}</div>
+      <h4>対処手順</h4>
+      <ol class="steps">${(r.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+      ${r.prevent?`<div class="prevent"><b>再発防止</b><br>${esc(r.prevent)}</div>`:''}
+      <div class="wzback"><button class="ghost" data-a="restart">最初からやり直す</button><button class="ghost" data-a="list">症状一覧へ</button></div>
+    </div>`;
+  } else {
+    const node = tree.nodes[st.node];
+    inner = `${bc?`<div class="bc">${bc}</div>`:''}
+    <div class="q">${esc(node.q)}</div>
+    <div class="wzopts">${node.opts.map((o,i)=>`<button data-o="${i}">${esc(o.label)}</button>`).join('')}</div>
+    <div class="wzback">${st.path.length?`<button class="ghost" data-a="restart">最初から</button>`:''}<button class="ghost" data-a="list">← 症状一覧</button></div>`;
+  }
+  app.innerHTML = `<h2><span class="eye">TROUBLE</span>${esc(tree.title)}</h2><div class="wz">${inner}</div>`;
+  app.querySelectorAll('[data-o]').forEach(b => b.addEventListener('click', ()=>{
+    const node = tree.nodes[st.node]; const o = node.opts[+b.dataset.o];
+    st.path.push(o.label);
+    if(o.result){ st.result = o.result; } else { st.node = o.next; }
+    renderSos(tree.id);
+  }));
+  app.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', ()=>{
+    if(b.dataset.a==='restart'){ wizardState=null; renderSos(tree.id); }
+    else go('sos');
+  }));
+}
+
+function renderStatus(k){
+  const s = STATUS[k] || STATUS.shukka;
+  app.innerHTML = `
+  <h2><span class="eye">STATUS</span>できる？できない？ 早見</h2>
+  <p class="lead">操作が拒否されたら、まず今のステータスと突き合わせる。</p>
+  <div class="chips">${Object.entries(STATUS).map(([id,v])=>`<button data-k="${id}" class="${id===k?'on':''}">${esc(v.label)}</button>`).join('')}</div>
+  <div class="flow">${s.flow.map((f,i)=>`<span class="st ${i===s.flow.length-1?'hl':''}">${esc(f)}</span>`).join('<span class="ar">→</span>')}</div>
+  <p class="lead">${esc(s.extra)}</p>
+  <div class="opgrid">${s.ops.map(o=>`<div class="oprow"><b>${esc(o.op)}</b><span class="cond">${o.cond}</span></div>`).join('')}</div>`;
+  app.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', ()=>go('status/'+b.dataset.k)));
+}
+
+function renderCheck(){
+  const cl = CHECKLISTS.find(c=>c.id===curCheck) || CHECKLISTS[0];
+  const state = load('wmsq.ck.'+cl.id, cl.items.map(()=>false));
+  const done = state.filter(Boolean).length;
+  app.innerHTML = `
+  <h2><span class="eye">CHECKLIST</span>現場チェックリスト</h2>
+  <p class="lead">押すとチェックが付きます（この端末のブラウザに保存）。作業の抜け防止に。</p>
+  <div class="cktabs chips">${CHECKLISTS.map(c=>`<button data-c="${c.id}" class="${c.id===cl.id?'on':''}">${esc(c.label)}</button>`).join('')}</div>
+  <div class="ckwrap">
+    <div class="ckbar"><span class="ckprog"><b>${done}</b> / ${cl.items.length} 完了</span><button class="ghost" id="ckreset">リセット</button></div>
+    ${cl.items.map((it,i)=>`<label class="ckitem ${state[i]?'done':''}"><input type="checkbox" data-i="${i}" ${state[i]?'checked':''}><span><span class="kt">${esc(it.t)}</span><br><span class="kd">${esc(it.d)}</span></span></label>`).join('')}
+  </div>`;
+  app.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', ()=>{ curCheck=b.dataset.c; history.replaceState(null,'','#check/'+curCheck); renderCheck(); }));
+  app.querySelectorAll('input[data-i]').forEach(cb => cb.addEventListener('change', ()=>{
+    state[+cb.dataset.i] = cb.checked; store('wmsq.ck.'+cl.id, state); renderCheck();
+  }));
+  $('#ckreset').addEventListener('click', ()=>{ store('wmsq.ck.'+cl.id, cl.items.map(()=>false)); renderCheck(); });
+}
+
+let paramQ = '';
+function renderParams(){
+  const list = (DB.params||[]).filter(p => !paramQ || search(paramQ).some(r=>r.it.type==='param'&&r.it.ref===p));
+  app.innerHTML = `
+  <h2><span class="eye">SETTINGS</span>設定辞典 —「挙動が違う」の正体</h2>
+  <p class="lead">同じWMSでもセンタ・荷主の設定で動きが変わります。現象から設定名を特定し、管理者への確認に使ってください。</p>
+  <div class="count">${list.length} 件${paramQ?`（「${esc(paramQ)}」で絞り込み中 — 上の検索窓を消すと全件）`:''}</div>
+  ${list.map(p=>`<div class="pcard">
+    <div class="sym">${esc(p.symptom)}</div>
+    <div class="pn"><b>${esc(p.name)}</b> <span class="pw">${esc(p.where)}</span></div>
+    <div class="pe">${esc(p.effect)}</div>
+  </div>`).join('') || '<div class="empty">該当なし</div>'}`;
+}
+
+function renderTerms(arg){
+  const cats = ['すべて', ...new Set((DB.glossary||[]).map(g=>g.cat))];
+  const list = (DB.glossary||[]).filter(g => curTermCat==='すべて' || g.cat===curTermCat);
+  app.innerHTML = `
+  <h2><span class="eye">GLOSSARY</span>用語辞書</h2>
+  <div class="chips">${cats.map(c=>`<button data-c="${esc(c)}" class="${c===curTermCat?'on':''}">${esc(c)}</button>`).join('')}</div>
+  <div class="count">${list.length} / ${(DB.glossary||[]).length} 語</div>
+  <dl>${list.map((g)=>{ const gi=(DB.glossary||[]).indexOf(g);
+    return `<div class="term" id="g-${gi}"><dt>${esc(g.term)}<span class="cat">${esc(g.cat)}</span></dt><dd>${esc(g.def)}</dd></div>`;}).join('')}</dl>`;
+  app.querySelectorAll('.chips button').forEach(b => b.addEventListener('click', ()=>{ curTermCat=b.dataset.c; renderTerms(); }));
+  if(arg!==undefined && arg!==''){ const el = document.getElementById('g-'+arg); if(el){ el.scrollIntoView({block:'center'}); el.style.background='var(--hl)'; setTimeout(()=>el.style.background='',1600); } }
+}
+
+function renderSearch(q){
+  q = q || $('#q').value;
+  const res = search(q);
+  const by = t => res.filter(r=>r.it.type===t).slice(0, 10);
+  const tasks = by('task'), sos = by('sos'), params = by('param'), terms = by('term'), stat = by('status');
+  const total = tasks.length+sos.length+params.length+terms.length+stat.length;
+  const hl = txt => { let h = esc(txt); expandQuery(q).flat().filter(w=>w.length>=2).slice(0,12).forEach(w=>{
+    try{ h = h.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'), m=>`<mark>${m}</mark>`);}catch(e){} }); return h; };
+  app.innerHTML = `
+  <h2><span class="eye">SEARCH</span>「${esc(q)}」の検索結果 <small style="font-weight:normal;color:var(--ink2)">${total}件</small></h2>
+  ${total===0?`<div class="empty">見つかりませんでした。言い換え（例:「引当」→「欠品」、「ハンディ」→「HT」）や、<b>困った・エラー診断</b>から症状で辿るのも試してください。</div>`:''}
+  <div class="sr">
+  ${sos.length?`<h3>🚨 困った・診断 <small>${sos.length}</small></h3>`+sos.map(r=>`<button class="srow" data-nav="sos/${esc(r.it.ref.id)}"><b>${hl(r.it.ref.title)}</b></button>`).join(''):''}
+  ${tasks.length?`<h3>📋 手順 <small>${tasks.length}</small></h3>`+tasks.map(r=>`<button class="srow" data-nav="tasks/${esc(r.it.ref.id)}" data-cat="${esc(r.it.ref.cat)}"><b>${hl(r.it.ref.title)}</b><small>${esc(r.it.ref.cat)}｜${esc(r.it.ref.where||'')}</small></button>`).join(''):''}
+  ${stat.length?`<h3>🚦 できる？できない？ <small>${stat.length}</small></h3>`+stat.map(r=>`<button class="srow" data-nav="status/${esc(r.it.ref.k)}"><b>${hl(r.it.ref.o.op)}</b><small>${esc(r.it.ref.label)}のステータス条件</small></button>`).join(''):''}
+  ${params.length?`<h3>⚙️ 設定辞典 <small>${params.length}</small></h3>`+params.map(r=>`<button class="srow" data-nav="params"><b>${hl(r.it.ref.name)}</b><small>${esc(r.it.ref.symptom)}</small></button>`).join(''):''}
+  ${terms.length?`<h3>📖 用語 <small>${terms.length}</small></h3>`+terms.map(r=>`<button class="srow" data-nav="terms/${(DB.glossary||[]).indexOf(r.it.ref)}"><b>${hl(r.it.ref.term)}</b><small>${esc(r.it.ref.def.slice(0,60))}…</small></button>`).join(''):''}
+  </div>`;
+  app.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', ()=>{
+    if(b.dataset.cat) curCat = 'すべて';
+    if(b.dataset.nav==='params') paramQ = q;
+    go(b.dataset.nav);
+  }));
+}
+
+/* ============ 初期化 ============ */
+$('#nav').innerHTML = VIEWS.map(v=>`<button data-v="${v.id}">${v.label}</button>`).join('');
+document.querySelectorAll('#nav button').forEach(b => b.addEventListener('click', ()=>{ paramQ=''; $('#q').value=''; go(b.dataset.v); }));
+$('#logo').addEventListener('click', ()=>go('home'));
+let debounce = null;
+$('#q').addEventListener('input', ()=>{
+  clearTimeout(debounce);
+  const v = $('#q').value.trim();
+  debounce = setTimeout(()=>{
+    if(v.length>=1){ paramQ=''; history.replaceState(null,'','#search/'+encodeURIComponent(v)); renderSearch(v); }
+    else if(location.hash.startsWith('#search')) go('home');
+  }, 180);
+});
+$('#q').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); $('#q').blur(); } });
+$('#topbtn').addEventListener('click', ()=>window.scrollTo({top:0}));
+window.addEventListener('hashchange', ()=>{ if(suppressHash){ suppressHash = false; return; } route(); });
+buildIndex();
+route();
+</script>
