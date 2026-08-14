@@ -141,16 +141,21 @@
   /* ---------- quote results ---------- */
   .quote-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
   .quote-card {
-    display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px;
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 16px;
     background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--line);
     border-radius: 4px; padding: 12px 16px;
   }
-  .quote-card.best { border-left-color: var(--kraft); background: var(--surface); }
-  .quote-card .cname { font-weight: 800; min-width: 6em; }
-  .quote-card .total { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .quote-card .total small { font-size: 12px; font-weight: 600; color: var(--muted); }
-  .quote-card .diff { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .quote-card .detail { flex-basis: 100%; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .quote-card.best { border-left-color: var(--kraft); }
+  .quote-card .qc-main { display: flex; align-items: center; gap: 10px; }
+  .quote-card .cname { font-weight: 800; font-size: 15px; }
+  .quote-card .qc-amount { text-align: right; }
+  .quote-card .total { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.3; }
+  .quote-card .diff { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .quote-card .diff.save { color: var(--kraft); font-weight: 700; }
+  .quote-card .detail {
+    grid-column: 1 / -1; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+    border-top: 1px dashed var(--line); padding-top: 6px; margin-top: 4px;
+  }
   .quote-card .na { color: var(--muted); font-size: 13px; }
   .chip-best {
     font-size: 11px; font-weight: 700; color: var(--kraft); background: var(--kraft-soft);
@@ -199,6 +204,8 @@
   .pill.ok { color: var(--ok-ink); background: var(--ok-soft); }
   .pill.bad { color: var(--bad-ink); background: var(--bad-soft); }
   .pill.na { color: var(--muted); background: var(--surface-2); }
+  td.reason { font-size: 11.5px; color: var(--muted); white-space: normal; max-width: 240px; }
+  .chip-demo.mini { font-size: 10px; padding: 0 6px; }
 
   /* ---------- master ---------- */
   .carrier-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -210,6 +217,37 @@
   .sur-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
   .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   @media (max-width: 760px) { .split { grid-template-columns: 1fr; } }
+
+  /* ---------- onboarding ---------- */
+  .onboard {
+    background: var(--kraft-soft); border: 1px solid var(--kraft); border-radius: 6px;
+    padding: 14px 18px; margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 10px 18px;
+    align-items: center; justify-content: space-between; font-size: 13px;
+  }
+  .onboard .btn-row { margin-top: 0; flex: none; }
+
+  /* ---------- micro-interactions ---------- */
+  .btn, .tabs button, .carrier-chips button, .file-btn { transition: background-color 0.15s, border-color 0.15s, color 0.15s, filter 0.15s; }
+  @media (prefers-reduced-motion: reduce) { .btn, .tabs button, .carrier-chips button, .file-btn { transition: none; } }
+  .btn.dirty { background: var(--kraft); border-color: var(--kraft); color: var(--accent-ink); }
+  tbody tr:hover td { background: var(--accent-soft); }
+
+  .file-btn {
+    display: inline-flex; align-items: center; border: 1px solid var(--line); background: var(--surface);
+    color: var(--muted); padding: 7px 14px; border-radius: 4px; cursor: pointer; font-weight: 700; font-size: 13px;
+  }
+  .file-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .file-btn:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .count-hint { font-size: 11.5px; color: var(--muted); }
+  .map-note { font-size: 11.5px; color: var(--muted); margin: 4px 0 8px; }
+  .map-note .warn { color: var(--bad-ink); font-weight: 700; }
+
+  @media print {
+    body { background: #fff; }
+    .tabs, .head-note, footer, .panel, #onboard, .btn-row, #toast { display: none !important; }
+    main { padding: 0; max-width: none; }
+    .table-wrap, .quote-card, .tile, .chart-panel { break-inside: avoid; }
+  }
 
   footer { margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
 
@@ -239,21 +277,32 @@
     </div>
   </header>
 
+  <div class="onboard" id="onboard" hidden>
+    <div>
+      <strong>はじめまして、タリフ番長です。</strong>いまは架空3社のデモタリフ入り。まずは一括見積りのサンプルを流して、最安ミックスの削減額を見てみてください。自社の契約タリフは「タリフマスタ」から登録できます。
+    </div>
+    <div class="btn-row">
+      <button class="btn" id="onboard-try">デモを流してみる</button>
+      <button class="btn subtle" id="onboard-close">閉じる</button>
+    </div>
+  </div>
+
   <nav class="tabs" role="tablist" aria-label="機能">
-    <button role="tab" aria-selected="true" data-view="quote">単発計算</button>
-    <button role="tab" aria-selected="false" data-view="batch">一括見積り</button>
-    <button role="tab" aria-selected="false" data-view="audit">請求照合</button>
-    <button role="tab" aria-selected="false" data-view="master">タリフマスタ</button>
-    <button role="tab" aria-selected="false" data-view="data">データ管理</button>
+    <button role="tab" id="tab-quote" aria-controls="view-quote" aria-selected="true" data-view="quote">単発計算</button>
+    <button role="tab" id="tab-batch" aria-controls="view-batch" aria-selected="false" data-view="batch">一括見積り</button>
+    <button role="tab" id="tab-audit" aria-controls="view-audit" aria-selected="false" data-view="audit">請求照合</button>
+    <button role="tab" id="tab-master" aria-controls="view-master" aria-selected="false" data-view="master">タリフマスタ</button>
+    <button role="tab" id="tab-data" aria-controls="view-data" aria-selected="false" data-view="data">データ管理</button>
   </nav>
 
   <!-- ============ 単発計算 ============ -->
-  <section class="view active" id="view-quote">
+  <section class="view active" id="view-quote" role="tabpanel" aria-labelledby="tab-quote">
     <h2>単発計算</h2>
     <p class="lead">発着・重量・容積を入れると、登録済みの全社で運賃を計算して安い順に並べます。</p>
     <div class="panel">
       <div class="form-grid">
         <div class="field"><label for="q-from">発地（都道府県）</label><select id="q-from"></select></div>
+        <button class="btn ghost" id="q-swap" title="発着を入れ替え" aria-label="発着を入れ替え">⇄</button>
         <div class="field"><label for="q-to">着地（都道府県）</label><select id="q-to"></select></div>
         <div class="field"><label for="q-weight">実重量 kg</label><input type="number" id="q-weight" min="0" step="0.1" value="80"></div>
         <div class="field"><label for="q-volume">容積 m³</label><input type="number" id="q-volume" min="0" step="0.001" value="0.4"></div>
@@ -263,10 +312,10 @@
       </div>
       <div class="btn-row">
         <span class="hint">容積を寸法から出す：</span>
-        <div class="field"><label for="q-w">縦 cm</label><input type="number" id="q-w" min="0" style="min-width:70px"></div>
-        <div class="field"><label for="q-d">横 cm</label><input type="number" id="q-d" min="0" style="min-width:70px"></div>
-        <div class="field"><label for="q-h">高さ cm</label><input type="number" id="q-h" min="0" style="min-width:70px"></div>
-        <div class="field"><label for="q-qty">個数</label><input type="number" id="q-qty" min="1" value="1" style="min-width:60px"></div>
+        <div class="field"><label for="q-w">縦 cm</label><input type="number" id="q-w" min="0" style="min-width:0;width:84px"></div>
+        <div class="field"><label for="q-d">横 cm</label><input type="number" id="q-d" min="0" style="min-width:0;width:84px"></div>
+        <div class="field"><label for="q-h">高さ cm</label><input type="number" id="q-h" min="0" style="min-width:0;width:84px"></div>
+        <div class="field"><label for="q-qty">個数</label><input type="number" id="q-qty" min="1" value="1" style="min-width:0;width:64px"></div>
         <button class="btn ghost" id="q-vol-apply">容積欄へ反映</button>
       </div>
     </div>
@@ -274,7 +323,7 @@
   </section>
 
   <!-- ============ 一括見積り ============ -->
-  <section class="view" id="view-batch">
+  <section class="view" id="view-batch" role="tabpanel" aria-labelledby="tab-batch">
     <h2>一括見積り・削減シミュレーション</h2>
     <p class="lead">出荷リストを貼り付けると全行×全社で計算し、「全部いまの1社」対「行ごとに最安社」の差額を出します。Excelからのコピペ（タブ区切り）対応。</p>
     <div class="panel">
@@ -285,14 +334,16 @@
       <div class="btn-row">
         <button class="btn" id="batch-run">一括計算する</button>
         <button class="btn ghost" id="batch-sample">サンプルを読み込む</button>
+        <label class="file-btn">CSV/TSVファイルを読み込み<input type="file" id="batch-file" accept=".csv,.tsv,.txt" hidden></label>
         <button class="btn subtle" id="batch-copy" hidden>結果をコピー（TSV）</button>
+        <span class="count-hint" id="batch-count"></span>
       </div>
     </div>
     <div id="batch-out"></div>
   </section>
 
   <!-- ============ 請求照合 ============ -->
-  <section class="view" id="view-audit">
+  <section class="view" id="view-audit" role="tabpanel" aria-labelledby="tab-audit">
     <h2>請求照合</h2>
     <p class="lead">請求明細を貼り付けると、契約条件から計算した理論値と突き合わせて差異を洗い出します。</p>
     <div class="panel">
@@ -302,15 +353,17 @@ A運輸&#9;東京&#9;大阪&#9;80&#9;0.4&#9;&#9;2026-08-14&#9;4000"></textarea>
       <div class="btn-row">
         <button class="btn" id="audit-run">照合する</button>
         <button class="btn ghost" id="audit-sample">サンプルを読み込む</button>
+        <label class="file-btn">CSV/TSVファイルを読み込み<input type="file" id="audit-file" accept=".csv,.tsv,.txt" hidden></label>
         <div class="field"><label for="audit-tol">許容差 円</label><input type="number" id="audit-tol" min="0" value="0" style="min-width:80px"></div>
         <button class="btn subtle" id="audit-copy" hidden>結果をコピー（TSV）</button>
+        <span class="count-hint" id="audit-count"></span>
       </div>
     </div>
     <div id="audit-out"></div>
   </section>
 
   <!-- ============ タリフマスタ ============ -->
-  <section class="view" id="view-master">
+  <section class="view" id="view-master" role="tabpanel" aria-labelledby="tab-master">
     <h2>タリフマスタ</h2>
     <p class="lead">会社ごとの契約条件・地帯区分・運賃表を管理します。編集後は「この会社を保存」を押してください。</p>
     <div class="carrier-chips" id="m-chips"></div>
@@ -323,7 +376,7 @@ A運輸&#9;東京&#9;大阪&#9;80&#9;0.4&#9;&#9;2026-08-14&#9;4000"></textarea>
   </section>
 
   <!-- ============ データ管理 ============ -->
-  <section class="view" id="view-data">
+  <section class="view" id="view-data" role="tabpanel" aria-labelledby="tab-data">
     <h2>データ管理</h2>
     <p class="lead">全データはこのブラウザの localStorage にだけ保存されます。バックアップや別端末への移動はJSONのコピペで。</p>
     <div class="split">
@@ -391,7 +444,7 @@ function normalizePref(s) {
 }
 
 function normalizeDate(s) {
-  const m = String(s || "").trim().match(/^(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?$/);
+  const m = String(s || "").normalize("NFKC").trim().match(/^(\d{4})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})日?$/);
   return m ? m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0") : "";
 }
 
@@ -443,16 +496,38 @@ function quoteAll(carriers, inp) {
 }
 
 // 表（CSV/TSV）テキスト → 行列。区切りはタブ優先、なければカンマ。
+// RFC4180の引用符（"15,120" や "" エスケープ）に対応。
 function parseTable(text) {
-  const lines = String(text || "").replace(/\r/g, "").split("\n").filter(l => l.trim() !== "");
-  return lines.map(l => (l.includes("\t") ? l.split("\t") : l.split(",")).map(c => c.trim()));
+  const src = String(text || "").replace(/\r/g, "");
+  const delim = src.includes("\t") ? "\t" : ",";
+  const rows = [];
+  let row = [], cell = "", inQ = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQ) {
+      if (ch === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else { inQ = false; } }
+      else cell += ch;
+    } else if (ch === '"' && cell === "") {
+      inQ = true;
+    } else if (ch === delim) {
+      row.push(cell.trim()); cell = "";
+    } else if (ch === "\n") {
+      row.push(cell.trim()); cell = "";
+      if (row.some(c => c !== "")) rows.push(row);
+      row = [];
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(c => c !== "")) rows.push(row);
+  return rows;
 }
 
+// 数値パース。NFKCで全角数字・全角記号を吸収し、桁区切り・円・¥を除去。
+// Python側に対応関数は無い（CSVは素の数値のみ）ため計算結果の一致には影響しない。
 function parseNum(s) {
-  const half = String(s || "")
-    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
-    .replace(/．/g, ".")
-    .replace(/[,，円\s]/g, "");
+  const half = String(s || "").normalize("NFKC").replace(/[,円¥\s]/g, "");
   const v = parseFloat(half);
   return isNaN(v) ? 0 : v;
 }
@@ -2017,6 +2092,7 @@ function buildDemoState() {
 /* =================== 状態 =================== */
 let state = null;
 let selectedCarrierId = null;
+let editorDirty = false;
 let idSeq = 1;
 
 function loadState() {
@@ -2031,9 +2107,10 @@ function saveState() {
   refreshDemoChip();
 }
 function refreshDemoChip() {
-  const allDemo = state.carriers.length > 0 && state.carriers.every(c => c.isDemo);
+  const n = state.carriers.filter(c => c.isDemo).length;
   const chip = document.getElementById("demo-chip");
-  chip.hidden = !allDemo;
+  chip.hidden = n === 0;
+  chip.textContent = (n === state.carriers.length) ? "ダミータリフ使用中" : "ダミータリフ" + n + "社を含む";
 }
 
 /* =================== 共通UI =================== */
@@ -2069,30 +2146,52 @@ async function copyText(text, okMsg, fallbackHost) {
 }
 
 // Artifactサンドボックスでは confirm() が常にfalseを返すため、2段階クリックで確認する
-function confirmClick(btn, fn) {
+function confirmClick(btn, fn, label) {
   if (btn.dataset.armed === "1") {
     btn.dataset.armed = ""; btn.textContent = btn.dataset.orig;
     fn(); return;
   }
   btn.dataset.armed = "1"; btn.dataset.orig = btn.textContent;
-  btn.textContent = "もう一度押すと実行";
+  btn.textContent = label || "もう一度押すと実行";
   setTimeout(() => {
     if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.textContent = btn.dataset.orig; }
   }, 4000);
+}
+
+// タリフマスタに未保存編集があるときは、破棄操作を2段階クリックで確認する
+function guardDirty(btn, fn) {
+  if (!editorDirty) { fn(); return; }
+  confirmClick(btn, () => { editorDirty = false; fn(); }, "未保存を破棄（もう一度押す）");
 }
 function todayStr() {
   const d = new Date();
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
 
-/* タブ切替 */
-document.querySelectorAll(".tabs button").forEach(b => {
-  b.addEventListener("click", () => {
-    document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-selected", x === b ? "true" : "false"));
-    document.querySelectorAll("section.view").forEach(v => v.classList.remove("active"));
-    $("#view-" + b.dataset.view).classList.add("active");
-    if (b.dataset.view === "master") renderMaster();
+/* タブ切替（ハッシュ復元・矢印キー対応） */
+const VIEWS = ["quote", "batch", "audit", "master", "data"];
+function activateTab(view) {
+  if (!VIEWS.includes(view)) view = "quote";
+  document.querySelectorAll(".tabs button").forEach(x => {
+    const sel = x.dataset.view === view;
+    x.setAttribute("aria-selected", sel ? "true" : "false");
+    x.tabIndex = sel ? 0 : -1;
   });
+  document.querySelectorAll("section.view").forEach(v => v.classList.remove("active"));
+  $("#view-" + view).classList.add("active");
+  if (view === "master" && !editorDirty) renderMaster(); // 未保存編集があれば編集中DOMを保持
+  try { if (location.hash !== "#" + view) history.replaceState(null, "", "#" + view); } catch (e) { /* サンドボックスでは無視 */ }
+}
+document.querySelectorAll(".tabs button").forEach(b =>
+  b.addEventListener("click", () => activateTab(b.dataset.view)));
+document.querySelector(".tabs").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  e.preventDefault();
+  const cur = document.querySelector('.tabs button[aria-selected="true"]');
+  const i = VIEWS.indexOf(cur ? cur.dataset.view : "quote");
+  const n = (i + (e.key === "ArrowRight" ? 1 : VIEWS.length - 1)) % VIEWS.length;
+  activateTab(VIEWS[n]);
+  document.querySelector('.tabs button[data-view="' + VIEWS[n] + '"]').focus();
 });
 
 /* ツールチップ */
@@ -2125,19 +2224,34 @@ const HEADER_SYNONYMS = {
   carrier: ["会社", "運送会社", "carrier", "業者"],
   amount: ["請求額", "請求", "金額", "amount", "請求額円"],
 };
+// 見出しセルの正規化：NFKC → 小文字 → 括弧書き・空白・単位サフィックスを除去
+// （「重量(kg)」「重量ｋｇ」「請求金額」等のExcel頻出表記を吸収する）
+function normHeaderCell(s) {
+  return String(s || "").normalize("NFKC").toLowerCase()
+    .replace(/[（(][^）)]*[）)]/g, "")
+    .replace(/[\s　]/g, "")
+    .replace(/(kg|m3|円)$/, "");
+}
 function detectColumns(headerRow, wanted) {
+  const cells = headerRow.map(normHeaderCell);
   const map = {};
   let hits = 0;
-  headerRow.forEach((cell, i) => {
-    const c = String(cell).trim().toLowerCase();
-    for (const key of wanted) {
-      if (map[key] === undefined && HEADER_SYNONYMS[key].some(s => c === s.toLowerCase())) { map[key] = i; hits++; }
-    }
-  });
+  const claim = (key, i) => {
+    if (map[key] === undefined && !Object.values(map).includes(i)) { map[key] = i; hits++; }
+  };
+  for (const key of wanted) { // 第1パス: 完全一致
+    const syns = HEADER_SYNONYMS[key].map(normHeaderCell);
+    cells.forEach((c, i) => { if (c && syns.includes(c)) claim(key, i); });
+  }
+  for (const key of wanted) { // 第2パス: 前方一致（「請求金額」→請求 など）
+    if (map[key] !== undefined) continue;
+    const syns = HEADER_SYNONYMS[key].map(normHeaderCell).filter(s => s.length >= 2);
+    cells.forEach((c, i) => { if (c && syns.some(s => c.startsWith(s))) claim(key, i); });
+  }
   return hits >= 2 ? map : null;
 }
 function rowsToShipments(rows, wanted, positional) {
-  if (!rows.length) return { header: false, items: [] };
+  if (!rows.length) return { header: false, items: [], map: null, unmapped: [] };
   const map = detectColumns(rows[0], wanted);
   const dataRows = map ? rows.slice(1) : rows;
   const get = (row, key, idx) => map ? (map[key] !== undefined ? row[map[key]] : "") : (row[idx] || "");
@@ -2146,7 +2260,53 @@ function rowsToShipments(rows, wanted, positional) {
     wanted.forEach((key) => { o[key] = get(row, key, positional.indexOf(key)); });
     return o;
   });
-  return { header: !!map, items };
+  const unmapped = map ? wanted.filter(k => map[k] === undefined) : [];
+  return { header: !!map, items, map, unmapped };
+}
+
+/* 列割当の可視化：どの列を何と解釈したかを結果に明示し、重要列の未検出を警告する */
+const COL_LABELS = { from: "発", to: "着", weight: "重量", volume: "容積", timed: "時間指定", date: "出荷日", carrier: "会社", amount: "請求額" };
+function mappingNotice(parsed, wanted, criticalKeys) {
+  const p = el("p", { class: "map-note" });
+  if (!parsed.header) {
+    p.append("見出し行なし → 固定の列順（" + wanted.map(k => COL_LABELS[k]).join("・") + "）で読み取りました。");
+    return p;
+  }
+  p.append("列の割当: ");
+  wanted.forEach((k, i) => {
+    if (i) p.append(" ／ ");
+    const found = parsed.map[k] !== undefined;
+    p.append(el("span", { class: found ? "" : "warn" },
+      COL_LABELS[k] + "=" + (found ? (parsed.map[k] + 1) + "列目" : "未検出")));
+  });
+  const missing = (criticalKeys || []).filter(k => parsed.map[k] === undefined);
+  if (missing.length) {
+    p.append(el("span", { class: "warn" }, " — " + missing.map(k => COL_LABELS[k]).join("・") + "の列が見つからないため結果が正しくない可能性があります"));
+    toast("警告: " + missing.map(k => COL_LABELS[k]).join("・") + " の列が見つかりません");
+  }
+  return p;
+}
+
+/* テキストエリア補助：行数カウンタとファイル読込（UTF-8/Shift_JIS自動判定） */
+function bindTableAids(ta, countEl, fileInput) {
+  const update = () => {
+    const n = parseTable(ta.value).length;
+    countEl.textContent = n ? n + "行を検出（見出し含む）" : "";
+  };
+  ta.addEventListener("input", update);
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    const buf = await f.arrayBuffer();
+    let text = new TextDecoder("utf-8").decode(buf);
+    if (text.includes("�")) {
+      try { text = new TextDecoder("shift_jis").decode(buf); } catch (e) { /* デコーダ非対応環境はUTF-8のまま */ }
+    }
+    ta.value = text;
+    update();
+    toast(f.name + " を読み込みました");
+    fileInput.value = "";
+  });
 }
 
 /* =================== 単発計算 =================== */
@@ -2168,30 +2328,40 @@ $("#q-vol-apply").addEventListener("click", () => {
   $("#q-volume").value = (Math.ceil(m3 * 1000) / 1000).toString();
   toast("容積 " + $("#q-volume").value + " m³ を反映しました");
 });
-$("#q-run").addEventListener("click", () => {
+function runQuote() {
+  const list = $("#q-results");
+  list.innerHTML = "";
+  if (!state.carriers.length) {
+    list.append(el("p", { class: "hint" }, "運送会社が未登録です。タリフマスタから追加してください。"));
+    return;
+  }
   const inp = {
     fromPref: $("#q-from").value, toPref: $("#q-to").value,
     weightKg: parseNum($("#q-weight").value), volumeM3: parseNum($("#q-volume").value),
     timed: $("#q-timed").checked, date: $("#q-date").value || todayStr(),
   };
-  if (!state.carriers.length) { toast("運送会社が未登録です（タリフマスタで追加）"); return; }
   const rs = quoteAll(state.carriers, inp);
-  const list = $("#q-results");
-  list.innerHTML = "";
   const bestTotal = rs.length && rs[0].ok ? rs[0].total : null;
   rs.forEach((r, i) => {
     const card = el("div", { class: "quote-card" + (i === 0 && r.ok ? " best" : "") });
-    card.append(el("span", { class: "cname" }, r.name));
+    const main = el("div", { class: "qc-main" }, el("span", { class: "cname" }, r.name));
+    const cRef = state.carriers.find(x => x.name === r.name);
+    if (cRef && cRef.isDemo) main.append(el("span", { class: "chip-demo mini" }, "ダミー"));
+    if (i === 0 && r.ok) main.append(el("span", { class: "chip-best" }, "最安"));
+    card.append(main);
     if (!r.ok) {
-      card.append(el("span", { class: "na" }, "― " + r.reason));
+      card.append(el("div", { class: "qc-amount" }, el("span", { class: "na" }, "― " + r.reason)));
     } else {
-      if (i === 0) card.append(el("span", { class: "chip-best" }, "最安"));
-      card.append(el("span", { class: "total" }, yen(r.total)));
-      if (bestTotal !== null && i > 0) {
+      const amount = el("div", { class: "qc-amount" }, el("div", { class: "total" }, yen(r.total)));
+      if (i > 0 && bestTotal !== null) {
         const d = r.total - bestTotal;
-        card.append(el("span", { class: "diff" }, "+" + yen(d) + "（+" + (d / bestTotal * 100).toFixed(1) + "%）"));
+        amount.append(el("div", { class: "diff" }, "最安より +" + yen(d) + "（+" + (d / bestTotal * 100).toFixed(1) + "%）"));
+      } else {
+        const save = 1 - r.total / r.listFare;
+        if (save > 0) amount.append(el("div", { class: "diff save" }, "定価比 −" + (save * 100).toFixed(0) + "%"));
       }
-      card.append(el("span", { class: "detail" },
+      card.append(amount);
+      card.append(el("div", { class: "detail" },
         r.lane + " ／ 課金 " + r.chargeable + "kg（" + r.basis + "勝ち）／ 〜" + r.band + "kg帯 ／ " +
         "定価 " + yen(r.listFare) + " → 割引後 " + yen(r.discounted) +
         (r.timedFee ? " ＋時間指定 " + yen(r.timedFee) : "") +
@@ -2200,6 +2370,18 @@ $("#q-run").addEventListener("click", () => {
     }
     list.append(card);
   });
+}
+$("#q-run").addEventListener("click", runQuote);
+["q-from", "q-to", "q-weight", "q-volume", "q-date", "q-timed"].forEach(id => {
+  const n = document.getElementById(id);
+  n.addEventListener("input", runQuote);
+  n.addEventListener("change", runQuote);
+});
+$("#q-swap").addEventListener("click", () => {
+  const a = $("#q-from").value;
+  $("#q-from").value = $("#q-to").value;
+  $("#q-to").value = a;
+  runQuote();
 });
 
 /* =================== 一括見積り =================== */
@@ -2214,14 +2396,18 @@ const BATCH_SAMPLE = [
   "兵庫\t福岡\t900\t\t\t2026-08-17",
   "東京\t沖縄\t100\t\t\t2026-08-17",
 ].join("\n");
-$("#batch-sample").addEventListener("click", () => { $("#batch-input").value = BATCH_SAMPLE; });
+$("#batch-sample").addEventListener("click", () => {
+  $("#batch-input").value = BATCH_SAMPLE;
+  $("#batch-input").dispatchEvent(new Event("input"));
+});
 
 let batchTSV = "";
 $("#batch-run").addEventListener("click", () => {
   const rows = parseTable($("#batch-input").value);
   if (!rows.length) { toast("出荷リストを貼り付けてください"); return; }
-  const { items } = rowsToShipments(rows, ["from", "to", "weight", "volume", "timed", "date"],
-    ["from", "to", "weight", "volume", "timed", "date"]);
+  const BATCH_COLS = ["from", "to", "weight", "volume", "timed", "date"];
+  const parsed = rowsToShipments(rows, BATCH_COLS, BATCH_COLS);
+  const { items } = parsed;
   const carriers = state.carriers;
   if (!carriers.length) { toast("運送会社が未登録です"); return; }
 
@@ -2237,29 +2423,32 @@ $("#batch-run").addEventListener("click", () => {
     return { it, inp, quotes, best };
   });
 
-  // 戦略別合計
-  const strategies = carriers.map((c, ci) => {
-    let sum = 0, served = 0, missed = 0;
-    perRow.forEach(r => { const q = r.quotes[ci]; if (q.ok) { sum += q.total; served++; } else missed++; });
-    return { name: c.name, sum, served, missed, kind: "single" };
-  });
-  let mixSum = 0, mixServed = 0, mixMissed = 0;
-  perRow.forEach(r => { if (r.best) { mixSum += r.best.total; mixServed++; } else mixMissed++; });
-  const mix = { name: "最安ミックス", sum: mixSum, served: mixServed, missed: mixMissed, kind: "mix" };
+  // 戦略比較は「全社が対応できる行」だけで行い、比較の土俵を揃える
+  const comparable = perRow.filter(r => r.quotes.every(q => q.ok));
+  const excluded = perRow.length - comparable.length;
+  const strategies = carriers.map((c, ci) => ({
+    name: c.name + (c.isDemo ? "（ダミー）" : ""),
+    sum: comparable.reduce((a, r) => a + r.quotes[ci].total, 0),
+    kind: "single",
+  }));
+  const mixComp = comparable.reduce((a, r) => a + r.best.total, 0);
+  const mix = { name: "最安ミックス", sum: mixComp, kind: "mix" };
+  const bestSingle = comparable.length ? strategies.reduce((a, b) => a.sum <= b.sum ? a : b) : null;
+  const saving = bestSingle ? bestSingle.sum - mixComp : null;
 
-  const complete = strategies.filter(s => s.missed === 0);
-  const bestSingle = complete.length ? complete.reduce((a, b) => a.sum <= b.sum ? a : b) : null;
-  const saving = bestSingle ? bestSingle.sum - mixSum : null;
+  let mixAll = 0, mixServed = 0, mixMissed = 0;
+  perRow.forEach(r => { if (r.best) { mixAll += r.best.total; mixServed++; } else mixMissed++; });
 
   const out = $("#batch-out");
   out.innerHTML = "";
+  out.append(mappingNotice(parsed, BATCH_COLS, ["from", "to", "weight"]));
 
   // タイル
   const tiles = el("div", { class: "tiles" });
   tiles.append(tileEl("出荷件数", perRow.length + "件", mixMissed ? "うち全社対応不可 " + mixMissed + "件" : ""));
-  if (bestSingle) tiles.append(tileEl("単社ベスト（" + bestSingle.name + "）", yen(bestSingle.sum), "全件を1社に出した場合の最良"));
-  tiles.append(tileEl("最安ミックス合計", yen(mixSum), "行ごとに最安社を選択（対応可能行のみ）"));
-  if (saving !== null && mixMissed === 0) {
+  tiles.append(tileEl("最安ミックス合計", yen(mixAll), "行ごとに最安社を選択（対応可能" + mixServed + "行）"));
+  if (bestSingle) {
+    tiles.append(tileEl("単社ベスト（" + bestSingle.name + "）", yen(bestSingle.sum), "全社対応可の" + comparable.length + "行で比較"));
     const tile = tileEl("ミックスで浮く額", yen(saving), bestSingle.sum > 0 ? "単社ベスト比 −" + (saving / bestSingle.sum * 100).toFixed(1) + "%" : "");
     tile.classList.add("hero");
     tiles.append(tile);
@@ -2267,10 +2456,15 @@ $("#batch-run").addEventListener("click", () => {
   out.append(tiles);
 
   // チャート
-  out.append(renderStrategyChart([...strategies, mix], perRow.length));
+  if (comparable.length) {
+    out.append(renderStrategyChart([...strategies, mix],
+      "全社対応可能な " + comparable.length + " 行で比較" + (excluded ? "（対応不可 " + excluded + " 行は明細のみ）" : "")));
+  } else {
+    out.append(el("p", { class: "hint" }, "全社対応可能な行がないため、戦略比較チャートは省略しました（明細をご確認ください）。"));
+  }
 
   // 明細テーブル
-  const head = ["#", "発", "着", "課金kg", "最安社", "最安額", ...carriers.map(c => c.name)];
+  const head = ["#", "発", "着", "課金kg", "最安社", "最安額", ...carriers.map(c => c.name + (c.isDemo ? "（ダミー）" : ""))];
   const table = el("table", {},
     el("thead", {}, el("tr", {}, ...head.map((h, i) => el("th", { class: i >= 3 && i !== 4 ? "num" : "" }, h)))));
   const tbody = el("tbody");
@@ -2311,10 +2505,10 @@ function tileEl(label, value, sub) {
 }
 
 /* 戦略比較 横棒チャート */
-function renderStrategyChart(strategies, totalRows) {
+function renderStrategyChart(strategies, basisNote) {
   const panel = el("div", { class: "chart-panel" });
   panel.append(el("div", { class: "chart-title" }, "配送戦略別の運賃合計"));
-  panel.append(el("div", { class: "chart-sub" }, "「全件を1社に出す」各戦略と「行ごとに最安社を選ぶ」ミックスの比較。対応不可行がある戦略は合計から除外分を注記。"));
+  panel.append(el("div", { class: "chart-sub" }, "「全件を1社に出す」各戦略と「行ごとに最安社を選ぶ」ミックスの比較 — " + basisNote));
   const legend = el("div", { class: "legend" });
   legend.append(el("span", {}, el("span", { class: "sw", style: "background: var(--chart-c1)" }), "単社戦略"));
   legend.append(el("span", {}, el("span", { class: "sw", style: "background: var(--chart-c2)" }), "最安ミックス"));
@@ -2372,13 +2566,6 @@ function renderStrategyChart(strategies, totalRows) {
     val.setAttribute("class", "bar-value");
     val.textContent = yen(s.sum);
     svg.append(val);
-    if (s.missed > 0) {
-      const note = document.createElementNS(svgNS, "text");
-      note.setAttribute("x", padL); note.setAttribute("y", y - 2);
-      note.setAttribute("class", "bar-note");
-      note.textContent = "※対応不可 " + s.missed + "件を除く";
-      svg.append(note);
-    }
 
     // ホバー用ヒット領域
     const hit = document.createElementNS(svgNS, "rect");
@@ -2387,7 +2574,7 @@ function renderStrategyChart(strategies, totalRows) {
     hit.setAttribute("fill", "transparent");
     hit.addEventListener("mousemove", (ev) => showTip(
       s.name,
-      ["合計 " + yen(s.sum), "対応 " + s.served + "/" + totalRows + "件" + (s.missed ? "（不可" + s.missed + "件）" : "")],
+      ["合計 " + yen(s.sum), s.kind === "mix" ? "行ごとに最安社を選択" : "全件をこの1社に出した場合"],
       ev.clientX, ev.clientY));
     hit.addEventListener("mouseleave", hideTip);
     svg.append(hit);
@@ -2407,15 +2594,19 @@ const AUDIT_SAMPLE = [
   "C物流\t神奈川\t広島\t260\t0.9\t\t2026-08-16\t9000",
   "C物流\t東京\t沖縄\t100\t\t\t2026-08-16\t8800",
 ].join("\n");
-$("#audit-sample").addEventListener("click", () => { $("#audit-input").value = AUDIT_SAMPLE; });
+$("#audit-sample").addEventListener("click", () => {
+  $("#audit-input").value = AUDIT_SAMPLE;
+  $("#audit-input").dispatchEvent(new Event("input"));
+});
 
 let auditTSV = "";
 $("#audit-run").addEventListener("click", () => {
   const rows = parseTable($("#audit-input").value);
   if (!rows.length) { toast("請求明細を貼り付けてください"); return; }
   const tol = parseNum($("#audit-tol").value);
-  const { items } = rowsToShipments(rows, ["carrier", "from", "to", "weight", "volume", "timed", "date", "amount"],
-    ["carrier", "from", "to", "weight", "volume", "timed", "date", "amount"]);
+  const AUDIT_COLS = ["carrier", "from", "to", "weight", "volume", "timed", "date", "amount"];
+  const parsed = rowsToShipments(rows, AUDIT_COLS, AUDIT_COLS);
+  const { items } = parsed;
 
   let match = 0, mismatch = 0, na = 0, diffSum = 0;
   const results = items.map(it => {
@@ -2436,6 +2627,7 @@ $("#audit-run").addEventListener("click", () => {
 
   const out = $("#audit-out");
   out.innerHTML = "";
+  out.append(mappingNotice(parsed, AUDIT_COLS, ["carrier", "from", "to", "amount"]));
   const tiles = el("div", { class: "tiles" });
   tiles.append(tileEl("明細件数", results.length + "件", ""));
   tiles.append(tileEl("一致", match + "件", "許容差 ±" + tol + "円"));
@@ -2449,7 +2641,7 @@ $("#audit-run").addEventListener("click", () => {
     el("thead", {}, el("tr", {},
       el("th", {}, "#"), el("th", {}, "会社"), el("th", {}, "区間"),
       el("th", { class: "num" }, "課金kg"), el("th", { class: "num" }, "請求額"),
-      el("th", { class: "num" }, "計算額"), el("th", { class: "num" }, "差異"), el("th", {}, "判定"))));
+      el("th", { class: "num" }, "計算額"), el("th", { class: "num" }, "差異"), el("th", {}, "判定"), el("th", {}, "理由"))));
   const tbody = el("tbody");
   results.forEach((r, i) => {
     const tr = el("tr", {});
@@ -2462,17 +2654,19 @@ $("#audit-run").addEventListener("click", () => {
     tr.append(el("td", { class: "num" }, r.q ? (r.diff > 0 ? "+" : r.diff < 0 ? "−" : "±") + Math.abs(r.diff).toLocaleString("ja-JP") : "—"));
     const pill = r.status === "ok" ? el("span", { class: "pill ok" }, "✓ 一致")
       : r.status === "bad" ? el("span", { class: "pill bad" }, "！ 差異")
-      : el("span", { class: "pill na", title: r.note }, "− 判定不能");
+      : el("span", { class: "pill na" }, "− 判定不能");
     tr.append(el("td", {}, pill));
+    tr.append(el("td", { class: "reason" }, r.note || ""));
     tbody.append(tr);
   });
   table.append(tbody);
   out.append(el("div", { class: "table-wrap" }, table));
-  out.append(el("p", { class: "hint" }, "判定不能の行はタリフ未登録・地帯対象外・会社名不一致など。行にカーソルを載せると理由が出ます。"));
+  out.append(el("p", { class: "hint" }, "判定不能の理由（会社名不一致・地帯対象外・重量帯超過など）は右端の「理由」列に表示されます。"));
 
-  auditTSV = [["会社", "発", "着", "請求額", "計算額", "差異", "判定"].join("\t"),
+  auditTSV = [["会社", "発", "着", "請求額", "計算額", "差異", "判定", "理由"].join("\t"),
     ...results.map(r => [r.it.carrier, normalizePref(r.it.from), normalizePref(r.it.to), r.amount,
-      r.q ? r.q.total : "", r.q ? r.diff : "", r.status === "ok" ? "一致" : r.status === "bad" ? "差異" : "判定不能"].join("\t"))
+      r.q ? r.q.total : "", r.q ? r.diff : "", r.status === "ok" ? "一致" : r.status === "bad" ? "差異" : "判定不能",
+      r.note || ""].join("\t"))
   ].join("\n");
   $("#audit-copy").hidden = false;
 });
@@ -2492,7 +2686,13 @@ function renderMaster() {
   if (!currentCarrier()) selectedCarrierId = state.carriers[0].id;
   if (!state.carriers.some(c => c.id === selectedCarrierId)) selectedCarrierId = state.carriers[0].id;
   state.carriers.forEach(c => {
-    const b = el("button", { class: c.id === selectedCarrierId ? "sel" : "", onclick: () => { selectedCarrierId = c.id; renderMaster(); } }, c.name);
+    const b = el("button", {
+      class: c.id === selectedCarrierId ? "sel" : "",
+      onclick: (e) => {
+        if (c.id === selectedCarrierId) return;
+        guardDirty(e.currentTarget, () => { selectedCarrierId = c.id; renderMaster(); });
+      },
+    }, c.name);
     chips.append(b);
   });
   renderEditor(currentCarrier());
@@ -2501,6 +2701,7 @@ function renderMaster() {
 function renderEditor(c) {
   const ed = $("#m-editor");
   ed.innerHTML = "";
+  editorDirty = false;
   if (!c) return;
 
   /* 基本条件 */
@@ -2581,9 +2782,15 @@ function renderEditor(c) {
   tar.append(mta);
   ed.append(tar);
 
+  const saveBtn = el("button", { class: "btn", onclick: () => saveEditor(c) }, "この会社を保存");
   ed.append(el("div", { class: "btn-row" },
-    el("button", { class: "btn", onclick: () => saveEditor(c) }, "この会社を保存"),
+    saveBtn,
     el("span", { class: "hint" }, "保存するとこの会社はダミー扱いが外れます")));
+  ed.oninput = () => {
+    editorDirty = true;
+    saveBtn.classList.add("dirty");
+    saveBtn.textContent = "この会社を保存（未保存の変更あり）";
+  };
 }
 
 function fieldEl(label, input) { return el("div", { class: "field" }, el("label", {}, label), input); }
@@ -2630,7 +2837,7 @@ function saveEditor(c) {
 }
 
 let addSeq = 1;
-$("#m-add").addEventListener("click", () => {
+$("#m-add").addEventListener("click", (e) => guardDirty(e.currentTarget, () => {
   const c = {
     id: "c" + Date.now().toString(36) + (addSeq++), name: "新しい会社" + addSeq,
     discountRate: 0, volumeKgPerM3: 280, minFare: 0, timedFee: 0,
@@ -2639,8 +2846,8 @@ $("#m-add").addEventListener("click", () => {
   state.carriers.push(c);
   selectedCarrierId = c.id;
   saveState(); renderMaster();
-});
-$("#m-dup").addEventListener("click", () => {
+}));
+$("#m-dup").addEventListener("click", (e) => guardDirty(e.currentTarget, () => {
   const c = currentCarrier(); if (!c) return;
   const copy = JSON.parse(JSON.stringify(c));
   copy.id = "c" + Date.now().toString(36) + (addSeq++);
@@ -2649,7 +2856,7 @@ $("#m-dup").addEventListener("click", () => {
   state.carriers.push(copy);
   selectedCarrierId = copy.id;
   saveState(); renderMaster();
-});
+}));
 $("#m-del").addEventListener("click", (e) => confirmClick(e.currentTarget, () => {
   const c = currentCarrier(); if (!c) return;
   state.carriers = state.carriers.filter(x => x.id !== c.id);
@@ -2694,4 +2901,24 @@ state = loadState();
 initQuoteForm();
 refreshDemoChip();
 saveState();
+
+bindTableAids($("#batch-input"), $("#batch-count"), $("#batch-file"));
+bindTableAids($("#audit-input"), $("#audit-count"), $("#audit-file"));
+
+const ONBOARD_KEY = "taribancho.onboarded";
+function dismissOnboard() {
+  $("#onboard").hidden = true;
+  try { localStorage.setItem(ONBOARD_KEY, "1"); } catch (e) { /* ストレージ不可なら次回も表示されるだけ */ }
+}
+$("#onboard-close").addEventListener("click", dismissOnboard);
+$("#onboard-try").addEventListener("click", () => {
+  dismissOnboard();
+  activateTab("batch");
+  $("#batch-sample").click();
+  $("#batch-run").click();
+});
+try { if (!localStorage.getItem(ONBOARD_KEY)) $("#onboard").hidden = false; } catch (e) { $("#onboard").hidden = false; }
+
+activateTab((location.hash || "#quote").slice(1));
+runQuote();
 </script>
