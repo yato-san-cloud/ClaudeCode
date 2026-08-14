@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f766e">
+<title>作業計画ウィザード｜現場マニュアルツール群</title>
+<style>
+  :root{
+    --bg:#f1f5f9; --card:#ffffff; --ink:#0f172a; --sub:#64748b;
+    --line:#e2e8f0; --brand:#0f766e; --brand-d:#0d5f57;
+    --danger:#dc2626; --accent:#f59e0b; --shadow:0 1px 3px rgba(15,23,42,.08),0 1px 2px rgba(15,23,42,.06);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.65; padding-bottom:40px}
+  header.app{position:sticky; top:0; z-index:20; background:var(--brand); color:#fff;
+    padding:12px 16px; box-shadow:var(--shadow); display:flex; align-items:center; gap:10px}
+  header.app .logo{font-size:22px}
+  header.app h1{font-size:17px; margin:0; font-weight:700; flex:1}
+  header.app .sub{font-size:11px; opacity:.85}
+  .wrap{max-width:820px; margin:0 auto; padding:16px}
+  .lead{font-size:13.5px; color:var(--sub); margin:2px 0 14px}
+  .card{background:var(--card); border-radius:14px; box-shadow:var(--shadow); padding:16px; margin-bottom:14px}
+  .sec-t{font-size:14px; font-weight:700; color:var(--brand); margin:0 0 10px}
+
+  /* template grid */
+  .tgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px}
+  .tcard{border:1.5px solid var(--line); border-radius:12px; padding:12px; cursor:pointer; background:#fff; text-align:left; font-family:inherit; transition:border-color .15s, background .15s}
+  .tcard:hover{border-color:var(--brand); background:#f0fdfa}
+  .tcard.on{border-color:var(--brand); background:#f0fdfa; outline:2px solid #99f6e4}
+  .tcard .ic{font-size:26px}
+  .tcard .nm{font-weight:700; font-size:14px; margin-top:4px}
+  .tcard .ht{font-size:11px; color:var(--sub); margin-top:2px; line-height:1.5}
+
+  /* form */
+  label.f{display:block; font-size:11px; color:var(--sub); font-weight:700; margin:12px 0 2px}
+  input.f,textarea.f{width:100%; border:1.5px solid var(--line); border-radius:9px; padding:9px 11px;
+    font-family:inherit; font-size:14.5px; color:var(--ink); background:#fff; resize:vertical}
+  input.f:focus,textarea.f:focus{outline:none; border-color:var(--brand)}
+  .frow{display:grid; grid-template-columns:1fr 1fr; gap:0 12px}
+  @media(max-width:560px){ .frow{grid-template-columns:1fr} }
+  .chk{display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; margin-top:14px}
+  .chk input{width:18px; height:18px; accent-color:var(--brand)}
+  .gen-row{display:flex; gap:10px; margin-top:16px}
+  .btn{flex:1; padding:14px; border-radius:12px; border:none; font-size:15px; font-weight:700;
+    font-family:inherit; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px}
+  .btn-pri{background:var(--brand); color:#fff}
+  .btn-pri:hover{background:var(--brand-d)}
+  .btn-ghost{background:var(--bg); color:var(--ink)}
+  .btn-ghost:hover{background:var(--line)}
+  .btn-sm{padding:10px 12px; font-size:13px; border-radius:10px; flex:none}
+
+  /* result */
+  #result{display:none}
+  .flow{display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+  .fbox{background:#f0fdfa; border:1.5px solid #99f6e4; border-radius:10px; padding:8px 12px; font-size:12.5px; line-height:1.5}
+  .fbox b{display:block; font-size:11px; color:var(--brand)}
+  .farr{color:var(--brand); font-weight:700; font-size:16px}
+  ol.skel{margin:0; padding-left:2px; list-style:none}
+  ol.skel li{display:flex; gap:10px; padding:9px 0; border-bottom:1px dashed var(--line); font-size:14px; align-items:flex-start}
+  ol.skel li:last-child{border-bottom:none}
+  .sk-n{width:26px; height:26px; flex:none; border-radius:50%; background:var(--brand); color:#fff;
+    font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; margin-top:1px}
+  .sk-n.w{background:var(--accent)}
+  .sk-n.c{background:#fff; color:var(--brand); border:2px solid var(--brand)}
+  .sk-b{flex:1}
+  .sk-t{font-weight:700}
+  .sk-d{font-size:12.5px; color:var(--sub)}
+  .sk-look{font-size:12px; color:#166534; background:#f0fdf4; border-radius:7px; padding:3px 9px; display:inline-block; margin-top:3px}
+  .sk-cam{font-size:11.5px; color:#7c3aed; font-weight:700; margin-top:3px}
+  pre.sheet{background:#0f172a; color:#e2e8f0; border-radius:12px; padding:14px; font-size:12px;
+    line-height:1.75; overflow-x:auto; white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; margin:0}
+  .act-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+  .act-row .btn{flex:1 1 30%}
+  .next-hint{background:#fffbeb; border-left:4px solid var(--accent); border-radius:0 10px 10px 0;
+    padding:10px 14px; font-size:13px; margin-top:14px}
+  .toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:11px 20px; border-radius:999px; font-size:14px; font-weight:600;
+    opacity:0; transition:opacity .25s,transform .25s; pointer-events:none; z-index:60; white-space:nowrap}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  .req{color:var(--danger); background:#fee2e2; border-radius:6px; padding:0 6px; font-weight:700}
+  @media print{
+    header.app,.gen-row,.act-row,.next-hint,#setup,.toast{display:none!important}
+    body{background:#fff}
+    #result{display:block!important}
+    .card{box-shadow:none; border:1px solid #cbd5e1; page-break-inside:avoid}
+    pre.sheet{background:#fff; color:#0f172a; border:1.5px solid #cbd5e1}
+  }
+</style>
+</head>
+<body>
+<header class="app">
+  <span class="logo">🧭</span>
+  <h1>作業計画ウィザード<div class="sub">やりたいこと → 構成・業務フロー・撮影指示書</div></h1>
+</header>
+
+<div class="wrap">
+  <div id="setup">
+    <p class="lead">作業タイプを選んで一言書けば、<b>手順の骨格・業務フロー・撮影指示書</b>と、
+    マニュアル作成ツール（index.html）にそのまま取り込める<b>骨格マニュアル(.json)</b>を生成します。
+    「⚡すぐ作る」なら未記入のまま3秒で簡易版が出ます（空欄は <span class="req">【要記入】</span> になります）。</p>
+
+    <div class="card">
+      <div class="sec-t">1️⃣ 作業タイプを選ぶ</div>
+      <div class="tgrid" id="tgrid"></div>
+    </div>
+
+    <div class="card">
+      <div class="sec-t">2️⃣ やりたいことを書く（分かる範囲でOK）</div>
+      <label class="f" for="q-goal">やらせたい作業（一言で）</label>
+      <input class="f" id="q-goal" placeholder="例：返品エリアの棚を整備して写真で記録させたい">
+      <div class="frow">
+        <div>
+          <label class="f" for="q-place">場所・エリア</label>
+          <input class="f" id="q-place" placeholder="例：第2工場 A棟 返品エリア">
+        </div>
+        <div>
+          <label class="f" for="q-target">対象（設備・棚・モノ）</label>
+          <input class="f" id="q-target" placeholder="例：棚A〜C">
+        </div>
+      </div>
+      <label class="f" for="q-done">完了状態（何がどうなっていれば終わり？）</label>
+      <input class="f" id="q-done" placeholder="例：床に物がなく、全ラベルが手前を向いている状態">
+      <div class="frow">
+        <div>
+          <label class="f" for="q-contact">困ったときの連絡先（人）</label>
+          <input class="f" id="q-contact" placeholder="例：佐藤班長">
+        </div>
+        <div>
+          <label class="f" for="q-min">全体の想定時間（分）</label>
+          <input class="f" id="q-min" type="number" min="5" placeholder="例：60">
+        </div>
+      </div>
+      <label class="f" for="q-tools">使う道具（1行に1つ・テンプレから自動入力）</label>
+      <textarea class="f" id="q-tools" rows="2"></textarea>
+      <label class="chk"><input type="checkbox" id="q-must"> 本日必達（全手順に［本日必達］を付ける）</label>
+      <div class="gen-row">
+        <button class="btn btn-pri" id="btn-gen">📋 生成する</button>
+        <button class="btn btn-ghost" id="btn-quick">⚡ すぐ作る（未記入OK）</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="result">
+    <div class="card">
+      <div class="sec-t">🔁 業務フロー（誰が何をするか）</div>
+      <div class="flow" id="r-flow"></div>
+    </div>
+    <div class="card">
+      <div class="sec-t">🧱 マニュアル構成（手順の骨格）</div>
+      <ol class="skel" id="r-skel"></ol>
+    </div>
+    <div class="card">
+      <div class="sec-t">📸 作業指示書（作業者に渡す・【撮影】ブロック入り）</div>
+      <pre class="sheet" id="r-sheet"></pre>
+      <div class="act-row">
+        <button class="btn btn-ghost btn-sm" id="btn-copy">📋 指示書をコピー</button>
+        <button class="btn btn-ghost btn-sm" id="btn-md">⬇ 指示書 (.md)</button>
+        <button class="btn btn-pri btn-sm" id="btn-json">⬇ マニュアル骨格 (.json)</button>
+        <button class="btn btn-ghost btn-sm" id="btn-ai">🤖 AI用プロンプトをコピー</button>
+        <button class="btn btn-ghost btn-sm" id="btn-print">🖨 印刷</button>
+        <button class="btn btn-ghost btn-sm" id="btn-back">‹ 入力に戻る</button>
+      </div>
+      <div class="next-hint">
+        <b>次にやること：</b>①指示書を作業者に渡す（印刷 or コピーして送信）
+        → ②作業者が実施しながら撮影 → ③<b>骨格(.json)</b>を index.html の「📥取り込み」へ
+        → 撮った写真を各手順に当てはめれば完成。空欄の <span class="req">【要記入】</span> は渡す前に必ず埋める。
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const REQ = "【要記入】";   // Copilot指示書仕様と同じ「空欄の可視化」規約
+
+/* ================= 作業タイプ別テンプレート =================
+   tp: step|warn|check ／ look: 完了の見た目 ／ shoot: 撮影指示（契約形式で出力）
+   {対象}{場所}{連絡先} は入力値で置換される */
+const TPL = [
+  { key:"inspect", ic:"🔍", name:"始業・定期点検", ht:"設備のランプ・計器・異音を順に確認",
+    tools:"軍手\n点検チェックシート",
+    flow:[["管理者","指示書を印刷して渡す"],["作業者","手順どおり点検・撮影"],["作業者","チェック結果を報告"],["管理者","記録を確認し台帳へ"]],
+    steps:[
+      {tp:"check", t:"{対象}の電源・表示を確認", d:"ランプと表示が正常であることを確認する。", look:"警告灯が消え、正常表示になっている状態", min:2,
+        shoot:{tg:"{対象}の操作パネル全体", pass:"ランプの色と表示の文字が読めること"},
+        mistake:"警告灯の見落とし（斜めから見ると点灯が分かりにくい）", esc:"異常表示があれば操作せず{連絡先}へ連絡"},
+      {tp:"warn", t:"可動部に異物・工具がないか確認", d:"可動範囲に物が残っていないか、指差呼称で確認する。", look:"可動範囲に何も置かれていない状態", min:3,
+        shoot:{tg:"{対象}の可動部まわり", pass:"可動範囲の床・台の上が写っていること"},
+        mistake:"前日の工具の置き忘れを見逃す", esc:"異物が取れない場合は動かさず{連絡先}へ"},
+      {tp:"check", t:"計器の値が規定範囲内か確認", d:"計器の値を読み、チェックシートに記入する。", look:"針（数値）が規定範囲に入り、記入が済んだ状態", min:2,
+        shoot:{tg:"{対象}の計器の目盛り", pass:"目盛りと針（数値）が読めること"},
+        mistake:"目盛りを斜めから読んで誤読する", esc:"範囲外なら起動せず{連絡先}へ即連絡"},
+      {tp:"check", t:"試運転して異音・振動がないか確認", d:"短時間の試運転を行い、音と振動を確認する。", look:"異音・異常振動がなく安定して動いている状態", min:3,
+        shoot:null, mistake:"周囲がうるさく異音に気付かない", esc:"少しでも普段と違う音がしたら停止して{連絡先}へ"}
+    ]},
+  { key:"clean", ic:"🧹", name:"清掃・5S・環境整備", ht:"片付け→清掃→定位置化→記録",
+    tools:"軍手\nほうき・ちりとり\nウエス\nゴミ袋",
+    flow:[["管理者","範囲と完了状態を指示"],["作業者","片付け→清掃→定位置化"],["作業者","前後写真を撮影し報告"],["管理者","写真で確認"]],
+    steps:[
+      {tp:"step", t:"{対象}の作業前の状態を撮影", d:"手を付ける前に、現状をそのまま撮影する。", look:"作業前の全体が1枚に収まった写真がある状態", min:2,
+        shoot:{tg:"{対象}の全景（作業前）", pass:"対象全体が1枚に写っていること"},
+        mistake:"先に片付けてしまい前後比較ができなくなる", esc:"撮影を忘れて作業を始めたら{連絡先}に報告"},
+      {tp:"step", t:"床・通路の物をカゴに移す", d:"床と通路に置かれている物をすべて回収カゴに移す。要否は判断せず全部移す。", look:"床と通路に物が1つも置かれていない状態", min:10,
+        shoot:null, mistake:"「後で使うから」と一部を残す", esc:"重くて動かせない物は{連絡先}へ"},
+      {tp:"step", t:"{対象}を清掃する", d:"上から下の順でほこりを落とし、床を掃く。", look:"目視でほこり・ゴミが見当たらない状態", min:15,
+        shoot:null, mistake:"床だけ掃いて棚上のほこりが残る", esc:"薬品・オイル汚れを見つけたら触らず{連絡先}へ"},
+      {tp:"step", t:"物を定位置に戻しラベルを正面に向ける", d:"カゴの物を表示どおりの定位置へ戻す。ラベルは全て手前に向ける。", look:"全ての物が表示位置にあり、ラベルが手前を向いている状態", min:10,
+        shoot:{tg:"{対象}の全景（作業後）", pass:"ラベルの文字が読める向きで全体が写っていること"},
+        mistake:"定位置表示がない物を適当な場所に置く", esc:"定位置が分からない物は{連絡先}に確認"},
+      {tp:"check", t:"作業後の状態を確認・報告", d:"完了状態と見比べて確認し、前後の写真を報告する。", look:"作業前後の写真2枚が送付済みの状態", min:3,
+        shoot:null, mistake:"報告を退勤直前まで忘れる", esc:"完了状態と違うと思ったら{連絡先}に相談"}
+    ]},
+  { key:"inventory", ic:"📦", name:"棚卸・在庫確認", ht:"数える→記録→差異を報告",
+    tools:"棚卸リスト\nバインダー・ペン\nハンディターミナル（ある場合）",
+    flow:[["管理者","対象棚と棚卸リストを渡す"],["作業者","1棚ずつ数えて記入"],["作業者","差異があれば付箋で印"],["管理者","差異行だけ再確認"]],
+    steps:[
+      {tp:"step", t:"{対象}の棚札と現物の品名を照合", d:"棚札の品番と現物の品番が一致しているか、1段ずつ確認する。", look:"全段の品番一致を確認し終えた状態", min:10,
+        shoot:{tg:"{対象}の棚札と現物ラベル", pass:"棚札と現物ラベルの品番が両方読めること"},
+        mistake:"似た品番（-1と-l など）の見間違い", esc:"品番不一致を見つけたら動かさず{連絡先}へ"},
+      {tp:"step", t:"数量を数えて棚卸リストに記入", d:"1棚ずつ数え、その場でリストに記入する。まとめて後で書かない。", look:"リストの対象行が全て埋まっている状態", min:20,
+        shoot:null, mistake:"数えてから記入までの間に別作業を挟んで忘れる", esc:"箱の中身が確認できない物は開けずに{連絡先}へ"},
+      {tp:"check", t:"リストの数量と帳簿の差異を確認", d:"差異のある行に付箋を貼る。理由は推測で書かない。", look:"差異行すべてに付箋が付いた状態", min:10,
+        shoot:{tg:"差異があった棚の現物", pass:"現物の数量が数えられる角度で写っていること"},
+        mistake:"差異を「多分こうだろう」と自分で調整してしまう", esc:"差異が3件を超えたら途中でも{連絡先}へ報告"},
+      {tp:"step", t:"リストと差異写真を提出", d:"記入済みリストと差異箇所の写真を提出する。", look:"リストと写真が{連絡先}に渡った状態", min:5,
+        shoot:null, mistake:"写真の撮り忘れ", esc:"提出前に不明点が残っていれば{連絡先}へ"}
+    ]},
+  { key:"receive", ic:"📥", name:"入荷検品・格納", ht:"荷降ろし→検品→格納→記録",
+    tools:"カッター\n検品リスト\nハンディターミナル（ある場合）",
+    flow:[["管理者","入荷予定と検品リストを渡す"],["作業者","外装確認→開梱→数量照合"],["作業者","指定棚へ格納・撮影"],["管理者","検品結果を確認"]],
+    steps:[
+      {tp:"check", t:"外装の破損・濡れを確認", d:"開ける前に外装の状態を全面確認する。", look:"全ケースの外装確認が済んだ状態", min:5,
+        shoot:{tg:"破損・濡れがあった外装（ある場合）", pass:"破損箇所が中央に写っていること"},
+        mistake:"底面の潰れを見ずに開梱してしまう", esc:"破損があれば開梱せず{連絡先}へ（返品判断のため）"},
+      {tp:"step", t:"納品書と現物の品番・数量を照合", d:"納品書の行ごとに現物と突き合わせ、チェックを付ける。", look:"納品書全行にチェックが付いた状態", min:15,
+        shoot:null, mistake:"ケース表示の入数を数えず信用してしまう", esc:"数量が合わない行は{連絡先}へ（受領サイン前に）"},
+      {tp:"step", t:"{対象}の指定棚へ格納", d:"格納先表示に従い、ラベルを手前に向けて格納する。", look:"全ての品が指定棚に収まり、通路に残っていない状態", min:15,
+        shoot:{tg:"格納後の{対象}の棚", pass:"棚番とラベルが読める状態で写っていること"},
+        mistake:"仮置きのまま退勤してしまう", esc:"棚に入り切らない場合は{連絡先}に置き場を確認"},
+      {tp:"step", t:"検品結果を報告", d:"チェック済み納品書と格納後写真を提出する。", look:"納品書と写真が{連絡先}に渡った状態", min:3,
+        shoot:null, mistake:"破損報告を後回しにする", esc:"報告内容に迷ったら{連絡先}へそのまま見せる"}
+    ]},
+  { key:"ship", ic:"🚚", name:"出荷・梱包", ht:"ピッキング→梱包→ラベル→積み込み",
+    tools:"梱包資材（箱・緩衝材・テープ）\n出荷リスト\nラベルプリンタ",
+    flow:[["管理者","出荷リストを渡す"],["作業者","ピッキング→検品→梱包"],["作業者","ラベル貼付・積み込み"],["管理者","出荷実績を確認"]],
+    steps:[
+      {tp:"step", t:"出荷リストの品をピッキング", d:"リスト順に棚を回り、品番を照合しながら集める。", look:"リスト全行の品が台車に揃った状態", min:20,
+        shoot:null, mistake:"類似品番の取り違え", esc:"棚に品がない行は飛ばして最後に{連絡先}へ"},
+      {tp:"check", t:"梱包前に品番・数量を再照合", d:"箱に入れる直前にリストと突き合わせる。", look:"全行の再照合チェックが付いた状態", min:10,
+        shoot:{tg:"梱包前の品と出荷リスト", pass:"品とリストが同じ写真に写っていること"},
+        mistake:"ピッキング時の思い込みのまま梱包する", esc:"数が合わなければ梱包を止めて{連絡先}へ"},
+      {tp:"step", t:"緩衝材を入れて梱包・封緘", d:"隙間に緩衝材を入れ、H貼りでテープを貼る。", look:"箱を振っても中身が動かない状態", min:10,
+        shoot:null, mistake:"緩衝材不足で輸送中に破損する", esc:"壊れやすい品の梱包方法に迷ったら{連絡先}へ"},
+      {tp:"check", t:"送り状を貼り、宛先を読み合わせ", d:"送り状の宛先と出荷リストの宛先を声に出して照合する。", look:"送り状が天面に貼られ、宛先照合が済んだ状態", min:5,
+        shoot:{tg:"送り状を貼った梱包箱", pass:"送り状の宛先が読めること"},
+        mistake:"複数口の送り状を取り違えて貼る", esc:"宛先が2件以上ある時は1箱ずつ{連絡先}と確認"}
+    ]},
+  { key:"change", ic:"🔧", name:"段取り替え・設備切替", ht:"停止→交換→設定→試運転",
+    tools:"交換部品・治具\n工具セット\n設定値表",
+    flow:[["管理者","切替内容と設定値表を渡す"],["作業者","停止・安全確認→交換"],["作業者","設定→試運転→初品確認"],["管理者","初品を検査し生産開始を許可"]],
+    steps:[
+      {tp:"warn", t:"{対象}を停止し、電源を遮断", d:"停止ボタン→主電源OFF→表示灯の消灯を確認してから触る。", look:"表示灯が全て消え、可動部が完全に停止した状態", min:5,
+        shoot:{tg:"電源OFF後の{対象}の操作パネル", pass:"表示灯が消えていることが分かること"},
+        mistake:"停止直後の惰性回転中に手を入れる", esc:"停止しない・表示が消えない場合は触らず{連絡先}へ"},
+      {tp:"step", t:"部品・治具を交換", d:"手順書の順に取り外し、交換部品を取り付ける。外した部品は所定置き場へ。", look:"交換部品が取り付き、外した部品が置き場に収まった状態", min:20,
+        shoot:{tg:"交換後の取り付け部", pass:"取り付け状態と締結部が写っていること"},
+        mistake:"外したボルトの置き場所が分からなくなる", esc:"固くて外れない・合わない場合は無理せず{連絡先}へ"},
+      {tp:"check", t:"設定値表のとおり設定", d:"設定値表と画面を1項目ずつ照合して入力する。", look:"全項目が設定値表と一致した状態", min:10,
+        shoot:{tg:"設定完了後の設定画面", pass:"設定値の数字が読めること"},
+        mistake:"前回値のまま流用してしまう", esc:"表にない項目が出たら変更せず{連絡先}へ"},
+      {tp:"check", t:"試運転し、初品を確認に出す", d:"試運転→初品を取り出し、{連絡先}の確認を受けるまで量産しない。", look:"初品の合格確認が済み、量産許可が出た状態", min:10,
+        shoot:{tg:"初品の全体", pass:"品物の全体と確認ポイントが写っていること"},
+        mistake:"初品確認を待たずに量産を始める", esc:"試運転で異音・異常があれば即停止して{連絡先}へ"}
+    ]},
+  { key:"handover", ic:"🎓", name:"引継ぎ・教育の準備", ht:"作業を見せて撮る→教えられる形に",
+    tools:"スマホ（撮影用）\n既存の手順メモ（あれば）",
+    flow:[["ベテラン","作業をゆっくり実演"],["撮影係","要所を撮影・メモ"],["管理者","マニュアル化して品質確認"],["新人","現場モードで学ぶ→実施"]],
+    steps:[
+      {tp:"step", t:"作業全体を通しで実演してもらう", d:"ベテランに通常速度で1回通しで実演してもらい、工程の区切りをメモする。", look:"工程の区切り（手順の数）がメモに書けた状態", min:10,
+        shoot:{tg:"作業場所の全景", pass:"作業場所全体と使う道具が写っていること"},
+        mistake:"最初から細部を撮ろうとして全体像を失う", esc:"工程が10を超えたら分割を{連絡先}と相談"},
+      {tp:"step", t:"工程ごとに手元を撮影", d:"2回目はゆっくり実演してもらい、工程ごとに手元を撮影する。", look:"全工程ぶんの写真が撮れた状態", min:15,
+        shoot:{tg:"各工程の手元（工程数ぶん撮影）", pass:"手の位置と対象物が両方写っていること"},
+        mistake:"ピンボケ・手ブレに気付かず先へ進む", esc:"撮り直しを頼みにくい時は{連絡先}から依頼してもらう"},
+      {tp:"step", t:"コツ・失敗例を聞き取る", d:"「新人が一番間違えるのは？」「どうなったら成功？」を工程ごとに聞く。", look:"各工程に完了条件とよくあるミスがメモされた状態", min:10,
+        shoot:null, mistake:"操作だけ聞いて判断基準を聞き忘れる", esc:"言語化が難しい工程は動画も撮って{連絡先}と相談"},
+      {tp:"step", t:"マニュアル化して本人チェックを受ける", d:"写真とメモをツールでマニュアル化し、実演者に内容を確認してもらう。", look:"実演者の「これで合っている」確認が取れた状態", min:15,
+        shoot:null, mistake:"作った後に本人確認を挟まない", esc:"本人と記載が食い違ったら{連絡先}が判定"}
+    ]},
+  { key:"free", ic:"📝", name:"汎用（自分で組む）", ht:"準備→実施→確認・報告の3段構成から",
+    tools:"",
+    flow:[["管理者","指示書を渡す"],["作業者","準備→実施→撮影"],["作業者","結果を報告"],["管理者","確認"]],
+    steps:[
+      {tp:"step", t:"準備：道具と{対象}の状態を確認", d:"使う道具を揃え、作業前の状態を撮影する。", look:"道具が揃い、作業前写真が撮れた状態", min:5,
+        shoot:{tg:"{対象}の作業前の状態", pass:"対象全体が写っていること"},
+        mistake:"準備不足のまま始めて中断する", esc:"道具が見つからなければ{連絡先}へ"},
+      {tp:"step", t:"実施：{対象}に対して作業を行う", d:"（ここに具体的な作業内容を書く）", look:REQ, min:20,
+        shoot:{tg:"作業のポイントとなる箇所", pass:REQ},
+        mistake:REQ, esc:"10分手が止まったら{連絡先}へ"},
+      {tp:"check", t:"確認：完了状態になっているか確認", d:"完了状態と見比べ、作業後の写真を撮って報告する。", look:"完了状態どおりで、作業後写真が送付済みの状態", min:5,
+        shoot:{tg:"{対象}の作業後の状態", pass:"作業前と同じ角度で撮ること"},
+        mistake:"自己判断で「大体できた」で終える", esc:"完了状態と違う場合は{連絡先}に写真を送って判断を仰ぐ"}
+    ]}
+];
+
+/* ================= state & helpers ================= */
+let curTpl = TPL[0];
+let lastGen = null;
+let toastTimer = null;
+function toast(msg){
+  const t=$("#toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2000);
+}
+function esc(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function sub(s,ctx){
+  return String(s)
+    .replace(/\{対象\}/g,ctx.target)
+    .replace(/\{場所\}/g,ctx.place)
+    .replace(/\{連絡先\}/g,ctx.contact);
+}
+function ctxFromForm(quick){
+  const v=id=>($("#"+id).value||"").trim();
+  return {
+    goal:   v("q-goal")   || (quick? curTpl.name : REQ),
+    place:  v("q-place")  || REQ,
+    target: v("q-target") || REQ,
+    done:   v("q-done")   || REQ,
+    contact:v("q-contact")|| REQ,
+    tools:  v("q-tools"),
+    min:    v("q-min"),
+    must:   $("#q-must").checked
+  };
+}
+
+/* ================= 生成 ================= */
+function generate(quick){
+  const ctx=ctxFromForm(quick);
+  const steps=curTpl.steps.map(s=>({
+    tp:s.tp,
+    t:sub(s.t,ctx), d:sub(s.d,ctx), look:sub(s.look,ctx),
+    min:s.min,
+    shoot:s.shoot?{tg:sub(s.shoot.tg,ctx), pass:sub(s.shoot.pass,ctx)}:null,
+    mistake:sub(s.mistake,ctx), esc:sub(s.esc,ctx)
+  }));
+  const title=ctx.goal===REQ? (curTpl.name+"："+ctx.target) : ctx.goal;
+  lastGen={ctx, steps, title, tpl:curTpl};
+  renderResult(lastGen);
+  $("#setup").style.display="none";
+  $("#result").style.display="block";
+  window.scrollTo(0,0);
+}
+
+function renderResult(g){
+  // 業務フロー
+  $("#r-flow").innerHTML=g.tpl.flow.map(([who,what],i)=>
+    `${i?'<span class="farr">→</span>':''}<span class="fbox"><b>${esc(who)}</b>${esc(sub(what,g.ctx))}</span>`
+  ).join("");
+  // 構成
+  $("#r-skel").innerHTML=g.steps.map((s,i)=>`
+    <li>
+      <span class="sk-n${s.tp==="warn"?" w":s.tp==="check"?" c":""}">${i+1}</span>
+      <span class="sk-b">
+        <span class="sk-t">${s.tp==="warn"?"⚠ ":""}${s.tp==="check"?"☑ ":""}${esc(s.t)}</span>
+        <div class="sk-d">${esc(s.d)}（${s.min}分）</div>
+        <span class="sk-look">✅ ${esc(s.look)}</span>
+        ${s.shoot?`<div class="sk-cam">📸 撮影：${esc(s.shoot.tg)}</div>`:""}
+      </span>
+    </li>`).join("");
+  // 指示書
+  $("#r-sheet").textContent=buildSheet(g);
+}
+
+/* 指示書テキスト（Copilot「作業指示書ジェネレーター」仕様の第1部書式） */
+function buildSheet(g){
+  const c=g.ctx;
+  const L=[];
+  L.push("# 作業指示書："+g.title);
+  L.push("");
+  L.push("今日やること："+g.title+"（完了状態："+c.done+"）");
+  L.push("場所："+c.place+" ／ 対象："+c.target+(c.min?(" ／ 想定時間：約"+c.min+"分"):""));
+  if(c.tools){
+    L.push("");
+    L.push("準備するもの：");
+    c.tools.split("\n").map(x=>x.trim()).filter(Boolean).forEach(x=>L.push("・"+x));
+  }
+  L.push("");
+  let camNo=0;
+  g.steps.forEach((s,i)=>{
+    const must=c.must?"［本日必達］":"";
+    L.push((i+1)+". □ "+must+s.t+"（"+s.min+"分）");
+    L.push("   [完了の見た目] "+s.look);
+    if(s.shoot){
+      camNo++;
+      const nn=String(camNo).padStart(2,"0");
+      const fname=nn+"_"+s.shoot.tg.replace(/[\\/:*?"<>|（）()\s]/g,"").slice(0,14)+".jpg";
+      L.push("   【撮影】No."+nn+" ／ 対象："+s.shoot.tg+" ／ ファイル名："+fname);
+      L.push("   　　　　合格条件："+s.shoot.pass);
+    }
+    L.push("");
+  });
+  L.push("■ 終わったら："+c.contact+"に、撮影した写真とチェック結果を送る");
+  L.push("■ 困ったとき：10分手が止まったら、"+c.contact+"に「◯番で止まっています」と伝える");
+  L.push("■ 帰る前に：［本日必達］が残っている場合は、退勤前に"+c.contact+"の確認を受ける");
+  return L.join("\n");
+}
+
+/* 骨格マニュアル(.json)：index.htmlのparseImportがそのまま読める形式 */
+function buildSkeletonJson(g){
+  const c=g.ctx;
+  return JSON.stringify({
+    title:g.title,
+    place:c.place===REQ?"":c.place,
+    tools:c.tools||"",
+    note:"作業計画ウィザードから生成（テンプレート："+g.tpl.name+"）",
+    status:"draft",
+    steps:g.steps.map(s=>({
+      type:s.tp, title:s.t, desc:s.d,
+      edu:{ time:s.min+"分", done:s.look, mistake:s.mistake, escalate:s.esc }
+    }))
+  },null,2);
+}
+
+/* AI用プロンプト：市販AI/Copilotに貼ると、契約形式の指示書が返ってくる */
+function buildAiPrompt(g){
+  const c=g.ctx;
+  return [
+"あなたは倉庫・工場現場の作業指示書を作成する専用アシスタントです。以下の作業について、作業者がそのまま実行できる指示書を作成してください。",
+"",
+"# 作業者の前提（必ず守る）",
+"- 作業を自分で工程に分解できない。「適宜」「必要に応じて」「状況を見て」「など」は使用禁止",
+"- 1ステップ＝1動作（動詞ひとつ）。各ステップに □ チェック欄、[完了の見た目]（目視で判定できる記述）、所要時間（分）を付ける",
+"- 末尾に「終わったら」「困ったとき（◯分止まったら誰に何と言うか）」「帰る前に」の3欄を置く",
+"- 情報がない箇所は推測せず【要記入】と書く",
+"",
+"# 撮影指示の形式（この形式は変更禁止。後工程のツールが機械的に読み取ります）",
+"【撮影】No.01 ／ 対象：棚Aのラベル貼付位置 ／ ファイル名：01_ラベル位置.jpg",
+"　　　　合格条件：ラベルの文字が読めること",
+"",
+"# 作業内容",
+"やらせたい作業："+g.title,
+"場所："+c.place+" ／ 対象："+c.target,
+"完了状態："+c.done,
+"困ったときの連絡先："+c.contact,
+"想定時間："+(c.min?c.min+"分":"未定"),
+"本日必達："+(c.must?"はい（該当ステップに［本日必達］を付ける）":"いいえ"),
+"",
+"# たたき台（この構成をベースに過不足を直してください）",
+buildSheet(g)
+  ].join("\n");
+}
+
+/* ================= I/O ================= */
+function download(content,name,mime){
+  const b=new Blob([content],{type:mime+";charset=utf-8"});
+  const u=URL.createObjectURL(b);
+  const a=document.createElement("a");
+  a.href=u; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(u),1000);
+}
+function copyText(txt,okMsg){
+  const done=()=>toast(okMsg);
+  const fb=()=>{
+    const ta=document.createElement("textarea"); ta.value=txt;
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); done(); }catch(e){ alert(txt); }
+    ta.remove();
+  };
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,fb);
+  else fb();
+}
+function safeName(s){ return (s||"作業").replace(/[\\/:*?"<>|]/g,"_").slice(0,30); }
+
+/* ================= wiring ================= */
+$("#tgrid").innerHTML=TPL.map((t,i)=>
+  `<button class="tcard${i===0?" on":""}" data-k="${t.key}"><span class="ic">${t.ic}</span><div class="nm">${t.name}</div><div class="ht">${t.ht}</div></button>`
+).join("");
+document.querySelectorAll(".tcard").forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll(".tcard").forEach(x=>x.classList.toggle("on",x===b));
+    curTpl=TPL.find(t=>t.key===b.dataset.k);
+    $("#q-tools").value=curTpl.tools;
+  };
+});
+$("#q-tools").value=curTpl.tools;
+$("#btn-gen").onclick=()=>generate(false);
+$("#btn-quick").onclick=()=>generate(true);
+$("#btn-back").onclick=()=>{ $("#result").style.display="none"; $("#setup").style.display="block"; window.scrollTo(0,0); };
+$("#btn-copy").onclick=()=>{ if(lastGen) copyText(buildSheet(lastGen),"📋 指示書をコピーしました"); };
+$("#btn-md").onclick=()=>{ if(lastGen){ download(buildSheet(lastGen), "指示書_"+safeName(lastGen.title)+".md", "text/markdown"); toast("⬇ 指示書を保存しました"); } };
+$("#btn-json").onclick=()=>{ if(lastGen){ download(buildSkeletonJson(lastGen), "骨格_"+safeName(lastGen.title)+".json", "application/json"); toast("⬇ 骨格マニュアルを保存しました（index.htmlの取り込みへ）"); } };
+$("#btn-ai").onclick=()=>{ if(lastGen) copyText(buildAiPrompt(lastGen),"🤖 AI用プロンプトをコピーしました"); };
+$("#btn-print").onclick=()=>window.print();
+
+</script>
+</body>
+</html>

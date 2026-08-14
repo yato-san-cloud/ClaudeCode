@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 現場マニュアル作成ツール — a single-file, offline-first HTML app for creating photo-based work-instruction manuals on site (smartphone camera → annotated steps → standalone HTML export). UI text is Japanese.
 
 - `index.html` — the entire app: editor UI, IndexedDB persistence (localStorage fallback), canvas photo annotation, and `buildDoc()` which generates the standalone viewer HTML
+- `planner.html` — 作業計画ウィザード: template-based generator (8 work types) that turns a one-line request into a step skeleton, business flow, a photo-shooting instruction sheet (【撮影】 block contract), a skeleton-manual .json that `index.html` imports, and an AI prompt for external LLMs. Standalone, same offline rule.
 - `docs/operations-design.md` — operations/rollout design (Teams / Kintone management, anti-formalization loops)
+- `docs/market-research.md` — commercial-tool research (Teachme Biz / tebiki etc.) and design decisions / buy-triggers
 - `docs/spec.html` — standalone HTML specification: overall architecture, Keyence RK (RPA) scenario specs, next actions, roadmap. Print-ready; no external deps (same offline rule as `index.html`)
 - `tests/smoke.js` — Playwright end-to-end smoke test
 - `README.md` — user-facing usage
@@ -15,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 - No build/lint step. Plain HTML+CSS+JS with **no external dependencies** — this is an offline requirement, keep it that way (no CDN scripts, no fetch).
-- Test: `node tests/smoke.js` (resolves Playwright from global install at `/opt/node22/lib/node_modules` and Chromium at `/opt/pw-browsers/chromium` when present; override with `SMOKE_CHROMIUM`).
+- Test: `node tests/smoke.js` (editor/viewer) and `node tests/planner-smoke.js` (wizard + cross-import into index.html). Both resolve Playwright from the global install at `/opt/node22/lib/node_modules` and Chromium at `/opt/pw-browsers/chromium` when present; override with `SMOKE_CHROMIUM`.
 
 ## Architecture notes
 

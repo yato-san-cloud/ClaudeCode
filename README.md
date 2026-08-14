@@ -1,8 +1,15 @@
-# 現場マニュアル作成ツール
+# 現場マニュアルツール群
 
-スマホで**写真を撮りながら、その場で作業手順書が作れる**単一HTMLツール。サーバー不要・インストール不要・オフライン動作。
+スマホで**写真を撮りながら、その場で作業手順書が作れる**オフラインツール群。サーバー不要・インストール不要・費用ゼロ。
 
-## 使い方（現場）
+| ツール | 役割 |
+|---|---|
+| **planner.html 作業計画ウィザード** | やりたいことを一言書く→作業タイプ別テンプレートから**手順の骨格・業務フロー・撮影指示書**を生成。「⚡すぐ作る」なら3クリックで簡易版（空欄は【要記入】表示）。骨格(.json)はそのままindex.htmlに取り込める。AI用プロンプトのコピーにも対応 |
+| **index.html マニュアル作成ツール** | 撮影→注釈→手順化→品質チェック→承認欄つきA4様式のHTML/PDF書き出し |
+
+**基本の流れ**：planner.htmlで計画（1分）→ 指示書を作業者に渡す → 作業者が実施・撮影 → 骨格(.json)をindex.htmlに取り込み → 写真を当てはめて完成 → 台帳へ提出。
+
+## 使い方（index.html）
 
 1. `index.html` をスマホ／PCのブラウザで開く
 2. 「＋ 新規作成」→「＋ 手順を追加」でカメラ起動 → 撮る → 説明を書く、の繰り返し（アルバムからの選択も可）
@@ -32,9 +39,10 @@
 
 - **詳細仕様書（全体アーキテクチャ／キーエンスRK連携／ロードマップ）**: [docs/spec.html](docs/spec.html) — ブラウザで開く・A4印刷対応
 - 運用設計の背景・Teams/Kintone比較の詳細: [docs/operations-design.md](docs/operations-design.md)
-- RK連携のデータ契約（埋め込みJSON・台帳CSVスキーマ）: [docs/rk-interface-spec.md](docs/rk-interface-spec.md)
+- RK連携のデータ契約（埋め込みJSON・台帳CSVスキーマ・作業指示書取込）: [docs/rk-interface-spec.md](docs/rk-interface-spec.md)
+- 市販ツール（Teachme Biz / tebiki 等）調査と設計判断・乗り換え条件: [docs/market-research.md](docs/market-research.md)
 
 ## 開発
 
-- 依存なしの素のHTML+CSS+JS 1ファイル（オフライン要件のため外部CDN禁止）
-- テスト: `node tests/smoke.js`（Playwright + Chromium）
+- 依存なしの素のHTML+CSS+JS（オフライン要件のため外部CDN禁止）
+- テスト: `node tests/smoke.js`（エディタ・ビューア） / `node tests/planner-smoke.js`（ウィザード＋クロス連携）

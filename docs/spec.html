@@ -159,6 +159,7 @@
     <div class="layer l-site">
       <div class="layer-label">現場層</div>
       <div class="layer-boxes">
+        <div class="node"><b>🧭 作業計画ウィザード（planner.html）</b><span class="sm">やりたいこと一言→テンプレートから構成・業務フロー・撮影指示書・骨格.jsonを生成。AI用プロンプト出力も</span></div>
         <div class="node"><b>📱 作成ツール（index.html）</b><span class="sm">撮影→注釈→手順化。端末内保存（IndexedDB）。HTML書き出し／再取り込み</span></div>
         <div class="node"><b>📄 書き出しマニュアル（単一HTML）</b><span class="sm">現場モード・点検チェック・期限警告・📢フィードバックを内蔵</span></div>
         <div class="node"><b>🏷 設備QR掲示</b><span class="sm">読むと該当マニュアルのURLへ。探さない導線</span></div>
@@ -209,6 +210,7 @@
   <div class="tbl-wrap"><table>
     <tr><th>項目</th><th>仕様</th></tr>
     <tr><td>形態</td><td>単一HTMLファイル。外部依存なし（CDN・通信なし）＝オフライン動作。配布は共有フォルダ/Teamsから各端末へ</td></tr>
+    <tr><td>計画ウィザード<br>（planner.html）</td><td>作業タイプ8種（点検/清掃5S/棚卸/入荷/出荷/段取り替え/引継ぎ教育/汎用）のテンプレートから、手順骨格・業務フロー・作業指示書（【撮影】ブロック入り・Copilot指示書仕様の第1部書式）・骨格マニュアル(.json)を生成。未記入は【要記入】として可視化（⚡クイック生成）。AI用プロンプトのコピーで市販AI/Copilotへ委譲も可。市販ツール調査に基づく設計は<code>docs/market-research.md</code></td></tr>
     <tr><td>作成機能</td><td>カメラ撮影またはアルバム選択→手順追加（1手順=写真+タイトル+説明）。手順の並べ替え・複製（直下挿入）・削除。一覧はタイトル・設備名で検索可</td></tr>
     <tr><td>写真注釈</td><td>丸・矢印・四角・ペン・番号スタンプ・文字入れ、3色。元写真を保持し再編集可能（書き出し時は焼き込み）</td></tr>
     <tr><td>手順タイプ</td><td>手順／⚠注意／☑点検（点検は書き出し先でチェックリスト化）</td></tr>
