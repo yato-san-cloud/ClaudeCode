@@ -413,5 +413,82 @@ def export_geojson(
         typer.echo("  ! ロケーションがまだありません（空の FeatureCollection を出力）。")
 
 
+@app.command("wording")
+def wording_cmd(
+    name: str,
+    file: str = typer.Option("", "--file", "-f",
+                             help="検査するテキスト/Markdown（既定: 最新の提案書）"),
+    rules: str = typer.Option("", "--rules",
+                              help="トーンガイドJSON（既定: settings.wording）"),
+    as_json: bool = typer.Option(False, "--json", help="機械可読な JSON で出力"),
+):
+    """提案書の用語ガード: 禁止語を検査して言い換えを提案する（検出時は終了コード1）。
+
+    ルール（禁止語/正規表現/言い換え/例外）は既定でプロジェクトの
+    ``settings.wording`` を使う。``--file`` を付けるとそのファイルの本文を、付けない
+    ときは最新ランの提案書ペイロード（判定文・示唆・ブランド・シナリオ）を検査する。
+    ルール未設定なら**何も検出しない**（＝検査は無効）。
+    """
+    from whsim import wording as wording_mod
+
+    proj = _open_project(name)
+    if rules:
+        try:
+            rule_set = wording_mod.load_rules(Path(rules))
+        except ValueError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(code=1)
+        src_rules = rules
+    else:
+        rule_set = wording_mod.rules_for(proj.load_model())
+        src_rules = "settings.wording"
+
+    text = None
+    if file:
+        path = Path(file)
+        if not path.is_file():
+            typer.echo(f"ファイルが見つかりません: {path}", err=True)
+            raise typer.Exit(code=1)
+        text = path.read_text("utf-8", errors="replace")
+
+    if text is not None:
+        hits = wording_mod.check(text, rule_set)
+        for h in hits:                       # the CLI shows the offending line itself
+            lines = text.splitlines()
+            i = h["line"] - 1
+            h["context"] = (lines[i] if 0 <= i < len(lines) else "").strip()[:120]
+        target_label = str(path)
+    else:
+        hits = wording_mod.lint_export(wording_mod.proposal_payload(proj), rule_set)
+        target_label = "提案書ペイロード（最新ラン）"
+
+    if as_json:
+        typer.echo(json.dumps({"enabled": wording_mod.enabled(rule_set),
+                               "target": target_label, "count": len(hits),
+                               "hits": hits}, ensure_ascii=False, indent=2))
+        raise typer.Exit(code=1 if hits else 0)
+
+    if not wording_mod.enabled(rule_set):
+        typer.echo(f"用語ルールが未設定です（{src_rules}）。検査は行いません。")
+        return
+    typer.echo(f"用語ガード: {src_rules}（禁止語 {len(rule_set.get('forbidden', []))} / "
+               f"言い換え {len(rule_set.get('replacements', {}))} / "
+               f"例外 {len(rule_set.get('allow', []))}）")
+    typer.echo(f"検査対象: {target_label}")
+    for h in hits:
+        where = f"L{h['line']}"
+        if h.get("path"):
+            where += f" [{h['path']}]"
+        arrow = f" → {h['suggestion']}" if h.get("suggestion") else ""
+        typer.echo(f"  {where}  {h['term']}{arrow}")
+        if h.get("context"):
+            typer.echo(f"      {h['context']}")
+    if not hits:
+        typer.echo("禁止語は見つかりませんでした。")
+        return
+    typer.echo(f"検出 {len(hits)} 件。")
+    raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()

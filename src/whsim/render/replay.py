@@ -366,8 +366,14 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
     # exactly like a worker's, with state in {"carry","belt","pack"}. Additive and
     # guarded: an engine/run artefact without totes (or any model with no conveyor)
     # yields an empty list, so viewers that ignore it are unaffected.
+    # ``kind`` (荷の種別 — what a 選択停止ゲート sorts on) and ``belt_id`` (which deck
+    # of a 2段駆動コンベア this box rides) ride along ONLY when the engine set them:
+    # an unset key is omitted entirely rather than emitted as null, because a
+    # viewer reading ``null`` as a belt id would snap the box to the wrong deck.
     totes = [
-        {"id": t.id, "keyframes": t.keyframes}
+        {"id": t.id, "keyframes": t.keyframes,
+         **({"kind": t.kind} if getattr(t, "kind", None) else {}),
+         **({"belt_id": t.belt_id} if getattr(t, "belt_id", None) else {})}
         for t in getattr(res, "totes", []) or []
         if t.keyframes
     ]

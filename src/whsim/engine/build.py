@@ -7,6 +7,7 @@ which the 2D/3D viewers replay as motion -- "the simulation must move".
 
 from __future__ import annotations
 
+import itertools
 import math
 from dataclasses import dataclass, field
 
@@ -46,10 +47,17 @@ class Tote:
     rounding — so a viewer lerps a tote exactly like it lerps an agent. ``state``
     is one of ``"carry"`` (in a picker's hands), ``"belt"`` (riding a conveyor) or
     ``"pack"`` (at the discharge/pack point). Purely a replay artefact: the DES
-    timing is unchanged whether or not a tote is being recorded."""
+    timing is unchanged whether or not a tote is being recorded.
+
+    ``kind`` is 荷の種別 (``Conveyor.load_kind`` — what a 選択停止ゲート sorts on) and
+    ``belt_id`` names the deck this box rides when one footprint carries two
+    (2段駆動コンベア). Both default to ``None`` and are then omitted from the replay
+    document entirely, so a model that states neither renders exactly as before."""
 
     id: str
     keyframes: list[tuple] = field(default_factory=list)
+    kind: str | None = None
+    belt_id: str | None = None
 
     def kf(self, t: float, x: float, y: float, state: str) -> None:
         self.keyframes.append((round(t, 2), round(x, 3), round(y, 3), state))
@@ -65,6 +73,44 @@ MAX_TOTE_TRACKS = 400
 # schema defaults to 0.5 m/s; a hand-edited 0 must not divide by zero or freeze
 # the belt -- never-blocks).
 DEFAULT_CONVEYOR_SPEED_MPS = 0.5
+
+
+@dataclass
+class StopGate:
+    """選択停止ゲート (停止線) resolved onto ONE belt: where it is, and what stops.
+
+    A real 出荷ライン carries two different loads on the SAME belt at the same time
+    — 検品済み(梱包前)の容器 and 梱包済みの完成品 — and the stop line near the far end
+    is what tells them apart: the containers stop there (they are what the 引き込み
+    workers pull in), the finished cartons run straight through to カーブ→積み付け.
+    Without it the belt can only be modelled as carrying one homogeneous load, and
+    the whole point of the stop line (holding goods on the line, in view, until
+    somebody takes them) disappears.
+
+    ``arc`` is the arc length from the belt's infeed, clamped to its length.
+    Selection is never-blocks and deliberately three-valued:
+
+    * ``stop_kinds`` non-empty  → exactly those stop, everything else passes;
+    * else ``pass_kinds`` non-empty → everything NOT named stops;
+    * neither → nothing stops (a gate that names nothing is not a gate).
+
+    ``bench``/``n_bench`` are the 梱包台 standing AT the stop line (same reach rule
+    as a 引き込み's own benches). ``None`` = nobody stands there and a stopped load
+    falls back to the shared pack pool — the same half-drawn-line fallback a
+    benchless 引き込み takes."""
+
+    arc: float
+    stop_kinds: frozenset[str] = frozenset()
+    pass_kinds: frozenset[str] = frozenset()
+    bench: simpy.Resource | None = None
+    n_bench: int = 0
+
+    def stops(self, kind: str) -> bool:
+        if self.stop_kinds:
+            return kind in self.stop_kinds
+        if self.pass_kinds:
+            return kind not in self.pass_kinds
+        return False
 
 
 @dataclass
@@ -114,6 +160,11 @@ class ConveyorLine:
     # stations (half-drawn line → shared-pool fallback keeps it running).
     closed: bool = False
     divert_wake: simpy.Event | None = None
+    # 荷の種別 this belt stamps on a load boarding it (``Conveyor.load_kind``); the
+    # kind then travels with the load over every hand-over. ``""`` = one kind.
+    load_kind: str = ""
+    # 選択停止ゲート on THIS belt (``None`` = none, which is every belt by default).
+    gate: StopGate | None = None
 
     def project(self, p) -> tuple[tuple[float, float], float]:
         """Nearest point ON the polyline to ``p`` + its arc length from the infeed.
@@ -230,6 +281,44 @@ def _attach_to(lines: list[ConveyorLine], p, exclude: set[str]):
     return (best[1], best[2]) if best is not None else None
 
 
+def _seglens(pts: list[tuple[float, float]]) -> list[float]:
+    """Euclidean length of every segment of a drawn polyline."""
+    return [math.dist(a, b) for a, b in itertools.pairwise(pts)]
+
+
+def _kind_set(spec, key) -> frozenset[str]:
+    """A gate's ``stop_states``/``pass_states`` as a set of kind names.
+
+    Tolerant on purpose (the gate is authored as a plain dict): a string is read as
+    one name, a list as many, anything else as nothing — a mis-typed gate degrades
+    to "stops nothing" instead of breaking the run (never-blocks)."""
+    v = spec.get(key)
+    if isinstance(v, str):
+        return frozenset({v})
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return frozenset(str(x) for x in v if str(x))
+    return frozenset()
+
+
+def _resolve_gate(cv, line: ConveyorLine) -> StopGate | None:
+    """``Conveyor.stop_gate`` → a :class:`StopGate` on ``line`` (or ``None``).
+
+    ``None`` for an unstated gate, for a malformed one, and for one that names
+    nothing to stop — in all three cases the belt behaves exactly as it always
+    has, so an existing model cannot acquire a gate by accident."""
+    spec = getattr(cv, "stop_gate", None)
+    if not isinstance(spec, dict) or not spec:
+        return None
+    try:
+        arc = float(spec.get("at_m", line.length))
+    except (TypeError, ValueError):
+        return None
+    gate = StopGate(arc=min(max(arc, 0.0), line.length),
+                    stop_kinds=_kind_set(spec, "stop_states"),
+                    pass_kinds=_kind_set(spec, "pass_states"))
+    return gate if (gate.stop_kinds or gate.pass_kinds) else None
+
+
 def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[ConveyorLine]:
     """Resolve the belts into ONE line: serial hand-overs, 引き込み branches, 梱包台.
 
@@ -267,6 +356,7 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
     # own bench pool. A spur nobody stands at keeps ``bench=None`` and its totes
     # fall back to the shared pack pool — a half-drawn line still runs.
     stations = list(getattr(model.resources, "stations", None) or [])
+    claimed: set[int] = set()          # stations already owned by a 引き込み
     for s in spurs:
         end = s.points[-1]
         nearby = [st for st in stations
@@ -275,6 +365,7 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
         if n > 0:
             s.n_bench = n
             s.bench = simpy.Resource(env, capacity=n)
+            claimed.update(id(st) for st in nearby)
         elif nearby:
             # Benches exist at this spur but every count is 0: the scenario
             # closed them. Falling back to the shared pool here would hand the
@@ -282,6 +373,24 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
             # packer_utilization 1.28 and a jam that vanished when benches were
             # REMOVED). A closed pull-in takes no totes instead.
             s.closed = True
+
+    # 停止線の作業者: the 梱包台 standing AT a stop gate belong to that gate — a load
+    # held there has to be taken off the line by somebody, and that somebody is the
+    # one standing at the stop line, not the whole packing floor. Benches already
+    # owned by a 引き込み are never counted twice (that double-count is what made a
+    # closed spur read packer_utilization 1.28 before ``closed`` existed).
+    for c in lines:
+        if c.gate is None:
+            continue
+        at = c.point_at(c.gate.arc)
+        nearby = [st for st in stations
+                  if id(st) not in claimed
+                  and math.dist((float(st.x), float(st.y)), at) <= BENCH_REACH_M]
+        n = sum(max(0, int(st.count)) for st in nearby)
+        if n > 0:
+            c.gate.n_bench = n
+            c.gate.bench = simpy.Resource(env, capacity=n)
+            claimed.update(id(st) for st in nearby)
 
     # 枝分かれ: hang each spur off the trunk its infeed touches. Spurs are never
     # junction hosts — a 引き込み feeds benches, not another 引き込み.
@@ -371,6 +480,21 @@ class World:
     # Always non-empty when ``conveyors`` is: it falls back to every active line,
     # which is the behaviour from before belts could be chained.
     entry_conveyors: list[ConveyorLine] = field(default_factory=list)
+    # 引き込み方式 ("auto" = 貪欲ディバート, the historical rule; "pull" = 作業者が引く).
+    divert_policy: str = "auto"
+    # 容器の有限循環. ``None`` = 容器は無限 (the historical behaviour: a picker can
+    # always put goods on the belt). When present it is a simpy.Container of empty
+    # containers: 投入 takes one and BLOCKS when the pool is dry, 梱包完了 sends it
+    # back round (return belt transit + ``container_return_s``). ``n_containers``
+    # is the pool size, i.e. the denominator every container KPI is read against.
+    container_pool: simpy.Container | None = None
+    n_containers: int = 0
+    container_return_s: float = 0.0
+    # The 還流ベルト an emptied container rides home on — geometry ONLY (transit
+    # time + the replay track). It is deliberately NOT one of ``conveyors``: empty
+    # containers do not contend for slots, and counting the return deck's slots in
+    # the conveyor KPIs would dilute the utilisation of the line that does the work.
+    container_return_line: ConveyorLine | None = None
     workers: list[Worker] = field(default_factory=list)
     helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
     totes: list[Tote] = field(default_factory=list)      # goods tracks (replay only)
@@ -514,13 +638,17 @@ class World:
     def recording(self) -> bool:
         return self.env.now <= self.replay_window_s
 
-    def new_tote(self, order_id: str) -> Tote | None:
+    def new_tote(self, order_id: str, kind: str | None = None,
+                 belt_id: str | None = None) -> Tote | None:
         """A replay track for one tote — or ``None`` when we are outside the replay
         window or past ``tote_cap`` (MAX_TOTE_TRACKS). Callers treat ``None`` as
-        "move it, don't draw it", so the physics never depend on recording."""
+        "move it, don't draw it", so the physics never depend on recording.
+
+        ``kind``/``belt_id`` are additive replay metadata (荷の種別 / which deck of a
+        2段駆動コンベア it rides). Unset ⇒ the track is exactly the legacy one."""
         if not self.recording() or len(self.totes) >= self.tote_cap:
             return None
-        t = Tote(id=f"tote-{order_id}")
+        t = Tote(id=f"tote-{order_id}", kind=kind or None, belt_id=belt_id or None)
         self.totes.append(t)
         return t
 
@@ -675,7 +803,7 @@ def build(
         if designed and str(cv.id) not in designed:
             continue          # a belt the design does not route through
         pts = [(float(p[0]), float(p[1])) for p in cv.points if len(p) >= 2]
-        seglens = [math.dist(a, b) for a, b in zip(pts, pts[1:])]
+        seglens = _seglens(pts)
         total = sum(seglens)
         if len(pts) < 2 or total <= 1e-9:
             continue
@@ -686,10 +814,57 @@ def build(
         # unstated (or non-positive) pitch keeps the historical 1 個/m.
         pitch = float(cv.tote_pitch_m) if cv.tote_pitch_m is not None else 0.0
         cap = max(1, int(total / pitch)) if pitch > 0.0 else max(1, int(total))
-        conveyor_lines.append(ConveyorLine(
+        line = ConveyorLine(
             id=cv.id, points=pts, seglens=seglens, length=total, speed=speed,
-            capacity=cap, belt=simpy.Resource(env, capacity=cap)))
+            capacity=cap, belt=simpy.Resource(env, capacity=cap),
+            load_kind=str(getattr(cv, "load_kind", "") or ""))
+        line.gate = _resolve_gate(cv, line)
+        conveyor_lines.append(line)
     entry_lines = _wire_conveyor_chain(model, env, conveyor_lines)
+
+    # --- 容器の有限循環 (finite container pool) -------------------------------
+    # Unstated ⇒ None ⇒ 投入 never waits for a container and nothing is logged, so
+    # the run is byte-identical. The return belt is resolved from the DRAWN belts
+    # rather than the designed ones: 上段の還流ベルト carries no order and is
+    # therefore not part of any flow leg, so it never appears in ``conveyor_lines``.
+    container_pool = None
+    n_containers = 0
+    container_return_s = 0.0
+    container_return_line = None
+    cpool = getattr(model.process, "container_pool", None)
+    if isinstance(cpool, dict) and cpool:
+        try:
+            n_containers = int(cpool.get("count", 0) or 0)
+        except (TypeError, ValueError):
+            n_containers = 0
+        try:
+            container_return_s = max(0.0, float(cpool.get("return_time_s", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            container_return_s = 0.0
+        if n_containers > 0:
+            container_pool = simpy.Container(env, capacity=n_containers,
+                                             init=n_containers)
+            ref = str(cpool.get("return_belt", "") or "")
+            rcv = next((c for c in model.resources.conveyors if str(c.id) == ref), None)
+            if rcv is not None:
+                rpts = [(float(p[0]), float(p[1])) for p in rcv.points if len(p) >= 2]
+                rseg = _seglens(rpts)
+                rlen = sum(rseg)
+                if len(rpts) >= 2 and rlen > 1e-9:
+                    rspeed = float(rcv.speed_mps)
+                    if not (rspeed > 0.0):
+                        rspeed = DEFAULT_CONVEYOR_SPEED_MPS
+                    container_return_line = ConveyorLine(
+                        id=rcv.id, points=rpts, seglens=rseg, length=rlen,
+                        speed=rspeed, capacity=1,
+                        belt=simpy.Resource(env, capacity=1))
+        else:
+            # A pool of 0 (or a mis-typed count) is not a pool. Fall all the way
+            # back to 容器は無限 rather than to a pool nobody can ever draw from —
+            # a warehouse with no containers cannot ship anything (never-blocks).
+            n_containers = 0
+            container_return_s = 0.0
+
     # Wall-aware routing graph (only meaningful when walls exist). A caller may
     # inject a pre-built one (shared across replications of the same layout).
     if graph is None:
@@ -837,6 +1012,10 @@ def build(
         put_wall=simpy.Resource(env, capacity=put_wall_cap),
         has_conveyor=has_conveyor, conveyors=conveyor_lines,
         entry_conveyors=entry_lines,
+        divert_policy=str(getattr(model.process, "divert_policy", "auto") or "auto"),
+        container_pool=container_pool, n_containers=n_containers,
+        container_return_s=container_return_s,
+        container_return_line=container_return_line,
         n_pickers=n_pickers, n_packers=n_packers,
         n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
         pick_strategy=strategy, batch_size=max(1, batch_size),

@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Response
 from whsim import cody, templates
 from whsim.project import Project
 
-from ._common import _open
+from ._common import _open, _proposal_extras
 
 router = APIRouter()
 
@@ -328,6 +328,60 @@ def api_timetable_solve(payload: dict | None = None):
     if not isinstance(scenario, dict):
         scenario = next(iter(seed["scenarios"].values()))
     return timetable.solve(scenario, processes, productivity)
+
+
+@router.post("/api/projects/{name}/wording/check")
+def api_wording_check(name: str, payload: dict | None = None):
+    """提案書の用語ガード: 禁止語を検出して言い換えを提案する。
+
+    Body（すべて任意）::
+
+        {"text": "検査したい文章",       # 省略時は最新の提案書ペイロードを検査
+         "rules": {...}}                 # 省略時は model.settings.wording
+
+    ルール未設定なら ``enabled:false`` と空の検出一覧を返す（＝検査は無効・既存の
+    出力は何も変わらない）。壊れたルールでも 500 にしない（never blocks）。
+    """
+    from whsim import wording
+    p = payload or {}
+    proj = _open(name)
+    try:
+        model = proj.load_model()
+    except Exception:  # noqa: BLE001 — an unreadable model must not 500 the guard
+        model = None
+    raw_rules = p.get("rules")
+    if isinstance(raw_rules, dict) and raw_rules:
+        try:
+            rules = wording.load_rules(raw_rules)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    else:
+        rules = wording.rules_for(model)
+
+    raw_text = p.get("text")
+    text = raw_text if isinstance(raw_text, str) else None
+    if text:
+        hits = wording.check(text, rules)
+        source = "text"
+    else:
+        extras: dict = {}
+        if model is not None:
+            try:
+                rd = proj.latest_run_dir()
+                metrics = (json.loads((rd / "kpis.json").read_text("utf-8"))
+                           if rd is not None and (rd / "kpis.json").is_file() else {})
+                extras = _proposal_extras(proj, model, metrics)
+            except Exception:  # noqa: BLE001 — extras enrich the payload, never required
+                extras = {}
+        target = wording.proposal_payload(proj, extras)
+        hits = wording.lint_export(target, rules)
+        source = "proposal"
+    return {"enabled": wording.enabled(rules), "source": source,
+            "count": len(hits), "hits": hits,
+            "rules": {"forbidden": rules.get("forbidden", []),
+                      "forbidden_regex": rules.get("forbidden_regex", ""),
+                      "allow": rules.get("allow", []),
+                      "replacements": rules.get("replacements", {})}}
 
 
 @router.get("/api/projects/{name}/notes")

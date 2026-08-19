@@ -133,6 +133,14 @@ async def api_import_rmpm(name: str, file: UploadFile):
         md["layout"]["zones"] = res["zones"]
     if res.get("stations"):
         md.setdefault("resources", {})["stations"] = res["stations"]
+    gates = 0
+    if res.get("conveyors"):
+        # The drawn belts REPLACE whatever the template guessed: once a real
+        # drawing states where the line runs, keeping the template's belts
+        # alongside it would simulate two warehouses at once. 停止線 は描かれた
+        # ベルトの上に解決してから入れる（ゲートの位置は図面が既に言っている）。
+        gates = rmpm.resolve_stop_gates(res["conveyors"], res.get("non_barriers") or [])
+        md.setdefault("resources", {})["conveyors"] = res["conveyors"]
     model = WarehouseModel.model_validate(md)
     design.materialize_racks(model)   # named shelves -> named location cells
     design.synthesize_items(model)    # ensure demand so the sim stays runnable
@@ -140,12 +148,19 @@ async def api_import_rmpm(name: str, file: UploadFile):
     prov = proj.load_provenance()
     prov.mark("layout", Source.IMPORTED)
     proj.save_provenance(prov)
+    warnings = list(res.get("warnings", []))
+    if gates:
+        warnings.insert(0, f"停止線 {gates} 本を、跨いでいるコンベア上の選択停止"
+                            "ゲートとして解決しました（止める荷/通す荷は名前から読み取り、"
+                            "書かれていなければ何も止めません）。")
     return {"bounds": res.get("bounds"),
             "shelves": res.get("stats", {}).get("shelves", 0),
             "walls": len(res.get("walls", [])), "zones": len(res.get("zones", [])),
             "stations": len(res.get("stations", [])),
+            "conveyors": len(res.get("conveyors", [])), "stop_gates": gates,
+            "markers": len(res.get("markers", [])),
             "locations": len(model.locations),
-            "warnings": res.get("warnings", []), "stats": res.get("stats", {})}
+            "warnings": warnings, "stats": res.get("stats", {})}
 
 
 @router.post("/api/projects/{name}/import-mapmaker-kpi")
@@ -418,6 +433,55 @@ async def api_import_distances(name: str, file: UploadFile):
     return {"count": res.get("count", 0), "ids": len(res.get("ids", [])),
             "symmetric": res.get("symmetric", False),
             "warnings": res.get("warnings", [])}
+
+
+@router.post("/api/projects/{name}/import/hourly-demand")
+async def api_import_hourly_demand(name: str, file: UploadFile,
+                                   total_orders: int | None = None,
+                                   seed: int = 42,
+                                   lines_per_order: float | None = None):
+    """時間帯別の件数表（CSV/Excel）→ 1日の到着系列を ``orders.outbound`` に流し込む。
+
+    実務で最初に出てくるのは明細ではなく「6時 97件, 7時 865件, …」の1枚だけ、という
+    ことが多い。それを捨てずに DES へ渡すと、一様投入では見えない**実際の波形での
+    臨界点**が出る（:mod:`whsim.analysis.demandshape`）。
+
+    ``total_orders`` を渡すと波形の形を保ったままその総数へスケール、``seed`` は
+    時間帯内のばらつきの再現性を握る（同じ入力＝同じ系列）。壊れた行は数えて落とす
+    ので、1行の不備で1枚を捨てない（never blocks）。"""
+    from whsim.analysis import demandshape
+    proj = _open(name)
+    data = await _read_upload(file)
+    try:
+        parsed = demandshape.read_hourly_csv(data, file.filename or "hourly.csv")
+    except Exception as e:  # noqa: BLE001 — tolerant: a bad file is a friendly 400
+        raise HTTPException(400, f"時間帯別の件数表を読み込めませんでした: {e}")
+    hourly = parsed.get("hourly") or {}
+    if not hourly or not any(v > 0 for v in hourly.values()):
+        return {"ok": False, "hourly": hourly, "summary": demandshape.describe(hourly),
+                "parsed": parsed,
+                "message": "時間帯別の件数を読み取れませんでした"
+                           "（「時」「件数」の列をご確認ください）。"}
+
+    model = proj.load_model()
+    summary = demandshape.apply_to_model(model, hourly, total_orders=total_orders,
+                                         seed=seed, lines_per_order=lines_per_order)
+    if not summary["orders"]:      # e.g. total_orders=0 — the model is left alone
+        return {"ok": False, "hourly": hourly, "summary": summary, "parsed": parsed,
+                "message": "作成する到着が0件でした（件数・total_orders をご確認ください）。"}
+    proj.save_model(model)
+    prov = proj.load_provenance()
+    prov.mark("orders", Source.IMPORTED)
+    proj.save_provenance(prov)
+    msg = (f"{summary['orders']:,}件の到着を時間帯波形から作成しました"
+           f"（ピーク {summary['peak_hour']}時台 {summary['peak_count']:,.0f}件"
+           f"＝全体の{summary['peak_share'] * 100:.0f}%）。")
+    if parsed.get("dropped"):
+        msg += f" 読めない行 {parsed['dropped']:,} 行は除外しました。"
+    if summary.get("window_extended"):
+        msg += f" シミュレーション時間を{summary['duration_s'] / 3600:.1f}時間に広げました。"
+    return {"ok": True, "hourly": hourly, "summary": summary, "parsed": parsed,
+            "provenance_summary": prov.summary(), "message": msg}
 
 
 @router.post("/api/projects/{name}/generate-missing")

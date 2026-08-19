@@ -384,6 +384,12 @@ def api_put_settings(name: str, payload: dict):
                     if bk in value and value[bk] is not None:
                         b[bk] = str(value[bk])
             merged["brand"] = b
+        elif key == "wording":
+            # 提案書の用語ガード: normalise through whsim.wording so only the four
+            # known sections survive (禁止語/正規表現/言い換え/例外) and a malformed
+            # guide can never land in the model. {} clears it = 検査を無効に戻す.
+            from whsim import wording as _wording
+            merged["wording"] = _wording.normalise_rules(value)
         # Unknown keys: ignored (forward-compatible, never fatal).
     md["settings"] = merged
 

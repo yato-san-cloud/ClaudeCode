@@ -41,7 +41,17 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   `.rmpm.json` export / **NATIVE `.rmpm`** = Java serialization, parsed via
   javaobj-py3 and validated byte-equal against the JSON-export oracle); shelves
   keep their MapMaker name (→ slottable location names), walls/stations mapped,
-  mm→m. `racktypes.py` — 9 storage-equipment presets (incl. メザニン/移動ラック/
+  mm→m. **名前規約の解釈** (`classify_name`/`_NAME_RULES`, 不変条件18): 形式に z 座標が
+  無く種別も3つしか無いので、段(下段/上段→`elevation_m`・同一XYの2本を両方残す)・
+  非障壁(停止線/仕切り→`non_barriers`, 壁にしない)・人マーカー(立ち位置→`markers`,
+  什器にしない)・搬送設備(引き込み/本線/還流/フリー→`conveyors`)・作業台の実寸は
+  **名前**にしか無い。判定は1つの表で**名前が先・`type` が fallback**(規約語ゼロの
+  図面はバイト同一)。名前は「何であるか(どこに・どうする)」なので**注記より先に頭を
+  見る** — 全文一致だと `検品者立ち位置マーカー(西・仕切り付近)` が区画線になる。
+  `北半`/`南半` は結合するが両方が相方を名指しするので**全半語を消してから**キーを作る。
+  停止線→ゲートは `resolve_stop_gates` (交差 or 1.5m 近接。受け渡し点では複数ベルトが
+  数cm内にいるので**「線に向かってくるベルト」**でないとカーブを掴む)。
+  `racktypes.py` — 9 storage-equipment presets (incl. メザニン/移動ラック/
   ハンガー) with unit economics, served at `/api/racktypes` and mirrored into the
   JS editor/3D (keep in parity).
 - `analysis/data_io.py` — real-WMS-grade table loading: header-row auto-detect
@@ -103,6 +113,19 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   is pinned by `tests/test_analytic_aisle_travel.py` on **every** template
   (|Δutil| < 0.08 each, catalogue mean < 0.04) — it used to check two, and the
   six unchecked ones hid residuals up to 0.81.
+  **ライン運用の3機構** (不変条件17・全部既定オフ＝同梱テンプレはバイト同一,
+  `tests/test_line_mechanics.py`): **選択停止** `Conveyor.stop_gate`＋`load_kind`
+  (1本のベルトを2種類の荷が同時に流れる — 検品済は停止線で止まって引き込みを待ち、
+  完成品は通過してカーブへ。「止める種別にはベルトが早く終わる」として実装＝連鎖の
+  既存規則1つを再利用するので滞留/背圧はそのまま落ちる。3値 never-blocks);
+  **有限容器循環** `Process.container_pool`（**投入時に確保**するので空＝投入停止＝
+  不足がピッキングへ遡る。空は還流ベルトを**幾何としてだけ**使う＝スロットを取り合わ
+  ない。KPI `containers_in_use_peak`＝**必要保有数の下限**、`== pool_size` は天井に
+  当たっただけ＝答えではない、が同じ表から読める。Little's law と ~2% 一致を検証);
+  **pull型引き込み** `Process.divert_policy: "auto"|"pull"`（通過の瞬間に台が空いて
+  いる引き込みにだけ入り、無ければ**本線で待たずに通り過ぎる**。貪欲は人員に盲目
+  =台3→1で分岐 74→74、pull は 72→40）。⚠️ `analytic.py` は3つとも**未鏡写し** —
+  既定オフゆえカタログのピンは無傷だが、ONにしたモデルは解析だけ甘く出る。
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict. Multi-rep runs
   add `kpis.ci` (95% t-CI per headline metric + n_recommended for a ±5% target);
   the KPI view shows 「±X (95%CI, n=N)」 and an honest n=1 disclosure.
@@ -113,6 +136,23 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   含む) から μ/σ を実測で直接算出; SS = z·σ·√(LT+R), ROP = μ·LT+SS; 低頻度SKUは
   ポアソン切替 (scipy不使用). GET /inventory-opt → ②分析「物量サマリ」カード
   (`js/dataanalysis.js`); 理論値の注記付き (never oversell).
+- `wording.py` — **提案書の用語ガード** (顧客ごとの禁止語・言い換え). `Settings.wording`
+  が空＝**検査そのものが不活性**（既存の出力は不変）。肝は **`allow` が先に地面を押さえる**
+  こと: 固有名詞は禁止語を含みうる（「停止」を禁じた案件で、設備名の**「停止線」**まで
+  消える）ので、allow 語句の占有区間を先に確定し、そこに重なる禁止語ヒットは**最初から
+  作らない**。ヒットは最長一致・非重複（「検品レス」があれば「検品」を出さない）＝
+  そのまま `apply` の書換に使える。`lint_export` は提案書ペイロードを再帰走査して
+  `insights.0.title` のようなパス付きで報告（`*_path`/`*_id`/`*_color` は走査しない）。
+  POST `/api/projects/{n}/wording/check`、CLI `whsim wording <p>` は**検出で終了コード1**
+  （CIゲート）。
+- `analysis/demandshape.py` — **時間帯波形→需要投入**. 実務で最初に出てくるのは明細では
+  なく「6時 97件, 7時 865件, …」の1枚。これを捨てて日量÷稼働時間（一様）で回すと、
+  ピーク時間帯シェアが実測 13.6%（一様 6.2% の 2.17倍）の現場で**臨界点の判定が反転
+  する**（20台/CT78: 一様なら794日中0日超過、波動なら18日）。`from_hourly` は比例配分＋
+  時間帯内一様乱数（seed固定＝完全再現）、`total_orders` は最大剰余法で合計厳密一致、
+  到着は**次の時間の直前でクランプ**（丸めで最終時間が翌日へ漏れると busiest-day
+  collapse を誤発火させる）。`apply_to_model` は `simulation.duration_s` を**伸ばすだけ**
+  （8時間窓のままだと夕方の山が窓外＝0件処理）。POST `/import/hourly-demand`。
 - `export/` — brand theme: `Settings.brand` (宛先/自社名/accent/logo/footer, all
   defaulted) → PPTX/PDF 表紙とアクセント色に反映; POST /brand/logo でロゴ保存;
   設定タブ「ブランド」(js/settings.js). Default brand is colour-identical (no-op).

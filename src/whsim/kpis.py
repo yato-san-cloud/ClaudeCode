@@ -309,6 +309,38 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     cv_blocked = sum(1 for e in cv_on if e.get("blocked"))
     cv_block_ratio = cv_blocked / len(cv_on) if cv_on else 0.0
     cv_first_block = min((float(e["t"]) for e in cv_on if e.get("blocked")), default=None)
+    # 選択停止ゲート(停止線): how many loads the gate held back. Only a belt with a
+    # gate emits these, so this is 0 for every model that has none.
+    cv_gate_stops = sum(1 for e in res.events if e["event"] == "conveyor_gate")
+
+    # --- 容器の有限循環 (finite container pool) --------------------------------
+    # Every field is 0 unless the model states a pool — additive, no legacy KPI
+    # shifts. ``containers_in_use_peak`` (+ the time it happened) is the read-out
+    # the customer buys against: 同時に使われた最大数 is the LOWER BOUND on how many
+    # containers the operation has to own or rent, and it is a measurement of this
+    # run rather than a rule of thumb. The in-use level only changes at take/return,
+    # so the (t, level) series is an EXACT step function — integrate it for the
+    # time-average (Little: L = λ·W against ``container_use_mean_s``).
+    ct_take = [e for e in res.events if e["event"] == "container_take"]
+    ct_ret = [e for e in res.events if e["event"] == "container_return"]
+    ct_pool = max((int(e.get("pool", 0)) for e in ct_take), default=0)
+    # Ties are ordered RETURN-then-TAKE, which is the causal order: a container
+    # taken at the same instant one came back was taken BECAUSE it came back (the
+    # SimPy put releases the waiting get at that time). Ordering it the other way
+    # would report a peak of pool_size+1 — a number that cannot physically happen
+    # and that would be read as "we need one more container". The integral is
+    # identical either way (a tie spans zero time).
+    ct_steps = sorted([(float(e["t"]), 1) for e in ct_take]
+                      + [(float(e["t"]), -1) for e in ct_ret])
+    ct_area, ct_peak, ct_peak_t, _t, _lvl = 0.0, 0, 0.0, 0.0, 0
+    for t, delta in ct_steps:
+        ct_area += _lvl * (t - _t)
+        _t, _lvl = t, _lvl + delta
+        if _lvl > ct_peak:
+            ct_peak, ct_peak_t = _lvl, t
+    ct_area += _lvl * max(res.duration_s - _t, 0.0)   # containers still out at the end
+    ct_held = [float(e.get("held", 0.0)) for e in ct_ret]
+    ct_waits = [float(e.get("wait", 0.0)) for e in ct_take]
 
     # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
     # Populated only when replenishment was enabled (replenish_done / stockout_wait
@@ -430,6 +462,19 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         # コンベア詰まり: how OFTEN a hand-over waited, and WHEN it first did.
         "conveyor_block_ratio": cv_block_ratio,
         "conveyor_time_to_first_block_s": cv_first_block,
+        # 停止線で止めた荷の数 (0 = ゲート無し).
+        "conveyor_gate_stops": cv_gate_stops,
+        # 容器の有限循環: 保有数 / 投入待ち / 同時使用ピーク(＋その時刻) / 平均滞留.
+        # ピークが「必要保有数の下限」— レンタル数量の根拠になる数字。
+        "container_pool_size": ct_pool,
+        "container_takes": len(ct_take),
+        "container_returns": len(ct_ret),
+        "container_waits": sum(1 for w in ct_waits if w > 1e-6),
+        "container_wait_total_s": sum(ct_waits),
+        "container_use_mean_s": statistics.fmean(ct_held) if ct_held else 0.0,
+        "containers_in_use_avg": ct_area / max(res.duration_s, 1e-9),
+        "containers_in_use_peak": ct_peak,
+        "containers_in_use_peak_t": ct_peak_t,
         # ...and WHERE (per belt), which is the only read-out that points at the
         # 引き込み/本線 to fix rather than at "the conveyor".
         "conveyors": _per_belt(res, model, cv_on, cv_off),
@@ -790,6 +835,19 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
                 else f"手待ち率 {agg['conveyor_block_ratio'] * 100:.0f}%")
         where = f", ベルト{min(belts)[1]}" if belts else ""
         agg["verdict"] += f"。コンベアに滞留が出ています（{when}{where}）"
+    # 容器の有限循環: the pool is a constraint you can BUY your way out of, so it must
+    # never hide inside "throughput was low". The peak is the number the customer
+    # orders against (必要保有数の下限), and 投入待ち says the pool is already short.
+    # No pool stated ⇒ size 0 ⇒ nothing appended (verdict byte-identical).
+    if agg.get("container_pool_size"):
+        peak = agg.get("containers_in_use_peak", 0.0)
+        at_min = agg.get("containers_in_use_peak_t", 0.0) / 60.0
+        agg["verdict"] += (f"。容器は同時最大 {peak:.0f} 個使用"
+                           f"（{at_min:.0f}分時点・保有 {agg['container_pool_size']:.0f} 個）")
+        if agg.get("container_wait_total_s", 0.0) > 0.0:
+            agg["verdict"] += (
+                f"。容器待ちで投入が止まった時間 {agg['container_wait_total_s'] / 60.0:.0f}分"
+                "（容器を増やせば解消します）")
     # 通路干渉: when agents spend a material share of their travel time queueing
     # behind each other, say so AND say where — 「通路が狭い」 is not actionable,
     # 「この座標の通路」 is. Off (or an uncongested floor) ⇒ share 0 ⇒ nothing

@@ -369,6 +369,29 @@ class Process(BaseModel):
     # emits a one-shot warning) and escaped by force-proceeding — detection+warning
     # only, no resolution/replanning. Opt-in ⇒ off is byte-identical.
     agv_interference: bool = False
+    # 容器の有限循環 (finite container pool). ``None`` (default) = 容器は無限に湧く
+    # ＝ the historical behaviour, byte-identical. A dict so a hand-authored model
+    # can state it without a nested schema:
+    #   ``{"count": 300, "return_belt": "trunk_up", "return_time_s": 60.0}``
+    # 折りたたみ容器は無限に湧かない: a load can only be put ON the line inside a
+    # container, so an empty pool STOPS 投入 (the picker stands there holding the
+    # goods) and the shortage backs up into picking. 確保するのは**コンベアへ投入する
+    # 時**だけ — a 人手/AGV leg carries its own containers and is not gated by this
+    # pool (it is the LINE's circulating stock that is finite). 梱包完了 empties it,
+    # which then rides ``return_belt`` (上段の還流ベルト — geometry only: transit
+    # time and the replay track; empty containers do not contend for slots) and is
+    # back in the pool ``return_time_s`` later. ``count`` ≤ 0 ⇒ pool disabled.
+    # The KPI that pays for this is ``containers_in_use_peak`` (+ its time): the
+    # LOWER BOUND on how many containers the operation has to own or rent.
+    container_pool: dict | None = None
+    # 引き込み方式 (how goods leave the 本線 into a 引き込み/spur).
+    #   "auto" (default) — 貪欲ディバート: a load turns into any spur with room,
+    #     and stalls on the 本線 when none has (the historical behaviour).
+    #   "pull"           — 作業者が引く: nothing diverts by itself. A load is taken
+    #     into a spur only where a 梱包台 is FREE as it arrives; otherwise it rides
+    #     on (past the pull-in, to the 停止線/末端). So an unmanned 引き込み takes
+    #     nothing and the 本線 accumulates — which is what the line really does.
+    divert_policy: Literal["auto", "pull"] = "auto"
     # 段(level)からのピック垂直アクセス時間: picking an upper 段 costs vertical time on
     # top of the handle. lift_speed_mps = forklift/order-picker hoist speed (m/s,
     # up+down); manual_reach_s_per_m = the ergonomic reach/ladder penalty per metre
@@ -455,6 +478,26 @@ class Conveyor(BaseModel):
     # into the 本線 is measured in. Non-positive values fall back to 1 個/m too
     # (never blocks, never divides by zero).
     tote_pitch_m: float | None = None
+    # 荷の種別 (load kind) this belt STAMPS on what boards it. One belt can only be
+    # fed by one kind of goods (a 検品ライン feeds 検品済み容器, the outfeed of a
+    # packing bench feeds 梱包済み completed cartons), so "which belt put it on the
+    # line" is what the goods' state actually is. The kind travels WITH the load
+    # over every hand-over, and a :attr:`stop_gate` downstream sorts on it.
+    # ``""`` (default) = one single kind, i.e. the historical behaviour.
+    load_kind: str = ""
+    # 選択停止ゲート (停止線): ``None`` (default) = no gate, byte-identical.
+    # A dict so a hand-authored model can state it without a nested schema:
+    #   ``{"at_m": 24.5, "stop_states": ["inspected"], "pass_states": ["packed"]}``
+    # ``at_m`` is the arc length from THIS belt's infeed (clamped to its length).
+    # 同じベルトの上を2種類の荷が流れる — 検品済み(梱包前)の容器は停止線で止まって
+    # 引き込みを待ち、梱包済みの完成品はそのまま通過してカーブ→積み付けへ行く。The
+    # gate is the only thing that can tell them apart, because they are physically
+    # on the same belt at the same time. A stopped load holds its slot until someone
+    # takes it off the line, so 滞留 propagates upstream exactly like a full 引き込み.
+    # Selection is never-blocks: ``stop_states`` names what stops (everything else
+    # passes); with only ``pass_states``, everything NOT named stops; a gate that
+    # names neither stops nothing.
+    stop_gate: dict | None = None
 
 
 class Station(BaseModel):
@@ -591,6 +634,14 @@ class Settings(BaseModel):
     shift_plan: dict = Field(default_factory=dict)
     # 提案書ブランドテーマ: cover 宛先/自社名/アクセント/ロゴ for a client-ready export.
     brand: Brand = Field(default_factory=Brand)
+    # 提案書の用語ガード (per-client wording guard). Shape — every key optional:
+    #   {"forbidden": ["…"], "forbidden_regex": "…",
+    #    "replacements": {"NG": "OK"}, "allow": ["…"]}
+    # Empty (the default) = the check is entirely INERT: whsim.wording returns no
+    # findings and no text is ever rewritten, so existing exports are unchanged.
+    # ``allow`` wins over ``forbidden`` — a proper name may contain a banned word
+    # (see whsim/wording.py for why the guard freezes that ground first).
+    wording: dict = Field(default_factory=dict)
 
 
 class Scenario(BaseModel):
