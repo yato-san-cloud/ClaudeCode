@@ -133,7 +133,7 @@ async def api_import_rmpm(name: str, file: UploadFile):
         md["layout"]["zones"] = res["zones"]
     if res.get("stations"):
         md.setdefault("resources", {})["stations"] = res["stations"]
-    gates = 0
+    gates: dict = {}
     if res.get("conveyors"):
         # The drawn belts REPLACE whatever the template guessed: once a real
         # drawing states where the line runs, keeping the template's belts
@@ -149,15 +149,35 @@ async def api_import_rmpm(name: str, file: UploadFile):
     prov.mark("layout", Source.IMPORTED)
     proj.save_provenance(prov)
     warnings = list(res.get("warnings", []))
-    if gates:
-        warnings.insert(0, f"停止線 {gates} 本を、跨いでいるコンベア上の選択停止"
-                            "ゲートとして解決しました（止める荷/通す荷は名前から読み取り、"
-                            "書かれていなければ何も止めません）。")
+    armed = int(gates.get("armed", 0))
+    placed = int(gates.get("positioned", 0))
+    waiting = int(gates.get("pending", 0))
+    # Report what the gates DO, not merely that lines were found: a gate no load
+    # matches sorts nothing, so 「解決しました」 on its own was a claim the run did
+    # not honour. A gate that cannot sort YET is still kept (the 荷の種別 may be
+    # set after this import) — it is reported as waiting, never deleted.
+    # The gate messages go FIRST (the UI shows the first few warnings only) —
+    # "this mechanism is not running" outranks the routine import counts.
+    head: list[str] = []
+    if armed:
+        head.append(f"停止線 {armed} 本を、跨いでいるコンベア上の選択停止ゲートとして"
+                    "解決しました（止める荷/通す荷は停止線の名前、荷の種別はベルト名"
+                    f"から読み取り: {'・'.join(gates.get('kinds') or [])}）。")
+    if waiting:
+        head.append(f"停止線 {waiting} 本は位置と規則を取り込みましたが、止める荷の"
+                    "種別を持つベルトがまだありません（設定されるまで何も止めません）。")
+    warnings = head + list(gates.get("warnings") or []) + warnings
     return {"bounds": res.get("bounds"),
             "shelves": res.get("stats", {}).get("shelves", 0),
             "walls": len(res.get("walls", [])), "zones": len(res.get("zones", [])),
             "stations": len(res.get("stations", [])),
-            "conveyors": len(res.get("conveyors", [])), "stop_gates": gates,
+            "conveyors": len(res.get("conveyors", [])), "stop_gates": armed,
+            # additive: 置いたゲートの総数・荷の種別待ちのゲート・1本のベルトに
+            # 2本目が来て見送った停止線（黙って上書きしない）。
+            "stop_gates_positioned": placed,
+            "stop_gates_pending": waiting,
+            "stop_gates_dropped": int(gates.get("dropped", 0)),
+            "load_kinds": list(gates.get("kinds") or []),
             "markers": len(res.get("markers", [])),
             "locations": len(model.locations),
             "warnings": warnings, "stats": res.get("stats", {})}

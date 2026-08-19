@@ -37,6 +37,39 @@ CI_METRICS: tuple[str, ...] = (
     "total_cost_per_order",    # 1件あたりコスト
 )
 
+# --- 平均してはいけないKPI (extrema across replications) ----------------------
+# ``compute`` averages every numeric key over the replications, which is right for
+# a rate, a total, a utilisation or a count — and WRONG for a maximum. A peak is
+# what the customer sizes against (容器を何個借りるか, 仮置きに何台置けるか, ベルトは
+# 満杯になるのか), so a mean of the per-run peaks reports a number BELOW every
+# maximum actually observed: the flattering direction, on the one KPI documented as
+# 「必要保有数の下限」. The same trap eats a defect counter — a mean turns 「5回中1回
+# 起きた」 into 0件 and prints a warning that contradicts its own number.
+#
+# ``how`` says how the replications are combined:
+#   "max"  — the headline value becomes the largest value observed (still a lower
+#            bound on the true peak: N runs of a model are not a year of operation).
+#   "mean" — a genuine average that nonetheless needs its spread disclosed (the
+#            merge for it lives elsewhere; here it only gains a spread entry).
+_EXTREMUM_KEYS: dict[str, str] = {
+    "containers_in_use_peak": "max",            # 容器の同時使用ピーク
+    "wip_max": "max",                           # 仮置き(staging) WIPのピーク
+    "path_violations": "max",                   # 棚を貫通した経路 (欠陥カウンタ)
+    "unroutable_legs": "max",                   # 直線に縮退した移動 (欠陥カウンタ)
+    "conveyor_time_to_first_block_s": "mean",   # 詰まり始めた時刻 (平均は詰まった回のみ)
+    "pack_unmanned_loads": "mean",              # 終端で止まった荷 (件数＝回あたりの平均)
+}
+
+# A "moment" key answers 「いつ起きたか」 for the extremum beside it, so it MUST be
+# read from the same replication as that extremum — a peak of 45 at t=3060 paired
+# with a mean time is a timestamp at which nothing happened in any run.
+_MOMENT_OF: dict[str, str] = {"containers_in_use_peak": "containers_in_use_peak_t"}
+
+# Per-belt (``kpis["conveyors"]``) fields that are extrema of their own run: a mean
+# reports 14 of 20 slots for a 本線 that filled up in one replication, and 「満杯に
+# なったか」 is the entire question the per-belt read-out exists to answer.
+_PER_BELT_MAX_KEYS: frozenset[str] = frozenset({"peak_occupancy"})
+
 
 def _t95(df: int) -> float:
     """Two-sided 95% t critical value at ``df`` degrees of freedom."""
@@ -45,7 +78,8 @@ def _t95(df: int) -> float:
     return _T95.get(df, _Z95)
 
 
-def _confidence_intervals(per: list[dict], rel_err: float = 0.05) -> dict:
+def _confidence_intervals(per: list[dict], rel_err: float = 0.05,
+                          keys: tuple[str, ...] = CI_METRICS) -> dict:
     """95% Student-t CIs + a recommended replication count for the headline KPIs.
 
     For each metric the per-replication samples give ``mean ± t·(s/√n)`` with the
@@ -54,13 +88,18 @@ def _confidence_intervals(per: list[dict], rel_err: float = 0.05) -> dict:
     ±``rel_err`` (default ±5%) relative-error target. Never blocks: a single
     replication has no spread, so ``metrics`` is left empty (no CI); a metric with
     ~zero mean or zero spread skips the (undefined) recommended-count division.
-    Purely additive/descriptive — it reads the samples, it does not change them."""
+    Purely additive/descriptive — it reads the samples, it does not change them.
+
+    ``keys`` defaults to the headline set; ``_merge_extrema`` passes its own keys so
+    the spread behind a peak is measured by this SAME machinery rather than a second
+    hand-rolled one (a metric whose value is a maximum still has a per-run mean, and
+    that mean's interval is what says how far the next run could land)."""
     n = len(per)
     out: dict = {"n": n, "confidence": 0.95, "rel_err_target": rel_err, "metrics": {}}
     if n < 2:
         return out  # single run → no interval to report (honest, never-blocks)
     t = _t95(n - 1)
-    for key in CI_METRICS:
+    for key in keys:
         xs = [float(p[key]) for p in per if isinstance(p.get(key), (int, float))]
         if len(xs) < 2:
             continue
@@ -230,6 +269,27 @@ def _merge_congestion(per: list[dict]) -> dict:
     return {"top_cells": top[:TOP_CELLS]}
 
 
+def _reps_seen(agg: dict, key: str) -> str:
+    """「N回中M回で発生」 for a verdict fragment, or "" for a single replication.
+
+    Reads the ``spread`` block (only published for n>1), so every sentence that
+    uses it is byte-identical on the single-replication path.
+    """
+    sp = (agg.get("spread") or {}).get(key) or {}
+    return (f"{sp['n_total']:.0f}回中{sp['reps_nonzero']:.0f}回で発生"
+            if sp else "")
+
+
+def _count(v: float) -> str:
+    """A per-run count for a verdict, which never rounds a real occurrence to 0.
+
+    Counts are averaged over the replications, so 「5回中1回だけ1件」 arrives here as
+    0.2 — and 「0件です」 next to a warning that only fires when it happened is the
+    read-out contradicting itself.
+    """
+    return f"{v:.0f}" if abs(v) >= 1.0 else f"{v:.1f}"
+
+
 def _pct(values: list[float], q: float) -> float:
     if not values:
         return 0.0
@@ -312,6 +372,15 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     # 選択停止ゲート(停止線): how many loads the gate held back. Only a belt with a
     # gate emits these, so this is 0 for every model that has none.
     cv_gate_stops = sum(1 for e in res.events if e["event"] == "conveyor_gate")
+    # --- ライン終端の無人 (nobody stands where the line ends) -------------------
+    # Every 梱包台 on the floor can already belong to a 引き込み or a 停止線, and then a
+    # load that no 引き込み pulled in reaches the end of the line with NOBODY there to
+    # take it. The engine refuses to invent a worker for it (the alternative was the
+    # whole floor packing at two places at once — packer_utilization 1.73), so the
+    # load simply stands on the belt: physically right, and from the outside an
+    # unexplained throughput collapse. Counting it is what turns that collapse into
+    # 「図面の末端に人が居ない」. 0 for every model where someone stands there.
+    unmanned_ends = [e for e in res.events if e["event"] == "pack_unmanned"]
 
     # --- 容器の有限循環 (finite container pool) --------------------------------
     # Every field is 0 unless the model states a pool — additive, no legacy KPI
@@ -464,6 +533,8 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "conveyor_time_to_first_block_s": cv_first_block,
         # 停止線で止めた荷の数 (0 = ゲート無し).
         "conveyor_gate_stops": cv_gate_stops,
+        # ライン終端に人が居ないため線上で止まった荷の数 (0 = 誰かが立っている).
+        "pack_unmanned_loads": len(unmanned_ends),
         # 容器の有限循環: 保有数 / 投入待ち / 同時使用ピーク(＋その時刻) / 平均滞留.
         # ピークが「必要保有数の下限」— レンタル数量の根拠になる数字。
         "container_pool_size": ct_pool,
@@ -477,7 +548,7 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "containers_in_use_peak_t": ct_peak_t,
         # ...and WHERE (per belt), which is the only read-out that points at the
         # 引き込み/本線 to fix rather than at "the conveyor".
-        "conveyors": _per_belt(res, model, cv_on, cv_off),
+        "conveyors": _per_belt(res, model, cv_on, cv_off, unmanned_ends),
         "n_conveyors": getattr(res, "n_conveyors", 0),
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
@@ -529,7 +600,8 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
 
 
 def _per_belt(res: RunResult, model: WarehouseModel | None,
-              cv_on: list[dict], cv_off: list[dict]) -> dict:
+              cv_on: list[dict], cv_off: list[dict],
+              unmanned: list[dict] | None = None) -> dict:
     """Per-belt コンベア詰まり read-out — 1枚で「どのベルトで詰まっているか」.
 
     The line totals say the belt system is jammed; a chained line
@@ -543,8 +615,13 @@ def _per_belt(res: RunResult, model: WarehouseModel | None,
     the estimate, in the run and here. Unknown capacity (a legacy caller with no
     model, or a belt that is no longer drawn) ⇒ ``capacity`` 0 and ``utilization``
     0.0, with every other field still reported — never blocks.
+
+    ``unmanned`` (``pack_unmanned`` events) adds the third WHERE this table has to
+    answer: a full 引き込み and a slow 本線 are capacity problems, but a line END with
+    nobody drawn at it is a hole in the DRAWING — same table, different fix, so the
+    belt id has to travel with the count. 0 on every belt somebody stands at.
     """
-    if not cv_on and not cv_off:
+    if not cv_on and not cv_off and not unmanned:
         return {}
     caps: dict[str, int] = {}
     if model is not None:
@@ -570,6 +647,14 @@ def _per_belt(res: RunResult, model: WarehouseModel | None,
         steps.setdefault(b, []).append((float(e["t"]), 1))
     for e in cv_off:
         steps.setdefault(str(e.get("conveyor", "")), []).append((float(e["t"]), -1))
+    # ライン終端の無人: a load standing at the end never gets off, so it contributes
+    # no step of its own — it is counted per belt instead. ``setdefault`` keeps a
+    # belt that somehow appears ONLY here from losing its row (never-blocks).
+    stalled: dict[str, int] = {}
+    for e in unmanned or ():
+        b = str(e.get("conveyor", ""))
+        stalled[b] = stalled.get(b, 0) + 1
+        steps.setdefault(b, [])
 
     out: dict[str, dict] = {}
     for belt, pts in steps.items():
@@ -595,6 +680,8 @@ def _per_belt(res: RunResult, model: WarehouseModel | None,
             "block_ratio": d["blocked"] / d["boardings"] if d["boardings"] else 0.0,
             "time_to_first_block_s": d["first"],
             "wait_mean_s": statistics.fmean(d["waits"]) if d["waits"] else 0.0,
+            # 終端に人が居ないまま止まった荷 (0 = 誰かが立っている).
+            "unmanned": stalled.get(belt, 0),
         }
     return out
 
@@ -607,6 +694,11 @@ def _merge_per_belt(per: list[dict]) -> dict:
     never blocked in a given rep contributes no ``time_to_first_block_s`` (it has
     none), so that field is the mean over the reps where it DID block — and stays
     ``None`` when it never did, rather than being read as 0 s (「開始直後に詰まる」).
+
+    ``peak_occupancy`` is a MAXIMUM (``_PER_BELT_MAX_KEYS``), so it takes the
+    largest occupancy any replication reached: averaging it says 「14/20スロット」 for
+    a 本線 that ran full in one run, i.e. exactly hides the jam this table exists to
+    point at. A single replication is unaffected (max == mean of one sample).
     """
     belts: list[str] = []
     for rep in per:
@@ -618,9 +710,87 @@ def _merge_per_belt(per: list[dict]) -> dict:
         rows = [rep[b] for rep in per if b in rep]
         merged: dict = {}
         for key in rows[0]:
-            vals = [r[key] for r in rows if isinstance(r.get(key), (int, float))]
-            merged[key] = statistics.fmean(vals) if vals else None
+            vals = [float(r[key]) for r in rows if isinstance(r.get(key), (int, float))]
+            if not vals:
+                merged[key] = None
+            elif key in _PER_BELT_MAX_KEYS:
+                merged[key] = max(vals)
+            else:
+                merged[key] = statistics.fmean(vals)
         out[b] = merged
+    return out
+
+
+def _merge_measured_productivity(per: list[dict]) -> dict:
+    """Average 実測生産性 across replications — it is a nested dict, so the generic
+    loop kept replication #1 alone.
+
+    This is the number 「実測を採用」 writes into ``settings.productivity_overrides``,
+    from where it flows into 原価試算 and the 人員タイムチャート. Selling the cost
+    model one random day out of N is the same defect ``_merge_per_belt`` exists for,
+    with money on the other end. A process only some replications measured (its
+    resource was idle in the others) is averaged over the reps that measured it.
+    Rounded to 1 decimal like ``_measured_productivity`` itself, so a single
+    replication is byte-identical to the value it already reported.
+    """
+    acc: dict[str, list[float]] = {}
+    for rep in per:
+        for pid, rate in (rep or {}).items():
+            if isinstance(rate, (int, float)):
+                acc.setdefault(str(pid), []).append(float(rate))
+    return {pid: round(statistics.fmean(v), 1) for pid, v in acc.items()}
+
+
+def _merge_extrema(per: list[dict], agg: dict) -> dict:
+    """Combine the KPIs a mean would misreport, and describe the spread behind them.
+
+    Writes every ``"max"`` key of :data:`_EXTREMUM_KEYS` into ``agg`` as the largest
+    value observed, and takes its 「いつ」 companion (:data:`_MOMENT_OF`) from THAT
+    replication — the pairing is the point: a peak of 45 containers at t=3060 s in
+    run #3 must be reported as 45 at 3060 s, never as 35 at 2132 s (a level nobody
+    reached, at a moment nothing happened). Ties go to the earliest replication so
+    the choice is deterministic.
+
+    Returns the per-key spread block: 各回の 最小/最大/平均, how many replications
+    produced a value, how many were non-zero, which replication the maximum came
+    from, and the 95% CI of the per-run mean straight out of
+    :func:`_confidence_intervals`. That block is what makes the headline number
+    honest — a single figure that is silently 「the largest of 5 random days」 is no
+    better than a mean unless the read-out says so.
+
+    Pure over the per-replication dicts (plus the ``agg`` it writes into); a key no
+    replication produced is skipped (never-blocks).
+    """
+    ci = _confidence_intervals(per, keys=tuple(_EXTREMUM_KEYS))["metrics"]
+    out: dict = {}
+    for key, how in _EXTREMUM_KEYS.items():
+        xs = [(float(p[key]), i) for i, p in enumerate(per)
+              if isinstance(p.get(key), (int, float))]
+        if not xs:
+            continue          # e.g. a run that never jammed has no "when" at all
+        vals = [v for v, _ in xs]
+        top, rep = max(xs, key=lambda pair: (pair[0], -pair[1]))
+        entry = {
+            "how": how,
+            "value": top if how == "max" else agg.get(key),
+            "min": min(vals),
+            "max": top,
+            "mean": statistics.fmean(vals),
+            "n": len(vals),                          # reps that produced a value
+            "n_total": len(per),                     # reps in this run
+            "reps_nonzero": sum(1 for v in vals if v),
+        }
+        if how == "max":
+            entry["replication"] = rep + 1           # 1-based: where the max came from
+            agg[key] = top
+            moment = _MOMENT_OF.get(key)
+            if moment is not None and isinstance(per[rep].get(moment), (int, float)):
+                agg[moment] = float(per[rep][moment])
+                entry["moment_key"] = moment
+                entry["at_s"] = agg[moment]
+        if key in ci:
+            entry["ci"] = ci[key]
+        out[key] = entry
     return out
 
 
@@ -703,7 +873,17 @@ def _picker_breakdown(res: RunResult, model: WarehouseModel | None,
 
 
 def compute(results: list[RunResult], model: WarehouseModel | None = None) -> dict:
-    """Average per-replication KPIs and add a plain-language verdict.
+    """Combine per-replication KPIs — each key the way its own meaning demands —
+    and add a plain-language verdict.
+
+    A rate, a total, a utilisation or a count is averaged over the replications.
+    A MAXIMUM is not (:data:`_EXTREMUM_KEYS`): peaks take the largest value
+    observed and their 「いつ」 companion comes from that same replication, and the
+    nested read-outs (per-belt, 最混雑セル, 実測生産性) get their own merges because
+    the generic loop would keep replication #1 alone. Multi-rep runs publish the
+    ``spread`` block (各回の幅 + the 95% CI of the per-run mean) so a headline peak
+    can say what it is; a single replication has no spread and is byte-identical to
+    the historical output.
 
     When ``model`` is supplied, cost KPIs are sourced from ``model.settings``
     (first-class cost/ops settings); otherwise they fall back to the cost inputs
@@ -731,10 +911,21 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     agg["conveyors"] = _merge_per_belt([p["conveyors"] for p in per])
     # 通路干渉: same trap, same fix — the worst-cells table is a nested dict.
     agg["congestion"] = _merge_congestion([p["congestion"] for p in per])
+    # 実測生産性: same trap again, and this one is spent — 「実測を採用」 pushes it into
+    # productivity_overrides → 原価/人員, so rep #1 alone would price the proposal.
+    agg["measured_productivity"] = _merge_measured_productivity(
+        [p["measured_productivity"] for p in per])
     _firsts = [p["conveyor_time_to_first_block_s"] for p in per
                if isinstance(p["conveyor_time_to_first_block_s"], (int, float))]
     agg["conveyor_time_to_first_block_s"] = (statistics.fmean(_firsts)
                                              if _firsts else None)
+    # 平均してはいけないKPI: peaks become the observed maximum, their moment comes
+    # from that replication, and the spread behind each is published so the number
+    # can say which it is. n=1 ⇒ max == the single sample ⇒ nothing moves, and the
+    # block itself is withheld (there is no spread to report).
+    _spread = _merge_extrema(per, agg)
+    if len(per) > 1:
+        agg["spread"] = _spread
 
     # Bottleneck = the busiest stage (pickers, pack stations, AGV fleet, or the
     # 種まき put wall when total picking is in use).
@@ -831,10 +1022,39 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         belts = [(v.get("time_to_first_block_s"), b)
                  for b, v in (agg.get("conveyors") or {}).items()
                  if isinstance(v.get("time_to_first_block_s"), (int, float))]
-        when = (f"最初の詰まり: {first_block / 60:.0f}分" if first_block is not None
-                else f"手待ち率 {agg['conveyor_block_ratio'] * 100:.0f}%")
+        # Over several replications this is a MEAN over the runs that jammed, so it
+        # says so and adds the earliest one and how many runs jammed at all —
+        # 「最初の詰まり: 30分」 otherwise reads as "it always jams at 30 minutes"
+        # when three of five runs never jammed and one jammed at minute 10.
+        sp = (agg.get("spread") or {}).get("conveyor_time_to_first_block_s") or {}
+        if first_block is None:
+            when = f"手待ち率 {agg['conveyor_block_ratio'] * 100:.0f}%"
+        elif sp:
+            when = (f"最初の詰まり: 平均{first_block / 60:.0f}分"
+                    f"・最早{sp['min'] / 60:.0f}分"
+                    f"・{sp['n_total']:.0f}回中{sp['n']:.0f}回")
+        else:
+            when = f"最初の詰まり: {first_block / 60:.0f}分"
         where = f", ベルト{min(belts)[1]}" if belts else ""
         agg["verdict"] += f"。コンベアに滞留が出ています（{when}{where}）"
+    # ライン終端の無人: every 梱包台 already belongs to a 引き込み or a 停止線, so the
+    # load that no 引き込み pulled in reaches the end of the line and finds NOBODY —
+    # it stops there and the throughput collapses for a reason no capacity number
+    # explains. The cause is a hole in the drawing, so the sentence has to name the
+    # belt and the fix (draw a bench at the 停止線 / the line end) rather than read
+    # as 「梱包が足りない」. Nobody stalled ⇒ 0 ⇒ nothing appended (additive).
+    if agg.get("pack_unmanned_loads"):
+        stalled = agg["pack_unmanned_loads"]
+        worst = sorted(((v.get("unmanned") or 0, b)
+                        for b, v in (agg.get("conveyors") or {}).items()
+                        if (v.get("unmanned") or 0) > 0), reverse=True)
+        where = f"ベルト{worst[0][1]} の終端で " if worst else ""
+        seen = _reps_seen(agg, "pack_unmanned_loads")
+        agg["verdict"] += (
+            f"。⚠ ライン終端に梱包台（人）が居ません"
+            f"（{where}{_count(stalled)} 件が線上で停止{'・' + seen if seen else ''}）"
+            "— 梱包台は全て引き込み/停止線に割り当てられており、"
+            "末端まで来た荷を取る人が居ません。停止線／ライン終端に梱包台を描いてください")
     # 容器の有限循環: the pool is a constraint you can BUY your way out of, so it must
     # never hide inside "throughput was low". The peak is the number the customer
     # orders against (必要保有数の下限), and 投入待ち says the pool is already short.
@@ -842,8 +1062,17 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     if agg.get("container_pool_size"):
         peak = agg.get("containers_in_use_peak", 0.0)
         at_min = agg.get("containers_in_use_peak_t", 0.0) / 60.0
-        agg["verdict"] += (f"。容器は同時最大 {peak:.0f} 個使用"
-                           f"（{at_min:.0f}分時点・保有 {agg['container_pool_size']:.0f} 個）")
+        held = f"保有 {agg['container_pool_size']:.0f} 個"
+        # Across replications this is the LARGEST peak seen in N runs of the model
+        # (each a different random day) — not their average and not a year of
+        # operation. A rental quantity is read off this line, so it states which
+        # number it is and carries the spread the reader needs to judge it.
+        sp = (agg.get("spread") or {}).get("containers_in_use_peak") or {}
+        where_when = (
+            f"（{sp['n_total']:.0f}回中の最大・{at_min:.0f}分時点／各回 "
+            f"{sp['min']:.0f}〜{sp['max']:.0f} 個・平均 {sp['mean']:.0f} 個・{held}）"
+            if sp else f"（{at_min:.0f}分時点・{held}）")
+        agg["verdict"] += f"。容器は同時最大 {peak:.0f} 個使用{where_when}"
         if agg.get("container_wait_total_s", 0.0) > 0.0:
             agg["verdict"] += (
                 f"。容器待ちで投入が止まった時間 {agg['container_wait_total_s'] / 60.0:.0f}分"
@@ -865,14 +1094,21 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
     # 経路拘束: an agent drawn walking THROUGH a rack means the routing graph did
     # not see that rack, so the travel behind every number in this run is
     # understated. That is a correctness warning, not a tuning hint.
+    # Both counters are the WORST replication's (a mean would round 「5回中1回で
+    # 起きた」 to 0件 and print a warning against its own number), so over several
+    # runs they say so and add how often it happened at all.
     if agg.get("unroutable_legs"):
+        seen = _reps_seen(agg, "unroutable_legs")
         agg["verdict"] += (
             f"。⚠ 通路グラフで解決できず直線距離に縮退した移動が "
             f"{agg['unroutable_legs']:.0f} 件あります"
-            "（取込レイアウトの通路が塞がっていないか確認してください）")
+            f"（{seen + '・' if seen else ''}"
+            "取込レイアウトの通路が塞がっていないか確認してください）")
     if agg.get("path_violations"):
+        seen = _reps_seen(agg, "path_violations")
         agg["verdict"] += (
-            f"。⚠ 経路が棚を貫通しています（{agg['path_violations']:.0f}件）"
+            f"。⚠ 経路が棚を貫通しています（{agg['path_violations']:.0f}件"
+            f"{'・' + seen if seen else ''}）"
             "— レイアウトの棚定義を確認してください"
         )
     return agg

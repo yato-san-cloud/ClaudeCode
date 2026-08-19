@@ -24,7 +24,18 @@ them simply ignores them).
 kinds, so real sites write the meaning into the object NAME. We read it — see the
 long comment on ``_NAME_RULES`` for why, and ``docs/mapmaker-v5-import.md`` §5-3
 for the table itself. A drawing that uses none of that vocabulary imports exactly
-as before.
+as before. Two rules keep the reading from inventing things: the **head** of the
+name decides the kind (a note names the neighbours, so a rack address with a note
+must stay a rack address), and a **shelf is never reclassified** at all — it is
+the one object whose meaning the format itself records.
+
+**荷の種別** (``load_kind_from_name``): a 停止線 sorts loads by kind, and only a
+belt can say what it carries — 「本線コンベア｜荷=検品済オリコン」. With no kind on
+any belt the gate never matches anything and the mechanism the drawing describes
+never fires, so :func:`resolve_stop_gates` reads the kind three ways (explicit
+「荷=…」 → the belt's own name → the kind the stop line stops, stamped on the belts
+that feed it) and says which reading it used. What it never does is delete a drawn
+gate: the model is still being built when this returns.
 
 **MapMaker カスタム版 (v4.4+)**: the custom build appends 什器マスタ・割当・資産情報
 (and, from v4.9, コンベア) AFTER the serialized map so older MapMaker versions skip
@@ -74,13 +85,22 @@ def _num(v) -> float | None:
 # 手掛かり**なので、ここで読む。
 #
 # 規約は下の**1つの表**に集約する。判定は **NFKC 畳み込み + 部分一致**（半角カナ・
-# 全角英数・大小文字を吸収）、**先に載っている行が勝つ**（具体的な語を上に置く:
-# 「検品者」は「検品台」より上、「引き込みコンベア」は「梱包台」より上）。
-# 当たらなければ従来どおり type で分類する ＝ **規約語を1つも含まない図面の結果は
-# 1バイトも変わらない**（never blocks）。tag は種別ごとの副情報:
+# 全角英数・大小文字を吸収）。当たらなければ従来どおり type で分類する ＝ **規約語を
+# 1つも含まない図面の結果は 1バイトも変わらない**（never blocks）。tag は種別ごとの副情報:
 #   marker → 役割 / zone → ゾーン種別 / station → 役割 / conveyor → 本線か引き込みか /
 #   non_barrier → なぜ壁でないのか。
+#
+# **どの行が勝つか＝日本語の語順**（`_match_rules`）。名前は「修飾語＋その物」の形で
+# 書かれるので、**最後の名詞がその物**である:「引き込み3-梱包台07」は梱包台、
+# 「検品者用検品台01」は検品台、「本線コンベア用 停止位置マーカー」はマーカー。
+# 表の並び順で勝たせると先頭の修飾語が正体を乗っ取り、実図面の梱包台20台が
+# 1.4m のベルト20本になった。だから **種別(kind)は最も後ろで終わる語が決め**、
+# tag だけを**表の並び順（具体的な語が上）**で選ぶ ——「仕切り側 引き込みコンベア2」は
+# 最後の語がコンベア＝搬送設備、その中では「引き込み」が具体的なので spur。
 _NAME_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    # 規約語を含むが**対象外**の物（`classify_name` は None ＝ type で分類）。
+    # 「カーブミラー」は通路の鏡であってカーブコンベアではない。
+    ("ignore", "fixture", ("ミラー",)),
     # 表示・区画であって障壁ではない（壁として取り込むと経路が塞がる）
     ("non_barrier", "stop_line", ("停止線", "停止位置")),
     ("non_barrier", "partition", ("仕切り", "仕切", "区画線", "表示線")),
@@ -89,7 +109,9 @@ _NAME_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("marker", "inspector", ("検品者", "検査者", "検品作業者")),
     ("marker", "packer", ("梱包者", "梱包作業者")),
     ("marker", "picker", ("ピッカー", "ピッキング作業者")),
-    ("marker", "worker", ("立ち位置", "立位置", "作業者", "作業員")),
+    # 「マーカー」は図面上の点であって障壁でも什器でもない（「停止位置マーカー」は
+    # 停止線ではない ＝ ゲート解決の対象にしない）。
+    ("marker", "worker", ("立ち位置", "立位置", "作業者", "作業員", "マーカー")),
     # 搬送設備
     ("conveyor", "spur", ("引き込み", "引込み", "引込")),
     ("conveyor", "main", ("本線",)),
@@ -100,15 +122,20 @@ _NAME_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     # 作業台（実寸を持つ。長辺の向きが「誰がどこに立つか」を決める）
     ("station", "pack", ("梱包台",)),
     ("station", "inspect", ("検品台",)),
-    ("station", "bench", ("作業台",)),
+    ("station", "bench", ("作業台", "テーブル")),
     ("station", "infeed", ("投入口", "投入部")),
-    # 意味領域
+    # 意味領域。**「エリア」単独は入れない** — 「検品エリア」「バッファエリア」まで
+    # 積み付けになる。用途が名前に書かれている領域だけを拾い、書かれていなければ
+    # 従来どおり type に任せる（StationObject の大きな矩形は「検品場」そのもの）。
     ("zone", "receiving", ("入荷エリア", "入荷置き場", "入荷置場")),
     ("zone", "shipping", ("出荷エリア", "出荷置き場", "出荷置場")),
     ("zone", "packing", ("梱包エリア",)),
     ("zone", "picking", ("ピッキングエリア",)),
-    ("zone", "staging", ("積み付け", "積付け", "積付", "置き場", "置場", "エリア")),
+    ("zone", "staging", ("積み付け", "積付け", "積付", "置き場", "置場",
+                         "バッファ", "仮置き", "仮置")),
 )
+# `_NAME_RULES` の kind のうち「whsim の種別ではない」を表す擬似 kind。
+_IGNORE_KIND = "ignore"
 
 # 2段駆動コンベアの既定デッキ高さ (m)。名前に「床上NNNNmm」/「HNNNN」があれば
 # そちらが勝つ（図面が実測値を書いているのに既定で上書きしては嘘になる）。
@@ -117,6 +144,11 @@ _TIER_ELEVATION_M: tuple[tuple[str, float], ...] = (("下段", 0.35), ("上段",
 # 平面座標が m でも、名前に書かれた高さは mm 表記）なので図面スケールを掛けない。
 _FLOOR_HEIGHT_RE = re.compile(r"(?:床上|fl\s*\+|fl|h)\s*(\d{2,5})\s*(?:mm)?")
 _MAX_ELEVATION_MM = 10000.0
+# 注記側で高さ/段/向きを**そのまま1節として**書いた場合だけ拾うための全体一致
+# （理由は `_annotation_clauses`）。NFKC 畳み込み後なので全角＝半角。高さは
+# 「床上/H/FL+」の印を必須にする — 注記の裸の数字は長さ・列数・台数でもありうる。
+_PURE_HEIGHT_RE = re.compile(r"^(?:段\s*[=:]?\s*)?(?:床上|fl\s*\+?|h)\s*(\d{2,5})\s*(?:mm)?$")
+_PURE_TIER_RE = re.compile(r"^(?:段\s*[=:]?\s*)?(下段|上段)$")
 # 進行方向。取込は MapMaker の軸（x 右+ / y 下+ ・Y反転しない）をそのまま使うので
 # 北 = -y。
 _DIRECTION_VEC: dict[str, tuple[float, float]] = {
@@ -124,6 +156,18 @@ _DIRECTION_VEC: dict[str, tuple[float, float]] = {
 }
 _ARROW_RE = re.compile(r"([東西南北])\s*(?:→|->|=>|⇒|から)\s*([東西南北])")
 _HEADING_RE = re.compile(r"([東西南北])\s*(?:向き|向|行き|方向)")
+_PURE_ARROW_RE = re.compile(
+    r"^([東西南北])\s*(?:→|->|=>|⇒|から)\s*([東西南北])\s*(?:向き|向|行き|方向|へ)?$")
+_PURE_HEADING_RE = re.compile(r"^([東西南北])\s*(?:向き|向|行き|方向)$")
+# 注記を節に割る区切り。**空白では割らない** —「(下段本線 西→東 の上を戻る)」を
+# 空白で割ると「西→東」が単独の向き指定に見えて、他のベルトの流れでこのベルトを
+# 反転させてしまう。
+_CLAUSE_SPLIT_RE = re.compile(r"[()（）｜|、,。・/／\[\]［］【】〔〕]+")
+# 荷の種別 (`Conveyor.load_kind`) の明示宣言。「荷=検品済オリコン」「荷種:完成品」。
+# 何を運ぶかは形にも type にも無いので、書いてあれば読む・無ければ何も言わない
+# （推測しない ＝ 停止線のゲートが空振りしていることを黙って隠さない）。
+# 「入荷:」「出荷:」の末尾を掴まないよう直前の1文字を見る（部分一致なので）。
+_LOAD_KIND_RE = re.compile(r"(?<![入出手])(?:荷種|荷|積載)\s*[=:]\s*([^)）｜|、,。・/／\s]+)")
 # 本線を跨ぐ1本のベルトを、作図の都合で半分ずつ描いたときの語。
 _HALF_TOKENS = ("北半", "南半", "東半", "西半")
 # 名前の「識別子」と「注記」の境目。全角/半角の括弧と縦棒（MapMaker の名前欄は
@@ -132,19 +176,30 @@ _ANNOTATION_DELIMS = ("(", "（", "｜", "|", "[", "［", "【", "〔")
 _DEFAULT_BELT_SPEED_MPS = 0.5   # mirrors cad.py / mapmaker_kpi (rmpm has no speed)
 
 
+def _nfkc(s) -> str:
+    """NFKC-normalised text, case preserved (半角カナ/全角英数 → 標準形)."""
+    return unicodedata.normalize("NFKC", str(s or ""))
+
+
 def _fold(s) -> str:
     """NFKC-fold + lowercase, for tolerant substring matching (半角カナ/全角英数)."""
-    return unicodedata.normalize("NFKC", str(s or "")).lower()
+    return _nfkc(s).lower()
+
+
+def _cut(name) -> tuple[str, str]:
+    """A drawn name split at its FIRST annotation delimiter → ``(head, tail)``."""
+    s = str(name or "")
+    cut = len(s)
+    for d in _ANNOTATION_DELIMS:
+        i = s.find(d)
+        if 0 < i < cut:
+            cut = i
+    return s[:cut].strip(), s[cut:]
 
 
 def _split_annotation(name) -> str:
     """The drawn name minus its annotation tail, original case preserved."""
-    s = str(name or "")
-    for d in _ANNOTATION_DELIMS:
-        i = s.find(d)
-        if i > 0:
-            s = s[:i]
-    return s.strip()
+    return _cut(name)[0]
 
 
 def _head(name) -> str:
@@ -155,15 +210,48 @@ def _head(name) -> str:
     tails routinely mention OTHER kinds of object (「検品者立ち位置マーカー(西・仕切り
     付近)」 is a person standing near a partition, 「投入口(検品済オリコン→下段本線)」
     is a chute feeding the trunk), so matching the tail turns people into partitions
-    and chutes into trunk belts. Match the head first, the whole name only after."""
+    and chutes into trunk belts. **The head alone decides the kind** — a head that
+    says nothing is a bare code (`100-01-09`, `L-3`, `No.3`), i.e. an object whose
+    identity the drawing states by its TYPE, and reading its note instead turns a
+    rack address into whatever the draughtsman mentioned next to it."""
     return _fold(_split_annotation(name))
 
 
+def _annotation_clauses(name) -> list[str]:
+    """The annotation tail, folded and split into clauses.
+
+    Only used for the few facts that legitimately live in a note — the deck height
+    and the travel direction of THIS belt (「(床上900mm)」「(東向き)」). A clause
+    counts only when it is NOTHING BUT that fact: a note freely describes other
+    equipment (「(下段本線H900から分岐)」 is the TRUNK's deck, 「(還流は西向き・本線は
+    東向き)」 names two belts), and reading those as this belt's own reverses the
+    trunk — which inverts `points[0]`/`points[-1]` and with it the whole chain."""
+    tail = _cut(name)[1]
+    return [c.strip() for c in _CLAUSE_SPLIT_RE.split(_fold(tail)) if c.strip()]
+
+
 def _match_rules(s: str) -> tuple[str, str] | None:
-    for kind, tag, words in _NAME_RULES:
-        if any(w in s for w in words):
+    """``(kind, tag)`` for folded text ``s``: the LAST noun decides (see `_NAME_RULES`).
+
+    Kind = the rule word that ENDS furthest right (ties: the longer word, then the
+    table's order). Tag = the first row of THAT kind whose word appears at all, so
+    the table's specificity ordering still picks 引き込み over コンベア."""
+    best: tuple[int, int] | None = None
+    kind: str | None = None
+    for kd, _tag, words in _NAME_RULES:
+        for w in words:
+            i = s.rfind(w)
+            if i < 0:
+                continue
+            key = (i + len(w), len(w))
+            if best is None or key > best:
+                best, kind = key, kd
+    if kind is None:
+        return None
+    for kd, tag, words in _NAME_RULES:
+        if kd == kind and any(w in s for w in words):
             return kind, tag
-    return None
+    return None      # pragma: no cover — the winning kind always has a row
 
 
 def classify_name(name) -> tuple[str, str] | None:
@@ -171,53 +259,97 @@ def classify_name(name) -> tuple[str, str] | None:
 
     ``None`` means "fall back to the historical type-based classification", which
     is what keeps a drawing that follows no naming convention byte-identical."""
-    s = _fold(name)
-    if not s:
-        return None
-    return _match_rules(_head(name)) or _match_rules(s)
+    hit = _match_rules(_head(name))
+    return None if (hit is None or hit[0] == _IGNORE_KIND) else hit
+
+
+def _mm_to_m(mm) -> float | None:
+    """A height written in mm → metres, or ``None`` when it is not a plausible one."""
+    v = _num(mm)
+    return round(v / 1000.0, 3) if (v is not None and 0 < v <= _MAX_ELEVATION_MM) else None
 
 
 def _belt_elevation_m(name) -> float | None:
-    """Deck height (m) written into a belt's name, or ``None`` when unstated."""
-    s = _fold(name)
-    m = _FLOOR_HEIGHT_RE.search(s)
+    """Deck height (m) written into a belt's name, or ``None`` when unstated.
+
+    A measured height always beats a tier default (the drawing wrote the real
+    number), and the HEAD always beats the note — 「引き込み3 北半(下段本線H900から
+    分岐)」 states the TRUNK's deck, and taking it as the spur's own gave the two
+    halves different keys so the pair never merged back into one belt."""
+    head = _head(name)
+    m = _FLOOR_HEIGHT_RE.search(head)
     if m:
-        mm = _num(m.group(1))
-        if mm is not None and 0 < mm <= _MAX_ELEVATION_MM:
-            return round(mm / 1000.0, 3)
-    for word, ev in _TIER_ELEVATION_M:
-        if word in s:
+        ev = _mm_to_m(m.group(1))
+        if ev is not None:
             return ev
+    clauses = _annotation_clauses(name)
+    for c in clauses:
+        m = _PURE_HEIGHT_RE.match(c)
+        if m:
+            ev = _mm_to_m(m.group(1))
+            if ev is not None:
+                return ev
+    for word, ev in _TIER_ELEVATION_M:
+        if word in head:
+            return ev
+    for c in clauses:
+        m = _PURE_TIER_RE.match(c)
+        if m:
+            return dict(_TIER_ELEVATION_M)[m.group(1)]
     return None
 
 
 def _belt_direction(name) -> tuple[float, float] | None:
-    """Travel direction unit vector from 「東向き」/「北→南」, else ``None``."""
-    s = _fold(name)
-    m = _ARROW_RE.search(s)
+    """Travel direction unit vector from 「東向き」/「北→南」, else ``None``.
+
+    The head may say it any way it likes; a note only counts when the clause is
+    nothing but the direction, because notes describe the neighbours' flow
+    (「(還流は西向き・本線は東向き)」) and obeying that runs the trunk backwards."""
+    head = _head(name)
+    m = _ARROW_RE.search(head)
     if m:
         return _DIRECTION_VEC.get(m.group(2))
-    m = _HEADING_RE.search(s)
+    m = _HEADING_RE.search(head)
     if m:
         return _DIRECTION_VEC.get(m.group(1))
+    for c in _annotation_clauses(name):
+        m = _PURE_ARROW_RE.match(c)
+        if m:
+            return _DIRECTION_VEC.get(m.group(2))
+        m = _PURE_HEADING_RE.match(c)
+        if m:
+            return _DIRECTION_VEC.get(m.group(1))
     return None
 
 
 def _half_key(name) -> str | None:
     """Grouping key for a 「…北半」/「…南半」 pair, or ``None`` if not a half.
 
-    Only names that actually carry a half token group, so two decks that happen to
-    share a name are never merged into one belt. The key is built from the HEAD
-    with EVERY half token removed, because each half's note names the other one
-    (「北半(既設)｜南半と一体」 vs 「南半(既設)｜北半と一体」) — cancelling just the
-    first token found leaves the two names different and the pair never merges."""
-    s = _fold(name)
-    if not any(tok in s for tok in _HALF_TOKENS):
-        return None
+    Both the test and the key read the HEAD: a note routinely names the belt that
+    crosses this one (「本線コンベア(北半の引き込みと交差)」 is the trunk, not a half
+    of anything), and treating that as a half merged the trunk with an unrelated
+    spur 45 m away into one 50 m rectangle. EVERY half token is then removed,
+    because a head can name both (「北半・南半と一体」) — cancelling just the first
+    one found leaves the two names different and the pair never merges."""
     head = _head(name)
+    if not any(tok in head for tok in _HALF_TOKENS):
+        return None
     for tok in _HALF_TOKENS:
         head = head.replace(tok, "")
     return re.sub(r"\s+", "", head)
+
+
+def load_kind_from_name(name) -> str:
+    """荷の種別 (`Conveyor.load_kind`) declared in a belt's name, else ``""``.
+
+    What a belt CARRIES is neither in the geometry nor in the object type, and a
+    停止線 can only sort loads that carry a kind — so an explicit 「荷=検品済オリコン」
+    is read wherever it stands (head or note: it states this belt's own cargo, not
+    a neighbour's). Nothing is guessed: an unstated belt keeps the schema's ``""``
+    and the gate resolver says so out loud rather than reporting a gate that
+    sorts nothing."""
+    m = _LOAD_KIND_RE.search(_nfkc(name))
+    return m.group(1).strip() if m else ""
 
 
 def _strip_half(name: str) -> str:
@@ -471,7 +603,8 @@ def _merge_halves(members: list[dict]) -> dict:
             "name": _strip_half(first["name"]),
             "role": next((m["role"] for m in members if m.get("role")), None),
             "elev": next((m["elev"] for m in members if m.get("elev") is not None), None),
-            "dir": next((m["dir"] for m in members if m.get("dir")), None)}
+            "dir": next((m["dir"] for m in members if m.get("dir")), None),
+            "load_kind": next((m["load_kind"] for m in members if m.get("load_kind")), "")}
 
 
 def import_rmpm_bytes(data: bytes) -> dict:
@@ -520,6 +653,7 @@ def import_rmpm_bytes(data: bytes) -> dict:
     raw_bars: list[tuple[float, float, float, float, str, str]] = []
     raw_zones: list[tuple[float, float, float, float, str, str]] = []
     skipped: dict[str, int] = {}
+    shelf_name_conflicts: list[str] = []
     pick_markers = 0
     for o in objects:
         if not isinstance(o, dict):
@@ -533,11 +667,21 @@ def import_rmpm_bytes(data: bytes) -> dict:
         # The NAME decides first (see _NAME_RULES: the format carries no z axis and
         # only three kinds, so meaning lives in the name); the object TYPE is the
         # fallback, i.e. the historical behaviour for un-annotated drawings.
-        kind, tag = classify_name(name) or (None, "")
+        named = classify_name(name)
+        if t in _SHELF_TYPES and named:
+            # …with ONE exception: a shelf is the one object whose meaning the
+            # FORMAT records (FreeShelfObject IS 「名前を持つ棚」, and that name is a
+            # WMS rack address = the join key for stock). A rule matching inside a
+            # rack address must not delete the shelf — the drawn 棚 5 本 came back
+            # as 0 shelves, no storage zone, and every warning read like success.
+            shelf_name_conflicts.append(name)
+            named = None
+        kind, tag = named or (None, "")
         if kind == "conveyor" and max(w, h) > 0:
             raw_belts.append({"x": x, "y": y, "w": w, "h": h, "name": name,
                               "role": tag, "elev": _belt_elevation_m(name),
-                              "dir": _belt_direction(name)})
+                              "dir": _belt_direction(name),
+                              "load_kind": load_kind_from_name(name)})
         elif kind == "marker":
             raw_marks.append((x, y, w, h, name, tag))
         elif kind == "non_barrier" and w > 0 and h > 0:
@@ -673,6 +817,10 @@ def import_rmpm_bytes(data: bytes) -> dict:
             # 2段駆動コンベアの上段/下段は同じ平面座標に2本ある。高さだけが両者を
             # 分けるので、片方を「重複」として捨ててはいけない (both are kept).
             cv["elevation_m"] = b["elev"]
+        if b.get("load_kind"):
+            # 荷の種別。書かれていなければキーごと出さない ＝ スキーマ既定の "" ＝
+            # 従来どおり「1種類の荷が流れるベルト」。
+            cv["load_kind"] = b["load_kind"]
         conveyors.append(cv)
 
     markers = []
@@ -720,9 +868,20 @@ def import_rmpm_bytes(data: bytes) -> dict:
     if low_walls:
         warnings.append(f"高さ 1.2m 以下の低い壁が {low_walls} 件あります。"
                         + _CONVEYOR_FOOTPRINT_NOTE)
+    if shelf_name_conflicts:
+        # 黙って棚のままにするのではなく、食い違いを見せる（never blocks）。
+        sample = "・".join(shelf_name_conflicts[:3])
+        warnings.append(
+            f"棚として描かれた {len(shelf_name_conflicts)} 件は名前が別の設備を"
+            f"指していますが（例: {sample}）、形式上は棚なので棚のまま取り込みました。"
+            "設備として扱うなら作業台/壁として描き直すか、設計タブで置き換えてください。")
     if conveyors:
         warnings.append(f"名前から搬送設備と判定した {len(conveyors)} 件を"
                         "コンベアとして取り込みました（作業台にはしていません）。")
+    kinds = sorted({c["load_kind"] for c in conveyors if c.get("load_kind")})
+    if kinds:
+        warnings.append(f"ベルト名から荷の種別 {'・'.join(kinds)} を読み取りました"
+                        "（停止線の選択停止はこの種別で判定します）。")
     if merged:
         warnings.append(f"北半/南半 に分けて描かれたコンベア {merged} 組を、"
                         "本線を跨ぐ1本のコンベアとして結合しました。")
@@ -755,14 +914,20 @@ def import_rmpm_bytes(data: bytes) -> dict:
 # 図面が言えるのは「ゲートがどのベルトのどこにあるか」まで。何が止まって何が通るかは
 # 意思なので、名前が書いていればそれを読み、書いていなければ**何も止めないゲート**
 # として置く（never blocks: 置いただけでは挙動は1バイトも変わらない）。
+# 仕分けが成立するには**3つ**が要る: 位置（図面）・止める種別（停止線の名前）・
+# 荷の種別（ベルトの名前）。3つ目が無いゲートは動かないので、動くふりをしない。
 _STOP_RULE_RE = re.compile(r"([^｜|、,。・/\s（(]+?)\s*(?:は|が)\s*[^、,。・｜|]{0,8}?(停止|通過)")
 
 
 def stop_rule_from_name(name) -> dict[str, list[str]]:
-    """「検品済オリコンは停止・完成品はカーブへ通過」 → 止まる荷と通る荷."""
+    """「検品済オリコンは停止・完成品はカーブへ通過」 → 止まる荷と通る荷.
+
+    Subjects come back NFKC-normalised, because they are matched against the
+    kinds belts stamp (`load_kind_from_name`) and 半角カナ on one drawing and
+    全角 on the other must not read as two different loads."""
     stop: list[str] = []
     pas: list[str] = []
-    for subject, verb in _STOP_RULE_RE.findall(str(name or "")):
+    for subject, verb in _STOP_RULE_RE.findall(_nfkc(name)):
         s = subject.strip(" 　")
         if not s or s in ("停止線", "停止位置"):
             continue
@@ -822,12 +987,83 @@ def _project(pts: list, m: tuple[float, float]) -> tuple[float, float, float] | 
     return best
 
 
-def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> int:
-    """Attach each drawn 停止線 to the belt it governs, in place. Returns how many.
+def _fed_by_another_belt(cv: dict, conveyors: list[dict]) -> bool:
+    """True when goods reach ``cv`` FROM another drawn belt (hand-over or branch).
+
+    Uses the one join rule (:mod:`whsim.beltgeom`) both the engine and the oracle
+    use, rather than a third copy of "these two touch"."""
+    from whsim import beltgeom
+    pts = cv.get("points") or []
+    if len(pts) < 2:
+        return False
+    others = [(str(c.get("id") or ""), c.get("points") or [])
+              for c in conveyors if c is not cv and len(c.get("points") or []) >= 2]
+    if beltgeom.attach(pts[0], others) is not None:
+        return True                        # its infeed sits on another belt's path
+    mine = [(str(cv.get("id") or ""), pts)]
+    return any(beltgeom.attach(o[-1], mine) is not None for _bid, o in others)
+
+
+def _kind_carried(cv: dict, named: list[str]) -> str:
+    """The gate-named 荷の種別 written into this belt's own name, else ``""``.
+
+    Closed-world on purpose: only a kind some 停止線 already names can be read off
+    a belt, so this can never invent a load. The HEAD only — a note names the
+    neighbours' cargo (「本線コンベア(検品済オリコン→梱包)」 is a trunk that carries
+    BOTH kinds, and stamping it with one would sort the other one wrongly)."""
+    head = _head(cv.get("name") or cv.get("id"))
+    hits = [k for k in named if k and _fold(k) in head]
+    return max(hits, key=lambda k: (len(k), k)) if hits else ""
+
+
+def _upstream_belts(cv: dict, conveyors: list[dict]) -> list[dict]:
+    """``cv`` plus every belt a load reaching it can have ridden, transitively.
+
+    Two joints, the same two the engine's chain is built from: a belt that
+    DISCHARGES onto this one hands its loads over, and the belt this one BRANCHES
+    off (our infeed sits on its path) is where a 引き込み's loads come from. These
+    are the belts a load riding into ``cv``'s gate can have boarded, which is where
+    荷の種別 has to be stamped for that gate to sort anything (the engine stamps at
+    boarding and the kind then travels with the load). Same join rule as everywhere
+    else (:mod:`whsim.beltgeom`); the walk is bounded by the belt count so a
+    mis-drawn loop terminates."""
+    from whsim import beltgeom
+    chain = [cv]
+    seen = {id(cv)}
+    i = 0
+    while i < len(chain) and len(chain) <= len(conveyors):
+        cur, i = chain[i], i + 1
+        pts = cur.get("points") or []
+        if len(pts) < 2:
+            continue
+        target = [(str(cur.get("id") or ""), pts)]
+        host = beltgeom.attach(pts[0], [(str(c.get("id") or ""), c.get("points") or [])
+                                        for c in conveyors if c is not cur])
+        for other in conveyors:
+            op = other.get("points") or []
+            if id(other) in seen or len(op) < 2:
+                continue
+            if (beltgeom.attach(op[-1], target) is not None
+                    or (host is not None and str(other.get("id") or "") == host[0])):
+                seen.add(id(other))
+                chain.append(other)
+    return chain
+
+
+def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> dict:
+    """Attach each drawn 停止線 to the belt it governs, in place.
+
+    Returns ``{"positioned", "armed", "pending", "dropped", "kinds", "warnings"}``
+    — gates PLACED, gates that sort right now, gates still waiting for a belt to
+    declare their 荷の種別, stop lines refused, the kinds belts carry, and what to
+    tell the user. **positioned ≠ armed**, but a pending gate is KEPT: the model is
+    edited after this returns (entry belts are given their kind in a later step),
+    so an importer that deletes a drawn gate because the model is not finished yet
+    would silently double the line's capacity (measured: 434 → 846 件/h).
 
     A 停止線 is drawn ACROSS the flow, so the drawing already says both which belt
     and where on it — asking the user to retype that would be asking for what we can
-    already see. Two things keep the reading honest:
+    already see. Four things keep the reading honest:
 
     * **Drawn lines miss by centimetres.** The line is put at the belt's END, which
       in practice lands just past the last drawn segment (P3: belt ends x=36.5, line
@@ -838,8 +1074,25 @@ def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> int:
       還流 starting back, the カーブ starting on): picking the geometrically nearest
       would put the gate on whichever was drawn closest. Requiring the line to be
       DOWNSTREAM (ahead along travel) leaves exactly the belt whose goods arrive at
-      it. A line that no belt runs into is left alone — it is a floor marking."""
-    hits = 0
+      it. A line that no belt runs into is left alone — it is a floor marking.
+      Equidistant belts tie by **belt id**, the same tie-break the join rule uses,
+      so swapping two objects in the file cannot swap the answer.
+    * **A gate sorts 荷の種別, and only a belt can state one.** The engine stamps
+      the kind of the belt a load BOARDS and it then travels with the load, so a
+      belt that states nothing stamps ``""`` and no ``stop_states`` ever matches —
+      the mechanism the drawing describes never fires. Three readings, in order:
+      an explicit 「荷=検品済オリコン」 on a belt; the kind written into a belt's own
+      name (closed-world: only kinds a 停止線 already names); and finally, for a
+      gate whose 止める荷 nothing declares, the belts that FEED that gate are
+      stamped with it — the loads arriving at a stop line are, by construction, the
+      loads it stops. Every inference is said out loud in a warning, and an
+      explicit statement always wins.
+    * **One belt, one gate.** ``Conveyor.stop_gate`` is a single gate, so a second
+      stop line on the same belt cannot be honoured. The one FURTHEST UPSTREAM is
+      kept (a load stopped there never reaches the other) and the other is refused
+      out loud — never silently overwritten."""
+    warnings: list[str] = []
+    placed: list[tuple[dict, dict]] = []      # (conveyor, gate) in drawing order
     for bar in non_barriers:
         if bar.get("kind") != "stop_line":
             continue
@@ -847,7 +1100,7 @@ def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> int:
         if len(bp) < 2:
             continue
         mid = ((bp[0][0] + bp[-1][0]) / 2, (bp[0][1] + bp[-1][1]) / 2)
-        best = None                       # (crossed, perp, arc, conveyor)
+        best = None                       # (key, arc, perp, crossed, conveyor)
         for cv in conveyors:
             pts = cv.get("points") or []
             if len(pts) < 2:
@@ -860,7 +1113,10 @@ def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> int:
                           for i in range(len(pts) - 1))
             if not crossed and (perp > _GATE_SNAP_M or fwd < -1e-9):
                 continue                  # too far, or the line is upstream of it
-            key = (0 if crossed else 1, perp)
+            # Ties by belt id (mirrors beltgeom.attach): two belts the same
+            # distance away must resolve the same way whatever order they were
+            # drawn in, or the model changes when somebody re-saves the drawing.
+            key = (0 if crossed else 1, perp, str(cv.get("id") or ""))
             if best is None or key < best[0]:
                 best = (key, arc, perp, crossed, cv)
         if best is None:
@@ -874,9 +1130,117 @@ def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> int:
             # Not proof, just the best reading — say how far off so it is auditable.
             gate["snapped_m"] = round(perp, 3)
         gate.update(stop_rule_from_name(bar.get("name")))
+        placed.append((cv, gate))
+
+    # --- 荷の種別: what the belts carry, so the rules can be checked -----------
+    named: list[str] = []
+    for _cv, gate in placed:
+        for k in list(gate.get("stop_states") or []) + list(gate.get("pass_states") or []):
+            if k not in named:
+                named.append(k)
+    read_off_name: list[str] = []
+    for cv in conveyors:
+        if not cv.get("load_kind"):
+            k = _kind_carried(cv, named)
+            if k:
+                cv["load_kind"] = k
+                read_off_name.append(f"{cv.get('id')}={k}")
+    if read_off_name:
+        warnings.append("停止線が名指しした荷の種別をベルト名から読み取りました: "
+                        + "・".join(read_off_name) + "。")
+    carried = {str(cv["load_kind"]) for cv in conveyors if cv.get("load_kind")}
+    handed_over = sorted(str(cv.get("id")) for cv in conveyors if cv.get("load_kind")
+                         and _fed_by_another_belt(cv, conveyors))
+    if handed_over:
+        # Honoured, but say what it can and cannot do: the kind is stamped where a
+        # load first boards, so on a belt fed by another one it only applies to
+        # loads that start there — goods handed over keep the kind they boarded with.
+        warnings.append(
+            f"{'・'.join(handed_over)} は他のベルトから荷を受けています。荷の種別は"
+            "最初に載ったベルトが決めるので、受け継いだ荷の種別は変わりません"
+            "（このベルトに直接載る荷にだけ効きます）。")
+
+    # --- one gate per belt (`Conveyor.stop_gate` is a single gate) --------------
+    keep: dict[int, tuple[dict, dict]] = {}
+    dropped = 0
+    for cv, gate in placed:
+        prev = keep.get(id(cv))
+        if prev is None:
+            keep[id(cv)] = (cv, gate)
+            continue
+        dropped += 1
+        # 上流側を残す: a load stopped at the first gate never reaches the second,
+        # so the upstream one is the one the line actually obeys.
+        old = prev[1]
+        win, lose = ((gate, old) if (gate["at_m"], str(gate["source"]))
+                     < (old["at_m"], str(old["source"])) else (old, gate))
+        keep[id(cv)] = (cv, win)
+        warnings.append(
+            f"コンベア「{cv.get('id')}」には停止線が2本以上かかっています。"
+            f"上流側の「{win['source']}」だけをゲートにし、「{lose['source']}」は"
+            "見送りました（1本のベルトに設定できるゲートは1つです）。")
+    # --- 止まる荷は、そのゲートへ荷を運ぶベルトが押している -----------------------
+    # 停止線が「検品済オリコンは停止」と書いているなら、そのゲートに着く荷は
+    # 検品済オリコンである（それが止まる荷なのだから）。どのベルトも種別を宣言して
+    # いないときに限り、ゲートのベルトとその上流にその種別を押す。宣言があれば
+    # 触らない。**推定であることは警告で言う**。
+    # ゲートを見る順はベルトIDで固定する（作図順ではない）: 2つのゲートの上流が
+    # 重なっている図面で、停止線の並び順によって押される種別が変わってはいけない。
+    for cv, gate in sorted(keep.values(),
+                           key=lambda p: (str(p[0].get("id") or ""), p[1]["at_m"])):
+        stop_states = list(gate.get("stop_states") or [])
+        if not stop_states:
+            continue                      # 通す荷だけ ＝ 押すべき種別が書かれていない
+        # 還流ベルトは空容器を戻す脚（名前がそう言っている）。同じ平面座標を共有する
+        # ので幾何上は上流に見えるが、そこに荷の種別を押すのは図面より踏み込みすぎ。
+        chain = [c for c in _upstream_belts(cv, conveyors) if c.get("role") != "return"]
+        if not chain or any(c.get("load_kind") for c in chain):
+            continue                      # 図面が言っている方が強い
+        k = stop_states[0]
+        for c in chain:
+            c["load_kind"] = k
+        carried.add(k)
+        warnings.append(
+            f"「{gate['source']}」が止める荷「{k}」を、ゲートへ荷を運ぶベルト "
+            + "・".join(str(c.get("id")) for c in chain)
+            + " の荷の種別として推定しました（図面が種別を書いていないため。"
+              "違う場合はベルト名に「荷=…」を書いてください）。")
+
+    armed = 0
+    pending: list[str] = []
+    for cv, gate in keep.values():
+        stop_states = list(gate.get("stop_states") or [])
+        pass_states = list(gate.get("pass_states") or [])
+        # Mirrors the engine's three-valued selection (`build.StopGate.stops`):
+        # 止める荷 wins when written, otherwise everything NOT passing stops.
+        if stop_states:
+            if set(stop_states) & carried:
+                armed += 1
+            else:
+                # The rule STAYS as drawn — the model is edited after this import
+                # (the entry belts get their 荷の種別 in a later step), and an
+                # importer that deletes the gate because the model is not finished
+                # yet silently doubles the line's capacity. Say what it waits for.
+                pending.append(f"{gate['source']}（{'・'.join(stop_states)}）")
+        elif pass_states:
+            # 通す荷しか書かれていない ＝ 種別を宣言していない荷は全部止まる。それが
+            # 図面の言っていることなので効かせるが、意図と違うなら分かるように言う。
+            armed += 1
+            if any(not c.get("load_kind") for c in conveyors):
+                warnings.append(
+                    f"「{gate['source']}」は通す荷「{'・'.join(pass_states)}」だけを"
+                    "書いています。荷の種別が書かれていないベルトの荷は、すべて"
+                    "このゲートで停止します（止める荷も書くか、通る荷を運ぶベルトに"
+                    "「荷=…」を書いてください）。")
         cv["stop_gate"] = gate
-        hits += 1
-    return hits
+    if pending:
+        warnings.append(
+            f"停止線 {len(pending)} 本はゲートとして残しましたが、止める荷の種別を"
+            "宣言しているベルトがまだありません: " + "・".join(pending)
+            + "。どれかのベルトが `load_kind` にこの値を持つまで、このゲートは"
+              "何も止めません（ベルト名に「荷=…」を書くか、設計側で設定してください）。")
+    return {"positioned": len(keep), "armed": armed, "pending": len(pending),
+            "dropped": dropped, "kinds": sorted(carried), "warnings": warnings}
 
 
 def _empty(warnings: list[str]) -> dict:

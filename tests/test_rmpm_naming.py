@@ -137,6 +137,27 @@ def test_direction_word_flips_the_polyline():
     assert north["points"][0][1] > north["points"][1][1]   # 北 = -y（Y反転しない）
 
 
+def test_a_direction_written_about_another_belt_is_not_obeyed():
+    """注記は隣のベルトの流れを平気で書く。それを自分の向きとして読むと本線が
+    逆走し、`points[0]`/`points[-1]` が入れ替わって連鎖の上下流ごと反転する。"""
+    trunk = _imp([{"type": "StationObject", "id": 1, "x": 10000, "y": 20000,
+                   "w": 30000, "h": 600,
+                   "name": "本線コンベア(還流は西向き・本線は東向き)"}])["conveyors"][0]
+    assert trunk["points"] == [[10.0, 20.3], [40.0, 20.3]], "東（＝作図順）のまま"
+    ret = _imp([{"type": "StationObject", "id": 1, "x": 10000, "y": 20000,
+                 "w": 30000, "h": 600,
+                 "name": "還流コンベア(下段本線 西→東 の上を戻る)"}])["conveyors"][0]
+    assert ret["points"] == [[10.0, 20.3], [40.0, 20.3]]
+    # 「(本線は東向き)」だけを見て短辺方向の指定と誤認 → 嘘の警告も出さない
+    spur = _imp([{"type": "StationObject", "id": 1, "x": 10000, "y": 5000,
+                  "w": 600, "h": 20000, "name": "引き込みコンベア5(本線は東向き)"}])
+    assert not any("長辺と直交" in w for w in spur["warnings"])
+    # 一方、その節が向きそのものなら従来どおり効く
+    west = _imp([{"type": "StationObject", "id": 1, "x": 10000, "y": 20000,
+                  "w": 30000, "h": 600, "name": "検品コンベア(既設・西向き)"}])["conveyors"][0]
+    assert west["points"] == [[40.0, 20.3], [10.0, 20.3]]
+
+
 def test_direction_across_the_short_side_is_reported_not_obeyed():
     res = _imp([{"type": "StationObject", "id": 1, "x": 10000, "y": 5000,
                  "w": 600, "h": 20000, "name": "引き込みコンベア(東向き)"}])
@@ -187,6 +208,37 @@ def test_halves_of_two_decks_merge_per_deck():
     assert len(res["conveyors"]) == 2, "段をまたいで結合してはいけない"
     assert [c["elevation_m"] for c in res["conveyors"]] == [0.35, 0.95]
     assert res["stats"]["merged_conveyors"] == 2
+
+
+def test_a_note_about_the_trunks_deck_does_not_split_the_halves():
+    """注記の高さは**隣のベルトの段**であることがある。それを自分の段として読むと
+    結合キーの段部分がズレて、1本のベルトが本線で切れた2本のまま出てしまう。"""
+    res = _imp([
+        {"type": "StationObject", "id": 1, "x": 20000, "y": 5000, "w": 600, "h": 8000,
+         "name": "引き込みコンベア3 北半(下段本線H900から分岐)"},
+        {"type": "StationObject", "id": 2, "x": 20000, "y": 15000, "w": 600, "h": 8000,
+         "name": "引き込みコンベア3 南半(既設)"},
+    ])
+    assert len(res["conveyors"]) == 1 and res["stats"]["merged_conveyors"] == 1
+    assert res["conveyors"][0]["points"] == [[20.3, 5.0], [20.3, 23.0]]
+    assert "elevation_m" not in res["conveyors"][0]     # 自分の段は書かれていない
+    # 自分の段が注記に**単独で**書かれていれば、従来どおり読む
+    solo = _imp([{"type": "StationObject", "id": 1, "x": 0, "y": 0, "w": 20000,
+                  "h": 600, "name": "本線コンベア(床上900mm)"}])["conveyors"][0]
+    assert solo["elevation_m"] == 0.9
+
+
+def test_a_note_mentioning_the_other_half_does_not_make_a_belt_a_half():
+    """「北半の引き込みと交差」は交差相手の名前。これで本線を「半分」に見なすと、
+    45m 離れた無関係のベルトと1本の巨大な矩形に結合される。"""
+    res = _imp([
+        {"type": "StationObject", "id": 1, "x": 0, "y": 20000, "w": 40000, "h": 600,
+         "name": "本線コンベア(北半の引き込みと交差)"},
+        {"type": "StationObject", "id": 2, "x": 50000, "y": 5000, "w": 600, "h": 8000,
+         "name": "本線コンベア 北半"},
+    ])
+    assert len(res["conveyors"]) == 2 and res["stats"]["merged_conveyors"] == 0
+    assert res["conveyors"][0]["points"] == [[0.0, 20.3], [40.0, 20.3]]
 
 
 # --- 6. 作業台: 実寸 (w/d) を保つ ---------------------------------------------
@@ -251,6 +303,46 @@ def test_classification_is_nfkc_folded_and_substring_based():
     # 具体的な行が先に勝つ（立ち位置は「梱包台」を含んでいても作業台ではない）
     assert rmpm.classify_name("梱包作業者01 立ち位置(梱包台01)") == ("marker", "packer")
     assert rmpm.classify_name("梱包台01") == ("station", "pack")
+
+
+# 名前は「修飾語＋その物」で書かれる ＝ **最後の名詞がその物**。表の並び順で勝たせると
+# 先頭の修飾語が正体を乗っ取り、実図面の梱包台20台が 1.4m のベルト20本になった
+# （しかも「搬送設備として取り込みました」と成功のように報告された）。
+_LAST_NOUN_CASES = [
+    ("引き込み3-梱包台07", ("station", "pack")),      # 梱包台であってベルトではない
+    ("引込2 梱包台12", ("station", "pack")),
+    ("検品者用検品台01", ("station", "inspect")),      # 台であって人ではない
+    ("検品作業者テーブル", ("station", "bench")),
+    ("梱包作業台01", ("station", "bench")),
+    ("仕切り側 引き込みコンベア2", ("conveyor", "spur")),  # 仕切りではない・本線でもない
+    ("排出部の仕切り", ("non_barrier", "partition")),
+    ("本線コンベア用 停止位置マーカー", ("marker", "worker")),  # 停止線ではない
+    ("梱包台01付近の立ち位置", ("marker", "worker")),
+    ("投入口コンベア", ("conveyor", "belt")),
+    ("ベルトコンベヤ 上段還流", ("conveyor", "return")),
+    ("カーブ排出部", ("conveyor", "discharge")),
+    ("バッファエリア", ("zone", "staging")),
+    ("パレット置場", ("zone", "staging")),
+    # 規約語を含むが対象外 → None ＝ 従来どおり type で分類（never blocks）
+    ("カーブミラー", None),
+    ("検品エリア", None),          # 「*エリア は積み付け」をやめた（検品場は作業場）
+]
+
+
+def test_the_last_noun_says_what_the_object_is():
+    for name, want in _LAST_NOUN_CASES:
+        assert rmpm.classify_name(name) == want, name
+
+
+def test_a_bench_named_after_its_pull_in_is_a_bench():
+    """実図面で 20 台の梱包台が 20 本の 1.4m ベルトになり、梱包能力が丸ごと消えた。"""
+    res = _imp([{"type": "StationObject", "id": i, "x": 10000 + 1500 * i, "y": 20000,
+                 "w": 900, "h": 1400, "name": f"引き込み{i // 4 + 1}-梱包台{i + 1:02d}"}
+                for i in range(20)])
+    assert res["conveyors"] == []
+    assert len(res["stations"]) == 20
+    assert {s["role"] for s in res["stations"]} == {"pack"}
+    assert [s["count"] for s in res["stations"]] == [1] * 20
 
 
 # --- 7. 後方互換: 規約語ゼロの図面は従来と完全一致 -----------------------------
@@ -322,11 +414,51 @@ def test_annotation_naming_another_object_does_not_hijack_the_kind():
     assert res["conveyors"] == []
 
 
-def test_head_loses_to_the_whole_name_only_when_the_head_says_nothing():
-    """注記だけが語彙を持つ名前は、従来どおり全文で拾う（取りこぼさない）。"""
+def test_a_head_that_says_nothing_is_a_code_not_its_neighbour():
+    """**この期待値は反転させた**（以前は「頭が無言なら全文で拾う」を固定していた）。
+
+    頭が無言の名前は、たいてい**そのものが番地**（`100-01-09` / `L-3` / `No.3`）で、
+    括弧の中は隣にある別の設備の名前でしかない。全文にフォールバックすると
+    「棚の名前が隣の設備の名前になる」＝実データで **描かれた棚5本が0本**になり、
+    保管ゾーンごと消えた（警告はどれも成功のように読めた）。取りこぼす方が
+    黙って壊すよりましなので、**種別は頭だけで決める**。"""
     res = _imp([{"type": "StationObject", "id": 1, "x": 1000, "y": 1000,
-                 "w": 20000, "h": 600, "name": "L-3(本線コンベア)"}])
-    assert [c["role"] for c in res["conveyors"]] == ["main"]
+                 "w": 20000, "h": 600, "name": "L-3(本線コンベア)"},
+                {"type": "WallObject", "id": 2, "x": 0, "y": 30000,
+                 "w": 20000, "h": 200, "name": "W-12(停止線と平行)"}])
+    assert res["conveyors"] == []
+    assert [s["id"] for s in res["stations"]] == ["L-3(本線コンベア)"]
+    # 躯体は躯体のまま（注記で壁が非障壁になると建屋に穴が開く）
+    assert len(res["walls"]) == 1 and res["non_barriers"] == []
+
+
+def test_a_drawn_shelf_is_never_reclassified_by_its_name():
+    """棚は**形式が種別を記録している唯一の型**。名前（WMSの棚番地＋作図メモ）で
+    上書きすると、図面の棚が丸ごとマーカー/区画線/ベルトに化けて在庫の置き場が
+    消える。実データ相当（5本の棚に普通の注記）で 0 本になっていた。"""
+    res = _imp([
+        {"type": "FreeShelfObject", "id": 1, "x": 10000, "y": 10000,
+         "w": 1150, "h": 2500, "name": "100-01-09(検品者側)"},
+        {"type": "FreeShelfObject", "id": 2, "x": 12000, "y": 10000,
+         "w": 1150, "h": 2500, "name": "100-01-10(停止線の手前)"},
+        {"type": "FreeShelfObject", "id": 3, "x": 14000, "y": 10000,
+         "w": 1150, "h": 2500, "name": "AAA-00-02（仕切り沿い）"},
+        {"type": "FreeShelfObject", "id": 4, "x": 16000, "y": 10000,
+         "w": 1150, "h": 2500, "name": "B-12-03(梱包エリア向かい)"},
+        {"type": "FreeShelfObject", "id": 5, "x": 18000, "y": 10000,
+         "w": 1150, "h": 2500, "name": "C-01-01(本線コンベア沿い)"},
+        # 頭に規約語が入ってしまった棚も棚のまま（型が種別を言っている）
+        {"type": "FreeShelfObject", "id": 6, "x": 20000, "y": 10000,
+         "w": 1150, "h": 2500, "name": "積み付けエリア棚1"},
+    ])
+    shelves = [s for z in res["zones"] for s in z.get("shelves", [])]
+    assert len(shelves) == 6, "描かれた棚は1本残らず棚のまま"
+    assert any(z["id"] == "storage" for z in res["zones"])
+    assert res["markers"] == [] and res["conveyors"] == [] and res["stations"] == []
+    assert res["non_barriers"] == []
+    assert [z["id"] for z in res["zones"]] == ["storage"]
+    # 食い違いは黙らない（棚のままにしたことを言う）
+    assert any("棚のまま" in w for w in res["warnings"])
 
 
 def test_halves_that_name_each_other_still_merge():
@@ -365,40 +497,41 @@ def test_stop_line_without_a_rule_stops_nothing():
 
 def _gate_of(objects):
     res = rmpm.import_rmpm_bytes(_doc(objects))
-    n = rmpm.resolve_stop_gates(res["conveyors"], res["non_barriers"])
-    return n, res["conveyors"]
+    g = rmpm.resolve_stop_gates(res["conveyors"], res["non_barriers"])
+    return g, res["conveyors"]
 
 
 def test_stop_line_lands_on_the_belt_it_crosses():
-    n, cvs = _gate_of([
+    """位置は図面が言える。**止める荷が言えているかは別**（下の 荷の種別 の節）。"""
+    g, cvs = _gate_of([
         {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
-         "name": "本線コンベア(東向き)"},
+         "name": "本線コンベア(東向き)｜荷=検品済オリコン"},
         {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
          "name": "停止線｜検品済オリコンは停止"},
     ])
-    assert n == 1
-    g = cvs[0]["stop_gate"]
-    assert g["at_m"] == 15.05 and g["stop_states"] == ["検品済オリコン"]
-    assert "snapped_m" not in g          # 実際に跨いでいる = スナップではない
+    assert (g["positioned"], g["armed"]) == (1, 1)
+    gate = cvs[0]["stop_gate"]
+    assert gate["at_m"] == 15.05 and gate["stop_states"] == ["検品済オリコン"]
+    assert "snapped_m" not in gate       # 実際に跨いでいる = スナップではない
 
 
 def test_stop_line_just_past_the_belt_end_still_lands_on_it():
     """図面では線はベルト端の少し先に引かれる（実データは 0.3 m 先）。"""
-    n, cvs = _gate_of([
+    g, cvs = _gate_of([
         {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 24400, "h": 600,
          "name": "本線コンベア(東向き)"},
         {"type": "WallObject", "id": 2, "x": 34700, "y": 18000, "w": 100, "h": 5000,
          "name": "停止線"},
     ])
-    assert n == 1
-    g = cvs[0]["stop_gate"]
-    assert g["at_m"] == 24.4 and 0 < g["snapped_m"] < 1.5
+    assert g["positioned"] == 1
+    gate = cvs[0]["stop_gate"]
+    assert gate["at_m"] == 24.4 and 0 < gate["snapped_m"] < 1.5
 
 
 def test_the_gate_goes_on_the_belt_whose_goods_arrive_at_the_line():
     """受け渡し点では3本が数cm内に居る。幾何的な最近傍ではなく、線に向かって
     流れている本線に付かないと「まだ来ていない荷」を止めることになる。"""
-    n, cvs = _gate_of([
+    g, cvs = _gate_of([
         # 下段本線: 西→東、x=34.4 で終わる（線はこの先）
         {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 24400, "h": 600,
          "name": "本線コンベア(東向き) 段=下段"},
@@ -411,19 +544,281 @@ def test_the_gate_goes_on_the_belt_whose_goods_arrive_at_the_line():
         {"type": "WallObject", "id": 4, "x": 34700, "y": 18000, "w": 100, "h": 5000,
          "name": "停止線"},
     ])
-    assert n == 1
+    assert g["positioned"] == 1
     gated = [c for c in cvs if c.get("stop_gate")]
     assert len(gated) == 1 and gated[0]["role"] == "main"
 
 
 def test_a_stop_line_far_from_every_belt_is_left_alone():
-    n, cvs = _gate_of([
+    g, cvs = _gate_of([
         {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
          "name": "本線コンベア(東向き)"},
         {"type": "WallObject", "id": 2, "x": 5000, "y": 35000, "w": 4000, "h": 100,
          "name": "停止線"},
     ])
-    assert n == 0 and not any(c.get("stop_gate") for c in cvs)
+    assert g["positioned"] == 0 and not any(c.get("stop_gate") for c in cvs)
+
+
+# --- 荷の種別 (load_kind): ゲートは「効いている」ときだけ効いていると言う ---------
+# エンジンは荷が**最初に載ったベルト**の `load_kind` を荷に押し、下流のゲートがそれで
+# 仕分ける。取込が `load_kind` を1件も書かなかった間、全ベルトは "" を押していたので
+#   * 「Xは停止」と書かれたゲート → "" は X ではない ⇒ **何も止めない**
+#   * 「Yは通過」だけ書かれたゲート → "" は Y ではない ⇒ **全部止める**
+# のどちらかにしかならず、取込は両方とも「解決しました」と報告していた。
+
+def test_a_belt_states_what_it_carries():
+    res = _imp([{"type": "StationObject", "id": 1, "x": 0, "y": 20000,
+                 "w": 30000, "h": 600, "name": "本線コンベア(東向き)｜荷=検品済オリコン"},
+                {"type": "StationObject", "id": 2, "x": 0, "y": 25000,
+                 "w": 30000, "h": 600, "name": "還流コンベア"}])
+    assert res["conveyors"][0]["load_kind"] == "検品済オリコン"
+    # 書いていないベルトはキーごと出さない = スキーマ既定 "" = 従来の1種類運用
+    assert "load_kind" not in res["conveyors"][1]
+    assert any("荷の種別" in w for w in res["warnings"])
+
+
+def test_the_kind_a_gate_stops_is_inferred_onto_the_belts_that_feed_it():
+    """止める荷が書かれていれば、そのゲートに着く荷は**その種別**である。
+
+    どのベルトも種別を宣言していないとき、ゲートのベルトとその上流にその種別を
+    押す（押さないと `""` は `stop_states` に当たらず、図面が描いている機構が
+    一度も動かない）。推定であることは警告で言う。"""
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
+         "name": "本線コンベア(東向き)"},
+        {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜検品済オリコンは停止・完成品はカーブへ通過"},
+    ])
+    assert (g["positioned"], g["armed"], g["pending"]) == (1, 1, 0)
+    assert cvs[0]["load_kind"] == "検品済オリコン"
+    gate = cvs[0]["stop_gate"]
+    assert gate["at_m"] == 15.05 and gate["stop_states"] == ["検品済オリコン"]
+    assert any("推定しました" in w for w in g["warnings"])
+
+
+def test_the_inferred_kind_follows_the_belts_that_carry_loads_into_the_gate():
+    """推定が及ぶのは**そのゲートへ荷を運ぶ**ベルトだけ: ゲートのベルトと、そこへ
+    払い出す上流。還流（空容器を戻す脚）・引き込み（ゲートより下流で荷を抜く）・
+    カーブ（先）は対象外 — 同じ平面座標を共有していても、運んでいる物が違う。"""
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 2000, "y": 12000, "w": 8000, "h": 600,
+         "name": "検品コンベア(東向き) 段=下段"},            # 本線へ払い出す上流
+        {"type": "StationObject", "id": 2, "x": 10000, "y": 12000, "w": 30000, "h": 600,
+         "name": "本線コンベア(東向き) 段=下段"},            # ゲートのベルト
+        {"type": "StationObject", "id": 3, "x": 10000, "y": 12000, "w": 30000, "h": 600,
+         "name": "還流コンベア(西向き) 段=上段"},            # 空容器の戻り
+        {"type": "StationObject", "id": 4, "x": 20000, "y": 9000, "w": 600, "h": 7000,
+         "name": "引き込みコンベア1"},                      # 本線から荷を抜く
+        {"type": "WallObject", "id": 5, "x": 40200, "y": 10000, "w": 100, "h": 5000,
+         "name": "停止線｜検品済オリコンは停止・完成品はカーブへ通過"},
+    ])
+    assert g["armed"] == 1
+    kinds = {c["id"]: c.get("load_kind", "") for c in cvs}
+    assert kinds["本線コンベア(東向き) 段=下段"] == "検品済オリコン"
+    assert kinds["検品コンベア(東向き) 段=下段"] == "検品済オリコン"
+    assert kinds["還流コンベア(西向き) 段=上段"] == ""
+    assert kinds["引き込みコンベア1"] == ""
+    # 逆に、ゲートが引き込みの側にあるなら、荷は本線を通ってそこへ来る ＝ 本線にも
+    # 押さないと、乗り継いだ荷は種別を持たないままゲートを素通りする。
+    g2, cvs2 = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 0, "y": 20000, "w": 40000, "h": 600,
+         "name": "本線コンベア(東向き)"},
+        {"type": "StationObject", "id": 2, "x": 20000, "y": 20000, "w": 600, "h": 10000,
+         "name": "引き込みコンベア1"},
+        {"type": "WallObject", "id": 3, "x": 19000, "y": 29500, "w": 3000, "h": 100,
+         "name": "停止線｜検品済オリコンは停止"},
+    ])
+    assert g2["armed"] == 1
+    assert {c["id"]: c.get("load_kind", "") for c in cvs2} == {
+        "本線コンベア(東向き)": "検品済オリコン", "引き込みコンベア1": "検品済オリコン"}
+
+
+def test_the_importer_never_decides_discharge_both():
+    """`Conveyor.discharge_both` は既定 False（片側払い出し）。図面は引き込みが
+    駆動か無動力かを言わないのに、これを立てると能力が倍になる。取込は決めない。"""
+    res = _imp([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 12000, "w": 30000,
+         "h": 600, "name": "本線コンベア(東向き)"},
+        {"type": "StationObject", "id": 2, "x": 20000, "y": 9000, "w": 600,
+         "h": 7000, "name": "引き込みコンベア1(本線を跨ぐ)"},
+        {"type": "StationObject", "id": 3, "x": 25000, "y": 9000, "w": 600,
+         "h": 7000, "name": "フリーコンベア2(無動力・両側から引く)"},
+    ])
+    assert all("discharge_both" not in c for c in res["conveyors"])
+
+
+def test_a_gate_is_never_deleted_because_the_model_is_not_finished_yet():
+    """取込は**モデルの途中経過**しか見られない（実運用は取込→荷の種別を設定→実行）。
+    その場で効かないからとゲートを外すと、図面が言っている滞留が丸ごと消えて能力が
+    倍に出る（実測 434→846 件/h）。効かない理由を言って、ゲートは残す。"""
+    g, cvs = _gate_of([
+        # 種別は宣言済みだが、停止線が名指しした荷ではない（推定は上書きしない）
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
+         "name": "本線コンベア(東向き)｜荷=完成品"},
+        {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜検品済オリコンは停止"},
+    ])
+    assert (g["positioned"], g["armed"], g["pending"]) == (1, 0, 1)
+    gate = cvs[0]["stop_gate"]
+    assert gate["stop_states"] == ["検品済オリコン"], "図面の規則はそのまま残す"
+    assert "inactive" not in gate
+    assert any("まだありません" in w and "検品済オリコン" in w for w in g["warnings"])
+
+
+def test_a_pass_only_gate_is_honoured_and_says_what_it_will_stop():
+    """「完成品は通過」だけの図面は「完成品以外は止まる」と言っている。種別を
+    宣言していないベルトの荷は止まる — それが図面の読みなので効かせ、意図と違えば
+    分かるように警告する。"""
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
+         "name": "本線コンベア(東向き)"},
+        {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜完成品はカーブへ通過"},
+    ])
+    assert (g["positioned"], g["armed"]) == (1, 1)
+    assert cvs[0]["stop_gate"]["pass_states"] == ["完成品"]
+    assert any("すべて" in w and "停止します" in w for w in g["warnings"])
+
+
+def test_a_gate_arms_when_a_belt_states_the_kind_the_line_names():
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
+         "name": "本線コンベア(東向き)｜荷=検品済オリコン"},
+        {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜検品済オリコンは停止・完成品はカーブへ通過"},
+    ])
+    assert (g["positioned"], g["armed"], g["kinds"]) == (1, 1, ["検品済オリコン"])
+    gate = cvs[0]["stop_gate"]
+    assert gate["stop_states"] == ["検品済オリコン"] and "inactive" not in gate
+    # 通す荷だけの図面でも、止まりうる荷が居れば効く（＝図面どおり）
+    g2, cvs2 = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
+         "name": "本線コンベア(東向き)｜荷=検品済オリコン"},
+        {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜完成品はカーブへ通過"},
+    ])
+    assert g2["armed"] == 1 and cvs2[0]["stop_gate"]["pass_states"] == ["完成品"]
+
+
+def test_the_kind_a_stop_line_names_is_read_off_the_belts_own_name():
+    """停止線が名指しした種別に限り、ベルト名（頭）からも読む＝閉じた語彙なので
+    勝手な荷を作らない。注記は隣の設備の荷を書くので頭だけを見る。"""
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 30000, "h": 600,
+         "name": "検品済オリコン本線コンベア(東向き)"},
+        {"type": "WallObject", "id": 2, "x": 25000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜検品済オリコンは停止"},
+    ])
+    assert g["armed"] == 1 and cvs[0]["load_kind"] == "検品済オリコン"
+    assert any("ベルト名から読み取り" in w for w in g["warnings"])
+
+
+def test_a_kind_on_a_belt_fed_by_another_belt_says_what_it_can_do():
+    """荷の種別は**最初に載ったベルト**が決め、受け渡しでは押し直されない。
+    下流のベルトに書かれた種別を黙って受け取ると、効かない設定が図面の意図として
+    保存される。"""
+    g, _cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 0, "y": 20000, "w": 40000, "h": 600,
+         "name": "本線コンベア(東向き)｜荷=検品済オリコン"},
+        # 本線の上から始まる引き込み ＝ 荷は本線から受け渡される
+        {"type": "StationObject", "id": 2, "x": 20000, "y": 20000, "w": 600, "h": 10000,
+         "name": "引き込みコンベア1｜荷=完成品"},
+        {"type": "WallObject", "id": 3, "x": 35000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線｜検品済オリコンは停止"},
+    ])
+    assert any("最初に載ったベルト" in w and "引き込みコンベア1" in w
+               for w in g["warnings"])
+
+
+def test_two_stop_lines_on_one_belt_keep_the_upstream_one_and_say_so():
+    """`Conveyor.stop_gate` は1本＝1つ。2本目で黙って上書きすると、報告された
+    本数と実際のゲート数が食い違う（検品済を止める線が消えても誰も言わない）。"""
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 0, "y": 20000, "w": 40000, "h": 600,
+         "name": "本線コンベア(東向き)｜荷=検品済オリコン"},
+        {"type": "WallObject", "id": 2, "x": 30000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線B｜完成品は停止"},
+        {"type": "WallObject", "id": 3, "x": 15000, "y": 18000, "w": 100, "h": 5000,
+         "name": "停止線A｜検品済オリコンは停止"},
+    ])
+    assert (g["positioned"], g["dropped"]) == (1, 1)
+    gate = cvs[0]["stop_gate"]
+    # 上流側（先に荷が着く方）を残す — 作図順ではない
+    assert gate["source"] == "停止線A｜検品済オリコンは停止" and gate["at_m"] == 15.05
+    assert any("停止線A" in w and "見送りました" in w for w in g["warnings"])
+
+
+def test_a_tie_between_two_belts_breaks_by_id_not_by_drawing_order():
+    """等距離のベルト2本は**ベルトID**で決める（`beltgeom.attach` と同じ規約）。
+    作図順で決めると、同じ図面を並べ替えて保存し直すだけで答えが変わる。"""
+    belts = [
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 24400,
+         "h": 600, "name": "AAAコンベア(東向き)"},
+        {"type": "StationObject", "id": 2, "x": 10000, "y": 21400, "w": 24400,
+         "h": 600, "name": "BBBコンベア(東向き)"},
+    ]
+    line = {"type": "WallObject", "id": 3, "x": 34700, "y": 20950, "w": 100,
+            "h": 100, "name": "停止線"}
+    got = []
+    for objs in ([belts[0], belts[1], line], [belts[1], belts[0], line]):
+        _g, cvs = _gate_of(objs)
+        got.append({c["id"] for c in cvs if c.get("stop_gate")})
+    assert got[0] == got[1] == {"AAAコンベア(東向き)"}
+
+
+def _runnable(res, load_kind: str):
+    """The imported drawing → a model the engine can actually run.
+
+    Mirrors the real model-build script: it imports the drawing FIRST and assigns
+    荷の種別 to the entry belt AFTERWARDS, which is exactly why the importer may
+    not judge a gate by what the model looks like while it is still being built."""
+    from whsim.schema.model import (
+        Bounds, FlowEdge, Item, Location, OrderProfile, WarehouseModel, WorkerGroup,
+    )
+    md = WarehouseModel().model_dump()
+    md["resources"]["conveyors"] = res["conveyors"]
+    md["resources"]["stations"] = res["stations"]
+    m = WarehouseModel.model_validate(md)
+    m.resources.conveyors[0].load_kind = load_kind        # ← the LATER step
+    m.layout.bounds = Bounds(width=60.0, depth=40.0)
+    m.locations = [Location(id="L0", x=2.0, y=6.0, sku="S0")]
+    m.items = [Item(sku="S0", pick_freq=1.0, ts_per_unit=1.0, default_location="L0")]
+    m.resources.workers = [WorkerGroup(id="p", role="picker", count=2)]
+    m.process.flow_edges = [FlowEdge(id="e", src="ピッキング", dst="検品",
+                                     transport="conveyor", share=1.0,
+                                     equipment_ref=m.resources.conveyors[0].id)]
+    m.process.pack_time_s = 20.0
+    m.orders.profile = OrderProfile(rate_per_hr=60.0, lines_per_order_mean=1.0)
+    m.simulation.duration_s = 1200.0
+    return m
+
+
+def test_the_drawn_stop_line_actually_stops_loads_in_a_run():
+    """図面→取込→（後から）荷の種別を設定→実行 で、**荷が止まる**ことまで見る。
+
+    ゲートが payload に載っているだけでは足りない: 荷の種別が押されていなければ
+    `stop_states` は一度も当たらず、機構は動かないのに取込は成功と報告できてしまう。
+    種別が図面に書かれていない場合（推定が効く）と、別の種別が宣言されている場合
+    （ゲートは残り、後の設定で効き始める）の両方を通す。"""
+    from whsim.engine.run import run_once
+    for belt_name in ("本線コンベア(東向き)",                    # 種別の記載なし
+                      "本線コンベア(東向き)｜荷=完成品"):          # 別の種別が宣言済み
+        res = rmpm.import_rmpm_bytes(_doc([
+            {"type": "StationObject", "id": 1, "x": 0, "y": 12000, "w": 40000,
+             "h": 600, "name": belt_name},
+            {"type": "WallObject", "id": 2, "x": 30000, "y": 10000, "w": 100,
+             "h": 5000, "name": "停止線(新設)｜検品済オリコンは停止・完成品は通過"},
+            {"type": "StationObject", "id": 3, "x": 30000, "y": 14000, "w": 900,
+             "h": 1400, "name": "梱包台01"},
+        ]))
+        rmpm.resolve_stop_gates(res["conveyors"], res["non_barriers"])
+        gate = res["conveyors"][0]["stop_gate"]
+        assert gate["stop_states"] == ["検品済オリコン"], belt_name
+        r = run_once(_runnable(res, "検品済オリコン"), seed=5)
+        stopped = [e for e in r.events if e["event"] == "conveyor_gate"]
+        done = [e for e in r.events if e["event"] == "order_complete"]
+        assert stopped, f"{belt_name}: 停止線が一度も荷を止めていない"
+        assert done, f"{belt_name}: 止めたきり流れていない"
 
 
 def test_empty_import_carries_the_same_additive_shape():
@@ -467,3 +862,37 @@ def test_named_layout_imports_through_the_endpoint():
         assert any(z["id"] == "積み付けエリア" for z in m["layout"]["zones"])
     finally:
         client.delete("/api/projects/rmpmname")
+
+
+def test_the_endpoint_reports_gates_that_work_separately_from_gates_it_placed():
+    """取込の返す `stop_gates` は「いま効いているゲート」の数。効いていないものは
+    別枠で数えて何が足りないかを言う — が、**ゲートは消さない**（荷の種別は取込の
+    後で設定される）。"""
+    client.post("/api/projects", json={"name": "rmpmgate", "template": "ecommerce_small"})
+    try:
+        def imp(belt_name):
+            data = _doc([
+                {"type": "StationObject", "id": 1, "x": 0, "y": 20000, "w": 40000,
+                 "h": 600, "name": belt_name},
+                {"type": "WallObject", "id": 2, "x": 30000, "y": 18000, "w": 100,
+                 "h": 5000, "name": "停止線｜検品済オリコンは停止・完成品は通過"},
+            ])
+            r = client.post("/api/projects/rmpmgate/import-rmpm",
+                            files={"file": ("x.rmpm.json", data, "application/json")})
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        # 種別の記載が無い図面 → 止める荷から推定して、その場で効くゲートになる
+        d = imp("本線コンベア(東向き)")
+        assert d["stop_gates"] == 1 and d["stop_gates_positioned"] == 1
+        assert d["load_kinds"] == ["検品済オリコン"]
+        # 別の種別が宣言済み → 推定せず、待ちとして報告し、規則はモデルに残す
+        d = imp("本線コンベア(東向き)｜荷=完成品")
+        assert d["stop_gates"] == 0 and d["stop_gates_pending"] == 1
+        assert any("まだありません" in w for w in d["warnings"])
+        m = client.get("/api/projects/rmpmgate/full").json()
+        cv = m["resources"]["conveyors"][0]
+        assert cv["load_kind"] == "完成品"
+        assert cv["stop_gate"]["stop_states"] == ["検品済オリコン"]
+    finally:
+        client.delete("/api/projects/rmpmgate")
