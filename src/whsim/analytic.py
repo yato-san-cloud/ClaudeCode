@@ -404,6 +404,31 @@ _JOIN_TOL_M = beltgeom.JOIN_TOL_M
 _BENCH_REACH_M = beltgeom.BENCH_REACH_M
 
 
+# The four scalars a belt has — drawn length, tote pitch, speed and slot count.
+# They live HERE, once, because ``linemech``'s three mechanism mirrors need the
+# same four and a private copy of an engine default is how the two readers drift
+# (invariant 11). Nothing below re-reads ``speed_mps``/``tote_pitch_m`` directly.
+
+def belt_length(cv) -> float:
+    """Drawn length of a belt, in metres (degenerate points ignored)."""
+    pts = [p for p in (getattr(cv, "points", None) or []) if len(p) >= 2]
+    return sum(math.dist((pts[i - 1][0], pts[i - 1][1]), (pts[i][0], pts[i][1]))
+               for i in range(1, len(pts)))
+
+
+def belt_pitch(cv) -> float:
+    """Metres of belt one tote occupies (unstated/non-positive ⇒ 1 個/m)."""
+    pitch = getattr(cv, "tote_pitch_m", None)
+    pitch = float(pitch) if pitch else 0.0
+    return pitch if pitch > 0.0 else _TOTE_PITCH_DEFAULT_M
+
+
+def belt_speed(cv) -> float:
+    """Belt speed in m/s (unstated/non-positive ⇒ ``build``'s own default)."""
+    speed = float(getattr(cv, "speed_mps", 0.0) or 0.0)
+    return speed if speed > 0.0 else _BELT_SPEED_FALLBACK
+
+
 def belt_slots(cv) -> int:
     """How many totes fit on one belt — the engine's own slot rule.
 
@@ -413,12 +438,7 @@ def belt_slots(cv) -> int:
     the estimate, in the run and in the read-out (invariant 11: one source, not
     three copies of the arithmetic).
     """
-    pts = [p for p in (getattr(cv, "points", None) or []) if len(p) >= 2]
-    length = sum(math.dist((pts[i - 1][0], pts[i - 1][1]), (pts[i][0], pts[i][1]))
-                 for i in range(1, len(pts)))
-    pitch = getattr(cv, "tote_pitch_m", None)
-    pitch = float(pitch) if pitch else 0.0
-    return max(1, int(length / pitch)) if pitch > 0.0 else max(1, int(length))
+    return max(1, int(belt_length(cv) / belt_pitch(cv)))
 
 
 def _belt_rate(cv) -> float:
@@ -427,17 +447,7 @@ def _belt_rate(cv) -> float:
     This is the belt's OWN capacity, independent of what feeds it — a 0.3 m/s
     引き込み carrying 0.45 m totes passes 0.67 totes/s however fast the 本線 runs.
     """
-    speed = float(getattr(cv, "speed_mps", 0.0) or 0.0)
-    if not (speed > 0.0):
-        speed = _BELT_SPEED_FALLBACK
-    pitch = getattr(cv, "tote_pitch_m", None)
-    pitch = float(pitch) if pitch else 0.0
-    return speed / (pitch if pitch > 0.0 else _TOTE_PITCH_DEFAULT_M)
-
-
-def _dist_to_polyline(p, pts) -> float:
-    """Euclidean distance from ``p`` to a polyline (``build._attach_to``'s test)."""
-    return math.dist((float(p[0]), float(p[1])), beltgeom.project(p, pts)[0])
+    return belt_speed(cv) / belt_pitch(cv)
 
 
 def _belt_stages(model: WarehouseModel):
@@ -460,8 +470,12 @@ def _belt_stages(model: WarehouseModel):
     passes the MIN over stages. Reading ten 引き込み as if they were in series
     would price a 10-lane line as a 1-lane one and cry jam on a healthy design.
 
-    Returns ``{"stages": [[cv…]…], "spurs": [cv…]}``, or ``None`` when no belt is
-    in use — which is what keeps every conveyor-less model byte-identical.
+    Returns ``{"stages": [[cv…]…], "spurs": [cv…], "benches": {…}}``, or ``None``
+    when no belt is in use — which is what keeps every conveyor-less model
+    byte-identical. The intermediate facts it had to resolve on the way (``belts``
+    / ``by_id`` / ``entries`` / ``spur_ids`` / ``succ``) come back with it: they
+    are what ``linemech``'s three mechanism mirrors need, and re-deriving the
+    chain a second time beside this one is exactly the drift invariant 11 forbids.
     """
     # Degenerate entries (<2 points, or every point coincident) are not physical
     # transport — build() skips them, so this must too (never blocks).
@@ -502,26 +516,23 @@ def _belt_stages(model: WarehouseModel):
 
     # 直列: a belt whose discharge end lands on another belt's path hands over to
     # it. A 引き込み is terminal on both sides (it ends at its benches), so it is
-    # never a hand-over target — exactly build._attach_to's exclusion.
-    succ: dict[str, str] = {}
+    # never a hand-over target — exactly build._attach_to's exclusion. The arc it
+    # lands AT comes back too: a hand-over half way along the next belt only rides
+    # the rest of it, which is what the mechanism mirrors charge for.
+    geom = [(str(cv.id), [(p[0], p[1]) for p in cv.points]) for cv in belts]
+    succ: dict[str, tuple[str, float]] = {}
     for a in belts:
         if str(a.id) in spur_only:
             continue
-        end = (a.points[-1][0], a.points[-1][1])
-        best = None
-        for b in belts:
-            if str(b.id) == str(a.id) or str(b.id) in spur_only:
-                continue
-            d = _dist_to_polyline(end, [(p[0], p[1]) for p in b.points])
-            if d <= _JOIN_TOL_M and (best is None or (d, str(b.id)) < best[:2]):
-                best = (d, str(b.id))
-        if best is not None:
-            succ[str(a.id)] = best[1]
+        hit = beltgeom.attach((a.points[-1][0], a.points[-1][1]), geom,
+                              exclude=spur_only | {str(a.id)})
+        if hit is not None:
+            succ[str(a.id)] = hit
 
     # Layer the chain from its HEADS (an entry that something else feeds is not a
     # head — it is one link further down, and calling it parallel to its own
     # feeder would double the line's capacity).
-    fed = set(succ.values())
+    fed = {nid for nid, _arc in succ.values()}
     heads = [cv for cv in entries if str(cv.id) not in fed] or list(entries)
     stages: list[list] = []
     seen = set(spur_only)
@@ -531,7 +542,7 @@ def _belt_stages(model: WarehouseModel):
         stages.append(layer)
         nxt: dict[str, object] = {}
         for cv in layer:
-            nid = succ.get(str(cv.id))
+            nid = (succ.get(str(cv.id)) or (None, 0.0))[0]
             if nid and nid not in seen and nid not in nxt:
                 nxt[nid] = by_id[nid]
         seen |= set(nxt)
@@ -546,12 +557,15 @@ def _belt_stages(model: WarehouseModel):
     # shared bench belongs to the nearer pull-in, and this module did not — so a
     # real drawing came out 4 benches in the run and 2 in the estimate, and a
     # bench between two spurs was counted twice (rosier than the run).
-    benches, _claimed = beltgeom.bench_pools(
+    benches, claimed = beltgeom.bench_pools(
         [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in spurs],
         [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in belts],
         [(s.x, s.y, s.count) for s in (model.resources.stations or [])],
         both={str(cv.id) for cv in spurs if getattr(cv, "discharge_both", False)})
-    return {"stages": stages, "spurs": spurs, "benches": benches}
+    return {"stages": stages, "spurs": spurs, "benches": benches,
+            # additive: the chain as it was resolved, for the mechanism mirrors
+            "belts": belts, "by_id": by_id, "entries": entries,
+            "spur_ids": spur_only, "succ": succ, "claimed": claimed}
 
 
 def _spur_benches(model: WarehouseModel, spur) -> int | None:
