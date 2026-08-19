@@ -790,6 +790,92 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
     }
 
 
+# ライン運用の3機構 (不変条件17). All three are opt-in and OFF in every shipped
+# template, so these three predicates are False for the whole catalogue and the
+# modules below are never even imported — which is what keeps ``estimate`` inside
+# its 50 ms budget (the editor re-estimates while the mouse is still down) and the
+# catalogue byte-identical.
+
+def _has_gate(model: WarehouseModel) -> bool:
+    """Does any drawn belt carry a 停止線? (a dict is authored, ``None`` is not)"""
+    return any(isinstance(getattr(cv, "stop_gate", None), dict) and cv.stop_gate
+               for cv in (model.resources.conveyors or []))
+
+
+def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
+                   pack_time_s: float, horizon_s: float) -> dict | None:
+    """The 搬送ライン block: the mechanism the model switched on, else the belt chain.
+
+    ``_conveyor_estimate`` prices ONE homogeneous load riding a greedy chain into
+    pooled 梱包台. Two authored mechanisms break that story, and each has its own
+    closed form under ``whsim.linemech`` returning the same keys, so this picks one:
+
+    * **pull型引き込み** (``Process.divert_policy == "pull"``) — a junction is a LOSS
+      system, not a queue: what nobody has hands for rides past instead of waiting.
+    * **選択停止ゲート** (``Conveyor.stop_gate``) — a stopped kind's belt ENDS at the
+      stop line and it holds its slot there until the gate's own hands take it off.
+
+    Pull wins when both are authored: it changes what happens at every junction,
+    which is upstream of what the gate then sees. The gate's own benches are not
+    counted twice in that case — ``pull.resolve`` reads them as the end pool, which
+    is where the engine hands a stopped load anyway. (A line authored with both is
+    the one combination neither closed form was validated on; it errs to the pull
+    reading, which is the gloomier of the two.)
+
+    ``None`` from a mechanism means "not in play on this drawing" and falls through,
+    so a model can never lose the answer it has today (never-blocks).
+    """
+    pull_on = str(getattr(model.process, "divert_policy", "auto") or "auto") == "pull"
+    gate_on = _has_gate(model)
+    if pull_on or gate_on:
+        line = _belt_stages(model)          # resolved ONCE and handed to the mirror
+        if line is not None:
+            if pull_on:
+                from whsim.linemech import pull as _pull
+                out = _pull.estimate(model, line, lam, n_stations, pack_time_s,
+                                     horizon_s)
+                if out is not None:
+                    return out
+            if gate_on:
+                from whsim.linemech import gate as _gate
+                out = _gate.gate_line_estimate(model, lam, n_stations, pack_time_s,
+                                               horizon_s, line=line)
+                if out is not None:
+                    return out
+    return _conveyor_estimate(model, lam, n_stations, pack_time_s, horizon_s)
+
+
+def _container_estimate(model: WarehouseModel, lam: float, n_stations: int,
+                        pack_time_s: float, batch: float,
+                        horizon_s: float) -> dict | None:
+    """容器の有限循環 — ADDITIVE, and deliberately with no feedback into the headline.
+
+    ``engine.processes`` claims one 容器 at 投入 and gives it back at 梱包完了, so a
+    pool that binds costs throughput. It is tempting to throttle λ by it the way the
+    AGV fleet and the belt chain are throttled — but measured, the engine does NOT
+    charge the 投入待ち to the picker (a container-starved line reads picker 0.110
+    against 0.155 unstarved, i.e. the blocked picker is idle, not busy). Throttling
+    would therefore push this oracle's picker utilisation BELOW the run's, and
+    reading a stage rosier than the run is the one thing invariant 5 forbids. So the
+    pool answers its own question — 「レンタルは何個要るのか」, residence, peak, and
+    whether it binds — and leaves every other number alone.
+
+    ``None`` unless a pool is authored AND a belt is in use, which is where the
+    engine's only ``_take_container`` call site sits.
+    """
+    if not isinstance(getattr(model.process, "container_pool", None), dict):
+        return None
+    if not model.process.container_pool:
+        return None
+    line = _belt_stages(model)
+    if line is None:
+        return None
+    from whsim.linemech import container as _container
+    return _container.container_estimate(
+        model, lam=lam, n_benches=n_stations, pack_time_s=pack_time_s,
+        horizon_s=horizon_s, line=line, batch=batch)
+
+
 def estimate(model: WarehouseModel) -> dict:
     speed = max(model.process.walk_speed_mps, 0.1)
     station = model.resources.stations[0] if model.resources.stations else None
@@ -903,8 +989,8 @@ def estimate(model: WarehouseModel) -> dict:
     # capacity needs them; the packing stage below reuses the same two values.
     n_stations = sum(max(0, s.count) for s in model.resources.stations) or 1
     pack_time = max(model.process.pack_time_s, 0.0)
-    conveyor = _conveyor_estimate(model, lam, n_stations, pack_time,
-                                  model.simulation.duration_s)
+    conveyor = _line_estimate(model, lam, n_stations, pack_time,
+                              model.simulation.duration_s)
     if conveyor is not None and conveyor["jams"] and conveyor["capacity_per_hr"]:
         lam = min(lam, conveyor["capacity_per_hr"] / 3600.0)
 
@@ -998,6 +1084,18 @@ def estimate(model: WarehouseModel) -> dict:
     pack_lam = min(lam, c * mu)
     pack_util = min(pack_lam * pack_time / n_stations, 1.0) if pack_time > 0 else 0.0
 
+    # 容器の有限循環: one container per order, claimed at 投入 and returned at 梱包完了,
+    # so the rate that matters is the one actually inducted onto the line — the same
+    # ``pack_lam`` the benches see. ``batch`` because 投入 claims one per order the
+    # trip sweeps, all at one instant. ``None`` unless a pool is authored, and it
+    # rides INSIDE the conveyor block: the engine's only ``_take_container`` call
+    # site is the belt hand-over, so a pool without a line cannot be claimed at all
+    # — and the shape of every existing answer stays exactly as it was.
+    containers = _container_estimate(model, pack_lam, n_stations, pack_time, batch,
+                                     model.simulation.duration_s)
+    if conveyor is not None and containers is not None:
+        conveyor = {**conveyor, "containers": containers}
+
     # The binding stage, in the SAME vocabulary ``kpis.compute`` uses -- the two
     # dicts share these key names, so a consumer must not have to know which one
     # it is holding.
@@ -1026,7 +1124,12 @@ def estimate(model: WarehouseModel) -> dict:
         "agv_utilization": agv_util,
         # ADDITIVE: ``None`` unless the flow actually routes goods onto a belt, so
         # a conveyor-less model is untouched. When there IS a line this says
-        # whether it jams, when, what binds it and how often a hand-over waits.
+        # whether it jams, when, what binds it and how often a hand-over waits —
+        # and when the model authored 選択停止 or pull型引き込み, it is that
+        # mechanism's own closed form speaking (``whsim.linemech``), in the same
+        # keys plus its own ``gate``/``policy`` read-outs. A 容器プール hangs off it
+        # under ``containers``, because a container is claimed on the belt
+        # hand-over path and nowhere else.
         "conveyor": conveyor,
         # ADDITIVE: ``None`` unless 通路干渉 is switched on. An explicit UPPER
         # bound on the walk-time penalty, labelled as one.

@@ -152,8 +152,12 @@ def bench_ledger(model, line: dict) -> dict:
                 for i in range(len(stations)) if i not in claimed)
     starved = bool(claimed) and spare == 0
     if starved:
+        # ``build``: with every bench spoken for, a pull-in nobody stands at has
+        # nobody at all — it is closed like a deliberately unmanned one. Only
+        # ``UNSTAFFED`` changes hands; ``CLOSED``/``LOST`` already take nothing and
+        # keep their own diagnosis (they say WHY the pull-in is dead).
         for sid, n in list(benches.items()):
-            if not (isinstance(n, int) and n > 0):
+            if n is beltgeom.UNSTAFFED:
                 benches[sid] = beltgeom.CLOSED
     return {"benches": benches, "gates": gates, "spare": spare, "total": total,
             "fallback": 0 if starved else (spare if 0 < spare < total else total),

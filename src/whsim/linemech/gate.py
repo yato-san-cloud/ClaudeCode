@@ -140,16 +140,17 @@ def _pts(cv):
             if len(p) >= 2]
 
 
-def resolve_line(model):
+def resolve_line(model, line=None):
     """The chain ``engine.build`` builds, plus its gates. ``None`` = no belt in use.
 
     The belts, the hand-overs, the 引き込み and their 梱包台 are
     ``analytic._belt_stages``' answer — the SAME resolution ``engine.build`` runs,
-    read once per estimate. What this adds is what only a gated line needs: which
-    belt carries a 停止線, whose hands stand at it, and where each 引き込み hangs off
-    its host (``linemech.junctions``).
+    passed in when the caller already has it so the chain is resolved ONCE per
+    estimate. What this adds is what only a gated line needs: which belt carries a
+    停止線, whose hands stand at it, and where each 引き込み hangs off its host
+    (``linemech.junctions``).
     """
-    line = _belt_stages(model)
+    line = _belt_stages(model) if line is None else line
     if line is None:
         return None
     ledger = bench_ledger(model, line)
@@ -336,7 +337,7 @@ def kind_routes(model, line, pack_s: float):
 # ============================================================== the closed form
 
 def gate_line_estimate(model, lam: float, n_stations: int, pack_time_s: float,
-                       horizon_s: float) -> dict | None:
+                       horizon_s: float, line=None) -> dict | None:
     """選択停止ゲートのある搬送ラインの閉形式. ``None`` when no belt carries a gate.
 
     Parameters mirror ``analytic._conveyor_estimate`` so a caller can simply prefer
@@ -349,11 +350,12 @@ def gate_line_estimate(model, lam: float, n_stations: int, pack_time_s: float,
       is sized from all of them, so the mirror must be too).
     * ``pack_time_s``  — ``Process.pack_time_s``.
     * ``horizon_s``    — ``Simulation.duration_s``; only ``block_ratio_est`` uses it.
+    * ``line``         — ``analytic._belt_stages(model)`` when the caller has it.
 
     Returns the same keys ``_conveyor_estimate`` returns (so it is a drop-in for the
     ``conveyor`` block) plus an additive ``gate`` sub-dict.
     """
-    line = resolve_line(model)
+    line = resolve_line(model, line)
     if line is None or not line["gates"]:
         return None                     # no gate ⇒ this module is not in play
     pack = max(float(pack_time_s), 0.0) or 1e-9

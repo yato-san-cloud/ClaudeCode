@@ -339,19 +339,6 @@ def solve_pull(
 # ------------------------------------------------------------------ 図面 → 引き込みバンク
 
 
-def _pts(cv):
-    return [(float(p[0]), float(p[1])) for p in cv.points if len(p) >= 2]
-
-
-def _len(pts):
-    return sum(math.dist(pts[i - 1], pts[i]) for i in range(1, len(pts)))
-
-
-def _speed(cv):
-    s = float(getattr(cv, "speed_mps", 0.0) or 0.0)
-    return s if s > 0 else 0.5
-
-
 def resolve(model, line=None):
     """図面 → the 引き込みバンク this closed form prices. ``None`` = no bank.
 
@@ -376,37 +363,33 @@ def resolve(model, line=None):
     * **A load boards its 引き込み at ``feed_arc``**, not at the far end: a spur
       drawn as ONE belt crossing the 本線 is met in the middle. The transit that
       the slot-holding test needs is therefore the arc that is LEFT.
-    * **末端 (the loads nobody pulled in) borrow ``World.spare_bench``** — the
-      benches no 引き込み and no 停止線 claimed — and only when there is nothing
-      spare do they fall back to the whole ``packers`` floor. That last branch
-      double-books the private benches of the pull-ins already working them, and
-      it is still live for every drawing whose stations all stand at 引き込み.
+    * **末端 (the loads nobody pulled in) get ``World.spare_bench``** — the benches
+      no 引き込み and no 停止線 claimed — or the 停止線's own hands when one is drawn
+      there. With every bench spoken for there is **nobody**, and the load stops at
+      the end of the 本線 for good (``pack_unmanned``). Reading the whole ``packers``
+      floor there instead books the private benches of the pull-ins already working
+      them a second time: measured packer_utilization 1.73, and a pull line
+      out-throughputing the greedy one it is physically a subset of.
     """
     line = _belt_stages(model) if line is None else line
     if line is None or not line.get("spurs"):
         return None
-    spurs = line["spurs"]
-    benches = line.get("benches") or {}
-    belts = [(str(cv.id), _pts(cv)) for st in line["stages"] for cv in st]
-    spur_ids = {str(cv.id) for cv in spurs}
     stations = list(getattr(model.resources, "stations", None) or [])
+    ledger = bench_ledger(model, line)
 
     junc: dict[tuple[str, float], dict] = {}
-    for cv in spurs:
-        n = benches.get(str(cv.id), UNSTAFFED)
+    for j0 in resolve_junctions(model, line, ledger):
+        n = j0["benches"]
         if not (isinstance(n, int) and n > 0):
-            continue                       # CLOSED / LOST / UNSTAFFED: not a lane
-        hit = feed_point(_pts(cv), belts, exclude=spur_ids)
-        if hit is None:
-            continue                       # fed by nothing: a dead belt
-        host, host_arc, feed_arc = hit
-        j = junc.setdefault((host, round(host_arc, 3)),
-                            {"benches": 0, "slots": 0, "arc": host_arc,
+            continue                       # UNSTAFFED: under pull, nobody pulls
+        cv = j0["cv"]
+        j = junc.setdefault((j0["host"], round(j0["arc"], 3)),
+                            {"benches": 0, "slots": 0, "arc": j0["arc"],
                              "spur_ids": [], "tau": []})
         j["benches"] += int(n)
         j["slots"] += belt_slots(cv)
-        j["tau"].append(max(_len(_pts(cv)) - feed_arc, 0.0) / _speed(cv))
-        j["spur_ids"].append(str(cv.id))
+        j["tau"].append(max(belt_length(cv) - j0["feed_arc"], 0.0) / belt_speed(cv))
+        j["spur_ids"].append(j0["spur"])
     if not junc:
         return None
 
@@ -416,22 +399,16 @@ def resolve(model, line=None):
     tid = max(by_host, key=lambda h: (len(by_host[h]),
                                       sum(x["benches"] for x in by_host[h])))
     js = sorted(by_host[tid], key=lambda x: x["arc"])
-    trunk = next(cv for st in line["stages"] for cv in st if str(cv.id) == tid)
-    v = _speed(trunk)
-    tpts = _pts(trunk)
+    trunk = line["by_id"][tid]
+    v = belt_speed(trunk)
 
-    # 末端の手 — ``processes._bench_pool`` on the 本線, exactly.
+    # 末端の手 — ``processes``' own answer at the end of the 本線: the 停止線's
+    # workers when one is drawn there, else ``_bench_pool``'s (spare benches, the
+    # whole floor when nothing is claimed, or NOBODY). Not "the floor" as a last
+    # resort: that is the double-count the engine was fixed for.
     n_packers = sum(max(0, int(s.count)) for s in stations) or 1
-    _pools, claimed_i = bench_pools(
-        [(str(cv.id), _pts(cv)) for cv in spurs], belts,
-        [(s.x, s.y, s.count) for s in stations],
-        both={str(cv.id) for cv in spurs
-              if getattr(cv, "discharge_both", False)})
-    claimed = set(claimed_i)
-    spare = sum(max(0, int(s.count)) for i, s in enumerate(stations)
-                if i not in claimed)
-    end_srv = spare if 0 < spare < n_packers else n_packers
-    end_double_books = not (0 < spare < n_packers)
+    gate_n = ledger["gates"].get(tid, 0) if resolve_gate(trunk) is not None else 0
+    end_srv = gate_n if gate_n > 0 else ledger["fallback"]
 
     entry = list(line["stages"][0]) if line["stages"] else []
     return {
@@ -440,12 +417,14 @@ def resolve(model, line=None):
                        "spur_ids": j["spur_ids"]} for j in js],
         "junction_arc_s": [j["arc"] / v for j in js],
         "end_servers": end_srv,
-        "end_double_books": end_double_books,
-        "spare_benches": spare,
+        # 末端に人が居ない ⇒ 荷はそこで止まる: the whole line stops behind it, and
+        # that is a designed-in consequence, not a modelling gap.
+        "end_unmanned": end_srv <= 0,
+        "spare_benches": ledger["spare"],
         "end_slots": belt_slots(trunk),
-        "trunk_transit_s": _len(tpts) / v,
+        "trunk_transit_s": belt_length(trunk) / v,
         "entry_slots": sum(belt_slots(cv) for cv in entry),
-        "entry_transit_s": (max(_len(_pts(cv)) / _speed(cv) for cv in entry)
+        "entry_transit_s": (max(belt_length(cv) / belt_speed(cv) for cv in entry)
                             if entry else 0.0),
         "n_packers": n_packers,
         "trunk_id": tid,
@@ -471,8 +450,21 @@ def estimate(model, line, lam: float, n_packers: int, pack_time_s: float,
         junction_arc_s=bank["junction_arc_s"],
         entry_slots=bank["entry_slots"], entry_transit_s=bank["entry_transit_s"],
         n_packers=n_packers or bank["n_packers"], horizon_s=horizon_s)
-    # 末端が床全体を借りている ⇒ the capacity and the 梱包稼働率 below are the
-    # ENGINE's, and the engine is double-booking. Say so rather than hiding it.
-    out["end_double_books"] = bank["end_double_books"]
+    # 末端に誰が居るか is the whole difference between a pull line that works and one
+    # that stops, so it travels with the answer rather than staying inside it.
+    out["end_unmanned"] = bank["end_unmanned"]
+    out["end_servers"] = bank["end_servers"]
     out["spare_benches"] = bank["spare_benches"]
+    # ...and the three keys every conveyor answer carries, so this is a drop-in for
+    # the block ``analytic.estimate`` publishes (a consumer must not have to know
+    # which mechanism produced it).
+    # What binds: the hands (梱包台 at the 引き込み plus whoever is at the end) or the
+    # 本線 itself, whose slots are the only waiting room a pull line has. Named in
+    # ``_conveyor_estimate``'s own vocabulary — "pack", or the belt's id.
+    hands = sum(j["benches"] for j in bank["junctions"]) + bank["end_servers"]
+    cap_hands = (hands / pack_time_s) if pack_time_s > 0 else float("inf")
+    trunk_cap = bank["end_slots"] / max(out["trunk_dwell_s"], 1e-9)
+    out["binding"] = "pack" if cap_hands <= trunk_cap else bank["trunk_id"]
+    out["buffer_slots"] = bank["entry_slots"] + bank["end_slots"]
+    out["offered_per_hr"] = lam * 3600.0
     return out
