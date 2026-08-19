@@ -160,10 +160,19 @@ class ConveyorLine:
     # junction is not wired), which is different from bench=None-with-no-
     # stations (half-drawn line → shared-pool fallback keeps it running).
     closed: bool = False
+    # Arc along THIS belt where a diverted tote boards it. 0.0 for a 引き込み whose
+    # infeed sits on the trunk (every historical drawing); the crossing point for
+    # one drawn as a single belt CROSSING the 本線, which the trunk meets in the
+    # middle.
+    feed_arc: float = 0.0
     divert_wake: simpy.Event | None = None
     # 荷の種別 this belt stamps on a load boarding it (``Conveyor.load_kind``); the
     # kind then travels with the load over every hand-over. ``""`` = one kind.
     load_kind: str = ""
+    # 無動力(フリー)ローラのように両端から人が引く引き込みか (``Conveyor.discharge_both``).
+    # False (default) = a driven belt runs one way, so only ``points[-1]``'s benches
+    # are reachable. See ``beltgeom.discharge_ends``.
+    discharge_both: bool = False
     # 選択停止ゲート on THIS belt (``None`` = none, which is every belt by default).
     gate: StopGate | None = None
 
@@ -342,14 +351,15 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
     pools, claimed_i = beltgeom.bench_pools(
         [(s.id, s.points) for s in spurs],
         [(c.id, c.points) for c in lines],
-        [(st.x, st.y, st.count) for st in stations])
+        [(st.x, st.y, st.count) for st in stations],
+        both={s.id for s in spurs if s.discharge_both})
     claimed: set[int] = {id(stations[i]) for i in claimed_i}
     for s in spurs:
         n = pools.get(s.id)
-        if n:
+        if n and n > 0:
             s.n_bench = n
             s.bench = simpy.Resource(env, capacity=n)
-        elif n == beltgeom.CLOSED:
+        elif n in beltgeom.NO_HANDS:
             s.closed = True
 
     # 停止線の作業者: the 梱包台 standing AT a stop gate belong to that gate — a load
@@ -370,15 +380,39 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
             c.gate.bench = simpy.Resource(env, capacity=n)
             claimed.update(id(st) for st in nearby)
 
-    # 枝分かれ: hang each spur off the trunk its infeed touches. Spurs are never
-    # junction hosts — a 引き込み feeds benches, not another 引き込み.
+    # 誰の持ち物でもない梱包台 — what is left after every 引き込み and every 停止線
+    # has taken its own. This, not the whole floor, is what a pull-in nobody
+    # stands at may borrow: ``packers`` counts the private benches of the pull-ins
+    # already working them, so borrowing it books the same people twice.
+    spare = sum(max(0, int(st.count)) for st in stations if id(st) not in claimed)
+    if claimed and spare == 0:
+        # Every bench on the floor is spoken for, so a pull-in nobody stands at
+        # has nobody at all — it takes nothing, exactly like a closed one. (With
+        # NOTHING claimed the line is simply drawn without benches: everybody
+        # shares the pack pool, which is the historical never-blocks fallback and
+        # stays untouched.)
+        for s in spurs:
+            if s.bench is None:
+                s.closed = True
+
+    # 枝分かれ: hang each spur off the belt that FEEDS it. Normally that is the
+    # trunk its infeed sits on; a 引き込み drawn as one belt crossing the 本線 has
+    # no endpoint on the trunk at all and used to end up wired to nothing —
+    # keeping its 梱包台 and receiving not one load, while every tote rode past to
+    # the end of the line. ``beltgeom.feed_point`` falls back to where the two
+    # PATHS meet, and the tote then boards the spur THERE (``feed_arc``) rather
+    # than at its far end. Spurs are never junction hosts — a 引き込み feeds
+    # benches, not another 引き込み.
+    by_id = {c.id: c for c in lines}
     for s in spurs:
         if s.closed:
             continue             # an unmanned pull-in diverts nothing
-        hit = _attach_to(lines, s.points[0], exclude=spur_ids)
+        hit = beltgeom.feed_point(s.points, [(c.id, c.points) for c in lines],
+                                  exclude=spur_ids)
         if hit is not None:
-            hit[0].junctions.append((hit[1], s))
-            s.host = hit[0]      # so freeing a spur slot can wake the trunk's waiters
+            host, host_arc, s.feed_arc = by_id[hit[0]], hit[1], hit[2]
+            host.junctions.append((host_arc, s))
+            s.host = host        # so freeing a spur slot can wake the trunk's waiters
     for c in lines:
         c.junctions.sort(key=lambda j: (j[0], j[1].id))
 
@@ -394,7 +428,7 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
 
     entry_refs = _refs(flowgraph.entry_conveyor_ids)
     entry = [c for c in lines if c.id in entry_refs]
-    return entry or list(lines)
+    return (entry or list(lines)), spare
 
 
 @dataclass
@@ -460,6 +494,14 @@ class World:
     entry_conveyors: list[ConveyorLine] = field(default_factory=list)
     # 引き込み方式 ("auto" = 貪欲ディバート, the historical rule; "pull" = 作業者が引く).
     divert_policy: str = "auto"
+    # 誰の持ち物でもない梱包台 — the stations no 引き込み and no 停止線 claimed.
+    # A pull-in nobody is drawn at falls back to THIS rather than to ``packers``,
+    # because ``packers`` counts every bench on the floor INCLUDING the private
+    # ones another 引き込み is already using: borrowing it books the same people
+    # twice (measured packer_utilization 1.675 on a floor of 4). ``None`` = every
+    # bench is spoken for, and then the historical shared pool is the fallback so
+    # a half-drawn line still runs (never-blocks).
+    spare_bench: simpy.Resource | None = None
     # 容器の有限循環. ``None`` = 容器は無限 (the historical behaviour: a picker can
     # always put goods on the belt). When present it is a simpy.Container of empty
     # containers: 投入 takes one and BLOCKS when the pool is dry, 梱包完了 sends it
@@ -795,10 +837,11 @@ def build(
         line = ConveyorLine(
             id=cv.id, points=pts, seglens=seglens, length=total, speed=speed,
             capacity=cap, belt=simpy.Resource(env, capacity=cap),
-            load_kind=str(getattr(cv, "load_kind", "") or ""))
+            load_kind=str(getattr(cv, "load_kind", "") or ""),
+            discharge_both=bool(getattr(cv, "discharge_both", False)))
         line.gate = _resolve_gate(cv, line)
         conveyor_lines.append(line)
-    entry_lines = _wire_conveyor_chain(model, env, conveyor_lines)
+    entry_lines, n_spare_bench = _wire_conveyor_chain(model, env, conveyor_lines)
 
     # --- 容器の有限循環 (finite container pool) -------------------------------
     # Unstated ⇒ None ⇒ 投入 never waits for a container and nothing is logged, so
@@ -987,6 +1030,8 @@ def build(
         ready_store=simpy.Store(env),
         fork_store=simpy.Store(env),
         packers=simpy.Resource(env, capacity=n_packers),
+        spare_bench=(simpy.Resource(env, capacity=n_spare_bench)
+                     if 0 < n_spare_bench < n_packers else None),
         put_wall=simpy.Resource(env, capacity=put_wall_cap),
         has_conveyor=has_conveyor, conveyors=conveyor_lines,
         entry_conveyors=entry_lines,

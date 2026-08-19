@@ -32,6 +32,8 @@ import json
 import math
 from collections import Counter
 
+import pytest
+
 from whsim import kpis, templates
 from whsim.engine.build import build
 from whsim.engine.run import run_once
@@ -212,6 +214,97 @@ def test_a_gate_that_names_nothing_is_not_a_gate():
     gate = {c.id: c.gate for c in build(m).conveyors}["T"]
     assert gate is not None and gate.arc == 40.0
     assert gate.stop_kinds == frozenset({"inspected"})
+
+
+def test_a_load_that_boarded_past_the_stop_line_rides_on():
+    """停止線は**通り過ぎる荷**を止めるもの。既に手前に居る荷は関係ない。
+
+    `end_arc = min(gate.arc, length)` に下限が無かったので、ゲートより下流で
+    乗った荷は**時間ゼロで後ろへ引き戻され**（軌跡が逆走し）、間違った場所で
+    梱包されていた。おまけに乗車位置とゲートの間の引き込みが分岐候補から
+    消えるので、荷は誰にも引き込まれなくなる。"""
+    e_far = Conveyor(id="E", points=[[26.0, 4.0], [26.0, 12.0]], speed_mps=1.0,
+                     tote_pitch_m=4.0, load_kind="inspected")
+    trunk = Conveyor(id="T", points=[[0.0, 12.0], [40.0, 12.0]], speed_mps=1.0,
+                     tote_pitch_m=4.0,
+                     stop_gate={"at_m": 10.0, "stop_states": ["inspected"]})
+    m = _model([e_far, trunk], [_edge(PICK, INSPECT, "E"), _edge(INSPECT, PACK, "T")],
+               pick_xy=[(27.0, 4.0)], duration=900.0,
+               stations=[Station(id="ship", x=41.0, y=14.0, count=4)])
+    res = run_once(m, seed=5)
+    legs = [e for e in _events(res, "conveyor_off") if e["conveyor"] == "T"]
+    assert legs, "the trunk must carry the load"
+    # arc 26 で乗って末端 40 まで＝14m 走る。引き戻されていた頃は 0m（`ride_m` は
+    # 負を 0 に丸めるので、後戻りは「一切走っていない」として現れる）。
+    assert all(e["ride_m"] == pytest.approx(14.0) for e in legs), \
+        [e["ride_m"] for e in legs]
+    assert not _events(res, "conveyor_gate"), \
+        "ゲートより下流で乗った荷は、そのゲートに止められない"
+    assert len(_events(res, "order_complete")) > 5
+
+
+def test_a_pull_in_whose_bench_belongs_to_a_neighbour_takes_nothing():
+    """最寄り所有で台を取られた引き込みが、床全体を借りて最強レーンにならないこと。
+
+    `_bench_pool` の共有プール転落は「誰も描かれていない半端な図面でも動く」ため
+    のもの。隣に台を取られただけの引き込みまでそこへ落とすと、**人が居ないほど
+    強い**引き込みが生まれる（実測: 台0の引き込みが53件、台1の隣が20件）。"""
+    trunk = Conveyor(id="T", points=[[0.0, 12.0], [40.0, 12.0]], speed_mps=1.0)
+    entry = Conveyor(id="E", points=[[2.0, 4.0], [2.0, 12.0]], speed_mps=1.0)
+    s1 = Conveyor(id="S1", points=[[10.0, 12.0], [10.0, 18.0]], speed_mps=1.0)
+    s2 = Conveyor(id="S2", points=[[12.0, 12.0], [12.0, 18.0]], speed_mps=1.0)
+    m = _model([entry, trunk, s1, s2],
+               [_edge(PICK, INSPECT, "E"), _edge(INSPECT, PACK, "S1"),
+                _edge(INSPECT, PACK, "S2"), _edge(PACK, SHIP, "T")],
+               pick_xy=[(3.0, 4.0)], duration=1800.0, rate=150.0, pack_time=60.0,
+               # one bench, nearer S1 — S2 can reach it but S1 owns it
+               stations=[Station(id="b", x=10.4, y=18.0, count=2)])
+    world = build(m)
+    got = {c.id: (c.n_bench, c.closed) for c in world.conveyors if c.id.startswith("S")}
+    assert got == {"S1": (2, False), "S2": (0, True)}
+    res = run_once(m, seed=5)
+    took = Counter(e["conveyor"] for e in _events(res, "conveyor_on"))
+    assert took["S2"] == 0, "人の居ない引き込みは荷を取らない"
+    assert took["S1"] > 10
+    k = kpis.compute([res], m)
+    assert k["packer_utilization"] <= 1.0, "床に居る人より多くは働けない"
+
+
+@pytest.mark.parametrize("stations,expect", [
+    # every bench at one 引き込み ⇒ the other has nobody and takes nothing
+    ([("b", 10.4, 18.0, 4)], {"S1": (4, False), "S2": (0, True)}),
+    ([("a", 10.4, 18.0, 2), ("b", 24.4, 18.0, 2)], {"S1": (2, False), "S2": (2, False)}),
+    # a bench standing at neither ⇒ it is the spare the un-benched one may borrow
+    ([("a", 10.4, 18.0, 3), ("c", 38.0, 30.0, 1)], {"S1": (3, False), "S2": (0, False)}),
+    # nobody drawn at either ⇒ the historical half-drawn-line fallback, both share
+    ([("far", 38.0, 30.0, 4)], {"S1": (0, False), "S2": (0, False)}),
+])
+def test_the_line_never_models_more_packers_than_the_drawing_has_people(
+        stations, expect):
+    """引き込みが借りられるのは**誰の持ち物でもない台**だけ。
+
+    共有プールは床の全台（他の引き込みが今まさに使っている専用台を含む）なので、
+    そこへ落ちると同じ人を二重に働かせる。実測 packer_utilization 1.675 ——
+    4人の床で。台が1つも余っていなければ借りるものは無い＝その引き込みは動かない。"""
+    trunk = Conveyor(id="T", points=[[0.0, 12.0], [40.0, 12.0]], speed_mps=1.0)
+    entry = Conveyor(id="E", points=[[2.0, 4.0], [2.0, 12.0]], speed_mps=1.0)
+    s1 = Conveyor(id="S1", points=[[10.0, 12.0], [10.0, 18.0]], speed_mps=1.0)
+    s2 = Conveyor(id="S2", points=[[24.0, 12.0], [24.0, 18.0]], speed_mps=1.0)
+    sts = [Station(id=i, x=x, y=y, count=n) for i, x, y, n in stations]
+    m = _model([entry, trunk, s1, s2],
+               [_edge(PICK, INSPECT, "E"), _edge(INSPECT, PACK, "S1"),
+                _edge(INSPECT, PACK, "S2"), _edge(PACK, SHIP, "T")],
+               pick_xy=[(3.0, 4.0)], duration=1800.0, rate=400.0, pack_time=60.0,
+               pickers=8, stations=sts)
+    world = build(m)
+    assert {c.id: (c.n_bench, c.closed)
+            for c in world.conveyors if c.id.startswith("S")} == expect
+    # the servers the model can actually use, summed, never exceed the drawn people
+    private = sum(c.n_bench for c in world.conveyors)
+    spare = world.spare_bench.capacity if world.spare_bench is not None else 0
+    drawn = sum(s.count for s in sts)
+    assert private + spare <= drawn, (private, spare, drawn)
+    assert kpis.compute([run_once(m, seed=5)], m)["packer_utilization"] <= 1.0
 
 
 def test_a_gate_with_no_one_standing_at_it_still_runs():
@@ -464,13 +557,42 @@ def _bench_counts(model):
     return {c.id: c.n_bench for c in w.conveyors if c.n_bench}
 
 
-def test_a_spur_crossing_the_trunk_gets_the_benches_on_both_sides():
-    """本線が真ん中で交わる1本の引き込み ⇒ 両端が払い出し口。"""
-    counts = _bench_counts(_through_spur_model(
-        [[20.0, 6.0], [20.0, 14.0]],          # y=10 の本線を跨ぐ
+def _crossing_spur_model(discharge_both=False):
+    m = _through_spur_model(
+        [[20.0, 6.0], [20.0, 14.0]],          # y=10 の本線を跨ぐ（端は触れていない）
         [Station(id="north", x=21.5, y=6.5, count=2),
-         Station(id="south", x=21.5, y=13.5, count=2)]))
-    assert counts == {"S": 4}, "末端だけ見ると南（または北）の2台が無人になる"
+         Station(id="south", x=21.5, y=13.5, count=2)])
+    for cv in m.resources.conveyors:
+        if cv.id == "S":
+            cv.discharge_both = discharge_both
+    return m
+
+
+def test_a_spur_crossing_the_trunk_is_actually_fed_by_it():
+    """本線に**端が触れていない**引き込みにも荷が入ること。
+
+    これが入らなかった間、引き込みは梱包台だけ持って一荷も受け取らない**死んだ
+    ベルト**だった: `_attach_to` が `points[0]` しか見ないので、真ん中で交わる
+    引き込みは合流点を持てない。オーダーは完走するので外からは正常に見え、
+    図面の機構だけが丸ごと消えていた — 台数を数えるテストは緑のまま。"""
+    m = _crossing_spur_model()
+    world = build(m)
+    spur = next(c for c in world.conveyors if c.id == "S")
+    assert spur.host is not None and spur.host.id == "T"
+    assert [(round(a, 1), s.id) for a, s in spur.host.junctions] == [(20.0, "S")]
+    assert spur.feed_arc == 4.0, "本線は引き込みの真ん中で交わる"
+    res = run_once(m, seed=5)
+    assert sum(1 for e in _events(res, "conveyor_on") if e["conveyor"] == "S") > 10
+
+
+def test_a_driven_crossing_spur_reaches_only_the_row_it_runs_to():
+    """駆動ベルトは一方向 ⇒ 使えるのは走り着く側の梱包台だけ（安全側の既定）。"""
+    assert _bench_counts(_crossing_spur_model()) == {"S": 2}
+
+
+def test_a_crossing_spur_worked_from_both_sides_reaches_both_rows():
+    """図面が「両端から人が引く」と言ったときだけ、両側の台が使える。"""
+    assert _bench_counts(_crossing_spur_model(discharge_both=True)) == {"S": 4}
 
 
 def test_a_spur_that_ends_on_the_trunk_keeps_reading_its_far_end_only():

@@ -66,11 +66,47 @@ def test_attach_takes_the_nearest_path_and_breaks_ties_by_id():
     assert beltgeom.attach((5.0, 0.2), belts, exclude={"a", "b"}) is None
 
 
-def test_a_spur_crossing_a_trunk_discharges_at_both_ends():
+def test_a_driven_spur_discharges_only_where_it_runs_to():
+    """A belt runs ONE way, so a load fed mid-path comes off at ``points[-1]``.
+
+    Claiming the far side's benches too would sell packing capacity the line
+    cannot deliver a load to — which is what "the far row is unstaffed" really
+    means on a driven belt."""
     ends = beltgeom.discharge_ends([(20.0, 6.0), (20.0, 14.0)],
                                    [TRUNK, ("S", [(20.0, 6.0), (20.0, 14.0)])],
                                    {"S"})
+    assert ends == [(20.0, 14.0)]
+
+
+def test_a_spur_worked_from_both_sides_discharges_at_both_ends():
+    """無動力ローラを人が両端から引く、と図面が言ったときだけ両側が使える。"""
+    ends = beltgeom.discharge_ends([(20.0, 6.0), (20.0, 14.0)],
+                                   [TRUNK, ("S", [(20.0, 6.0), (20.0, 14.0)])],
+                                   {"S"}, both=True)
     assert sorted(ends) == [(20.0, 6.0), (20.0, 14.0)]
+
+
+def test_a_spur_crossing_the_trunk_is_fed_where_the_paths_meet():
+    """本線に端が触れていない引き込みでも、荷は入る（触れていた頃は死んでいた）。"""
+    spur = [(20.0, 6.0), (20.0, 14.0)]
+    hit = beltgeom.feed_point(spur, [TRUNK, ("S", spur)], exclude={"S"})
+    assert hit is not None
+    host, host_arc, spur_arc = hit
+    assert host == "T"
+    assert host_arc == pytest.approx(20.0), "本線に沿った合流位置"
+    assert spur_arc == pytest.approx(4.0), "引き込みの真ん中で乗る"
+
+
+def test_a_half_drawn_spur_is_still_fed_at_its_infeed():
+    """端が本線に載っている図面は従来どおり arc 0 で乗る（挙動不変）。"""
+    spur = [(20.0, 10.0), (20.0, 16.0)]
+    assert beltgeom.feed_point(spur, [TRUNK, ("S", spur)], exclude={"S"}) == \
+        ("T", pytest.approx(20.0), 0.0)
+
+
+def test_a_spur_touching_nothing_is_fed_by_nothing():
+    spur = [(20.0, 20.0), (20.0, 26.0)]
+    assert beltgeom.feed_point(spur, [TRUNK, ("S", spur)], exclude={"S"}) is None
 
 
 def test_a_spur_that_starts_on_the_trunk_discharges_only_at_its_far_end():
@@ -103,16 +139,16 @@ def test_a_shared_bench_belongs_to_the_nearer_pull_in_and_to_only_one():
 def test_a_tie_goes_to_the_first_spur_the_caller_resolved():
     """Determinism, not fairness: the same drawing must resolve the same way.
 
-    The loser owns NO bench, which is UNSTAFFED (half-drawn line ⇒ shared pool),
-    not CLOSED (a bench is drawn there and deliberately unmanned). Reading the
-    loser as closed would silently switch off a pull-in over a rounding tie."""
+    The loser is LOST, not UNSTAFFED: a bench IS within its reach, the nearer
+    pull-in simply has the person standing at it. Reading it as UNSTAFFED sent it
+    to the shared pack pool — the WHOLE floor — which made a bench-less 引き込み
+    the most attractive lane on the line."""
     spurs = [("A", [(20.0, 10.0), (20.0, 15.0)]), ("B", [(24.0, 10.0), (24.0, 15.0)])]
     belts = [TRUNK, *spurs]
     mid = [(22.0, 15.0, 1)]                       # exactly 2.0 m from both
-    assert beltgeom.bench_pools(spurs, belts, mid)[0] == \
-        {"A": 1, "B": beltgeom.UNSTAFFED}
+    assert beltgeom.bench_pools(spurs, belts, mid)[0] == {"A": 1, "B": beltgeom.LOST}
     assert beltgeom.bench_pools(spurs[::-1], belts, mid)[0] == \
-        {"B": 1, "A": beltgeom.UNSTAFFED}
+        {"B": 1, "A": beltgeom.LOST}
 
 
 def test_the_three_answers_are_three_different_things():
@@ -145,12 +181,24 @@ def _agree(model) -> tuple[dict, dict]:
     return eng, {k: v for k, v in ana.items() if v}
 
 
+def _crossing(discharge_both=False):
+    m = _through_spur_model([[20.0, 6.0], [20.0, 14.0]],
+                            [Station(id="north", x=21.5, y=6.5, count=2),
+                             Station(id="south", x=21.5, y=13.5, count=2)])
+    for cv in m.resources.conveyors:
+        if cv.id == "S":
+            cv.discharge_both = discharge_both
+    return m
+
+
 def test_engine_and_oracle_agree_on_a_spur_that_crosses_the_trunk():
-    """The shape that made them disagree: engine 4 benches, oracle 2."""
-    eng, ana = _agree(_through_spur_model(
-        [[20.0, 6.0], [20.0, 14.0]],
-        [Station(id="north", x=21.5, y=6.5, count=2),
-         Station(id="south", x=21.5, y=13.5, count=2)]))
+    """A driven crossing spur reaches ONE row of benches, in both readers."""
+    eng, ana = _agree(_crossing())
+    assert eng == ana == {"S": 2}
+
+
+def test_engine_and_oracle_agree_when_the_spur_is_worked_from_both_sides():
+    eng, ana = _agree(_crossing(discharge_both=True))
     assert eng == ana == {"S": 4}
 
 

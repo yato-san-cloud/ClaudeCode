@@ -1286,9 +1286,17 @@ def _belt_room(line) -> bool:
 def _bench_pool(world: World, line):
     """Who takes a tote off ``line`` at its end: its own 梱包台, else the shared pool.
 
-    A 引き込み nobody stands at borrows the shared pack stations rather than refusing
-    to deliver — the half-drawn-line fallback (never-blocks)."""
-    return line.bench if line.bench is not None else world.packers
+    A 引き込み nobody stands at borrows the pack stations rather than refusing to
+    deliver — the half-drawn-line fallback (never-blocks). What it borrows is the
+    benches NOBODY ELSE claimed (``spare_bench``), not the whole floor: the shared
+    ``packers`` pool counts every station including the private ones another
+    引き込み is already working, so borrowing that books the same people twice
+    (measured packer_utilization 1.675 on a floor of four). With every bench
+    spoken for there is nothing to borrow, and the historical shared pool keeps
+    the line moving rather than deadlocking it."""
+    if line.bench is not None:
+        return line.bench
+    return world.spare_bench if world.spare_bench is not None else world.packers
 
 
 def _bench_free(world: World, line) -> bool:
@@ -1297,8 +1305,18 @@ def _bench_free(world: World, line) -> bool:
     Only the 引き込み方式 "pull" asks this. Free means idle this instant (nobody
     queued, a server unused): a load passing a bench whose operator is mid-carton
     is not taken, it rides on. That is the whole difference from 貪欲ディバート,
-    where the load enters the spur regardless and waits there for the bench."""
-    pool = _bench_pool(world, line)
+    where the load enters the spur regardless and waits there for the bench.
+
+    A 引き込み with NO bench drawn at it has nobody to do the pulling, so under
+    this policy it takes nothing. Asking the shared pack pool on its behalf
+    inverted the entire mechanism: the empty pool is almost always free, so the
+    pull-in with no workers became the most attractive lane on the line and took
+    nearly THREE TIMES the load of its manned neighbour (53 against 20). The
+    shared pool stays the fallback for 貪欲ディバート, where it is what keeps a
+    half-drawn line running (never-blocks)."""
+    if line.bench is None:
+        return False
+    pool = line.bench
     return not pool.queue and pool.count < pool.capacity
 
 
@@ -1453,7 +1471,13 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
         # 停止線: for a load of a stopped kind THIS belt ends at the gate — it can
         # neither ride past it nor hand over beyond it. ``None`` (no gate, or a
         # kind that passes) leaves every arc below exactly as it was.
-        gate = line.gate if (line.gate is not None and line.gate.stops(kind)) else None
+        # A stop line only stops what PASSES it: a load that boarded (or handed
+        # over) downstream of the gate is already past it and rides on. Without
+        # the ``>= arc`` test such a load was dragged BACKWARDS to the gate in
+        # zero time and packed at the wrong place, and every 引き込み between it
+        # and the gate vanished from its junction window.
+        gate = (line.gate if (line.gate is not None and line.gate.stops(kind)
+                              and line.gate.arc >= arc - 1e-9) else None)
         end_arc = line.length if gate is None else min(gate.arc, line.length)
         branches = ([(a, s) for a, s in line.junctions
                      if arc - 1e-9 <= a <= end_arc + 1e-9 and s.id not in visited]
@@ -1503,13 +1527,16 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
             pack_wait += spur_wait
             hops += 1
             leg += 1
-            _leg_on(world, order, spur, leg, 0.0, spur_wait)
+            _leg_on(world, order, spur, leg, spur.feed_arc, spur_wait)
             _leg_off(world, order, line, leg - 1, arc_in, arc, board_t, last=0)
             line.belt.release(slot)              # hand-over-hand: hold, then let go
-            line, slot, arc = spur, spur_slot, 0.0
+            # The tote boards the 引き込み where the 本線 actually meets it, which
+            # is its infeed for a half-drawn spur (``feed_arc`` 0.0, unchanged) and
+            # the crossing point for one drawn as a single belt across the trunk.
+            line, slot, arc = spur, spur_slot, spur.feed_arc
             visited.add(line.id)
             if tote is not None and world.recording():
-                p0 = line.points[0]
+                p0 = line.point_at(arc)
                 tote.kf(env.now, p0[0], p0[1], "belt")
             continue
 

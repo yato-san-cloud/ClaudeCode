@@ -549,7 +549,8 @@ def _belt_stages(model: WarehouseModel):
     benches, _claimed = beltgeom.bench_pools(
         [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in spurs],
         [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in belts],
-        [(s.x, s.y, s.count) for s in (model.resources.stations or [])])
+        [(s.x, s.y, s.count) for s in (model.resources.stations or [])],
+        both={str(cv.id) for cv in spurs if getattr(cv, "discharge_both", False)})
     return {"stages": stages, "spurs": spurs, "benches": benches}
 
 
@@ -575,16 +576,17 @@ def _spur_benches(model: WarehouseModel, spur) -> int | None:
 def _open_spurs(line: dict) -> list:
     """The 引き込み that actually TAKE a tote — i.e. not the deliberately unmanned.
 
-    ``engine.build`` does not wire a junction for a spur whose benches are all
-    ``count: 0`` (``ConveyorLine.closed``), so such a pull-in receives nothing at
-    all. Pricing it as an open lane would hand the bank capacity the floor has no
-    people for — rosier than the run, which is the one direction invariant 5
-    forbids. A spur with nobody DRAWN at it is a different thing and stays open:
-    it falls back to the shared pack pool, exactly as the engine does.
+    ``engine.build`` does not wire a junction for a spur that has no hands —
+    either its benches are all ``count: 0`` (deliberately unmanned) or the bench
+    within its reach belongs to a NEARER pull-in. Such a pull-in receives nothing
+    at all. Pricing it as an open lane would hand the bank capacity the floor has
+    no people for — rosier than the run, which is the one direction invariant 5
+    forbids. A spur with nobody DRAWN anywhere near it is a different thing and
+    stays open: it falls back to the shared pack pool, exactly as the engine does.
     """
     benches = line.get("benches") or {}
     return [cv for cv in line["spurs"]
-            if benches.get(str(cv.id), beltgeom.UNSTAFFED) != beltgeom.CLOSED]
+            if benches.get(str(cv.id), beltgeom.UNSTAFFED) not in beltgeom.NO_HANDS]
 
 
 def _mmck_full(c: int, a: float, k: int) -> float:
@@ -644,7 +646,10 @@ def _steady_block(model: WarehouseModel, line: dict, lam: float,
         probs = []
         for cv in spurs:
             benches = line["benches"].get(str(cv.id))
-            if not benches:                      # nobody stands there: pooled pack
+            # ``_open_spurs`` has already dropped the ones with no hands, so what
+            # is left is either a real count or UNSTAFFED (nobody drawn ⇒ the
+            # half-drawn-line fallback onto the shared pack pool).
+            if not (isinstance(benches, int) and benches > 0):
                 benches = max(1, int(n_packers / len(spurs)))
             slots = belt_slots(cv)
             probs.append(_mmck_full(benches, (lam / len(spurs)) * pack_time_s,

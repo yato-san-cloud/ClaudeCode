@@ -485,6 +485,12 @@ class Conveyor(BaseModel):
     # over every hand-over, and a :attr:`stop_gate` downstream sorts on it.
     # ``""`` (default) = one single kind, i.e. the historical behaviour.
     load_kind: str = ""
+    # 引き込みを両側から扱うか。既定 False = 駆動ベルトは一方向に流れるので、
+    # 中ほどで本線に交わる引き込みでも荷が降りるのは `points[-1]` 側だけ＝そちらの
+    # 梱包台しか使えない。True = 無動力(フリー)ローラのように**両端から人が引く**
+    # ので、両側の梱包台が使える（能力が倍になる）。図面は普通どちらとも書かない
+    # ので、安全な側（片側）を既定にして、**言えるときだけ言う**。
+    discharge_both: bool = False
     # 選択停止ゲート (停止線): ``None`` (default) = no gate, byte-identical.
     # A dict so a hand-authored model can state it without a nested schema:
     #   ``{"at_m": 24.5, "stop_states": ["inspected"], "pass_states": ["packed"]}``
