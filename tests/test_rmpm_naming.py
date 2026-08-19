@@ -633,6 +633,28 @@ def test_the_inferred_kind_follows_the_belts_that_carry_loads_into_the_gate():
         "本線コンベア(東向き)": "検品済オリコン", "引き込みコンベア1": "検品済オリコン"}
 
 
+def test_two_benches_drawn_with_the_same_name_stay_two_benches():
+    """同名で描かれた梱包台は2台。IDが衝突すると**片方しか指せない**。
+
+    他のコレクション（ベルト・マーカー・非障壁・ゾーン）は最初から `_uniq` で
+    重複を解いていたのに作業台だけ素通しだった。`Station` が点だった頃は実害が
+    薄かったが、いまは役割・実寸・人数を持つので、IDで引く側（シナリオ編集・
+    エディタ・KPIの読み出し）が黙って先に見つけた方を触る。"""
+    res = _imp([
+        {"type": "StationObject", "id": 1, "x": 10000, "y": 20000, "w": 900,
+         "h": 1400, "name": "梱包台"},
+        {"type": "StationObject", "id": 2, "x": 12000, "y": 20000, "w": 900,
+         "h": 1400, "name": "梱包台"},
+        {"type": "StationObject", "id": 3, "x": 14000, "y": 20000, "w": 900,
+         "h": 1400, "name": "梱包台"},
+    ])
+    ids = [s["id"] for s in res["stations"]]
+    assert len(ids) == len(set(ids)) == 3, ids
+    assert ids[0] == "梱包台", "1台目は描かれた名前のまま（equipment_ref が指せる）"
+    # ...and every one of them is still a real bench with its own footprint.
+    assert all(s.get("count") == 1 and s.get("w") for s in res["stations"])
+
+
 def test_the_importer_never_decides_discharge_both():
     """`Conveyor.discharge_both` は既定 False（片側払い出し）。図面は引き込みが
     駆動か無動力かを言わないのに、これを立てると能力が倍になる。取込は決めない。"""

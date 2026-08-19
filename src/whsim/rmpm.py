@@ -762,8 +762,15 @@ def import_rmpm_bytes(data: bytes) -> dict:
         walls.append(wall)
 
     stations = []
+    # Two benches drawn with the SAME name are two benches. Every other collection
+    # here already deduped (`belt_ids` / `mark_ids` / …) and stations did not, so a
+    # line drawn as 20 identically-named 梱包台 arrived as 20 objects sharing one id
+    # — harmless while a Station was a point, but they now carry role/w/d/count and
+    # anything that looks one up by id (scenario edits, the editor, KPI read-outs)
+    # would silently address whichever one it found first.
+    station_ids: set[str] = set()
     for i, (x, y, w, h, name, role) in enumerate(raw_stations):
-        st = {"id": name or f"st{i}",
+        st = {"id": _uniq(station_ids, name, f"st{i}"),
               "x": round(sx(x) + sl(w) / 2, 3),
               "y": round(sy(y) + sl(h) / 2, 3)}
         if role:
