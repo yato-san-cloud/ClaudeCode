@@ -514,6 +514,13 @@ class Station(BaseModel):
     # as a point and ignore both).
     w: float | None = None   # 幅 (x方向, m)
     d: float | None = None   # 奥行 (y方向, m)
+    # 作業台の役割 (`pack` / `inspect` / `bench` / `infeed`, …). ``""`` (default) =
+    # 「ただの作業台」＝従来どおり。取込は図面の名前から役割を読めるのに、置き場が
+    # 無いと保存時に落ちる — そして後から「梱包台なのか、P2 時代の検品台なのか、
+    # ラインへ載せる投入口なのか」を id の文字列で当てにいく羽目になる。
+    # エンジンは今のところ役割を見ない（台数は今までどおり全ステーションの合計）ので、
+    # これを足しても挙動は 1 バイトも変わらない。
+    role: str = ""
 
 
 class Resources(BaseModel):

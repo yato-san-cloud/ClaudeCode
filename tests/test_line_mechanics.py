@@ -441,6 +441,67 @@ def test_pull_never_stalls_the_trunk_waiting_for_a_bench():
     assert len(done) > 20 and done[-1]["t"] > 0.8 * res.duration_s
 
 
+# ======================================= 引き込みの梱包台: 端と持ち主の決め方
+# 引き込みは物理的には**本線を跨ぐ1本**で、両側に梱包台が並ぶ。半分ずつ描かれた図面
+# （＝同梱テンプレート）では末端が自分の台なので従来どおり。1本で描かれると本線は
+# 真ん中で交わり、末端だけ見ると片側の列が丸ごと無人になる。
+
+
+def _through_spur_model(spur_points, stations, edges_ref="S"):
+    trunk = Conveyor(id="T", points=[[0.0, 10.0], [40.0, 10.0]], speed_mps=1.0,
+                     tote_pitch_m=1.0)
+    entry = Conveyor(id="E", points=[[2.0, 2.0], [2.0, 10.0]], speed_mps=1.0,
+                     tote_pitch_m=1.0)
+    spur = Conveyor(id=edges_ref, points=spur_points, speed_mps=0.5, tote_pitch_m=1.0)
+    return _model([entry, trunk, spur],
+                  [_edge(PICK, INSPECT, "E"), _edge(INSPECT, PACK, edges_ref),
+                   _edge(PACK, SHIP, "T")],      # 本線を配線しないとベルト集合に居ない
+                  pick_xy=[(3.0, 2.0)], stations=stations, duration=600.0)
+
+
+def _bench_counts(model):
+    w = build(model)
+    return {c.id: c.n_bench for c in w.conveyors if c.n_bench}
+
+
+def test_a_spur_crossing_the_trunk_gets_the_benches_on_both_sides():
+    """本線が真ん中で交わる1本の引き込み ⇒ 両端が払い出し口。"""
+    counts = _bench_counts(_through_spur_model(
+        [[20.0, 6.0], [20.0, 14.0]],          # y=10 の本線を跨ぐ
+        [Station(id="north", x=21.5, y=6.5, count=2),
+         Station(id="south", x=21.5, y=13.5, count=2)]))
+    assert counts == {"S": 4}, "末端だけ見ると南（または北）の2台が無人になる"
+
+
+def test_a_spur_that_ends_on_the_trunk_keeps_reading_its_far_end_only():
+    """半分ずつ描かれた図面（＝同梱テンプレート）の従来挙動。"""
+    counts = _bench_counts(_through_spur_model(
+        [[20.0, 10.0], [20.0, 16.0]],          # 始端が本線の上＝そこは払い出さない
+        [Station(id="far", x=21.0, y=15.5, count=2),
+         Station(id="on_trunk", x=21.0, y=10.5, count=5)]))
+    assert counts == {"S": 2}, "本線に接する端は乗り口であって払い出し口ではない"
+
+
+def test_a_bench_between_two_spurs_belongs_to_the_nearer_one():
+    trunk = Conveyor(id="T", points=[[0.0, 10.0], [40.0, 10.0]], speed_mps=1.0,
+                     tote_pitch_m=1.0)
+    entry = Conveyor(id="E", points=[[2.0, 2.0], [2.0, 10.0]], speed_mps=1.0,
+                     tote_pitch_m=1.0)
+    a = Conveyor(id="A", points=[[20.0, 10.0], [20.0, 15.0]], speed_mps=0.5,
+                 tote_pitch_m=1.0)
+    b = Conveyor(id="B", points=[[24.0, 10.0], [24.0, 15.0]], speed_mps=0.5,
+                 tote_pitch_m=1.0)
+    m = _model([entry, trunk, a, b],
+               [_edge(PICK, INSPECT, "E"), _edge(INSPECT, PACK, "A"),
+                _edge(INSPECT, PACK, "B"), _edge(PACK, SHIP, "T")],
+               pick_xy=[(3.0, 2.0)], duration=600.0,
+               stations=[Station(id="near_a", x=20.5, y=15.0, count=1),
+                         # A から 2.6m / B から 1.6m — 手の届く方が引く
+                         Station(id="mid", x=22.6, y=15.0, count=1),
+                         Station(id="near_b", x=24.5, y=15.0, count=1)])
+    assert _bench_counts(m) == {"A": 1, "B": 2}
+
+
 # ==================================================== 既定OFF: バイト同一
 # Captured from the PRE-CHANGE tree (a `git worktree` of HEAD, same seeds, same
 # model) — not merely frozen from the current one. The three mechanisms are all

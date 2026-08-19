@@ -357,10 +357,30 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
     # fall back to the shared pack pool — a half-drawn line still runs.
     stations = list(getattr(model.resources, "stations", None) or [])
     claimed: set[int] = set()          # stations already owned by a 引き込み
+    # A spur's benches stand at its DISCHARGE ends — the extremities that are not
+    # its infeed junction. Drawn as two halves ending at their own benches, that is
+    # just `points[-1]` (the shipped line is unchanged). Drawn as ONE belt CROSSING
+    # the 本線 (which is what a 引き込み physically is — see rmpm's 北半/南半 merge),
+    # the trunk meets it in the MIDDLE and BOTH extremities discharge, to the benches
+    # on either side. Reading only `points[-1]` there finds one row and leaves the
+    # other row of 梱包台 unstaffed — the belt then jams with half the floor idle.
+    _ends = {}
     for s in spurs:
-        end = s.points[-1]
-        nearby = [st for st in stations
-                  if math.dist((float(st.x), float(st.y)), end) <= BENCH_REACH_M]
+        ends = [s.points[0], s.points[-1]]
+        disch = [e for e in ends if _attach_to(lines, e, spur_ids) is None]
+        _ends[s.id] = disch or [s.points[-1]]   # every end on a trunk ⇒ historical
+    # Each bench belongs to the pull-in its worker actually reaches: the NEAREST
+    # one. Claiming first-come instead lets a wide reach steal a neighbour's bench
+    # (P3: 4.5 m pitch, benches ±1.9 m ⇒ 6/4/4/4/2 instead of the drawn 4/4/4/4/4).
+    owner: dict[int, tuple[float, str]] = {}
+    for s in spurs:
+        for st in stations:
+            p = (float(st.x), float(st.y))
+            d = min(math.dist(p, e) for e in _ends[s.id])
+            if d <= BENCH_REACH_M and (id(st) not in owner or d < owner[id(st)][0]):
+                owner[id(st)] = (d, s.id)
+    for s in spurs:
+        nearby = [st for st in stations if owner.get(id(st), (0, None))[1] == s.id]
         n = sum(max(0, int(st.count)) for st in nearby)
         if n > 0:
             s.n_bench = n

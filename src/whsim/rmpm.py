@@ -630,6 +630,12 @@ def import_rmpm_bytes(data: bytes) -> dict:
             # it keeps the historical point-only dict.
             st["role"] = role
             st["w"], st["d"] = sl(w), sl(h)
+            # …and ONE drawn bench is ONE working position. The schema defaults
+            # `count` to 3 (a Station used to mean "a packing area with a few
+            # people in it"), so 20 drawn 梱包台 would silently become 60 positions
+            # — a 3× capacity error in the direction that flatters the design.
+            # The drawing counted them for us; take the count it gives.
+            st["count"] = 1
         stations.append(st)
 
     # 北半/南半 に分かれて描かれた1本のベルトを結合してから配線する（結合前に

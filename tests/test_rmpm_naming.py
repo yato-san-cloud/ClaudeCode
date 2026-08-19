@@ -201,6 +201,22 @@ def test_packing_bench_keeps_its_real_footprint():
     assert res["conveyors"] == []
 
 
+def test_one_drawn_bench_is_one_working_position():
+    """スキーマ既定の count=3 のままだと、描かれた20台が60人分になる。"""
+    res = _imp([
+        {"type": "StationObject", "id": 1, "x": 30000, "y": 30000, "w": 900, "h": 1400,
+         "name": "梱包台01"},
+        {"type": "StationObject", "id": 2, "x": 32000, "y": 30000, "w": 900, "h": 1400,
+         "name": "梱包台02"},
+        # 名前で判定できなかった作業台は従来どおり（既定に任せる）
+        {"type": "StationObject", "id": 3, "x": 1000, "y": 1000, "w": 20000, "h": 6500},
+    ])
+    named = [s for s in res["stations"] if s.get("role")]
+    assert [s["count"] for s in named] == [1, 1]
+    plain = [s for s in res["stations"] if not s.get("role")]
+    assert plain and "count" not in plain[0]
+
+
 def test_infeed_is_a_station_with_a_role():
     res = _imp([{"type": "StationObject", "id": 1, "x": 1000, "y": 1000,
                  "w": 1000, "h": 1000, "name": "投入口A"},
@@ -444,9 +460,10 @@ def test_named_layout_imports_through_the_endpoint():
         assert d["stats"]["non_barriers"] == 1
         assert d["walls"] == 1        # 停止線 is not one of them
         m = client.get("/api/projects/rmpmname/full").json()
-        # the bench survives the round trip with its real footprint
+        # the bench survives the round trip with its real footprint AND its role
         st = [s for s in m["resources"]["stations"] if s["id"] == "梱包台01"]
         assert st and st[0]["w"] == 0.9 and st[0]["d"] == 1.4
+        assert st[0]["role"] == "pack" and st[0]["count"] == 1
         assert any(z["id"] == "積み付けエリア" for z in m["layout"]["zones"])
     finally:
         client.delete("/api/projects/rmpmname")
