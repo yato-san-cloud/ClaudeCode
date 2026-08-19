@@ -354,6 +354,16 @@ def test_an_unstaffed_pull_in_is_closed_exactly_when_the_engine_closes_it(spare_
     assert priced == {str(cv.id) for cv in line["spurs"]} - closed
     assert ("S2" in priced) is spare_bench
 
+    # A borrowed pull-in is worked by the 余り台 and NOTHING else: the bank must
+    # give it the 3 unclaimed benches, not a share of the whole packing floor
+    # (which would book the two staffed pull-ins' people a second time).
+    live = _live_line(m)
+    bank = analytic._bank_of(live, live["stages"], analytic._open_spurs(live),
+                             sum(s.count for s in m.resources.stations),
+                             m.process.pack_time_s)
+    assert [c for c, _k, _s in bank] == ([2, 2, 3] if spare_bench else [2, 2])
+    assert 0.0 <= analytic.estimate(m)["conveyor"]["block_ratio_est"] <= 1.0
+
 
 def test_the_estimate_and_the_engine_read_the_same_bank_on_the_shipped_line():
     """The bundled 出荷ライン: 10 引き込み, 2 台 each, in trunk-arc order."""
