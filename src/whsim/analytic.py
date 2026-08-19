@@ -557,15 +557,24 @@ def _belt_stages(model: WarehouseModel):
     # shared bench belongs to the nearer pull-in, and this module did not — so a
     # real drawing came out 4 benches in the run and 2 in the estimate, and a
     # bench between two spurs was counted twice (rosier than the run).
+    stations = list(model.resources.stations or [])
     benches, claimed = beltgeom.bench_pools(
         [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in spurs],
         [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in belts],
-        [(s.x, s.y, s.count) for s in (model.resources.stations or [])],
+        [(s.x, s.y, s.count) for s in stations],
         both={str(cv.id) for cv in spurs if getattr(cv, "discharge_both", False)})
+    # 余り台 — 誰の持ち物でもない梱包台, i.e. ``World.spare_bench``. It is what a
+    # pull-in nobody stands at may borrow, and when it is ZERO such a pull-in has
+    # nobody at all: ``build`` then marks it ``closed``. Resolved HERE, beside the
+    # ``claimed`` it is the complement of, so no reader has to pair this answer
+    # with a second bench_pools call of its own (invariant 11).
+    spare = sum(max(0, int(s.count)) for i, s in enumerate(stations)
+                if i not in claimed)
     return {"stages": stages, "spurs": spurs, "benches": benches,
             # additive: the chain as it was resolved, for the mechanism mirrors
             "belts": belts, "by_id": by_id, "entries": entries,
-            "spur_ids": spur_only, "succ": succ, "claimed": claimed}
+            "spur_ids": spur_only, "succ": succ, "claimed": claimed,
+            "spare": spare}
 
 
 def _spur_benches(model: WarehouseModel, spur) -> int | None:
@@ -643,17 +652,48 @@ def _aisle_congestion(model: WarehouseModel, det: dict | None,
 def _open_spurs(line: dict) -> list:
     """The 引き込み that actually TAKE a tote — i.e. not the deliberately unmanned.
 
-    ``engine.build`` does not wire a junction for a spur that has no hands —
-    either its benches are all ``count: 0`` (deliberately unmanned) or the bench
-    within its reach belongs to a NEARER pull-in. Such a pull-in receives nothing
-    at all. Pricing it as an open lane would hand the bank capacity the floor has
-    no people for — rosier than the run, which is the one direction invariant 5
-    forbids. A spur with nobody DRAWN anywhere near it is a different thing and
-    stays open: it falls back to the shared pack pool, exactly as the engine does.
+    ``engine.build`` does not wire a junction for a spur that has no hands, and it
+    reaches that verdict TWICE:
+
+    * its benches are all ``count: 0`` (deliberately unmanned) or the bench within
+      its reach belongs to a NEARER pull-in — ``beltgeom.NO_HANDS``;
+    * **or** nobody is drawn at it AND there is no 余り台 left to borrow. A spur
+      with nobody drawn falls back to the shared pool, but that pool is the
+      UNCLAIMED benches only (``World.spare_bench``) — every other bench is already
+      being worked by the pull-in that owns it, so lending it books the same person
+      twice. With ``spare == 0`` and something claimed, ``build``'s second pass
+      (``if claimed and spare == 0``) closes every un-benched pull-in.
+
+    Either way the pull-in receives nothing at all. Pricing it as an open lane
+    would hand the bank capacity the floor has no people for — rosier than the run,
+    which is the one direction invariant 5 forbids. Only the second case was
+    missing here, and it is not academic: ``_conveyor_estimate`` summed such a
+    belt's rate and slots into its stage, so the line's ceiling and its buffer both
+    counted a lane nobody can unload.
+
+    With NOTHING claimed the line is simply drawn without benches: everybody shares
+    the pack pool, which is the historical never-blocks fallback and stays open.
+
+    ⚠️ 停止線 also claim benches in ``build`` (the workers standing at the gate),
+    which shrinks ``spare`` further and can close a pull-in this still calls open.
+    A drawing with a gate is priced by ``linemech.gate``, not by the branch this
+    feeds, so the gap is unreachable from ``_conveyor_estimate``'s own answer — but
+    it is a gap, and it is the rosy side, so it belongs in the daylight.
     """
     benches = line.get("benches") or {}
-    return [cv for cv in line["spurs"]
-            if benches.get(str(cv.id), beltgeom.UNSTAFFED) not in beltgeom.NO_HANDS]
+    # ``build``'s ``s.bench is None`` — a pull-in with no private bench of its own.
+    # A ``line`` without the key (a hand-built dict) reads as no 余り台, i.e. the
+    # gloomy side: an oracle may be gloomier than the run, never rosier.
+    unbenched = bool(line.get("claimed")) and not int(line.get("spare") or 0)
+    out = []
+    for cv in line["spurs"]:
+        n = benches.get(str(cv.id), beltgeom.UNSTAFFED)
+        if n in beltgeom.NO_HANDS:
+            continue
+        if unbenched and not (isinstance(n, int) and n > 0):
+            continue
+        out.append(cv)
+    return out
 
 
 def _mmck_full(c: int, a: float, k: int) -> float:
@@ -682,49 +722,445 @@ def _mmck_full(c: int, a: float, k: int) -> float:
     return r / total
 
 
+# 引き込み(spur) bank: a chain over the TOTAL loads standing on the line. A 100 m
+# belt drawn at a 2 cm pitch is 5000 slots and the walk is O(slots), so cap the
+# state space — past this the line is saturated either way (a buffer that deep
+# never drains inside one shift) and the estimate has to stay 爆速.
+_BANK_MAX_STATES = 20000
+# Nodes for the finite-horizon integral below. 40 is ~0.05 ms and the answer is
+# stable to 1e-3 against 400.
+_FILL_NODES = 40
+_SQRT2 = math.sqrt(2.0)
+# The queue's variance rate, in units of the M/M/1 value ``λ + capacity``. Twice,
+# because the bank is NOT a fixed-rate server: below ``ΣK`` its rate ramps with
+# occupancy (fewer 引き込み in play ⇒ fewer 梱包台 working), so the walk gets a push
+# towards the top that a constant-rate diffusion has no term for. CALIBRATED, not
+# derived: at the M/M/1 value the near-critical margin all but vanishes — measured
+# over 18 h at 8 reps, a 5-spur bank at ρ_bank = 0.95 reads 0.5833 against a run's
+# 0.5828, which is inside the run's own rep-to-rep spread and therefore a coin toss
+# on the side invariant 5 forbids. Doubling it reads 0.6016. The cost is carried by
+# lines at and over capacity, which are already being told they jam.
+_FILL_VAR = 2.0
+
+
+def _spur_serve_s(pack_time_s: float, benches: int, slots: int,
+                  ride_s: float) -> float:
+    """梱包台-seconds ONE load costs a 引き込み, ride-in dead time included.
+
+    A 梱包台 that has just gone free cannot start again until a load is standing at
+    it, and a load that turns in at the junction has to RIDE the 引き込み first. That
+    ride is dead time on the bench — unless a load that has ALREADY ridden is
+    waiting behind it, which is what the pull-in's spare slots are for: ``K − c``
+    waiting positions drain at ``c/τ`` and so cover ``(K−c)·τ/c`` seconds of it.
+
+    ``K ≤ c`` (slots at most benches — the short free-roller pull-in with no
+    accumulation) covers nothing and pays the ride every cycle. That is a real
+    capacity loss the bench count alone cannot show. Measured on a saturated
+    5-spur bank of 2 slots / 2 benches (τ = 60 s), the real cycle is 61.5 s and the
+    line passes 585/hr where the benches say 600 — so offering it its NOMINAL
+    capacity already over-feeds it, and the whole line then saturates over a shift
+    (DES ``conveyor_block_ratio`` 0.816 against a nominal-capacity reading of 0).
+    With ``K ≥ c + 1`` the term vanishes on every realistic geometry — the measured
+    cycle is τ to within 0.06% — which is why the bundled 出荷ライン (5 slots,
+    2 benches, τ = 78 s) is untouched by it.
+    """
+    tau = max(pack_time_s, 1e-9)
+    c = max(int(benches), 1)
+    cover = max(int(slots) - c, 0) * tau / c
+    return tau + max(0.0, float(ride_s) - cover)
+
+
+def _bank_rate_profile(bank) -> list[float]:
+    """梱包 completions/s available when ``N`` loads stand in the bank (N = 0…ΣK).
+
+    貪欲ディバート takes the FIRST 引き込み with room, so loads pile into spur 1 until
+    its slots are gone, then spur 2, and so on. That is measured, not assumed: a
+    3-spur bank at ρ_bank = 0.7 takes 241/208/76 in junction order, and the 前詰め
+    disappears exactly where the mechanism says it should — at ρ_bank = 1.0 every
+    pull-in is saturated (243/243/239), and with a single slot each every load
+    spills at once (117/117/116).
+
+    Filling in JUNCTION order is therefore the engine's own order, and it is also
+    the pessimistic one against the split this replaces: a spur holding ``n`` works
+    ``min(n, c)`` benches, so concentrating ``N`` loads leaves more benches idle
+    than spreading them. For a bank of identical pull-ins it is the fewest benches
+    any arrangement of ``N`` could work; for a mixed bank the true minimum would
+    concentrate into the pull-in with the fewest benches per slot instead, which
+    the engine does not do — so what is modelled here is the run's ORDER, not a
+    bound.
+    """
+    prof = [0.0]
+    for c, k, serve in bank:
+        for i in range(1, k + 1):
+            prof.append(prof[-1] + (1.0 / serve if i <= c else 0.0))
+    return prof
+
+
+def _queue_prefactor(prof: list[float], servers: int, lam: float) -> float:
+    """P(a queue has formed behind the 梱包台 at all) — the bank's Erlang-C term.
+
+    The horizon walk below prices the queue as if one always existed: its
+    steady-state weight is the geometric tail ``(λ/capacity)^depth``, which is the
+    tail of an M/M/**1** queue. A bank of ``c`` benches offered a third of its
+    capacity almost never has a queue at all, and pricing the tail without the
+    probability that it exists read a 6-bench pull-in at ρ_bank = 0.33 as blocking
+    0.111 where the chain (and the run) say 0.002.
+
+    So this is that probability, taken from the chain itself with an INFINITE tail
+    (the belt is finite, but the picker behind it is not), and it is the same
+    number for every stage: ``P(N ≥ L) = A·r^(L−servers)`` for every level ``L``
+    above the benches, so ``A`` factors straight out.
+
+    ``1.0`` at or over capacity — there is no stationary law to take it from, and
+    a queue is certainly there.
+    """
+    m_bank = len(prof) - 1
+    full = prof[m_bank]
+    if full <= 0.0 or lam <= 0.0:
+        return 1.0
+    r = lam / full
+    if r >= 1.0:
+        return 1.0
+    log_w = [0.0] * (m_bank + 1)
+    acc = 0.0
+    for n in range(1, m_bank + 1):
+        acc += math.log(lam / prof[n])
+        log_w[n] = acc
+    top = max(log_w)
+    w = [math.exp(v - top) for v in log_w]
+    z = sum(w) + w[m_bank] * r / (1.0 - r)
+    if w[m_bank] <= 0.0 or z <= 0.0:
+        return 0.0
+    log_a = (math.log(w[m_bank]) + (servers - m_bank) * math.log(r)
+             - math.log(1.0 - r) - math.log(z))
+    return 1.0 if log_a >= 0.0 else math.exp(log_a)
+
+
+def _bank_chain(prof: list[float], extra: int, lam: float) -> list[float]:
+    """Stationary law of that chain, with the upstream belts as its waiting room.
+
+    Below ``ΣK`` the death rate RISES with occupancy (each further load puts one
+    more 引き込み in play); above it the bank is full and the rate is flat, so the
+    本線 and 検品ライン behind it are a plain queue in front of a fixed-rate server.
+    That is the whole coupling in one birth-death chain: 引き込みが満杯 ⇒ 本線に滞留
+    ⇒ 検品ラインが止まる ⇒ ピッカーが手放せない.
+
+    Carried in logs: λ/rate can be tens and the chain hundreds of states long, so
+    the raw product overflows long before the tail is reached.
+    """
+    m_bank = len(prof) - 1
+    full = prof[m_bank]
+    n_max = min(m_bank + max(extra, 0), _BANK_MAX_STATES)
+    if lam <= 0.0:
+        return [1.0] + [0.0] * n_max          # no arrivals ⇒ an empty line
+    if full <= 0.0:
+        # Nobody can pack at all: the bank fills once and never drains. This is the
+        # closed form of ``pack_unmanned`` — every bench claimed and no 余り台 left,
+        # so ``World.spare_bench`` has nothing to lend and the load stays put.
+        return [0.0] * n_max + [1.0]
+    log_pi = [0.0] * (n_max + 1)
+    acc = 0.0
+    for n in range(1, n_max + 1):
+        acc += math.log(lam / (prof[n] if n <= m_bank else full))
+        log_pi[n] = acc
+    top = max(log_pi)
+    pi = [math.exp(v - top) for v in log_pi]
+    tot = sum(pi)
+    return [p / tot for p in pi]
+
+
+def _fill_share(depth: float, delta: float, var: float, horizon_s: float,
+                tail: float | None = None) -> float:
+    """Share of a run of length ``horizon_s`` that a queue ``depth`` deep is FULL.
+
+    The loads standing behind the 梱包台 are a random walk started EMPTY and
+    reflected at 0: drift ``delta = λ − capacity`` per second, variance rate
+    ``var = λ + capacity``. By the reflection principle
+    ``P(Q(t) ≥ depth) = Φ̄((d−δt)/σ√t) + e^{2δd/σ²}·Φ̄((d+δt)/σ√t)``, and what a run
+    reports is that averaged over the run.
+
+    This is the piece a stationary chain cannot supply, and it is not a refinement:
+    the belt is a FINITE buffer but the picker behind it is not — a load that
+    cannot be handed over waits in the picker's hands, so the queue is unbounded
+    and at ρ = 1 it is null recurrent. It has no steady state at all; it grows like
+    ``σ√t`` for ever, and how much of a shift a stage spends blocked is therefore a
+    property of the SHIFT. Measured on a 6-spur bank at ρ_bank = 1.00, the 検品ライン
+    is blocked 0.25 of an 8-hour run and 0.47 of an 18-hour one, where the
+    finite-buffer stationary reading says 0.01 for both. This is a diffusion
+    APPROXIMATION, not a bound: it is the heavy-traffic limit, so it is trustworthy
+    near ρ = 1 (which is where it is asked) and merely indicative far from it — the
+    other two readings in :func:`_overflow_cascade` cover those ends.
+
+    ``depth`` is counted from the servers, not from the belt: the loads AT the
+    梱包台 are in service, everything behind them is the queue. A 引き込み bank with
+    no waiting room at all (slots = benches) therefore has depth 0 at its own level
+    and this says nothing about it — the chain does, and it is an Erlang-B-shaped
+    answer, not "always full".
+    """
+    if depth <= 0.0:
+        return 0.0
+    if horizon_s <= 0.0 or var <= 0.0:
+        return 0.0
+    sig = math.sqrt(var)
+    # Steady-state weight of the "already been there" term. The reflection formula
+    # carries ``2δd/σ²``, which is the HEAVY-TRAFFIC form of the queue's geometric
+    # tail ``(λ/capacity)^d`` — the two agree to 1e-4 at ρ = 0.9 but the diffusion
+    # decays too slowly further down (it reads 0.0025 where an idle line has 0). The
+    # exact exponent costs nothing and is what makes an empty line read empty.
+    boost = (depth * math.log(tail) if (tail is not None and 0.0 < tail < 1.0)
+             else 2.0 * delta * depth / var)
+    ex = math.exp(boost) if boost < 700.0 else None      # None ⇒ saturated
+    acc = 0.0
+    for i in range(1, _FILL_NODES + 1):
+        # t = horizon·s²: the integrand moves fastest just after the run starts,
+        # and this spaces the nodes there without a special case.
+        s = (i - 0.5) / _FILL_NODES
+        t = horizon_s * s * s
+        sd = sig * math.sqrt(t)
+        if ex is None:
+            p = 1.0
+        else:
+            p = (0.5 * math.erfc((depth - delta * t) / sd / _SQRT2)
+                 + ex * 0.5 * math.erfc((depth + delta * t) / sd / _SQRT2))
+        acc += min(p, 1.0) * 2.0 * s / _FILL_NODES
+    return min(max(acc, 0.0), 1.0)
+
+
+def _overflow_cascade(bank, upstream, lam: float, capacity: float,
+                      horizon_s: float) -> list[float]:
+    """P(a boarding onto each stage has to WAIT) — 引き込み stage first.
+
+    The 逐次オーバーフロー縦続 the ``auto`` bank really is. ``_convey_chain`` turns into
+    the FIRST junction with room, so the bank is an ORDERED hunt group, not the
+    random split ``lam/len(spurs)`` prices: spur 1 is offered everything until its
+    slots are gone, spur 2 takes what spills, and so on. And the overflow is not a
+    LOSS — a load that finds every pull-in full stalls on the 本線 holding its slot,
+    which is the back-pressure this whole model exists to show. So it is a QUEUE
+    cascade: the bank is the (state-dependent) server, the belts behind it are its
+    waiting room, and a stage blocks when everything DOWNSTREAM of it is full. The
+    levels are therefore cumulative — 引き込み at ``ΣK``, 本線 at ``ΣK + K_trunk``,
+    検品ライン at ``ΣK + K_trunk + K_entry`` — and they fill IN THAT ORDER.
+
+    ``bank``     — the OPEN 引き込み in junction (arc) order as
+                   ``(梱包台, slots, seconds of bench time per load)``; the third
+                   entry is :func:`_spur_serve_s`.
+    ``upstream`` — accumulating slots of each stage BEHIND the bank, nearest first.
+    ``capacity`` — the line's ceiling in loads/s (``_conveyor_estimate``'s ``cap``).
+    ``horizon_s``— the run this is compared against (``simulation.duration_s``).
+
+    Per stage the answer is the WORST of three readings, because no one of them is
+    honest across the whole range — and none of the three is a proven upper bound,
+    so the ``max`` is the honesty, not any single term:
+
+    * the **stationary chain**, right below capacity where the line settles long
+      before the shift ends;
+    * the **fluid fill** ``1 − C_i/((λ−capacity)·T)``, right above it. Charging ONE
+      fill time for the whole buffer is what read the bundled 出荷ライン at 2× demand
+      as blocking 0.00 where the run blocks 0.52: the 引き込み bank is full after
+      1.9 h of the shift, the 本線 after 3.5 h and the 検品ライン after 6.2 h, so the
+      three stages are blocked 0.99 / 0.90 / 0.46 of it and not one of them 0;
+    * the **finite-horizon walk** :func:`_fill_share`, which is the only one of the
+      three that says anything at all at ρ = 1, where there IS no steady state.
+
+    Validated, not proved: over 270 synthetic bank configurations at 8 h the split
+    it replaces reads rosier than the DES in 202 of them (worst −0.815) and this
+    reads rosier in 2 (worst −0.001, ~1 blocked boarding in 850 = run noise).
+
+    This prices 貪欲ディバート — ``Process.divert_policy == "auto"``, the default.
+    Under "pull" nothing piles into the first pull-in (a load rides past a bench
+    that is not free instead of waiting), so the water-filling profile above is the
+    wrong shape; ``_line_estimate`` routes that case to ``linemech.pull`` before
+    ``_conveyor_estimate`` is reached, and 停止線 likewise to ``linemech.gate``.
+    """
+    # A 引き込み with NO hands takes one load per slot and never gives it back, so
+    # after the first minutes it is simply not part of the bank any more — which is
+    # also what ``engine.build`` does with it (``closed`` ⇒ no junction is wired).
+    levels_n = 1 + len(upstream)
+    alive = [(int(c), int(k), float(s)) for c, k, s in bank
+             if int(k) > 0 and int(c) > 0]
+    if not alive:
+        # Every pull-in is a dead end: nothing on this line is ever packed.
+        return [1.0] * levels_n if bank else []
+    if lam <= 0.0:
+        # No arrivals ⇒ an empty line, which is what ``_bank_chain`` says too. The
+        # diffusion below cannot say it: its geometric tail is ``(λ/capacity)^d``
+        # and ``log(0)`` is not a number, so it falls back to the heavy-traffic
+        # exponent and reads a warehouse with no orders as 5% blocked.
+        return [0.0] * levels_n
+    bank = alive
+    prof = _bank_rate_profile(bank)
+    m_bank = len(prof) - 1
+    ups = [max(int(u), 0) for u in upstream]
+    pi = _bank_chain(prof, sum(ups), max(lam, 0.0))
+
+    lvl = m_bank
+    levels = [lvl]
+    for u in ups:
+        lvl += u
+        levels.append(lvl)
+
+    # The line's REAL ceiling: the benches' nominal rate is not reachable when the
+    # pull-ins are too short to keep them fed (``_spur_serve_s``), and the fill has
+    # to be measured against what the line actually passes — otherwise an over-fed
+    # line reads as merely critical (measured: 572/hr passed where the benches
+    # say 600).
+    cap_real = min(capacity, prof[m_bank])
+    delta = lam - cap_real
+    var = _FILL_VAR * (lam + cap_real)
+    servers = sum(min(c, k) for c, k, _s in bank)
+    prefactor = _queue_prefactor(prof, servers, lam)
+    top = len(pi) - 1
+    out = []
+    for c_i in levels:
+        p = sum(pi[c_i:]) if c_i <= top else 0.0
+        if delta > 0.0 and horizon_s > 0.0:
+            p = max(p, 1.0 - c_i / (delta * horizon_s))
+        p = max(p, prefactor * _fill_share(c_i - servers, delta, var, horizon_s,
+                                           tail=(lam / cap_real) if cap_real > 0.0
+                                           else None))
+        out.append(min(max(p, 0.0), 1.0))
+    for i in range(len(out) - 2, -1, -1):
+        out[i] = max(out[i], out[i + 1])   # downstream fills first, so it is fuller
+    return out
+
+
+# --- the model-side glue (still pure: it only reads the resolved line) --------
+
+def _stage_room(stage, lam: float) -> int:
+    """Slots of a belt stage that can actually ACCUMULATE.
+
+    A belt is a pipeline: at rate ``lam`` a share ``lam/rate`` of its slots is
+    already under a MOVING load, so only the rest is waiting room. On the bundled
+    本線 (66 slots, 0.83 loads/s) that is a third of it at 2× demand — counting it
+    as free buffer puts the jam later than the run has it.
+    """
+    room = 0.0
+    for cv in stage:
+        room += belt_slots(cv) * max(0.0, 1.0 - lam / max(_belt_rate(cv), 1e-9))
+    return int(room)
+
+
+def _bank_of(line: dict, stages, spurs, n_packers: int,
+             pack_time_s: float) -> list[tuple[int, int, float]]:
+    """The open 引き込み as ``(梱包台, slots, serve_s)`` in JUNCTION (arc) order.
+
+    Junction order is what ``engine.build`` sorts ``ConveyorLine.junctions`` by and
+    what ``_convey_chain`` scans in, so it is the order loads pile up in. It is
+    read off ``beltgeom.feed_point`` — the same function the builder uses, so a
+    引き込み drawn as one belt CROSSING the 本線 lands at its crossing arc here too
+    (invariant 11: share the rule, do not mirror it).
+
+    梱包台 come from ``beltgeom.bench_pools``, the same answer the engine gets — and
+    from the SAME call ``line["benches"]`` came from, via the ``claimed``/``spare``
+    the line resolved with it. Re-running ``bench_pools`` here to recover the 余り台
+    would pair one call's bench counts with another call's claim set, which is the
+    drift invariant 11 is about (they differ once a pull-in is worked from both
+    extremities and a belt is missing from the live stages).
+
+    A pull-in with nobody drawn at it (``UNSTAFFED``) borrows the 余り台, which is
+    exactly what ``World.spare_bench`` lends it, and shares them with every other
+    un-benched end; with every bench already claimed there is nothing to borrow and
+    the load STALLS (``pack_unmanned``) — ``0`` servers here, which makes the chain
+    read that pull-in as a slot sink that never drains. Which is what it is.
+    (``_open_spurs`` drops that pull-in outright, so what survives to here is the
+    half-drawn line: something claimed, and 余り台 left to share.)
+    """
+    spur_ids = {str(cv.id) for cv in line["spurs"]}
+    trunks = [cv for st in stages[:-1] for cv in st]
+    order = {}
+    for cv in spurs:
+        hit = beltgeom.feed_point(
+            [(float(p[0]), float(p[1])) for p in cv.points],
+            [(str(t.id), [(float(p[0]), float(p[1])) for p in t.points])
+             for t in trunks], exclude=spur_ids)
+        order[str(cv.id)] = hit[1] if hit is not None else float("inf")
+    ordered = sorted(spurs, key=lambda cv: (order[str(cv.id)], str(cv.id)))
+
+    claimed = line.get("claimed") or set()
+    spare = int(line.get("spare") or 0)
+    borrowers = sum(1 for cv in ordered
+                    if not isinstance(line["benches"].get(str(cv.id)), int))
+
+    bank = []
+    for cv in ordered:
+        b = line["benches"].get(str(cv.id))
+        if isinstance(b, int) and b > 0:
+            c = b
+        elif claimed:
+            c = spare // max(borrowers, 1)          # 余り台 only, and shared
+        else:
+            c = max(1, n_packers // max(borrowers, 1))   # nothing claimed: the pool
+        k = belt_slots(cv)
+        bank.append((c, k, _spur_serve_s(pack_time_s, c, k,
+                                         k / max(_belt_rate(cv), 1e-9))))
+    return bank
+
+
 def _steady_block(model: WarehouseModel, line: dict, lam: float,
-                  n_packers: int, pack_time_s: float) -> float:
+                  n_packers: int, pack_time_s: float,
+                  capacity: float = float("inf"),
+                  horizon_s: float = 0.0) -> float:
     """Share of hand-overs that WAIT while the line is under its capacity.
 
     Below ``capacity_line`` the belt does not fill up for good, but it still
     blocks now and then — and 「どれくらい詰まりますか」 is exactly what a proposal is
-    asked. The waiting happens at the 引き込み, not on the line as a whole: a tote
+    asked. The waiting happens at the 引き込み, not on the line as a whole: a load
     that cannot turn into a spur stands on the 本線, and standing on the 本線 IS the
-    blocked state. So the loss system is ONE 引き込み — its own 梱包台 as servers
-    (``_spur_benches``), its own slots as the waiting room — offered its share of
-    the totes, averaged over the spurs. With no spur drawn (the legacy single-belt
-    line) the belt itself is the waiting room in front of the pooled benches.
+    blocked state.
 
-    This is an UPPER bound, deliberately: the engine passes a tote that finds its
-    target spur full on to the NEXT junction, so the bank is partially pooled and
-    really blocks somewhat less (measured ~3x less on the bundled line). An oracle
-    may read a jam gloomier than the run; it must never read it rosier
-    (invariant 5) — a proposal that promises a clear line and meets a jam on site
-    is the failure this whole module exists to prevent.
+    Two readings, and the answer is the WORSE of them:
 
-    Returned per BOARDING, not per tote, so it is directly comparable with
-    ``kpis``' ``conveyor_block_ratio``: a tote rides one belt per stage, and only
-    the last of those legs can be turned away.
+    * the historical per-spur SPLIT — offer each pull-in ``λ/n`` and average its
+      ``_mmck_full``. It is a genuine upper bound while the bank is comfortably
+      under capacity, which is the whole bundled catalogue, and it is kept as a
+      FLOOR so nothing there moves by a single ulp;
+    * :func:`_overflow_cascade` — the 逐次オーバーフロー縦続 the bank really is.
+
+    The split alone was **rosier than the DES** from ρ_bank ≈ 0.85 upwards, which
+    is the one direction invariant 5 forbids. 貪欲ディバート is not a random split:
+    ``processes._convey_chain`` takes the FIRST junction with room, so spur 1 is
+    offered everything until its slots fill (measured intake 236/229/189 on a
+    3-spur bank at ρ_bank = 1.0, flattening to 87/87/86 at one slot per spur). And
+    the docstring's old rationale — "an UPPER bound, deliberately, because the
+    engine passes a full spur's load on to the next junction, so the bank is
+    partially pooled and blocks somewhat less" — holds only BELOW capacity. At and
+    above it, pooling means the bank saturates as a whole and essentially every
+    load stalls, so the pooled truth is far WORSE than the split: the deliberate
+    upper bound inverts into a lower bound. Measured over 270 synthetic
+    configurations at 8 h, the split is rosy in 202 of them, worst −0.815; the
+    shipped 出荷ライン at 2× demand blocks 0.52 in the run and read 0.00.
+
+    Returned per BOARDING, not per load, so it is directly comparable with
+    ``kpis``' ``conveyor_block_ratio``: a load rides one belt per stage, and each
+    of those legs can be turned away.
     """
     stages = line["stages"]
     spurs = _open_spurs(line)
     legs = max(len(stages), 1)
-    if spurs:
-        probs = []
-        for cv in spurs:
-            benches = line["benches"].get(str(cv.id))
-            # ``_open_spurs`` has already dropped the ones with no hands, so what
-            # is left is either a real count or UNSTAFFED (nobody drawn ⇒ the
-            # half-drawn-line fallback onto the shared pack pool).
-            if not (isinstance(benches, int) and benches > 0):
-                benches = max(1, int(n_packers / len(spurs)))
-            slots = belt_slots(cv)
-            probs.append(_mmck_full(benches, (lam / len(spurs)) * pack_time_s,
-                                    max(0, slots - benches)))
-        return statistics.fmean(probs) / legs
-    total_slots = sum(belt_slots(cv) for st in stages for cv in st)
-    return _mmck_full(int(n_packers), lam * pack_time_s,
-                      max(0, total_slots - int(n_packers))) / legs
+    if not spurs:
+        # The legacy single-belt line: the belt itself is the waiting room in
+        # front of the pooled benches. Untouched, byte for byte.
+        total_slots = sum(belt_slots(cv) for st in stages for cv in st)
+        return _mmck_full(int(n_packers), lam * pack_time_s,
+                          max(0, total_slots - int(n_packers))) / legs
+
+    probs = []
+    for cv in spurs:
+        benches = line["benches"].get(str(cv.id))
+        # ``_open_spurs`` has already dropped the ones with no hands, so what is
+        # left is either a real count or UNSTAFFED (nobody drawn ⇒ the
+        # half-drawn-line fallback onto the shared pack pool).
+        if not (isinstance(benches, int) and benches > 0):
+            benches = max(1, int(n_packers / len(spurs)))
+        slots = belt_slots(cv)
+        probs.append(_mmck_full(benches, (lam / len(spurs)) * pack_time_s,
+                                max(0, slots - benches)))
+    split = statistics.fmean(probs) / legs
+
+    bank = _bank_of(line, stages, spurs, n_packers, pack_time_s)
+    upstream = [_stage_room(st, lam) for st in reversed(stages[:-1])]
+    parts = _overflow_cascade(bank, upstream, lam, capacity, float(horizon_s))
+    return max(split, sum(parts) / legs) if parts else split
 
 
 def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
@@ -767,17 +1203,25 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
 
     jams = lam > cap and math.isfinite(cap)
     ttj = (buffer_slots / (lam - cap)) if jams and lam > cap else None
+    # The steady reading is needed on BOTH branches, and it needs the line's
+    # ceiling and the run's horizon: the bank's own levels fill IN ORDER, and how
+    # much of the shift each one spends full is a property of the shift.
+    # ``stages`` is the LIVE topology, so a closed 引き込み is not counted as a leg.
+    steady = _steady_block(model, {**line, "stages": stages}, lam, n_packers,
+                           pack_time_s, cap, float(horizon_s))
     if jams:
         # Over the horizon the line runs free until it fills, then passes only
         # ``cap`` and every hand-over waits: boardings = λ·t_jam + cap·(T − t_jam).
+        # That charges ONE fill time for the WHOLE buffer, which is why it read the
+        # shipped 出荷ライン at 2× demand as 0.00 — its 引き込み bank is full after
+        # 1.9 h of the shift, its 本線 after 3.5 h and its 検品ライン after 6.2 h. So
+        # the cascade, which fills the levels one at a time, is taken when worse.
         span = max(float(horizon_s), 0.0) - (ttj or 0.0)
         blocked = cap * span if span > 0.0 else 0.0
         total = lam * (ttj or 0.0) + blocked
-        ratio = (blocked / total) if total > 0.0 else 1.0
+        ratio = max((blocked / total) if total > 0.0 else 1.0, steady)
     else:
-        # the LIVE topology, so a closed 引き込み is not counted as a leg either
-        ratio = _steady_block(model, {**line, "stages": stages}, lam, n_packers,
-                              pack_time_s)
+        ratio = steady
     return {
         "jams": bool(jams),
         "time_to_jam_s": ttj,

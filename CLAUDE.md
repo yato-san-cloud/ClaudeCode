@@ -140,7 +140,15 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   peak — and `Conveyor.tote_pitch_m` sets slot density, KPIs
   `conveyor_block_ratio`/`time_to_first_block`/per-belt `kpis["conveyors"]`,
   pinned by `tests/test_{engine_conveyor_chain,analytic_conveyor_jam}.py`
-  with unchained models byte-identical). 解析↔DES agreement
+  with unchained models byte-identical. **貪欲ディバートの鏡は `_overflow_cascade`**
+  — 引き込みバンクは `lam/本数` の分割ではなく**順序付きハントグループ**で、溢れは
+  損失でなく**待ち行列**（入れない荷は本線のスロットを保持して止まる）。水詰め→
+  生死過程→段ごとの累積水位で、答えは 定常鎖／流体充填／**有限地平線のランダム
+  ウォーク** の**最悪値**（ρ=1 は零再帰＝定常解が無く「何割詰まるか」はシフト長の
+  関数）。どれも上界ではない・`_FILL_VAR` は較正値なので検証は実測: 270構成で甘い側
+  202→2、`line_inspection` 2倍需要 実測0.52 に対し 0.00→0.78。既定の `auto` 専用
+  （`pull`/停止線 は `linemech` が先に取る）で、歴史的分割を FLOOR に残すため
+  **カタログはバイト同一**。`tests/test_analytic_spur_cascade.py`). 解析↔DES agreement
   is pinned by `tests/test_analytic_aisle_travel.py` on **every** template
   (|Δutil| < 0.08 each, catalogue mean < 0.04) — it used to check two, and the
   six unchecked ones hid residuals up to 0.81.
