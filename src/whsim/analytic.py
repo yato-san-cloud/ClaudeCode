@@ -573,6 +573,59 @@ def _spur_benches(model: WarehouseModel, spur) -> int | None:
     return line["benches"].get(str(spur.id), beltgeom.UNSTAFFED)
 
 
+# 通路干渉: ρ → 1 would price a crowded aisle as infinite service. The cap keeps
+# the bound finite on a floor the geometry reads as tiny (it is a bound, not a
+# prediction — see ``_aisle_congestion``).
+_AISLE_RHO_CAP = 0.5
+
+
+def _aisle_congestion(model: WarehouseModel, det: dict | None,
+                      travel_m_per_order: float, lam: float, speed: float):
+    """通路干渉が picker の歩行時間に足す待ち — an explicit UPPER bound.
+
+    ``simulation.aisle_interference`` makes every walk leg contend for its
+    ``(cell, direction)``: capacity 1, held ``g/v`` seconds per traversal. One cell
+    is therefore M/M/1, a trip crosses ``travel/g`` of them, and **the cell pitch
+    cancels**::
+
+        wait/trip = (travel/g)·(g/v)·ρ/(1−ρ) = (travel/v)·ρ/(1−ρ)
+
+    so interference is a pure multiplier on walk TIME, never on distance — which is
+    what the engine pins too (``walk_total_m`` is byte-identical with the flag on).
+    Little's law supplies ρ without a graph search: ``A = λ·travel/v`` agents are in
+    motion over ``N = 2·aisles·ℓ/g`` directed cells (floored at a lap of the
+    envelope, which is what keeps a one-aisle floor off the cap).
+
+    **A bound, deliberately, and a loose one.** Same-direction contention between
+    equal-speed agents is self-annihilating: the follower waits once and then trails
+    by one cell for the rest of the run, so the engine pays ONE residual per
+    encounter where M/M/1 charges one per cell. Measured over 21 configurations the
+    bound sits 9.1x–23.0x above the run's picker wait and never below it. Loose in
+    seconds, right-sized in utilisation — the true effect is 0.03–0.17% of walking
+    time on the bundled catalogue, so the utilisation it moves (+0.000…+0.008) is
+    the same order as the DES's own. An oracle may read congestion gloomier than the
+    run; it must never read it rosier (invariant 5).
+
+    ``None`` when the flag is off — which is every shipped template, so the
+    catalogue is untouched.
+    """
+    if not model.simulation.aisle_interference:
+        return None
+    if travel_m_per_order <= 0.0 or lam <= 0.0 or speed <= 0.0:
+        return None                      # GTP walks nowhere; never blocks
+    g = float(model.simulation.heatmap_grid_m or 1.0) or 1.0
+    cells = (2.0 * max(det["n_aisles"], 1) * max(det["run_len_m"], g) / g
+             if det else 0.0)
+    b = model.layout.bounds
+    cells = max(cells, 2.0 * (b.width + b.depth) / g, 1.0)
+    rho = min((lam * travel_m_per_order / speed) / cells, _AISLE_RHO_CAP)
+    factor = rho / (1.0 - rho)
+    return {"cell_utilization": rho,
+            "wait_s_per_order_bound": (travel_m_per_order / speed) * factor,
+            "wait_share_bound": factor / (1.0 + factor),
+            "bound": "upper"}
+
+
 def _open_spurs(line: dict) -> list:
     """The 引き込み that actually TAKE a tote — i.e. not the deliberately unmanned.
 
@@ -889,10 +942,25 @@ def estimate(model: WarehouseModel) -> dict:
                 + n_lines * sort_s
                 + b * pack_s)
 
-    batch = _batch_per_trip(model, b_cap, c, lam, trip_time_s)
+    # A JAMMED line makes the batch a certainty, not a queueing outcome. Once the
+    # belt is full the picker cannot hand over, so the order store never empties
+    # and every trip pulls the cap. Solving the fixed point on the THROTTLED λ
+    # instead reads the store as nearly empty and returns 1.02-1.25 orders/trip
+    # where the DES measures 3.2-3.4 — which then over-charges the per-order trip
+    # and read picker_utilization 0.669 against a measured 0.543. Bundled
+    # templates never jam, so the catalogue is untouched.
+    batch = (b_cap if (conveyor is not None and conveyor["jams"])
+             else _batch_per_trip(model, b_cap, c, lam, trip_time_s))
 
     service_s = trip_time_s(batch) / batch   # picker-seconds per ORDER
     travel = trip_travel_m(batch) / batch
+
+    # 通路干渉: a contended aisle cell is a capacity-1 server, so the same metres
+    # cost more SECONDS. Distance is untouched — the engine pins that. ``None``
+    # when the flag is off (every shipped template) ⇒ nothing below moves.
+    congestion = _aisle_congestion(model, det, travel, lam, speed)
+    if congestion is not None:
+        service_s += congestion["wait_s_per_order_bound"]
 
     mu = 1.0 / max(service_s, 1e-6)      # service/s per picker
     a = lam / mu                         # offered load
@@ -946,6 +1014,24 @@ def estimate(model: WarehouseModel) -> dict:
         # a conveyor-less model is untouched. When there IS a line this says
         # whether it jams, when, what binds it and how often a hand-over waits.
         "conveyor": conveyor,
+        # ADDITIVE: ``None`` unless 通路干渉 is switched on. An explicit UPPER
+        # bound on the walk-time penalty, labelled as one.
+        "aisle_congestion": congestion,
+        # ADDITIVE disclosure, never a claim. The travel above is a
+        # NEAREST-NEIGHBOUR tour; the engine can walk s_shape / return /
+        # largest_gap instead (``process.routing_policy``, and two shipped
+        # templates already do). Mirroring the disciplines was measured and
+        # REJECTED: the DES's own sensitivity is ≤1.5% of walk on 7 of 9 templates
+        # and ≤0.013 utilisation everywhere — 6x inside the agreement pin — while a
+        # closed form built on the engine's own ``route_order`` made the oracle
+        # worse (mean walk error 6.8% → 10.0%, max 15.5% → 31.0%) and ROSIER,
+        # because it amplifies ``_batch_per_trip``'s own batch error superlinearly
+        # and every bundled depot faces mid-band. So say which tour this is
+        # instead of pretending it is policy-aware. See ``routecompare`` for the
+        # real per-policy answer (2x-60x over this module's whole time budget).
+        "routing_policy": str(model.process.routing_policy or "nearest"),
+        "routing_policy_mirrored":
+            str(model.process.routing_policy or "nearest") == "nearest",
         "packer_utilization": pack_util,
         "bottleneck_utilization": min(binding, 1.0),
         "bottleneck": bottleneck,

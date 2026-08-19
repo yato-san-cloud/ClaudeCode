@@ -1296,7 +1296,15 @@ def _bench_pool(world: World, line):
     the line moving rather than deadlocking it."""
     if line.bench is not None:
         return line.bench
-    return world.spare_bench if world.spare_bench is not None else world.packers
+    if world.spare_bench is not None:
+        return world.spare_bench
+    # No spare AND some bench is privately owned ⇒ every person on the floor is
+    # standing at a 引き込み or a 停止線, so there is nobody at this belt end.
+    # ``None`` says exactly that. Falling through to ``packers`` here is what made
+    # a line whose every bench is claimed pack its overflow with the SAME people a
+    # second time (measured packer_utilization 1.73 and a pull line out-throughput-
+    # ing the greedy one it is physically a subset of).
+    return None if world.benches_claimed else world.packers
 
 
 def _bench_free(world: World, line) -> bool:
@@ -1577,6 +1585,16 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
     end = line.point_at(arc)
     pool = (gate.bench if (gate is not None and gate.bench is not None)
             else _bench_pool(world, line))
+    if pool is None:
+        # 誰も立っていない末端に着いた: この荷を取る人が居ない。スロットを持った
+        # まま止まる＝ラインが詰まる、が物理的に正しい答え（人を発明しない）。
+        # 図面が末端に人を置いていない設計は、実際そこで止まる。
+        world.log(t=env.now, event="pack_unmanned", order_id=order.order_id,
+                  resource="packer", conveyor=line.id, arc=arc)
+        if tote is not None and world.recording():
+            tote.kf(env.now, end[0], end[1], "belt")
+        yield env.event()                    # never fires: the load stays put
+        return
     pack_req_t = env.now
     preq = pool.request()
     yield preq

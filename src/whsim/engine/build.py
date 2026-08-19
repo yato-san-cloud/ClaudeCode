@@ -428,7 +428,7 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
 
     entry_refs = _refs(flowgraph.entry_conveyor_ids)
     entry = [c for c in lines if c.id in entry_refs]
-    return (entry or list(lines)), spare
+    return (entry or list(lines)), spare, bool(claimed)
 
 
 @dataclass
@@ -502,6 +502,13 @@ class World:
     # bench is spoken for, and then the historical shared pool is the fallback so
     # a half-drawn line still runs (never-blocks).
     spare_bench: simpy.Resource | None = None
+    # True = some 梱包台 belongs to a 引き込み or a 停止線. Then ``spare_bench``
+    # being ``None`` means every bench on the floor is spoken for, so there is
+    # NOBODY at a belt end that has no bench of its own — and a load arriving
+    # there is not packed by the whole floor a second time, it simply stands on
+    # the belt. With nothing claimed (every model without a 引き込み) this stays
+    # False and ``packers`` is the fallback exactly as it always was.
+    benches_claimed: bool = False
     # 容器の有限循環. ``None`` = 容器は無限 (the historical behaviour: a picker can
     # always put goods on the belt). When present it is a simpy.Container of empty
     # containers: 投入 takes one and BLOCKS when the pool is dry, 梱包完了 sends it
@@ -841,7 +848,8 @@ def build(
             discharge_both=bool(getattr(cv, "discharge_both", False)))
         line.gate = _resolve_gate(cv, line)
         conveyor_lines.append(line)
-    entry_lines, n_spare_bench = _wire_conveyor_chain(model, env, conveyor_lines)
+    entry_lines, n_spare_bench, benches_claimed = _wire_conveyor_chain(
+        model, env, conveyor_lines)
 
     # --- 容器の有限循環 (finite container pool) -------------------------------
     # Unstated ⇒ None ⇒ 投入 never waits for a container and nothing is logged, so
@@ -1032,6 +1040,7 @@ def build(
         packers=simpy.Resource(env, capacity=n_packers),
         spare_bench=(simpy.Resource(env, capacity=n_spare_bench)
                      if 0 < n_spare_bench < n_packers else None),
+        benches_claimed=benches_claimed,
         put_wall=simpy.Resource(env, capacity=put_wall_cap),
         has_conveyor=has_conveyor, conveyors=conveyor_lines,
         entry_conveyors=entry_lines,

@@ -451,12 +451,19 @@ def test_an_emptied_container_rides_the_return_deck_home():
 # ======================================= 機構3: 引き込みは作業者が引く (pull)
 
 
-def _pull_model(policy="auto", bench=3, rate=150.0, duration=1800.0, pack_time=60.0):
+def _pull_model(policy="auto", bench=3, rate=150.0, duration=1800.0, pack_time=60.0,
+                end_bench=0):
     """検品ライン E → 本線 T → 引き込み S1/S2 → 梱包台.
 
     The spurs are long (20 slots each) on purpose: with 貪欲ディバート they can hold
     everything the run produces, so the number of loads that go IN is decided by the
-    belt and not by the benches. That is exactly the assumption "pull" removes."""
+    belt and not by the benches. That is exactly the assumption "pull" removes.
+
+    ``end_bench`` puts somebody at the far end of the 本線 — the 停止線's operator.
+    A pull line NEEDS one: what nobody pulled in arrives there, and if no bench is
+    drawn there then nobody on the floor is free to take it (every other bench
+    belongs to a 引き込み). 0 keeps the historical fixture, which is now the model
+    of a line whose overflow has nowhere to go."""
     e = Conveyor(id="E", points=[[2.0, 3.0], [2.0, 12.0]], speed_mps=1.0)
     trunk = Conveyor(id="T", points=[[0.0, 12.0], [40.0, 12.0]], speed_mps=1.0)
     s1 = Conveyor(id="S1", points=[[10.0, 12.0], [10.0, 32.0]], speed_mps=1.0)
@@ -465,6 +472,8 @@ def _pull_model(policy="auto", bench=3, rate=150.0, duration=1800.0, pack_time=6
              _edge(INSPECT, PACK, "S2"), _edge(PACK, SHIP, "T")]
     stations = [Station(id="b1", x=10.0, y=32.0, count=bench),
                 Station(id="b2", x=20.0, y=32.0, count=bench)]
+    if end_bench:
+        stations.append(Station(id="end", x=40.0, y=13.0, count=end_bench))
     m = _model([e, trunk, s1, s2], edges,
                pick_xy=[(2.0, 2.0), (5.0, 2.0), (8.0, 2.0)],
                rate=rate, pack_time=pack_time, stations=stations, duration=duration)
@@ -505,9 +514,13 @@ def test_what_no_one_pulled_in_stays_on_the_trunk():
 
     Which is the honest picture: on the floor it keeps going and someone deals with
     it at the far end (or, with a 停止線 authored, it stands there). Under 貪欲
-    ディバート nothing ever reaches the end of the trunk."""
-    thin = run_once(_pull_model("pull", bench=1), seed=5)
-    auto = run_once(_pull_model("auto", bench=1), seed=5)
+    ディバート nothing ever reaches the end of the trunk.
+
+    Note the ``end_bench``: that someone has to be DRAWN. Before, this test relied
+    on the un-manned end borrowing the whole floor — i.e. on the 引き込み workers
+    packing at the far end at the same time as they packed at their own benches."""
+    thin = run_once(_pull_model("pull", bench=1, end_bench=2), seed=5)
+    auto = run_once(_pull_model("auto", bench=1, end_bench=2), seed=5)
 
     def packed_at(res):
         return Counter(e["conveyor"] for e in _events(res, "conveyor_off")
@@ -524,7 +537,7 @@ def test_pull_never_stalls_the_trunk_waiting_for_a_bench():
     """The structural property that replaces the auto rule's deadlock-freedom
     argument: under "pull" a load only ever moves forward, so it cannot hold a
     trunk slot waiting for something upstream of it to free up."""
-    res = run_once(_pull_model("pull", bench=1, rate=300.0), seed=5)
+    res = run_once(_pull_model("pull", bench=1, rate=300.0, end_bench=4), seed=5)
     trunk = [e for e in _events(res, "conveyor_off") if e["conveyor"] == "T"]
     assert trunk
     # occupancy on the trunk is the ride plus (at most) the wait for the pack pool
@@ -532,6 +545,29 @@ def test_pull_never_stalls_the_trunk_waiting_for_a_bench():
     assert all(e["occupancy"] >= e["transit"] - 1e-9 for e in trunk)
     done = _events(res, "order_complete")
     assert len(done) > 20 and done[-1]["t"] > 0.8 * res.duration_s
+
+
+def test_a_line_end_nobody_stands_at_stops_the_line():
+    """末端に人が居なければ、そこに着いた荷は止まる — 人を発明しない。
+
+    これは never-blocks の違反ではなく、**設計の帰結**。全ての梱包台が引き込みに
+    属している床では、末端に着いた荷を取れる人は一人も居ない。ここで共有プール
+    （＝床の全台）へ落ちると、引き込みで梱包している人が同時に末端でも梱包する
+    ことになり、実測 packer_utilization 1.73（20台の図面で29〜36の同時梱包）に
+    なった。pull が貪欲より速い、という物理的にあり得ない読みもここから出ていた。"""
+    m = _pull_model("pull", bench=1, rate=300.0)          # 末端に人を描かない
+    world = build(m)
+    assert world.spare_bench is None and world.benches_claimed
+    res = run_once(m, seed=5)
+    assert _events(res, "pack_unmanned"), "末端で止まった荷が記録されること"
+    k = kpis.compute([res], m)
+    assert k["packer_utilization"] <= 1.0
+    # ...and the same line WITH somebody at the end keeps running.
+    staffed = kpis.compute(
+        [run_once(_pull_model("pull", bench=1, rate=300.0, end_bench=4), seed=5)],
+        _pull_model("pull", bench=1, rate=300.0, end_bench=4))
+    assert staffed["orders_completed"] > k["orders_completed"]
+    assert staffed["packer_utilization"] <= 1.0
 
 
 # ======================================= 引き込みの梱包台: 端と持ち主の決め方

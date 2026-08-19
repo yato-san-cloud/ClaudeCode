@@ -89,9 +89,13 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   validated vs M/M/1 Lq within ±5%. Runtime rack-penetration check every rep
   (`rackgeom.track_penetrations` → `path_violations` KPI + verdict). Event log is a
   run artifact (`events.jsonl` + `/runs/{run}/events.{jsonl,json,csv}`, `eventlog.py`);
-  `scenarios.whatif(base, edits)` = diff→headless run→summary (D5 I/F). Analytic does
-  NOT yet mirror interference/non-default routing (defaults unchanged ⇒ catalogue pins
-  hold — known limitation, see PROGRESS.md).
+  `scenarios.whatif(base, edits)` = diff→headless run→summary (D5 I/F).
+  **解析側**: 通路干渉は**上界として鏡写し済**（`analytic._aisle_congestion`; 歩行
+  「時間」の倍率で距離は不変、実測9.1〜23.0倍 甘くない側）。非既定ルーティングは
+  **測った上で映さない**と決めた（DES感度が稼働率0.013以下＝ピンの1/6、閉形式は
+  オラクルを悪化させ甘い側へ倒した）→ `routing_policy`/`routing_policy_mirrored` で
+  名乗るだけ。⚠️ `apparel`=s_shape / `food_chilled`=return を**既に**使っている。
+  AGV同士の干渉は未鏡写し。
 - `distances.py` — tolerant import of a measured shelf-to-shelf distance matrix (CSV/JSON).
   Pickers and AGVs are individual agents (AGV mode is a pipeline: AGV agents fetch totes →
   ready queue → pickers handle), emitting trajectory keyframes for replay. Batch/zone/wave
@@ -143,6 +147,22 @@ replay/MapMaker data contracts, and extension points — read it before a large 
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict. Multi-rep runs
   add `kpis.ci` (95% t-CI per headline metric + n_recommended for a ±5% target);
   the KPI view shows 「±X (95%CI, n=N)」 and an honest n=1 disclosure.
+  **レプリケーション集約はキーの意味ごと** (`_EXTREMUM_KEYS`/`_MOMENT_OF`): レート・
+  合計・稼働率・件数は平均、**最大値は最大** (`containers_in_use_peak`＝レンタル数量の
+  根拠, `wip_max`, ベルト別 `peak_occupancy`) — 5回のピーク [44,29,45,28,29] を平均した
+  35 は**観測されたどの最大値より低い**＝甘い方向。「いつ」(`containers_in_use_peak_t`)
+  は**そのピークを出した回から**採る（時刻の平均はどの run でも何も起きていない瞬間）。
+  欠陥カウンタ (`path_violations`/`unroutable_legs`) も最大＝「5回中1回発生」を 0件 に
+  丸めない。入れ子は専用マージ (`_merge_per_belt`/`_merge_congestion`/
+  `_merge_measured_productivity`) — 汎用ループは rep#1 だけを残す。n>1 は
+  `kpis.spread`（各回の 最小/最大/平均＋`_confidence_intervals` の 95%CI）を additive に
+  出し、判定文が「N回中の最大」と明記する（**n=1 は 1バイトも変えない**＝既定の経路）。
+  **ライン終端の無人** `pack_unmanned_loads`＋ベルト別 `unmanned`（`pack_unmanned`
+  イベント）: 梱包台が全て引き込み/停止線のものだと、どの引き込みも引かなかった荷は
+  末端で**誰にも取られず止まる**（エンジンは人を発明しない）。外からは説明のつかない
+  スループット崩壊なので、判定文が**原因（図面に人が居ない）と直し方（停止線／終端に
+  梱包台を描く）とベルト名**を言う。件数なので集約は平均だが、`spread.reps_nonzero` で
+  「N回中M回で発生」を出し、平均 0.2 件を **0件 と書かない**（`_count`）。
 - `asrs.py` — FEM 9.851 / Bozer-White クレーンサイクル解析 (E(SC)/E(DC) → cycles/h →
   必要クレーン台数). 保管設計 (`storage.py`) の自動倉庫サイジングと GET /storage payload
   の additive `asrs` ブロック; クレーンつまみは /api/racktypes 配信 (no hardcode).
