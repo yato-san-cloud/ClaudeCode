@@ -2299,7 +2299,7 @@ function bindTableAids(ta, countEl, fileInput) {
     if (!f) return;
     const buf = await f.arrayBuffer();
     let text = new TextDecoder("utf-8").decode(buf);
-    if (text.includes("�")) {
+    if (text.includes("\uFFFD")) { // 置換文字が出たらUTF-8デコード失敗とみなす
       try { text = new TextDecoder("shift_jis").decode(buf); } catch (e) { /* デコーダ非対応環境はUTF-8のまま */ }
     }
     ta.value = text;
