@@ -54,6 +54,13 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   `racktypes.py` — 9 storage-equipment presets (incl. メザニン/移動ラック/
   ハンガー) with unit economics, served at `/api/racktypes` and mirrored into the
   JS editor/3D (keep in parity).
+- `beltgeom.py` — **ベルトの払い出し口と梱包台の持ち主＝唯一の規則**（純幾何、simpy 非依存）。
+  `engine/build.py` と `analytic.py` が同じ関数を呼ぶ: `discharge_ends`（**本線を跨ぐ
+  引き込みは両端が払い出し口** — `points[-1]` だけ見ると片側の列が丸ごと無人）、
+  `bench_pools`（**共有台は最寄りの引き込みのもの**、3値 `n`/`CLOSED`=描かれているが人0＝
+  何も引き込まない/`UNSTAFFED`=誰も居ない＝共有プールへ）。以前は両者が写しを持ち、エンジン
+  だけが上を学んで実図面で**エンジン4台 vs 解析2台**、共有台は**解析が両方に計上**（人より
+  多いサーバ数＝DESより甘い＝不変条件5が唯一禁じる向き）。`JOIN_TOL_M`/`BENCH_REACH_M` の源。
 - `analysis/data_io.py` — real-WMS-grade table loading: header-row auto-detect
   (タイトル行/メタ行 skip), 合計/小計 row drop, header NFKC fold so 半角カナ
   (商品ｺｰﾄﾞ/出荷ﾊﾞﾗ数) auto-map, ragged-CSV salvage, legacy `.xls` via xlrd

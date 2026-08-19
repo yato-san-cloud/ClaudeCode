@@ -37,7 +37,7 @@
 8. **日本語＝ユーザー向け文字列、英語＝コード/識別子/コメント**。
 9. **journey→view 規約**。パネルは `<div id="x" class="panel" role="tabpanel">`、ナビは `journey.js` が描く `.jn-sub[role="tab"]`、`switchView`(`app.js`) がステッパーとパネルを同期。**フラット `.tab` マークアップを復活させない**（CSSは削除済）。
 10. **新テンプレ＝データのみ**。`templates/<id>/{template.json,manifest.json}` を足すだけ、**コード変更不要**。
-11. **ミラー定数は parity を保つ**。Python↔JS のミラー（`timetable`）は parity テスト有り。新たなミラーも同様に守るか、**一つの源から配る**（例 `/api/racktypes` を fetch）。ハードコピー増殖は禁止。
+11. **ミラー定数は parity を保つ**。Python↔JS のミラー（`timetable`）は parity テスト有り。新たなミラーも同様に守るか、**一つの源から配る**（例 `/api/racktypes` を fetch）。ハードコピー増殖は禁止。**規則そのもの（定数ではなく計算）を写した場合、parity テストでは足りない**: エンジンと解析が各々持っていた「梱包台は誰のものか」は、片方だけが賢くなった瞬間に定数の一致を保ったまま食い違った（実図面で 4台 vs 2台）。**計算を写したくなったら関数を切り出して両者から呼ぶ**（`beltgeom.py` がその型）。
 12. **オプション依存**：web app は `[web]`（fastapi/uvicorn）、CAD/PPTX/PDF は `[docs]`（ezdxf/python-pptx/reportlab）。全部入りは `pip install -e ".[dev,web,docs]"`。
 13. **業務フロー＝1つのグラフ (`flowgraph.py`)**。whsim は同じ倉庫を3回別々に記述していた: 工程DAG(`WorkProcess.depends`)・ステージ列(`Process.stages`)・物理設備(`Resources`)。①と②で**共有IDはゼロ**、どちらも③の設備を指せなかったので「梱包はこのベルトで受ける」の置き場が無く、エンジンは**幾何的に最寄りのベルト**を拾うしかなかった（＝フローで人手に変えてもベルトが使われ続けた）。`flowgraph.resolve(model)` が唯一の解決器: ノード=工程(`role`でエンジン挙動に写像、`zone`で床に紐付け)、エッジ=`Process.flow_edges`(`transport`＋`equipment_ref`＝どの実機で運ぶか＋`share`)。**エッジ未作成⇒`depends`が含意していたグラフに解決**するので既存プロジェクトは不変。**部分配線が正常系**: 1本だけ配線しても残りは工程順の派生エッジを保つ。エンジンは `conveyor_ids_in_use()` でベルトをゲートする（`None`=どの工程もコンベアで受けない⇒ベルトは動かさない）。描いただけの設備は「物理的事実」であって「設計の意思」ではない — 意思は `diagnose()` が警告で可視化する(never-blocks)。**設備を足したら、そのエッジ意味論もここに書く**。
 14. **荷姿と滞留は解析レイヤ (`loadunit.py` / `wipcurve.py`)**。荷姿カタログは `capacity` の連鎖表現で、混載は**占有率の和** `Σ(count/capacity)`（seed 値では既存の平坦式「(OC＋ケース)÷14」と完全一致＝②基礎物量の数字は不動、テストで固定）。カタログは `catalog(model)` 経由で解決（既定同梱・使う辺でその場編集＝SLC型「資材マスタ先埋め」の逆）。滞留は累積フロー図 `WIP(t)=max(0, Σ上流out − Σ下流out)` を人員ソルバーの `headcount×生産性` から算出。上下流は単位が違う（行/h vs 件/h）ので**日量に対する進捗比**に正規化してから辺の荷姿へ換算する。台車は**共有プール**なので保有台数は各辺ピークの和ではなく**和のピーク**。DES はまだ台車を動かさない（明示的な拡張点）。`capacity` は**「何を」で引く辞書**（`{piece:30}` / `{orikon:14,case:14,tray:14}`）であってスカラーではない — 台車の入数は**その辺の容器で決まる**（「14 オリコン/カゴ台車」か「14 ケース/カゴ台車」か）。UI 側で 1 つの数として読むと 0 になり、1 つの数として書くと同じ台車の他の組が消える。読み書きは `js/materialflow/loadunits.js` の `capacityKey`/`capacityOf`/`withCapacity` に集約し、**換算式は JS で再実装せずサーバの `chain` 文字列をそのまま出す**。
@@ -65,6 +65,7 @@
 - `cad.py` — DXF。**CONVEYOR レイヤ→`resources.conveyors`（壁にはしない＝二重計上しない）**、**SHELF レイヤ→`zone.shelves`**、その他は従来どおり壁。
 - `distances.py` — 実測 棚間距離行列（最大級ファイル；`engine/graph.py` と距離で概念重複）。
 - `rackgeom.py` — **描かれたラック＝ジオメトリの唯一の真実**。`rack_rects`（描画と routing 障害物の共通元; `(x,y,w,h)` であって `(x0,y0,x1,y1)` ではない）＋`aisle_block`/`aisle_detour`/`aisle_escape_m`（通路travel の閉形式＝解析側の補正; `analytic.py` が消費。`aisle_escape_m` は1点分だけを再利用するための切り出し＝ベルト境界点ごとの評価に使う）。
+- `beltgeom.py` — **ベルトの払い出し口と梱包台の持ち主＝唯一の規則**（純幾何・simpy非依存）。`project`/`attach`（本線に接する端の判定）＋`discharge_ends`（**本線を跨ぐ引き込みは両端が払い出し口**）＋`bench_pools`（**共有台は最寄りの引き込みのもの・二重に数えない**、3値 `n`/`CLOSED`=描かれているが人0/`UNSTAFFED`=誰も居ない→共有プール）。`engine/build.py` と `analytic.py` が**同じ関数を呼ぶ**。以前は各々が写しを持ち、エンジンだけが上の2つを学んだ結果 実図面で **エンジン4台 / 解析2台**、共有台は**解析が両方に計上**（＝人より多いサーバ数＝**DESより甘い**＝不変条件5が唯一禁じる向き）。`JOIN_TOL_M`/`BENCH_REACH_M` もここが源（両者は再エクスポート）。
 - `provenance.py` — 出所追跡。
 
 ### エンジン（SimPy DES）

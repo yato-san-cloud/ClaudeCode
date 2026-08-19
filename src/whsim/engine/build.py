@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import simpy
 
+from whsim import beltgeom
 from whsim.engine.graph import AisleGraph, simplify_collinear
 from whsim.engine.routing import manhattan
 from whsim.schema.model import WarehouseModel
@@ -172,25 +173,7 @@ class ConveyorLine:
         Projects onto every segment (clamped to its ends) rather than snapping to
         the nearest vertex -- a picker standing beside the middle of a 30 m belt
         boards there, not at the far corner."""
-        px, py = float(p[0]), float(p[1])
-        best_d2 = float("inf")
-        best_xy = self.points[0]
-        best_arc = 0.0
-        arc = 0.0
-        for i, (a, b) in enumerate(zip(self.points, self.points[1:])):
-            dx, dy = b[0] - a[0], b[1] - a[1]
-            seg = self.seglens[i]
-            if seg <= 1e-12:
-                t = 0.0
-            else:
-                t = ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy)
-                t = 0.0 if t < 0.0 else (min(t, 1.0))
-            qx, qy = a[0] + dx * t, a[1] + dy * t
-            d2 = (px - qx) ** 2 + (py - qy) ** 2
-            if d2 < best_d2:
-                best_d2, best_xy, best_arc = d2, (qx, qy), arc + seg * t
-            arc += seg
-        return best_xy, best_arc
+        return beltgeom.project(p, self.points, self.seglens)
 
     def remaining(self, arc: float) -> float:
         """Metres left from arc length ``arc`` to the discharge end."""
@@ -254,15 +237,12 @@ class ConveyorLine:
         return out
 
 
-# A belt end / infeed this close to another belt's path is physically ON it. One
-# drawn corner rounds to a few centimetres, so a metre-ish tolerance is what
-# "they touch" means on a drawing; wider than that and two parallel lines running
-# past each other would be spliced into one.
-JOIN_TOL_M = 0.8
-# Stations this close to a 引き込み(spur)'s discharge end are ITS 梱包台. A bench
-# stands beside the belt end with room to work, so the reach is a couple of metres,
-# not a couple of centimetres.
-BENCH_REACH_M = 3.0
+# Both live in ``whsim.beltgeom`` now, with the geometry that reads them: the
+# oracle needs the same two numbers, and a shared definition beats a mirrored
+# constant plus a parity test (invariant 11). Re-exported under the historical
+# names because callers and tests reach for ``build.JOIN_TOL_M``.
+JOIN_TOL_M = beltgeom.JOIN_TOL_M
+BENCH_REACH_M = beltgeom.BENCH_REACH_M
 
 
 def _attach_to(lines: list[ConveyorLine], p, exclude: set[str]):
@@ -270,15 +250,10 @@ def _attach_to(lines: list[ConveyorLine], p, exclude: set[str]):
 
     Pure geometry, no randomness: the nearest path within :data:`JOIN_TOL_M`, ties
     broken by belt id so the resolved topology is identical on every run."""
-    best = None
-    for c in lines:
-        if c.id in exclude:
-            continue
-        xy, arc = c.project(p)
-        d = math.dist(p, xy)
-        if d <= JOIN_TOL_M and (best is None or (d, c.id) < (best[0], best[1].id)):
-            best = (d, c, arc)
-    return (best[1], best[2]) if best is not None else None
+    hit = beltgeom.attach(p, [(c.id, c.points) for c in lines], exclude)
+    if hit is None:
+        return None
+    return next(c for c in lines if c.id == hit[0]), hit[1]
 
 
 def _seglens(pts: list[tuple[float, float]]) -> list[float]:
@@ -356,42 +331,25 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
     # own bench pool. A spur nobody stands at keeps ``bench=None`` and its totes
     # fall back to the shared pack pool — a half-drawn line still runs.
     stations = list(getattr(model.resources, "stations", None) or [])
-    claimed: set[int] = set()          # stations already owned by a 引き込み
-    # A spur's benches stand at its DISCHARGE ends — the extremities that are not
-    # its infeed junction. Drawn as two halves ending at their own benches, that is
-    # just `points[-1]` (the shipped line is unchanged). Drawn as ONE belt CROSSING
-    # the 本線 (which is what a 引き込み physically is — see rmpm's 北半/南半 merge),
-    # the trunk meets it in the MIDDLE and BOTH extremities discharge, to the benches
-    # on either side. Reading only `points[-1]` there finds one row and leaves the
-    # other row of 梱包台 unstaffed — the belt then jams with half the floor idle.
-    _ends = {}
+    # Which 梱包台 belong to which 引き込み is ``beltgeom``'s rule, shared verbatim
+    # with the closed-form oracle so the two can never price different floors
+    # (invariant 5). Three answers, and the last two are NOT the same: a count of
+    # 0 means the pull-in is deliberately unmanned (it takes nothing), while
+    # nobody drawn at all means a half-drawn line that still runs off the shared
+    # pool. Falling back to the shared pool for the first case handed the spur the
+    # WHOLE bench line's capacity a second time (measured: packer_utilization 1.28
+    # and a jam that vanished when benches were REMOVED).
+    pools, claimed_i = beltgeom.bench_pools(
+        [(s.id, s.points) for s in spurs],
+        [(c.id, c.points) for c in lines],
+        [(st.x, st.y, st.count) for st in stations])
+    claimed: set[int] = {id(stations[i]) for i in claimed_i}
     for s in spurs:
-        ends = [s.points[0], s.points[-1]]
-        disch = [e for e in ends if _attach_to(lines, e, spur_ids) is None]
-        _ends[s.id] = disch or [s.points[-1]]   # every end on a trunk ⇒ historical
-    # Each bench belongs to the pull-in its worker actually reaches: the NEAREST
-    # one. Claiming first-come instead lets a wide reach steal a neighbour's bench
-    # (P3: 4.5 m pitch, benches ±1.9 m ⇒ 6/4/4/4/2 instead of the drawn 4/4/4/4/4).
-    owner: dict[int, tuple[float, str]] = {}
-    for s in spurs:
-        for st in stations:
-            p = (float(st.x), float(st.y))
-            d = min(math.dist(p, e) for e in _ends[s.id])
-            if d <= BENCH_REACH_M and (id(st) not in owner or d < owner[id(st)][0]):
-                owner[id(st)] = (d, s.id)
-    for s in spurs:
-        nearby = [st for st in stations if owner.get(id(st), (0, None))[1] == s.id]
-        n = sum(max(0, int(st.count)) for st in nearby)
-        if n > 0:
+        n = pools.get(s.id)
+        if n:
             s.n_bench = n
             s.bench = simpy.Resource(env, capacity=n)
-            claimed.update(id(st) for st in nearby)
-        elif nearby:
-            # Benches exist at this spur but every count is 0: the scenario
-            # closed them. Falling back to the shared pool here would hand the
-            # spur the WHOLE bench line's capacity a second time (measured:
-            # packer_utilization 1.28 and a jam that vanished when benches were
-            # REMOVED). A closed pull-in takes no totes instead.
+        elif n == beltgeom.CLOSED:
             s.closed = True
 
     # 停止線の作業者: the 梱包台 standing AT a stop gate belong to that gate — a load

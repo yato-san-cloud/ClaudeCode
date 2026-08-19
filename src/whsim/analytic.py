@@ -43,11 +43,11 @@ from __future__ import annotations
 import math
 import statistics
 
+from whsim import beltgeom
 from whsim.engine.routing import manhattan
 from whsim.rackgeom import aisle_block, aisle_detour, aisle_escape_m
 from whsim.schema.model import WarehouseModel
 from whsim.workmethod import orders_per_trip
-
 
 # Units picked per order LINE when demand comes from the profile rather than
 # from imported orders: ``engine.processes._sample_order`` draws
@@ -396,8 +396,12 @@ def _sort_stops(model: WarehouseModel, b_cap: float):
 # the engine's own constants is pinned by tests/test_analytic_conveyor_jam.py.
 _TOTE_PITCH_DEFAULT_M = 1.0     # unstated pitch ⇒ the historical 1 個/m
 _BELT_SPEED_FALLBACK = 0.5      # build.DEFAULT_CONVEYOR_SPEED_MPS
-_JOIN_TOL_M = 0.8               # build.JOIN_TOL_M — "this belt end is ON that path"
-_BENCH_REACH_M = 3.0            # build.BENCH_REACH_M — 引き込み端に立つ梱包台
+# These two are no longer copies: ``whsim.beltgeom`` owns them, and the engine
+# re-exports the same objects. A shared definition beats a mirrored constant plus
+# a parity test — which is what invariant 11 asks for, and what the drifted 梱包台
+# rule (engine 4 benches, oracle 2) cost when only the constants were shared.
+_JOIN_TOL_M = beltgeom.JOIN_TOL_M
+_BENCH_REACH_M = beltgeom.BENCH_REACH_M
 
 
 def belt_slots(cv) -> int:
@@ -433,15 +437,7 @@ def _belt_rate(cv) -> float:
 
 def _dist_to_polyline(p, pts) -> float:
     """Euclidean distance from ``p`` to a polyline (``build._attach_to``'s test)."""
-    best = float("inf")
-    for i in range(1, len(pts)):
-        a, b = pts[i - 1], pts[i]
-        vx, vy = b[0] - a[0], b[1] - a[1]
-        span = vx * vx + vy * vy
-        t = 0.0 if span <= 1e-12 else ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / span
-        t = min(1.0, max(0.0, t))
-        best = min(best, math.dist(p, (a[0] + vx * t, a[1] + vy * t)))
-    return best
+    return math.dist((float(p[0]), float(p[1])), beltgeom.project(p, pts)[0])
 
 
 def _belt_stages(model: WarehouseModel):
@@ -544,21 +540,51 @@ def _belt_stages(model: WarehouseModel):
         stages.append(spurs)
     if not stages:
         return None
-    return {"stages": stages, "spurs": spurs}
+    # 梱包台 per 引き込み, resolved by the SAME function ``engine.build`` calls.
+    # Keeping a second copy here is what let the two drift: the engine learned
+    # that a spur crossing the 本線 discharges at both extremities and that a
+    # shared bench belongs to the nearer pull-in, and this module did not — so a
+    # real drawing came out 4 benches in the run and 2 in the estimate, and a
+    # bench between two spurs was counted twice (rosier than the run).
+    benches, _claimed = beltgeom.bench_pools(
+        [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in spurs],
+        [(str(cv.id), [(float(p[0]), float(p[1])) for p in cv.points]) for cv in belts],
+        [(s.x, s.y, s.count) for s in (model.resources.stations or [])])
+    return {"stages": stages, "spurs": spurs, "benches": benches}
 
 
-def _spur_benches(model: WarehouseModel, spur) -> int:
-    """梱包台 standing at ONE 引き込み's discharge end — ``build``'s own rule.
+def _spur_benches(model: WarehouseModel, spur) -> int | None:
+    """梱包台 standing at ONE 引き込み's discharge ends — ``build``'s own rule.
 
     ``engine.build._wire_conveyor_chain`` gives each spur the stations within
     :data:`_BENCH_REACH_M` of where it discharges, and a tote holds that spur's
     slot until ITS bench is free. Pooling all 20 benches would make ten 2-bench
     引き込み look like one 20-server queue, which is exactly the mechanism the
     line was drawn to have.
+
+    Three-valued like the engine's own answer: ``n`` benches, ``0`` = drawn but
+    unmanned (the pull-in takes nothing at all), ``None`` = nobody drawn there
+    (a half-drawn line falls back to the shared pack pool).
     """
-    end = (float(spur.points[-1][0]), float(spur.points[-1][1]))
-    return sum(max(0, int(s.count)) for s in (model.resources.stations or [])
-               if math.dist((float(s.x), float(s.y)), end) <= _BENCH_REACH_M)
+    line = _belt_stages(model)
+    if line is None:
+        return beltgeom.UNSTAFFED
+    return line["benches"].get(str(spur.id), beltgeom.UNSTAFFED)
+
+
+def _open_spurs(line: dict) -> list:
+    """The 引き込み that actually TAKE a tote — i.e. not the deliberately unmanned.
+
+    ``engine.build`` does not wire a junction for a spur whose benches are all
+    ``count: 0`` (``ConveyorLine.closed``), so such a pull-in receives nothing at
+    all. Pricing it as an open lane would hand the bank capacity the floor has no
+    people for — rosier than the run, which is the one direction invariant 5
+    forbids. A spur with nobody DRAWN at it is a different thing and stays open:
+    it falls back to the shared pack pool, exactly as the engine does.
+    """
+    benches = line.get("benches") or {}
+    return [cv for cv in line["spurs"]
+            if benches.get(str(cv.id), beltgeom.UNSTAFFED) != beltgeom.CLOSED]
 
 
 def _mmck_full(c: int, a: float, k: int) -> float:
@@ -612,13 +638,13 @@ def _steady_block(model: WarehouseModel, line: dict, lam: float,
     the last of those legs can be turned away.
     """
     stages = line["stages"]
-    spurs = line["spurs"]
+    spurs = _open_spurs(line)
     legs = max(len(stages), 1)
     if spurs:
         probs = []
         for cv in spurs:
-            benches = _spur_benches(model, cv)
-            if benches <= 0:                     # nobody stands there: pooled pack
+            benches = line["benches"].get(str(cv.id))
+            if not benches:                      # nobody stands there: pooled pack
                 benches = max(1, int(n_packers / len(spurs)))
             slots = belt_slots(cv)
             probs.append(_mmck_full(benches, (lam / len(spurs)) * pack_time_s,
@@ -639,7 +665,17 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
     line = _belt_stages(model)
     if line is None:
         return None
-    stages = line["stages"]
+    # A deliberately unmanned 引き込み is never wired to the trunk (``build`` skips
+    # its junction), so it passes nothing at all. Summing its belt rate into the
+    # spur stage would sell lane capacity the floor has no people for; the loads
+    # go to the belt's own end and the shared pack pool instead, which is what
+    # dropping it leaves behind.
+    open_ids = {str(cv.id) for cv in _open_spurs(line)}
+    closed_ids = {str(cv.id) for cv in line["spurs"]} - open_ids
+    stages = [st for st in ([cv for cv in st if str(cv.id) not in closed_ids]
+                            for st in line["stages"]) if st]
+    if not stages:
+        return None
     rates = [sum(_belt_rate(cv) for cv in st) for st in stages]
     slots = [sum(belt_slots(cv) for cv in st) for st in stages]
     mu_pack = (n_packers / pack_time_s) if pack_time_s > 0 else float("inf")
@@ -667,7 +703,9 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
         total = lam * (ttj or 0.0) + blocked
         ratio = (blocked / total) if total > 0.0 else 1.0
     else:
-        ratio = _steady_block(model, line, lam, n_packers, pack_time_s)
+        # the LIVE topology, so a closed 引き込み is not counted as a leg either
+        ratio = _steady_block(model, {**line, "stages": stages}, lam, n_packers,
+                              pack_time_s)
     return {
         "jams": bool(jams),
         "time_to_jam_s": ttj,
