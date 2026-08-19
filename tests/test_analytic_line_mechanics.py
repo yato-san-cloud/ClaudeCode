@@ -26,8 +26,6 @@ here.
 from __future__ import annotations
 
 import math
-import subprocess
-import sys
 import time
 
 import pytest
@@ -38,12 +36,11 @@ from test_line_mechanics import (  # the line fixtures live next door
     SHIP,
     _container_model,
     _edge,
-    _gate_model,
     _model,
     _pull_model,
 )
 
-from whsim import analytic, beltgeom, kpis, linemech, templates
+from whsim import analytic, kpis, linemech, templates
 from whsim.engine import build as engine_build
 from whsim.engine.run import run_once
 from whsim.linemech import container as container_mod
@@ -173,9 +170,11 @@ def _blind(model):
 
 # ======================================================= 既定オフ＝カタログ不変
 
-@pytest.mark.parametrize("template_id",
-                         [t["template_id"] for t in templates.list_templates()])
-def test_the_catalogue_never_reaches_any_of_the_three(template_id):
+ALL_TEMPLATES = [t["template_id"] for t in templates.list_templates()]
+
+
+@pytest.mark.parametrize("template_id", ALL_TEMPLATES)
+def test_the_catalogue_answer_is_the_one_it_had_before(template_id):
     """ADDITIVE: every shipped template is ``auto``, gate-less and pool-less, so
     all three branches are unreachable and not one existing number may move — the
     aisle-travel contract (``test_analytic_aisle_travel``) is pinned on these very
@@ -185,31 +184,36 @@ def test_the_catalogue_never_reaches_any_of_the_three(template_id):
     assert (m.process.divert_policy or "auto") == "auto"
     assert not analytic._has_gate(m)
     line = analytic._belt_stages(m)
+    # The gate and the pool are inert on their own terms (no gate on any belt, no
+    # pool authored); "pull" is a POLICY, so the module would happily price this
+    # bank — what keeps it out is the predicate at the call site, which is why the
+    # line block below has to come out identical.
     assert gate_mod.gate_line_estimate(m, 0.1, 4, 60.0, 3600.0, line=line) is None
-    if line is not None:
-        assert pull_mod.estimate(m, line, 0.1, 4, 60.0, 3600.0) is None
     assert analytic._container_estimate(m, 0.1, 4, 60.0, 1.0, 3600.0) is None
+    assert analytic._line_estimate(m, 0.1, 4, 60.0, 3600.0) == \
+        analytic._conveyor_estimate(m, 0.1, 4, 60.0, 3600.0)
     assert analytic.estimate(m) == _blind(m)
 
 
-def test_the_catalogue_never_even_reaches_the_line_mechanisms():
-    """STRUCTURALLY unreachable, which is stronger than "the dicts came out equal".
+@pytest.mark.parametrize("template_id", ALL_TEMPLATES)
+def test_the_catalogue_never_reaches_the_three_entry_points(monkeypatch, template_id):
+    """同梱テンプレは3機構の枝に**到達しない** — 出力が一致するより強い性質。
 
-    All three mirrors are imported from INSIDE the branch that needs them, so a
-    catalogue estimate must not so much as import them: the branch predicates
-    (``divert_policy``, ``stop_gate``, ``container_pool``) are the only door. This
-    also keeps the 50 ms budget honest — a model with none of the three pays
-    nothing at all — and unlike a frozen digest it cannot rot into a false pass.
+    A dict comparison (or a frozen digest) also passes when a branch DID run and
+    happened to come back with the same numbers; this one fails the moment a
+    predicate is loosened. The three mirrors are reached only through
+    ``divert_policy`` / ``stop_gate`` / ``container_pool``, and the shipped
+    catalogue authors none of them — which is also what keeps ``estimate`` inside
+    its 50 ms budget on those models: they pay nothing, not even the import.
     """
-    saved = {k: v for k, v in sys.modules.items() if k.startswith("whsim.linemech")}
-    for mod in saved:
-        del sys.modules[mod]
-    try:
-        for t in templates.list_templates():
-            analytic.estimate(templates.load_template_model(t["template_id"]))
-        assert not any(k.startswith("whsim.linemech") for k in sys.modules)
-    finally:
-        sys.modules.update(saved)      # leave the interpreter as we found it
+    reached = []
+    monkeypatch.setattr(gate_mod, "gate_line_estimate",
+                        lambda *a, **k: reached.append("gate"))
+    monkeypatch.setattr(pull_mod, "estimate", lambda *a, **k: reached.append("pull"))
+    monkeypatch.setattr(container_mod, "container_estimate",
+                        lambda *a, **k: reached.append("container"))
+    analytic.estimate(templates.load_template_model(template_id))
+    assert reached == []
 
 
 def test_a_mechanism_on_still_estimates_inside_the_budget():
@@ -334,22 +338,31 @@ def test_the_gate_this_module_reads_is_the_gate_the_engine_builds():
 
 def test_the_kind_mix_is_the_mix_the_engine_boards():
     """There is no "mix" field and none is needed: the kind is stamped by the
-    ENTRY belt the picker hands to, so the mix is geometry × ``pick_freq``."""
+    ENTRY belt the picker hands to, so the mix is geometry × ``pick_freq``.
+
+    Measured over 12 h the run sits ~0.016 toward the MINORITY kind (0.734 against
+    0.750 at a 3:1 face split, 0.265 against 0.250 at 1:3, exact at 2:2 and 4:0):
+    a multi-line order is stamped by its LAST pick, so a tour that crosses to the
+    other belt's faces carries that kind. Real, small, and well inside the 0.05
+    this is pinned to — but it is why the seeds are averaged rather than sampled.
+    """
+    # Under the line's capacity, so the mix is the DRAWING's and not the jam's:
+    # a saturated stop line blocks its own kind and skews what gets boarded.
     for insp, packed in ((1, 3), (2, 2), (3, 1), (4, 0)):
-        m = _gated(n_inspect_faces=insp, n_packed_faces=packed, rate=240.0)
+        m = _gated(n_inspect_faces=insp, n_packed_faces=packed, rate=120.0,
+                   n_stop_bench=4)
         line = gate_mod.resolve_line(m)
         share, _arcs = gate_mod.kind_shares(m, line)
         assert share.get("inspected", 0.0) == pytest.approx(
             insp / (insp + packed), abs=1e-9), (insp, packed)
-        k = _measure(m)
         world = engine_build.build(m)
         kind_of = {c.id: c.load_kind for c in world.conveyors}
-        res = run_once(m, seed=SEED)
-        boarded = [kind_of[e["conveyor"]] for e in res.events
+        boarded = [kind_of[e["conveyor"]]
+                   for seed in (5, 11, 23)      # ~700 boardings: ±0.03 at 1 sd
+                   for e in run_once(m, seed=seed).events
                    if e["event"] == "conveyor_on" and e.get("entry")]
         measured = boarded.count("inspected") / max(len(boarded), 1)
         assert measured == pytest.approx(share.get("inspected", 0.0), abs=0.05)
-        assert k["_boarded"] > 0
     # No locations at all ⇒ an even split over the entry belts (never blocks).
     m = _gated()
     m.locations, m.items = [], []

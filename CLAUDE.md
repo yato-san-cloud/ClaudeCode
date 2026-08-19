@@ -155,8 +155,19 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   当たっただけ＝答えではない、が同じ表から読める。Little's law と ~2% 一致を検証);
   **pull型引き込み** `Process.divert_policy: "auto"|"pull"`（通過の瞬間に台が空いて
   いる引き込みにだけ入り、無ければ**本線で待たずに通り過ぎる**。貪欲は人員に盲目
-  =台3→1で分岐 74→74、pull は 72→40）。⚠️ `analytic.py` は3つとも**未鏡写し** —
-  既定オフゆえカタログのピンは無傷だが、ONにしたモデルは解析だけ甘く出る。
+  =台3→1で分岐 74→74、pull は 72→40）。
+- `linemech/` — **その3機構の解析ミラー** (`gate.py`/`container.py`/`pull.py` ＋ 共有層
+  `bench_ledger`（梱包台の持ち主・停止線の作業者・余り台）と `junctions`（引き込みの
+  合流点））。図面の読み方を3つに増やさないため、連鎖は `analytic._belt_stages`・幾何は
+  `beltgeom` から受け取り、自前では持たない。`analytic.estimate` は**機構が書かれている
+  枝の中でだけ遅延 import** するので、同梱テンプレは `whsim.linemech` を import すら
+  しない（カタログはSHA一致・爆速のまま。`tests/test_analytic_line_mechanics.py` が
+  「入口が呼ばれないこと」で固定＝出力一致より強い）。実測: 選択停止 |Δ梱包稼働率|
+  平均0.010/最大0.028（36構成・機構なしなら0.289/0.669）、pull 引込率 rms 0.008・
+  梱包稼働率は甘い側0/36、容器 滞留 中央値0.4%。容器は **additive**（エンジンは投入待ちを
+  ピッカーの busy に数えないので λ を絞ると解析だけ甘くなる）で `conveyor.containers` に
+  ぶら下がる。⚠️ 末端に人が居ないラインは「止まる」と読む＝地平線平均より最大0.67辛い
+  （安全側・意図的）、停止線と pull の同時指定は pull 優先（未検証の組み合わせ）。
 - `kpis.py` — event log → KPIs + a plain-language (Japanese) verdict. Multi-rep runs
   add `kpis.ci` (95% t-CI per headline metric + n_recommended for a ±5% target);
   the KPI view shows 「±X (95%CI, n=N)」 and an honest n=1 disclosure.

@@ -1,7 +1,5 @@
 """容器の有限循環 (finite container pool) in CLOSED FORM — 「レンタルは何個要るのか」.
 
-Proposed as ``src/whsim/linemech/container.py``.
-
 WHY THIS EXISTS (invariant 5)
 -----------------------------
 ``engine.processes`` claims one 折りたたみ容器 per order **at 投入** — the instant the
@@ -61,9 +59,11 @@ home from the mean CARRIED discharge point (40.4 s vs 40.41 s).
 THE DRAWING IS READ THROUGH ``beltgeom``, NEVER RE-DERIVED
 ----------------------------------------------------------
 Where a 引き込み is fed, how far it then rides, and whose 梱包台 stands at its end
-are ``beltgeom``'s answers — the same ones ``engine.build`` and ``analytic`` use.
-A private copy of that arithmetic is exactly what let the two drift before, and
-the drift is invisible from the outside because the orders still complete:
+are ``beltgeom``'s answers — the same ones ``engine.build`` and ``analytic`` use —
+resolved once for all three mechanisms by ``linemech.bench_ledger`` /
+``linemech.junctions``, over the chain ``analytic._belt_stages`` hands in. A
+private copy of that arithmetic is exactly what let the two drift before, and the
+drift is invisible from the outside because the orders still complete:
 
 * a spur drawn as ONE belt CROSSING the 本線 is fed in its MIDDLE
   (``feed_point``/``feed_arc``), so it rides only the rest of its length — 8 m,
@@ -88,12 +88,11 @@ it reads anything else.
 from __future__ import annotations
 
 import math
-from itertools import pairwise
 
 from whsim import beltgeom
 from whsim.analytic import _erlang_c as erlang_c
 from whsim.analytic import belt_length, belt_slots, belt_speed
-from whsim.linemech import bench_ledger, gate_stops, junctions, resolve_gate
+from whsim.linemech import bench_ledger, gate_stops, junctions, point_at, resolve_gate
 
 # ``beltgeom`` is the ONE source for where a belt is fed, where it discharges and
 # whose 梱包台 stands there; ``analytic`` is the one source for what a belt's four
@@ -235,22 +234,6 @@ def _length(pts) -> float:
     return sum(math.dist(pts[i - 1], pts[i]) for i in range(1, len(pts)))
 
 
-def _point_at(pts, arc: float) -> tuple[float, float]:
-    """``ConveyorLine.point_at``: the xy at arc length ``arc`` along the polyline."""
-    left = max(arc, 0.0)
-    for a, b in pairwise(pts):
-        seg = math.dist(a, b)
-        if left <= seg or seg <= 1e-12:
-            t = 0.0 if seg <= 1e-12 else left / seg
-            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-        left -= seg
-    return pts[-1]
-
-
-def _dist_to_polyline(p, pts) -> float:
-    return math.dist(p, beltgeom.project(p, pts)[0])
-
-
 def _gate_arc(cv, kind: str) -> float | None:
     """``StopGate.stops(kind)`` ⇒ where THIS belt ends for a load of that kind.
 
@@ -313,8 +296,10 @@ def resolve_line(model, line: dict, kind: str = "", ledger=None) -> dict:
     where ``trunk_s`` is the deterministic ride from the boarding point to the
     junction bank, and each spur carries what it needs to be one M/M/c/K stage.
 
-    Three of ``engine.build``'s rules are load-bearing here and all three are read
-    from ``beltgeom`` rather than re-derived:
+    Three of ``engine.build``'s rules are load-bearing here and none of them is
+    re-derived — the junction rule comes from :func:`linemech.junctions` and the
+    bench ledger from :func:`linemech.bench_ledger`, which is what the other two
+    mechanisms read too:
 
     * a 引き込み is fed at :func:`beltgeom.feed_point` — its infeed when that sits on
       the 本線 (every half-drawn spur, ``feed_arc`` 0), else where the two PATHS
@@ -325,7 +310,8 @@ def resolve_line(model, line: dict, kind: str = "", ledger=None) -> dict:
       appear in the cascade, or the bank is priced with servers the floor has not
       got — rosier than the run.
     * a spur nobody is DRAWN at borrows only the benches nobody else claimed
-      (``World.spare_bench``), and if every bench is spoken for it takes nothing.
+      (``World.spare_bench``), and if every bench is spoken for it takes nothing —
+      the ledger has already closed it, exactly as ``build`` does.
     """
     stages = line["stages"]
     spur_ids = set(line["spur_ids"])
@@ -346,6 +332,7 @@ def resolve_line(model, line: dict, kind: str = "", ledger=None) -> dict:
     trunk_slots = 0
     gate = None
     gate_belt = None
+    gate_stage = None
     tail_end = None
     for si, stage in enumerate(trunk_stages):
         legs, ends = [], []
@@ -355,7 +342,7 @@ def resolve_line(model, line: dict, kind: str = "", ledger=None) -> dict:
                 continue
             length = _length(pts)
             joins = [beltgeom.project(e, pts)[1] for e in (tail_end or [])
-                     if _dist_to_polyline(e, pts) <= beltgeom.JOIN_TOL_M]
+                     if beltgeom.distance_to(e, pts) <= beltgeom.JOIN_TOL_M]
             arc_in = (sum(joins) / len(joins)) if joins else 0.0
             arc_out = length
             # 停止線 only stops what PASSES it: a load that boarded (or handed over)
@@ -364,28 +351,39 @@ def resolve_line(model, line: dict, kind: str = "", ledger=None) -> dict:
             g = _gate_arc(cv, kind)
             if g is not None and g >= arc_in - 1e-9:
                 arc_out = min(arc_out, g)
-                gate = {"end": _point_at(pts, arc_out), "arc": arc_out}
-                gate_belt = str(cv.id)
+                gate = {"end": point_at(pts, arc_out), "arc": arc_out,
+                        "trunk_s": 0.0}
+                gate_belt, gate_stage = str(cv.id), si
             if si + 1 < len(trunk_stages):     # hand over to the next 本線 stage
                 nxt = [beltgeom.project(_pts(n)[0], pts)[1] for n in trunk_stages[si + 1]
                        if len(_pts(n)) >= 2
-                       and _dist_to_polyline(_pts(n)[0], pts) <= beltgeom.JOIN_TOL_M]
+                       and beltgeom.distance_to(_pts(n)[0], pts) <= beltgeom.JOIN_TOL_M]
                 if nxt:
                     arc_out = min(arc_out, sum(nxt) / len(nxt))
             legs.append((arc_in, arc_out, belt_speed(cv), pts))
-            ends.append(_point_at(pts, arc_out))
+            ends.append(point_at(pts, arc_out))
             trunk_slots += belt_slots(cv)
         if not legs:
             continue
         # The junction bank sits on the LAST trunk stage: the ride to it is priced
         # per spur below (weighted by what each one actually carries), so only the
-        # run UP TO the bank is charged here.
-        if si + 1 == len(trunk_stages) and spur_info and gate is None:
+        # run UP TO the bank is charged here. A 停止線 does NOT replace that bank —
+        # it stands at the END of it and catches what no 引き込み had hands for, so
+        # the spurs BEFORE it keep their lanes and the gate is the terminus. (The
+        # ones beyond it are invisible to a stopped load: ``_convey_chain`` looks
+        # for junctions only up to ``end_arc``.) Reading the gate as the only exit
+        # priced a 10-bench bank as one 1-slot lane.
+        bank = si + 1 == len(trunk_stages) and spur_info and (
+            gate is None or gate_stage == si)
+        if bank:
             arc_in, _out, sp, pts = legs[0]
-            trunk_s += 0.0
             for s in spur_info:
+                if gate is not None and s["arc"] > gate["arc"] + 1e-9:
+                    continue                 # 停止線の先の引き込みは見えない
                 s["trunk_s"] = max((s["arc"] or 0.0) - arc_in, 0.0) / sp
                 s["host_pts"] = pts
+            if gate is not None:
+                gate["trunk_s"] = max(gate["arc"] - arc_in, 0.0) / sp
         else:
             trunk_s += sum((b - a) / sp for a, b, sp, _p in legs) / len(legs)
         tail_end = ends
@@ -640,10 +638,18 @@ def container_estimate(
                      or s["benches"] <= 0]
         for s in unstaffed:
             s["benches"] = max(1, ledger["fallback"] // max(len(unstaffed), 1))
-        if geo["gate"] is not None:           # 停止線 で降ろす: the gate's own hands
+        if geo["gate"] is not None:
+            # 停止線 で降ろす: its OWN hands, and it stands at the END of the bank —
+            # a load reaches it only when no 引き込み before it had room, so it is
+            # the cascade's terminus, not a replacement for it. (Replacing the bank
+            # priced a 10-bench line as one 1-slot lane: capacity 46/h against a
+            # measured 434, residence 2 770 s against 527.) It holds its slot until
+            # its bench frees, so the trunk behind it IS its waiting room.
             n_gate = ledger["gates"].get(geo["gate_belt"], 0) or fallback_c
-            spurs = [{"id": "gate", "benches": n_gate, "slots": 1,
-                      "end": geo["gate"]["end"], "ride_s": 0.0, "trunk_s": 0.0}]
+            spurs = spurs + [{"id": "gate", "benches": n_gate,
+                              "slots": max(geo["trunk_slots"], 1),
+                              "end": geo["gate"]["end"], "ride_s": 0.0,
+                              "trunk_s": geo["gate"].get("trunk_s", 0.0)}]
         if not spurs:                         # legacy single belt: the shared pool
             spurs = [{"id": "pack", "benches": fallback_c, "slots": 1,
                       "end": geo["tail_end"], "ride_s": 0.0, "trunk_s": 0.0}]

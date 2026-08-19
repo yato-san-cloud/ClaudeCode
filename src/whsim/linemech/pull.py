@@ -34,6 +34,22 @@ prices, together with what it implies:
    at a junction), so ``conveyor_block_ratio`` under pull comes only from the
    serial hand-overs.
 
+末端に誰も立っていないとき (``end_servers == 0``)
+------------------------------------------------
+The engine's answer changed under this module's feet and the mirror was
+re-derived against the new one: ``processes._bench_pool`` now returns ``None``
+when every 梱包台 stands at a 引き込み or a 停止線, so a load nobody pulled in
+**stops at the end of the 本線 for good** (``pack_unmanned``) instead of being
+packed by those same people a second time. So the end pool is ``spare`` — zero is
+a real answer, not a fallback — and a line with any overflow at all jams
+(``time_to_jam_s`` = the trunk's free slots ÷ the overflow rate).
+
+Measured over 12 unmanned-end configurations: 引き込み量 rms 0.009 (unchanged —
+the bank is upstream of the end), and 梱包稼働率 **never rosier**, but gloomier by
+up to 0.67 because this prices the rate the bank sustains UNTIL the trunk fills,
+while the run's horizon average includes the dead time after it. Averaging the
+death into the capacity lands on the rosy side, so it is deliberately not done.
+
 Pure arithmetic — no simpy, no graph search, O(#junctions + #slots) — so the
 estimate stays 爆速 for drag-time re-estimation, exactly like the rest of
 ``analytic.py``.
@@ -402,13 +418,18 @@ def resolve(model, line=None):
     trunk = line["by_id"][tid]
     v = belt_speed(trunk)
 
-    # 末端の手 — ``processes``' own answer at the end of the 本線: the 停止線's
-    # workers when one is drawn there, else ``_bench_pool``'s (spare benches, the
-    # whole floor when nothing is claimed, or NOBODY). Not "the floor" as a last
+    # 末端の手 — ``processes``' own answer for a load nobody pulled in. Two pools
+    # can be standing there and they are different people: the 停止線's own workers
+    # (``gate.bench``, who take the kinds the gate stops) and ``_bench_pool``'s
+    # answer at the belt end (the spare benches, the whole floor when nothing is
+    # claimed at all, or NOBODY once every bench stands at a 引き込み or a 停止線).
+    # Both are summed because both take loads OFF this line; pooling them is an
+    # approximation only when a gate splits the kinds between them — see the note
+    # on gate+pull in ``analytic._line_estimate``. Never "the floor" as a last
     # resort: that is the double-count the engine was fixed for.
     n_packers = sum(max(0, int(s.count)) for s in stations) or 1
     gate_n = ledger["gates"].get(tid, 0) if resolve_gate(trunk) is not None else 0
-    end_srv = gate_n if gate_n > 0 else ledger["fallback"]
+    end_srv = gate_n + ledger["fallback"]
 
     entry = list(line["stages"][0]) if line["stages"] else []
     return {

@@ -89,6 +89,16 @@ def project(p, pts, seglens=None) -> tuple[tuple[float, float], float]:
     return best_xy, best_arc
 
 
+def distance_to(p, pts) -> float:
+    """How far ``p`` is from a polyline — ``build._attach_to``'s "do they touch" test.
+
+    One line, but it is the test every reader of a drawing runs (does this end sit
+    ON that belt?), so it lives beside :func:`project` rather than as a private
+    wrapper in each of them.
+    """
+    return math.dist((float(p[0]), float(p[1])), project(p, pts)[0])
+
+
 def attach(p, belts, exclude=()) -> tuple[str, float] | None:
     """The belt whose PATH ``p`` sits on, as ``(belt id, arc)`` — or ``None``.
 

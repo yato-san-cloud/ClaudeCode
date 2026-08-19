@@ -32,7 +32,7 @@ import math
 
 from whsim import beltgeom
 
-__all__ = ["bench_ledger", "gate_stops", "junctions", "resolve_gate"]
+__all__ = ["bench_ledger", "gate_stops", "junctions", "point_at", "resolve_gate"]
 
 
 def resolve_gate(cv):
@@ -81,16 +81,22 @@ def gate_stops(gate, kind: str) -> bool:
     return False
 
 
-def _point_at(pts, arc: float):
-    """``ConveyorLine.point_at``: the xy at arc length ``arc`` along a polyline."""
-    left = max(arc, 0.0)
+def point_at(pts, arc: float):
+    """The xy at arc length ``arc`` along a polyline — ``ConveyorLine.point_at``.
+
+    Written in the engine's own accumulating form (not a decrementing remainder)
+    so the two land on the same float: this is what decides which 梱包台 stands AT
+    a stop line, and a bench 3 m away is either the gate's or nobody's.
+    """
+    arc = max(arc, 0.0)
+    acc = 0.0
     for i in range(1, len(pts)):
         a, b = pts[i - 1], pts[i]
         seg = math.dist(a, b)
-        if left <= seg or seg <= 1e-12:
-            t = 0.0 if seg <= 1e-12 else left / seg
+        if arc <= acc + seg + 1e-9:
+            t = min(max((arc - acc) / seg, 0.0), 1.0) if seg > 1e-12 else 0.0
             return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-        left -= seg
+        acc += seg
     return pts[-1]
 
 
@@ -138,7 +144,7 @@ def bench_ledger(model, line: dict) -> dict:
         g = resolve_gate(cv)
         if g is None:
             continue
-        at = _point_at(_pts(cv), g[0])
+        at = point_at(_pts(cv), g[0])
         near = [i for i, st in enumerate(stations)
                 if i not in claimed
                 and math.dist((float(st.x), float(st.y)), at) <= beltgeom.BENCH_REACH_M]
