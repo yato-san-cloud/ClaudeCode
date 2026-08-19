@@ -152,6 +152,41 @@ def _gate_downstream(count=40, rate=150.0, pack_time=40.0, duration=3600.0):
     return _pooled(m, count)
 
 
+def _bank_and_gate(count=40, rate=200.0, spurs=4, bench=2, gate=True,
+                   gate_bench=2, pack_time=60.0, duration=7200.0,
+                   return_time=30.0):
+    """引き込みバンク ＋ **その下流の停止線**（同じ荷種別）— the customer's own shape.
+
+    The 引き込み take what they have hands for and the 停止線 catches the rest, so
+    the gate is the cascade's TERMINUS, not its only lane.
+    """
+    e = Conveyor(id="E", points=[[2.0, 3.0], [2.0, 12.0]], speed_mps=1.0)
+    trunk = Conveyor(id="T", points=[[0.0, 12.0], [40.0, 12.0]], speed_mps=1.0)
+    up = Conveyor(id="UP", points=[[40.0, 12.5], [0.0, 12.5]], speed_mps=1.0,
+                  elevation_m=1.1)
+    if gate:
+        # The belts carry no ``load_kind``, so the loads are kind "" — and a gate
+        # cannot NAME the empty kind (``_kind_set`` drops it). The three-valued
+        # rule is how such a line is gated: everything not named stops.
+        trunk.stop_gate = {"at_m": 34.0, "pass_states": ["nothing-passes"]}
+    cvs = [e, trunk]
+    edges = [_edge(PICK, INSPECT, "E"), _edge(PACK, SHIP, "T")]
+    stations = []
+    for i in range(spurs):
+        x = 6.0 + 6.0 * i                     # 6..24 m: all BEFORE the stop line
+        cvs.append(Conveyor(id=f"S{i}", points=[[x, 12.0], [x, 17.0]], speed_mps=1.0))
+        edges.append(_edge(INSPECT, PACK, f"S{i}"))
+        stations.append(Station(id=f"b{i}", x=x, y=17.0, count=bench))
+    if gate_bench:
+        stations.append(Station(id="stopline", x=34.0, y=14.0, count=gate_bench))
+    cvs.append(up)
+    m = _model(cvs, edges, pick_xy=[(2.0, 2.0), (5.0, 2.0), (8.0, 2.0)],
+               stations=stations, rate=rate, pack_time=pack_time, duration=duration)
+    m.process.container_pool = {"count": count, "return_time_s": return_time,
+                                "return_belt": "UP"}
+    return m
+
+
 def _multi_spur(count=20, rate=200.0, spurs=4, bench=2, pack_time=60.0,
                 duration=3600.0, return_time=30.0):
     """本線 with several 引き込み — the shape the bundled ``line_inspection`` has."""
@@ -418,6 +453,36 @@ def test_an_unstaffed_pull_in_borrows_only_the_spare_benches():
         got, k = _predict(m), _measure(m)
         assert got["residence_s"] == pytest.approx(
             k["container_use_mean_s"], rel=0.20), spare
+
+
+@pytest.mark.parametrize("count,rate", [(400, 200.0), (400, 400.0), (20, 300.0)])
+def test_a_stop_line_stands_at_the_END_of_the_bank_not_instead_of_it(count, rate):
+    """停止線は引き込みバンクを置き換えない — その終端に立つ。
+
+    A 停止線 downstream of the 引き込み catches only what no pull-in had hands for,
+    so the spurs keep their lanes and the gate is the cascade's terminus. Reading
+    the gate as the ONLY exit priced a 10-bench bank as one 1-slot lane: on the
+    real drawing that was capacity 46 件/h against a measured 434 (9.4× low) and a
+    residence of 2 770 s against 527 (5.3× high), while the same model with the
+    gate removed was 0.3% out. The two errors nearly cancel in ``required_pool``,
+    so that number alone would not have caught it.
+    """
+    armed = _bank_and_gate(count=count, rate=rate, gate=True)
+    bare = _bank_and_gate(count=count, rate=rate, gate=False)
+    geo = _resolved(armed)
+    lanes = [s["id"] for s in geo["spurs"] if s.get("trunk_s") is not None]
+    assert lanes == ["S0", "S1", "S2", "S3"], "the bank survives the gate"
+    assert geo["gate"] is not None
+    got, k = _predict(armed), _measure(armed)
+    assert got["residence_s"] == pytest.approx(k["container_use_mean_s"], rel=0.10)
+    assert got["throughput_per_hr"] == pytest.approx(k["throughput_per_hr"], rel=0.12)
+    assert got["required_pool"] >= k["containers_in_use_peak"], "sizes the rental short"
+    # 貪欲ディバート never lets a load past an open 引き込み, so on this drawing the
+    # stop line is never reached and the armed answer must equal the bare one —
+    # which is exactly what the run shows (zero ``conveyor_gate`` events).
+    assert not [e for e in run_once(armed, seed=5).events
+                if e["event"] == "conveyor_gate"]
+    assert got["residence_s"] == pytest.approx(_predict(bare)["residence_s"], rel=0.02)
 
 
 def test_a_load_that_boarded_past_the_stop_line_is_not_dragged_back_to_it():

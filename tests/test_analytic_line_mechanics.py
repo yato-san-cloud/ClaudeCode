@@ -271,11 +271,8 @@ def test_the_ledger_is_the_engines_own_answer_about_who_stands_where():
     belt end with nobody of its own gets (``processes._bench_pool``). Three
     answers, and the last one is where the engine was WRONG until it was fixed:
     with every bench spoken for there is nobody, not "the whole floor again"."""
-    for n_spur, n_stop, n_ship in ((2, 2, 3), (2, 0, 3), (0, 2, 3)):
+    for n_spur, n_stop in ((2, 2), (2, 0), (0, 2)):
         m = _gated_with_spurs(n_spur_bench=n_spur, n_stop_bench=n_stop)
-        if n_ship == 0:
-            m.resources.stations = [s for s in m.resources.stations
-                                    if s.id != "ship"]
         world = engine_build.build(m)
         led = linemech.bench_ledger(m, analytic._belt_stages(m))
         assert led["gates"].get("T", 0) == \

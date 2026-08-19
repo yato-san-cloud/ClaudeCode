@@ -76,6 +76,22 @@ drift is invisible from the outside because the orders still complete:
   (``World.spare_bench``), and with every bench spoken for it takes nothing;
 * ``Conveyor.discharge_both`` doubles the bank (2 → 4 on the same drawing).
 
+WHAT IT DOES NOT MODEL (measured, so you know the shape of the error)
+---------------------------------------------------------------------
+One representative path per 荷の種別. Where that is not the line's shape, the
+answer drifts and the drift has been measured rather than guessed:
+
+* **two 検品ライン joining the 本線 at very different arcs**, where the late one
+  boards PAST the whole bank: those loads see no junction at all and pile up at
+  the belt end, which this prices as if they had been taken by the last 引き込み.
+  Measured on a 4-spur line at saturation: residence 179 s against 500 s — ROSY,
+  and the same with the gate armed or removed, so it is this, not the gate. The
+  bundled ``line_inspection`` has that shape mildly and reads +17% (gloomy).
+* **``divert_policy: "pull"``**: the cascade here is 貪欲ディバート's (slot-blocking
+  M/M/c/K), not pull's loss system. Measured +27…+31% on residence — gloomy, so
+  the rental quantity is over-bought rather than under-bought, but it is not the
+  right mechanism. ``linemech.pull`` is.
+
 INERT WITHOUT A POOL — provably
 -------------------------------
 ``_take_container`` is called from exactly ONE place in the engine
@@ -403,7 +419,7 @@ def _cascade(spurs: list[dict], lam: float, s_pack: float, wait_cap: float,
     offered = lam
     carried, waits, rides, pts = [], [], [], []
     for i, s in enumerate(spurs):
-        c = max(int(s["benches"]), 1)
+        c = max(int(s["benches"]), 0)
         if i == len(spurs) - 1:
             # A tote that finds every 引き込み full does NOT vanish: it stalls on the
             # 本線 (auto) holding a slot, so the LAST stage carries the whole
@@ -445,8 +461,14 @@ def _wait_mmc(c: int, lam: float, s_pack: float, cap: float, cv2: float) -> floa
     wait 4.7× high once 梱包 passed ρ ≈ 0.8, which would have had the proposal rent
     twice the containers it needs.
     """
-    if s_pack <= 0.0 or lam <= 0.0 or c <= 0:
+    if s_pack <= 0.0 or lam <= 0.0:
         return 0.0
+    if c <= 0:
+        # 誰も居ない末端 (an unmanned 停止線): nothing is served there, so a load
+        # that reaches it waits as long as the pool and the belt physically allow.
+        # Weighted by the overflow that actually gets that far — which is ~0 on a
+        # line whose 引き込み absorb everything, so this stays quiet until it bites.
+        return cap
     mu = 1.0 / s_pack
     if lam >= c * mu:
         return cap
