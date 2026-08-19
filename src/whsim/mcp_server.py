@@ -46,6 +46,8 @@ DEFAULT_LEDGER_ROWS = 50
 # スイープの実行本数の上限（1本1DES — 無制限だと会話が返って来なくなる）。
 MAX_SWEEP_CASES = 64
 MAX_SEED = 2 ** 32 - 1
+# 1回のスイープで表に載せられる指標の数（表であって生ログではない）。
+MAX_SWEEP_METRICS = 60
 
 SWEEPS_SUBDIR = "sweeps"
 
@@ -159,6 +161,43 @@ def _validate_diff(diff_json: Any) -> dict:
     if bad:
         raise LabError(f"diff_json のキーは dotted-path 文字列である必要があります: {bad}")
     return diff
+
+
+def _validate_metrics(metrics: Any) -> list[str]:
+    """表に載せる KPI キーの検証。``None`` は既定の主要KPI（既存の応答と同一）。
+
+    KPI そのものは ``kpis.compute`` の出力（＝runの成果物）で、ここが決めるのは
+    **どれを表に転記するか**だけ。既定に入っていない KPI（``containers_in_use_peak``
+    や ``conveyor_gate_stops`` のようなライン運用の読み出し）はこの引数で名指しする。
+    """
+    if metrics is None:
+        return list(lab.HEADLINE_KPIS)
+    if not isinstance(metrics, list) or not metrics:
+        raise LabError('metrics は KPI キーの配列で指定してください'
+                       '（未指定なら既定の主要KPI。例: ["containers_in_use_peak", '
+                       '"conveyor_gate_stops"]）')
+    keys: list[str] = []
+    for m in metrics:
+        if not isinstance(m, str) or not m.strip():
+            raise LabError(f"metrics のキーは KPI 名の文字列である必要があります: {m!r}")
+        keys.append(m)
+    if len(keys) > MAX_SWEEP_METRICS:
+        raise LabError(f"metrics が多すぎます: {len(keys)} > {MAX_SWEEP_METRICS}")
+    return keys
+
+
+def _compact_params(params: dict) -> dict:
+    """応答に載せる params（配列/オブジェクトの値は要約する）。
+
+    ``param_grid`` の値には ``resources.conveyors`` 丸ごとのような複合値も置ける。
+    それを 64 ケース分そのまま返すと応答が実験そのものより大きくなるので、複合値は
+    形だけにする（全量は ``table.json`` に残っている＝出所は失わない）。
+    """
+    out = {}
+    for k, v in (params or {}).items():
+        out[k] = v if (v is None or isinstance(v, (str, int, float, bool))) \
+            else f"<{type(v).__name__} len={len(v)}>"
+    return out
 
 
 def _check_applied(run_id: str, diff: dict) -> tuple[list[str], list[dict]]:
@@ -303,15 +342,31 @@ def compare_runs(run_ids: list[str], metrics: list[str] | None = None) -> dict:
 
 def sweep(base_scenario: dict[str, Any] | str,
           param_grid: dict[str, Any] | str,
-          seeds: list[int]) -> dict:
+          seeds: list[int],
+          metrics: list[str] | None = None) -> dict:
     """パラメータ格子×seed を全数実行し、結果テーブルを永続化する。
 
     param_grid は ``{"resources.workers.0.count": [8, 9, 10]}`` のように
     dotted-path → 値のリスト。総ケース数（格子の直積 × seed 数）が
     上限を超えるときは実行前に断る。**1本失敗してもスイープは止まらず**、
     その失敗は結果テーブル（``index.jsonl``）にエラー行として残る。
+
+    ``metrics`` は表に載せる KPI キー（未指定＝既定の主要KPI）。既定に入っていない
+    読み出し（``containers_in_use_peak`` / ``conveyor_gate_stops`` /
+    ``conveyor_block_ratio`` など）はここで名指しする — 名指ししないと、その KPI は
+    掃引の表にもこの応答にも出ない。
+
+    ケースごとの行（params ↔ run_id ↔ KPI）は ``rows`` でそのまま返す。掃引の
+    目的は**曲線**なので、表がファイルにしか無いと臨界点を読むのに run 1本ずつ
+    問い合わせる羽目になる。
+
+    掃引した dotted-path が効かなかった場合は ``unapplied_edits`` に出し、全ケースの
+    KPI が完全一致した場合は ``warnings`` に出す（``apply_scenario`` は解決できない
+    パスを黙って捨て、自由 dict のキー名違いは「適用された」ように見えるので、
+    **同じ数字が並んだだけの掃引**を「効かなかった」と読み違えないため）。
     """
     base = _validate_scenario(_resolve_base_scenario(base_scenario))
+    mets = _validate_metrics(metrics)
     grid = _as_dict(param_grid, "param_grid")
     if not grid:
         raise LabError("param_grid が空です（dotted-path → 値のリスト を指定してください）")
@@ -344,21 +399,54 @@ def sweep(base_scenario: dict[str, Any] | str,
             summary = _run(scen, sd)
         except Exception as e:                      # noqa: BLE001 — 1本の失敗で掃引を止めない
             row.update({"status": "error", "run_id": None, "kpis": {},
-                        "error": f"{type(e).__name__}: {e}"})
+                        "unapplied_edits": [], "error": f"{type(e).__name__}: {e}"})
         else:
+            # 焼かれた model.json で「そのケースの編集が本当に効いたか」を確かめる
+            # （効かなかったケースが黙って基準と同じ数字を出すのが一番危ない）。
+            try:
+                _applied, unapplied = _check_applied(summary["run_id"], params)
+            except LabError as e:                   # 確認できないことは確認できないと言う
+                unapplied = [{"path": "*", "reason": f"適用結果を確認できませんでした: {e}"}]
             row.update({"status": "ok", "run_id": summary["run_id"],
                         "seed": summary["seed"],
                         "scenario_hash": summary["scenario_hash"],
                         "artifacts_path": summary["artifacts_path"],
-                        "kpis": {m: summary["kpis"].get(m) for m in lab.HEADLINE_KPIS},
+                        "kpis": {m: summary["kpis"].get(m) for m in mets},
+                        "unapplied_edits": unapplied,
                         "error": None})
         rows.append(row)
 
     manifest = {"sweep_id": sweep_id, "base_scenario": base, "param_grid": grid,
-                "seeds": seed_list, "cases": total,
+                "seeds": seed_list, "cases": total, "metrics": mets,
                 "created": _dt.datetime.now().isoformat(timespec="seconds")}  # noqa: DTZ005
-    paths = lab.write_sweep_table(sdir, manifest, rows)
+    paths = lab.write_sweep_table(sdir, manifest, rows, mets)
     ok = [r for r in rows if r["status"] == "ok"]
+
+    # 効かなかった編集（パス単位に畳む — 同じ格子は全ケースで同じパスを編集する）。
+    unapplied: dict[str, dict] = {}
+    for r in rows:
+        for u in r.get("unapplied_edits") or ():
+            e = unapplied.setdefault(str(u.get("path")),
+                                     {"path": u.get("path"), "reason": u.get("reason"),
+                                      "cases": []})
+            e["cases"].append(r["case"])
+    # 同一seedのケースのKPIが1つ残らず一致＝掃引したつまみが動いていない疑い。
+    # 「効かない」と「本当に効果が無い」は別物なので、断定せず注意として返す。
+    by_seed: dict[Any, list[dict]] = {}
+    for r in ok:
+        by_seed.setdefault(r["seed"], []).append(r["kpis"])
+    groups = [v for v in by_seed.values() if len(v) > 1]
+    kpi_identical = bool(groups) and all(all(k == v[0] for k in v) for v in groups)
+    warnings: list[str] = []
+    if unapplied:
+        warnings.append("モデルに効かなかった編集があります（unapplied_edits）: "
+                        + ", ".join(sorted(unapplied)))
+    if kpi_identical:
+        warnings.append(
+            "同一seedの全ケースでKPIが完全に一致しました — 掃引したつまみが"
+            "モデルに効いていない可能性があります（自由 dict のキー名違い・配列の"
+            "添字違いなど）。焼かれた model.json で確かめてください。")
+
     return {
         "sweep_id": sweep_id,
         "dir": paths["dir"],
@@ -368,10 +456,20 @@ def sweep(base_scenario: dict[str, Any] | str,
         "cases": total,
         "ok": len(ok),
         "failed": total - len(ok),
+        "metrics": mets,
         "run_ids": [r["run_id"] for r in ok],
-        "summary": lab.summarize_rows(rows, lab.HEADLINE_KPIS),
-        "errors": [{"case": r["case"], "params": r["params"], "seed": r["seed"],
-                    "error": r["error"]} for r in rows if r["status"] == "error"],
+        "rows": [{"case": r["case"], "seed": r["seed"],
+                  "params": _compact_params(r.get("params")),
+                  "status": r["status"], "run_id": r.get("run_id"),
+                  "kpis": r.get("kpis") or {},
+                  "unapplied_edits": r.get("unapplied_edits") or [],
+                  "error": r.get("error")} for r in rows],
+        "summary": lab.summarize_rows(rows, mets),
+        "unapplied_edits": list(unapplied.values()),
+        "warnings": warnings,
+        "errors": [{"case": r["case"], "params": _compact_params(r["params"]),
+                    "seed": r["seed"], "error": r["error"]}
+                   for r in rows if r["status"] == "error"],
     }
 
 

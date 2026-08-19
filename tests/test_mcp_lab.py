@@ -290,6 +290,119 @@ def test_sweep_rejects_out_of_range_parameters(runs, grid, seeds, needle):
     assert needle in str(e.value)
 
 
+# --- sweep: 名指しした KPI と、ケースごとの行 ------------------------------
+# 掃引の目的は**曲線**（つまみ→KPIの並び）なので、(1) 見たい KPI が既定の主要KPIに
+# 入っていない機構（容器・停止線・詰まり）だと表に1つも出ない、(2) 行がファイルに
+# しか無いと臨界点を読むのに run 1本ずつ問い合わせる、の2つがそのまま実験の障壁に
+# なる。どちらも「装置が数値を作る」話ではない — 転記する先の話。
+
+LINE_KPIS = ["containers_in_use_peak", "container_pool_size", "container_wait_total_s",
+             "conveyor_gate_stops", "conveyor_block_ratio", "completion_rate"]
+
+
+def test_sweep_carries_the_kpis_you_name_and_they_are_still_transcription(runs):
+    out = M.sweep(SHORT, {"resources.workers.0.count": [4, 5]}, [1],
+                  metrics=LINE_KPIS)
+    assert out["metrics"] == LINE_KPIS
+    assert out["warnings"] == [] and out["unapplied_edits"] == []
+    for row in out["rows"]:
+        assert list(row["kpis"]) == LINE_KPIS
+        disk = json.loads(
+            (runs / row["run_id"] / "summary.json").read_text("utf-8"))["kpis"]
+        for k, v in row["kpis"].items():
+            assert v == disk[k]                      # 転記そのもの（作った数字ではない）
+    # 永続化した表にも同じ列が立つ（応答とファイルが食い違わない）
+    header = (Path(out["table_path"]).read_text("utf-8")
+              .lstrip("﻿").splitlines()[0].split(","))
+    assert {"containers_in_use_peak", "conveyor_gate_stops"} <= set(header)
+    assert "walk_total_m" not in header              # 名指ししたものだけ
+    assert set(out["summary"]) <= set(LINE_KPIS)
+
+
+def test_sweep_returns_the_case_rows_so_the_curve_takes_one_round_trip(runs):
+    grid = {"resources.workers.0.count": [4, 5], "orders.profile.peak_factor": [1.0, 2.0]}
+    out = M.sweep(SHORT, grid, [1])
+    assert len(out["rows"]) == out["cases"] == 4
+    assert [r["case"] for r in out["rows"]] == [1, 2, 3, 4]
+    # 行は params ↔ run_id ↔ KPI を1つの表として持つ（応答＝ファイルの table.json）
+    disk = {r["case"]: r for r in
+            json.loads((Path(out["dir"]) / "table.json").read_text("utf-8"))["rows"]}
+    for r in out["rows"]:
+        assert r["params"] == disk[r["case"]]["params"]
+        assert r["run_id"] == disk[r["case"]]["run_id"]
+        assert r["kpis"] == disk[r["case"]]["kpis"]
+    assert {r["params"]["resources.workers.0.count"] for r in out["rows"]} == {4, 5}
+
+
+def test_sweep_summarises_a_composite_param_instead_of_echoing_it(runs):
+    """複合値（配列丸ごと）は64ケース分そのまま返すと応答が実験より大きくなる。
+    形だけ返し、全量は table.json に残す（出所は失わない）。"""
+    workers = [{"id": "pickers", "role": "picker", "count": 5},
+               {"id": "packers", "role": "packer", "count": 2}]
+    out = M.sweep(SHORT, {"resources.workers": [workers]}, [1])
+    assert out["rows"][0]["params"]["resources.workers"] == "<list len=2>"
+    disk = json.loads((Path(out["dir"]) / "table.json").read_text("utf-8"))["rows"]
+    assert disk[0]["params"]["resources.workers"] == workers
+
+
+def test_sweep_says_out_loud_when_the_swept_knob_never_landed(runs):
+    """``apply_scenario`` は解決できない dotted-path を黙って捨てる。掃引だと
+    「同じ数字が4本並んだ」だけが返り、実験者は「このつまみは効かない」と読む —
+    実際は**回していない**。1本ずつなら apply_diff_and_run が言うことを、掃引でも
+    言わないと差分実験が静かに嘘をつく。"""
+    out = M.sweep(SHORT, {"resources.nonexistent.0.count": [1, 2, 3]}, [1])
+    assert out["ok"] == 3 and out["failed"] == 0     # 走るには走る（never-blocks）
+    assert [u["path"] for u in out["unapplied_edits"]] == ["resources.nonexistent.0.count"]
+    assert out["unapplied_edits"][0]["cases"] == [1, 2, 3]
+    assert all(r["unapplied_edits"] for r in out["rows"])
+    assert any("効かなかった編集" in w for w in out["warnings"])
+    assert any("KPIが完全に一致" in w for w in out["warnings"])
+
+
+def test_sweep_flags_a_gate_position_sweep_on_a_belt_that_has_no_gate(runs):
+    """顧客の実物: `停止線位置±` を stop_gate=None のベルトに当てると、パスが
+    解決できず全ケースが基準と同じ run になる（自由 dict なので警告も出ない）。"""
+    base = {"template": "pick_to_belt", "seed": 3, "reps": 1, "duration_s": 300.0}
+    out = M.sweep(base, {"resources.conveyors.0.stop_gate.at_m": [2.0, 6.0]}, [3],
+                  metrics=["conveyor_gate_stops", "throughput_per_hr"])
+    assert out["ok"] == 2
+    assert [u["path"] for u in out["unapplied_edits"]] == \
+        ["resources.conveyors.0.stop_gate.at_m"]
+    assert out["warnings"] and all(r["kpis"]["conveyor_gate_stops"] == 0
+                                   for r in out["rows"])
+
+
+def test_sweep_without_metrics_is_the_old_sweep(runs):
+    out = M.sweep(SHORT, {"resources.workers.0.count": [4, 5]}, [1])
+    assert out["metrics"] == list(lab.HEADLINE_KPIS)
+    assert out["warnings"] == [] and out["unapplied_edits"] == []
+    for row in out["rows"]:
+        assert list(row["kpis"]) == list(lab.HEADLINE_KPIS)
+
+
+@pytest.mark.parametrize(("metrics", "needle"), [
+    ([], "KPI キーの配列"),
+    ("throughput_per_hr", "KPI キーの配列"),
+    ([""], "KPI 名の文字列"),
+    ([1], "KPI 名の文字列"),
+    ([f"k{i}" for i in range(61)], "metrics が多すぎます"),
+])
+def test_sweep_rejects_bad_metrics(runs, metrics, needle):
+    with pytest.raises(LabError) as e:
+        M.sweep(SHORT, {"resources.workers.0.count": [4]}, [1], metrics=metrics)
+    assert needle in str(e.value)
+
+
+def test_the_line_mechanics_kpis_have_labels_a_proposal_can_print(runs):
+    """比較表の行ラベル。数字を含めてはいけない — 見出しは値ではないので、本文の
+    数値照合（`verify_report`）に拾われた瞬間に「台帳に無い数字」になる。"""
+    for k in ("containers_in_use_peak", "conveyor_gate_stops", "conveyor_block_ratio",
+              "container_wait_total_s", "container_pool_size"):
+        label = lab.KPI_JP.get(k)
+        assert label and label != k, k
+        assert not lab._NUM_RE.findall(label), (k, label)
+
+
 # --------------------------------------------------------------------------
 # query_events
 # --------------------------------------------------------------------------

@@ -71,6 +71,19 @@ KPI_JP: dict[str, str] = {
     "congestion_wait_share": "通路待ちの割合",
     "headcount": "人員数", "total_cost_per_order": "原価（¥/件）",
     "bottleneck_utilization": "ボトルネック稼働率",
+    # ライン運用の3機構の読み出し（既定の指標ではない＝``metrics`` で名指しする）。
+    # 見出しであって値ではないので、ここに数字を書かない（本文の数値照合の対象に
+    # なってしまう）。
+    "conveyor_gate_stops": "停止線で止めた荷（件）",
+    "conveyor_block_ratio": "コンベア詰まり率",
+    "conveyor_time_to_first_block_s": "最初の詰まりまで（秒）",
+    "conveyor_utilization": "コンベア稼働率",
+    "container_pool_size": "容器の保有数（設定）",
+    "containers_in_use_peak": "容器の同時使用ピーク（必要保有数の下限）",
+    "containers_in_use_avg": "容器の同時使用平均",
+    "container_waits": "容器待ち回数",
+    "container_wait_total_s": "容器待ちで投入が止まった時間（秒）",
+    "container_use_mean_s": "容器1個あたり滞留（秒）",
 }
 
 # 図に出す指標（小さく保つ — 図は表の要約であって別の主張ではない）。

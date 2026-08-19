@@ -89,7 +89,7 @@ claude mcp remove whsim-lab
 | `run_scenario` | `scenario_path` か `scenario_json`、`seed?` | `run_id` / `seed` / `scenario_hash` / `summary`(KPI) / `artifacts_path` |
 | `apply_diff_and_run` | `base_scenario`（パスかJSON）、`diff_json`（dotted-path編集）、`seed?` | 上と同じ＋適用後シナリオ・`applied_edits` / `unapplied_edits` |
 | `compare_runs` | `run_ids[]`、`metrics?` | KPI差分表（絶対値・差・変化率・出所パス） |
-| `sweep` | `base_scenario`、`param_grid`、`seeds[]` | `sweep_id` / `table_path` / 集計サマリ / エラー一覧 |
+| `sweep` | `base_scenario`、`param_grid`、`seeds[]`、`metrics?` | `sweep_id` / `table_path` / ケース行 `rows`（params↔run_id↔KPI）/ 集計サマリ / `unapplied_edits` / `warnings` / エラー一覧 |
 | `query_events` | `run_id`、`filter{type?,actor?,t_range?}`、`limit?`、`rep?` | 件数・時間範囲・type別内訳・数値フィールド集計＋先頭 `limit` 行 |
 | `get_run_artifacts` | `run_id` | 成果物ファイルのパスとサイズ |
 | `list_runs` | `limit?` | run台帳（新しい順） |
@@ -112,6 +112,38 @@ claude mcp remove whsim-lab
 
 `template` の代わりに `"model": "path/to/model.json"` でもよい。`edits` は
 `engine/scenarios.py` の dotted-path 編集そのもの。
+
+### 掃引で見る KPI を名指しする（`sweep(metrics=…)`）
+
+`compare_runs` / `generate_report` と同じ規約で、`metrics` 未指定＝既定の主要KPI。
+**既定に入っていない読み出しは名指ししないと表に出ない** — ライン運用の3機構
+（不変条件17）の答えはどれも既定の外にある:
+
+```json
+{"metrics": ["containers_in_use_peak", "container_pool_size",
+             "container_wait_total_s", "conveyor_gate_stops",
+             "conveyor_block_ratio", "completion_rate"]}
+```
+
+`containers_in_use_peak` は**必要保有数の下限**なので、`container_pool_size`
+（設定値）と `container_wait_total_s` を並べて初めて読める — 一致していたら
+「天井に当たった」であって答えではない。
+
+### 掃引が黙って空振りしていないか
+
+`apply_scenario` は解決できない dotted-path を**黙って捨てる**（`stop_gate` /
+`container_pool` は既定 `None` なので、`…stop_gate.at_m` のような下位パスは
+基準モデルにゲートが無ければ丸ごと落ちる）。1本なら `apply_diff_and_run` の
+`unapplied_edits` に出るが、掃引だと「同じ数字が並んだ」だけが返り、
+**「このつまみは効かない」と読み違える**。なので `sweep` も焼かれた
+`model.json` を読み直し、
+
+- `unapplied_edits` — 効かなかったパスと、その発生ケース番号、
+- `warnings` — 上記＋「同一seedの全ケースでKPIが完全に一致した」注意
+
+を返す。後者は自由 dict（`container_pool` / `stop_gate` は型が `dict`）に
+**綴り違いのキーを書いた**ときの唯一の手がかりでもある — `container_pool.size`
+は「適用された」ように見えて、エンジンは読まない。
 
 ## 成果物（数値の出所）
 
