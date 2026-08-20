@@ -1,0 +1,271 @@
+# Name: 問題タイプ判定フロー
+# Claude版 warehouse-planner の「判定フロー」を決定的レイヤーとして移植したトピック。
+# Q1 閉形式 → Q2 確率性 → Q3 最適化/評価 の順序を必ず守らせるため、生成オーケストレーションではなくトピックで実装する。
+kind: AdaptiveDialog
+modelDescription: 倉庫・物流の課題を、Excel領域／数理最適化領域／シミュレーション領域／シミュレーション最適化領域の4分類に、3つの質問で決定的に仕分けする判定フロー。ユーザーが解法アプローチの判定や仕分けを求めた時に使う。
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: 問題タイプ判定フロー
+    triggerQueries:
+      - 判定フローを始めて
+      - どの手法で解くべきか判定して
+      - 問題タイプを分類して
+      - Excelで足りるか最適化か判断したい
+      - 解法アプローチを仕分けして
+
+  actions:
+    - kind: SendActivity
+      id: sendMessage_cl4a01
+      activity: |-
+        3つの質問で問題タイプを仕分けします。
+        <br /><br />
+        起点は「問題を部品に分解して足し算で済むか」です。順番に伺います。
+
+    # --- Q1: 閉形式で書けるか ---
+    - kind: Question
+      id: question_cl4a02
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+      variable: init:Topic.ClosedForm
+      prompt: |-
+        Q1. 知りたい答えを、閉形式（数式）で書けそうですか。
+        <br /><br />
+        「閉形式で書けない」とは、答えに至る数式が書けないという意味です。答えが一意でないという意味ではありません。閉形式は線形と同義ではなく、M/M/1のような非線形でも閉形式です。
+      entity:
+        kind: EmbeddedEntity
+        displayName: 閉形式で書けるか
+        definition:
+          kind: ClosedListEntity
+          items:
+            - id: 書ける
+              displayName: 書ける
+              synonyms:
+                - はい
+                - 数式で書ける
+                - 足し算で済む
+            - id: 書けない
+              displayName: 書けない
+              synonyms:
+                - いいえ
+                - 数式にできない
+                - 足し算では済まない
+            - id: 判断できない
+              displayName: 判断できない
+              synonyms:
+                - わからない
+                - 不明
+                - どちらとも言えない
+
+    - kind: ConditionGroup
+      id: conditionGroup_cl4a03
+      conditions:
+        - id: conditionItem_cl4a04
+          condition: =Topic.ClosedForm = "書ける"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a05
+              activity: |-
+                【Excel領域】と判定しました。静的な能力値の問題です。
+                <br /><br />
+                典型例: ソーター単体の処理能力（投入速度と排出速度のmin）、必要間口数・必要人員・必要㎡、M/M/1やM/M/cによる静的な詰まり近似、ピッキング歩行距離の平均的見積もり。
+                <br /><br />
+                定石: Excelの算数と待ち行列で十分です。SimPyなどのシミュレーションは過剰投資になります。
+                <br /><br />
+                ただし、波動（ばらつき）で結果が変わる、あるいは前後工程が絡むと分かった時点で、シミュレーション領域に移行します。
+
+            - kind: SendActivity
+              id: sendMessage_cl4a06
+              activity: |-
+                この続きは、対象設備・工程と数量条件を書いていただければ、式の形とClaude Codeへの依頼文テンプレートをお出しします。
+            - kind: EndDialog
+              id: endDialog_cl4a07
+
+        - id: conditionItem_cl4a08
+          condition: =Topic.ClosedForm = "判断できない"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a09
+              activity: |-
+                承知しました。判断がつかない場合は「書けない」寄りで進めるのが安全です。次の質問で切り分けます。
+
+    # --- Q2: ばらつき（確率性）が結果を左右するか ---
+    - kind: Question
+      id: question_cl4a10
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+      variable: init:Topic.Stochastic
+      prompt: |-
+        Q2. ばらつき（波動・変動などの確率性）は、結果を左右しますか。
+        <br /><br />
+        例: 入荷量の日内波動、作業時間のばらつき、車両到着時刻のずれなどで結論が変わるかどうかです。
+      entity:
+        kind: EmbeddedEntity
+        displayName: 確率性が結果を左右するか
+        definition:
+          kind: ClosedListEntity
+          items:
+            - id: 左右する
+              displayName: 左右する
+              synonyms:
+                - はい
+                - ばらつきが効く
+                - 波動がある
+            - id: 左右しない
+              displayName: 左右しない
+              synonyms:
+                - いいえ
+                - 無視できる
+                - 決定的でよい
+            - id: わからない
+              displayName: わからない
+              synonyms:
+                - 判断がつかない
+                - 不明確
+
+    - kind: ConditionGroup
+      id: conditionGroup_cl4a11
+      conditions:
+        - id: conditionItem_cl4a12
+          condition: =Topic.Stochastic = "左右しない"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a13
+              activity: |-
+                【数理最適化領域】と判定しました。決定的な条件下で「最適な〜は何か」に答える問題です。
+                <br /><br />
+                典型例: ダイヤ作成（VSP / VRPTW）、ロケーション割当（ABC分析に基づく配置）、シフト最適化、静的条件下でのバッチ編成、ラック配置最適化。
+                <br /><br />
+                定石ツール: OR-Tools / PuLP / Gurobi / scipy.optimize.linprog / Excelソルバー。
+                <br /><br />
+                整理すべき3点: 目的関数（何を最大化・最小化するか）、決定変数（何を決めるか）、制約（何を守るか）。
+
+            - kind: SendActivity
+              id: sendMessage_cl4a14
+              activity: |-
+                注意点として、確率性が無視できないと後で分かった場合は、シミュレーション最適化領域に格上げします。
+                <br /><br />
+                目的関数・決定変数・制約が固まったら、Claude Codeへの依頼文テンプレートをお出しします。
+            - kind: EndDialog
+              id: endDialog_cl4a15
+
+        - id: conditionItem_cl4a16
+          condition: =Topic.Stochastic = "わからない"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a17
+              activity: |-
+                承知しました。判断がつかない場合は「左右する」前提で進めます。ばらつきを無視して外すより安全側です。
+
+    # --- Q3: 最適化したいのか、評価だけか ---
+    - kind: Question
+      id: question_cl4a18
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+      variable: init:Topic.Goal
+      prompt: |-
+        Q3. やりたいのは、最適な案を探すことですか、それとも今の案を評価することですか。判断がつかなければ「決めていない」で構いません。
+      entity:
+        kind: EmbeddedEntity
+        displayName: 最適化か評価か
+        definition:
+          kind: ClosedListEntity
+          items:
+            - id: 評価だけ
+              displayName: 評価だけ
+              synonyms:
+                - 評価
+                - 詰まるか知りたい
+                - 検証したい
+            - id: 最適化したい
+              displayName: 最適化したい
+              synonyms:
+                - 最適化
+                - 最適な案を探したい
+                - 改善案も出したい
+            - id: 決めていない
+              displayName: 決めていない
+              synonyms:
+                - わからない
+                - 判断がつかない
+                - どちらとも言えない
+
+    - kind: ConditionGroup
+      id: conditionGroup_cl4a19
+      conditions:
+        - id: conditionItem_cl4a20
+          condition: =Topic.Goal = "評価だけ"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a21
+              activity: |-
+                【シミュレーション領域】と判定しました。ばらつき下で「詰まるか、待ち時間はどれくらいか、波動に耐えるか」に答える問題です。
+                <br /><br />
+                典型例: オムニソーターが波動で詰まるか、ピッキング動線の評価、前後工程を繋いだボトルネック検証、バース競合・待機時間評価、ダイヤのストレステスト。
+                <br /><br />
+                定石ツール: SimPy（離散事象シミュレーション）／自作シミュレータ／モンテカルロ。
+
+            - kind: SendActivity
+              id: sendMessage_cl4a22
+              activity: |-
+                実装は3層構造が定石です。
+                <br />
+                1. 重い計算層: Pythonでシミュレーション本体
+                <br />
+                2. 結果テーブル層: パラメータを振った結果をJSON / CSV / Parquet / DuckDBに保存
+                <br />
+                3. 可視化・操作層: HTML / Streamlitで意思決定者がスライダーを動かせるUI
+                <br /><br />
+                原則は「重い計算はオフライン、軽い表示はオンライン」です。客先デモでの訴求力が変わります。
+
+        - id: conditionItem_cl4a26
+          condition: =Topic.Goal = "決めていない"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a27
+              activity: |-
+                判断がつかない場合は、まず【シミュレーション領域】（今の案・たたき台の評価）から始めるのが安全です。評価の結果を見てから、最適化まで進むかを決められます。いきなり最適化まで組むのは過剰投資になりがちです。
+                <br /><br />
+                進め方は評価の場合と同じです。定石ツールはSimPy（離散事象シミュレーション）／自作シミュレータ／モンテカルロ。実装は3層構造（Python計算 → 結果テーブル → HTML/StreamlitのUI）で組みます。
+
+        - id: conditionItem_cl4a28
+          condition: =Topic.Goal = "最適化したい"
+          actions:
+            - kind: SendActivity
+              id: sendMessage_cl4a23
+              activity: |-
+                【シミュレーション最適化領域】と判定しました。最適化したい、かつ評価にシミュレーションが必要な問題です。
+                <br /><br />
+                典型例: ダイヤのロバスト性検証と改善、レイアウト代替案の比較評価、バッチサイズ × 投入タイミングの組合せ探索、波動対応シフト設計。
+                <br /><br />
+                定石ツール: 最適化 × シミュレーションの組み合わせ／scikit-optimize／Optuna。
+
+            - kind: SendActivity
+              id: sendMessage_cl4a24
+              activity: |-
+                探索戦略はパラメータ数で選びます。
+                <br />
+                ・3次元以下 → グリッドサーチ全探索
+                <br />
+                ・5〜10次元 → ラテン超方格サンプリング + 補間
+                <br />
+                ・さらに多い、評価が重い → ベイズ最適化
+                <br /><br />
+                こちらも3層構造（Python計算 → 結果テーブル → HTML/StreamlitのUI）で組みます。
+
+      elseActions:
+        - kind: SendActivity
+          id: sendMessage_cl4a29
+          activity: |-
+            ご回答からは判定できなかったため、安全側の進め方をご案内します。判断がつかないうちは、まず今の案の評価（【シミュレーション領域】）から始めるのが定石です。評価の結果を見てから、最適化（シミュレーション最適化領域）まで進むかを決めてください。
+
+    - kind: SendActivity
+      id: sendMessage_cl4a25
+      activity: |-
+        続けて、対象設備・工程、データ項目、制約、評価指標を教えてください。実装方針を具体化し、Claude Codeへの依頼文テンプレートをお出しします。
+        <br /><br />
+        依頼文だけ先に欲しい場合は「依頼文テンプレートをください」とお伝えください。

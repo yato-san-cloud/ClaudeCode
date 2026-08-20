@@ -1,0 +1,100 @@
+# Name: FlowSkeleton
+# 業務フロー図の骨格（目的・レーン・始点終点・工程列）を、必ずこの順番で聞き取る決定的トピック。
+# 生成オーケストレーションに任せると順序が保証されないため、意図的に Question ノードを直列に並べている。
+kind: AdaptiveDialog
+modelDescription: >-
+  業務フロー図や flow.yaml を新しく作りはじめるときに、図の目的・登場する人と組織とシステム（レーン）・
+  始点と終点・工程（列）の4点を、この順番で聞き取る。個々の処理（ノード）や矢印の内容を聞く前に、
+  必ずこのトピックを先に通すこと。
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: 業務フロー骨格ヒアリング
+    triggerQueries:
+      - 業務フロー図を作りたい
+      - フロー図を描いてほしい
+      - スイムレーンの図を作りたい
+      - 業務の流れを図にしたい
+      - 誰が何をするか整理したい
+      - flow.yaml を作りたい
+      - As-Is と To-Be の図を作りたい
+      - 議事録から業務フローを起こしたい
+
+  actions:
+    - kind: SendActivity
+      id: sendIntro_7b2e91
+      activity: |-
+        図を描く前に、flow.yaml の骨格を先に決めます。レーン（誰が）と列（いつ）が決まらないとノードの置き場所が決まらず、後から全部並べ直しになるためです。
+        <br /><br />
+        4点だけ、順番に伺います。
+
+    - kind: Question
+      id: askPurpose_3c8d15
+      variable: init:Topic.purpose
+      prompt: |-
+        1/4　この図で何を決めたいですか。1文でお願いします。
+        <br /><br />
+        例:「誰がどの承認をするのか明確にしたい」「どの画面を通ってどのDBに落ちるのか整理したい」。目的によってレーンの粒度が変わるので、ここが起点になります。
+      entity: StringPrebuiltEntity
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+
+    - kind: Question
+      id: askLanes_9f4a62
+      variable: init:Topic.lanes
+      prompt: |-
+        2/4　この業務に登場する人・組織・システムを、カンマ区切りで挙げてください。これがレーン（横帯）になります。
+        <br /><br />
+        目安は7本まで。システムは「WMS(システム)」のように書き添えてください。人のレーンを上、システムのレーンを下に並べます。
+      entity: StringPrebuiltEntity
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+
+    - kind: Question
+      id: askBoundary_5e07b3
+      variable: init:Topic.boundary
+      prompt: |-
+        3/4　この流れは何をきっかけに始まり、何が起きたら終わりですか。始点と終点をそれぞれ書いてください。
+        <br /><br />
+        ここが曖昧なまま描くと図がどこまでも広がってしまうので、先に区切ります。
+      entity: StringPrebuiltEntity
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+
+    - kind: Question
+      id: askColumns_2a6cf8
+      variable: init:Topic.columns
+      prompt: |-
+        4/4　始点から終点までの工程を、時間順にカンマ区切りで挙げてください。これが列（時間の刻み）になります。
+        <br /><br />
+        目安は12本まで。担当が違うだけで同時に起きることは、1つの工程にまとめてください。
+      entity: StringPrebuiltEntity
+      alwaysPrompt: true
+      interruptionPolicy:
+        allowInterruption: false
+
+outputType:
+  properties:
+    purpose:
+      displayName: purpose
+      description: この業務フロー図で何を決めたいか（1文）
+      type: String
+
+    lanes:
+      displayName: lanes
+      description: レーン候補。登場する人・組織・システムのカンマ区切り。末尾に(システム)と書かれたものは kind system として扱う
+      type: String
+
+    boundary:
+      displayName: boundary
+      description: フローの始点（何をきっかけに始まるか）と終点（何が起きたら終わりか）
+      type: String
+
+    columns:
+      displayName: columns
+      description: 列候補。始点から終点までの工程を時間順に並べたカンマ区切り
+      type: String

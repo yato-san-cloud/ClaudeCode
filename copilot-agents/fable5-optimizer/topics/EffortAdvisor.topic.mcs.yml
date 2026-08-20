@@ -1,0 +1,96 @@
+# Name: effort の選び方
+# タスク像から推奨 effort と一行理由を決定的に返す。
+# 「提案には必ず推奨 effort と理由を添える」という元スキルの約束事を、生成任せにせず保証するためのトピック。
+kind: AdaptiveDialog
+modelDescription: |-
+  Claude Fable 5 の effort（xhigh / high / medium / low）をどれに設定すべきか聞かれたときに呼ぶ。
+  これからやらせるタスクの種類から、推奨 effort と一行理由を返す。
+  「effort をどうする」「常に最大でよいか」「思考が長すぎる」「終わるが遅い」といった相談が対象。
+inputs:
+  - kind: AutomaticTaskInput
+    propertyName: TaskKind
+    description: |-
+      利用者がこれから Claude にやらせるタスクを次のいずれか1つに分類する。
+      次の4つのうち1つだけを、そのままの文字列で返すこと。
+      Routine: 定型作業、整形、分類、要約、単純な編集、小さな差分
+      Normal: 通常の実装、分析、調査、複数ファイルの編集
+      Hard: 新規アーキテクチャの設計、難しいデバッグ、長時間の自律作業、探索が必要な曖昧なタスク
+      Unknown: 判断できない
+    shouldPromptUser: false
+
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent: {}
+  actions:
+    - kind: ConditionGroup
+      id: conditionGroup_f5e01
+      conditions:
+        - id: conditionItem_f5e02
+          condition: =Topic.TaskKind = "Routine"
+          actions:
+            - kind: SendActivity
+              id: sendRoutine_f5e03
+              activity:
+                text:
+                  - |-
+                    推奨 effort: low から medium
+                    <br /><br />
+                    理由: 定型作業に思考時間を積んでも品質は上がらず、思考の分がそのまま出力トークンとして課金されるためです。
+                    <br /><br />
+                    Claude Code では /effort で切り替えます。品質が足りなければ一段上げてください。
+
+        - id: conditionItem_f5e04
+          condition: =Topic.TaskKind = "Normal"
+          actions:
+            - kind: SendActivity
+              id: sendNormal_f5e05
+              activity:
+                text:
+                  - |-
+                    推奨 effort: high（既定のまま）
+                    <br /><br />
+                    理由: 通常の実装や調査は既定の high で十分に届く範囲で、xhigh に上げても多くの場合は時間とコストだけが増えるためです。
+                    <br /><br />
+                    まず high で走らせ、品質が足りないと実際に見てから上げてください。
+
+        - id: conditionItem_f5e06
+          condition: =Topic.TaskKind = "Hard"
+          actions:
+            - kind: SendActivity
+              id: sendHard_f5e07
+              activity:
+                text:
+                  - |-
+                    推奨 effort: xhigh
+                    <br /><br />
+                    理由: 新規設計や難しいデバッグ、長時間の自律作業は探索の質がそのまま結果を左右するため、ここは上げる価値があるためです。
+                    <br /><br />
+                    ただし xhigh は最難関だけの予約席です。あわせて、範囲と完了条件を明確に書いてください。effort が高いほど書きすぎる傾向があるので、枠付けが効きます。
+
+      elseActions:
+        - kind: SendActivity
+          id: sendUnknown_f5e08
+          activity:
+            text:
+              - |-
+                迷ったら high です。既定を下げる方向に寄せると、品質を落とさずコストと待ち時間が下がります。
+                <br /><br />
+                目安: 定型作業や整形は low から medium、通常の実装や調査は high、新規設計や難しいデバッグ、長時間の自律作業だけ xhigh。
+                <br /><br />
+                やらせたい作業の中身を教えていただければ、推奨 effort と理由をお出しします。
+
+inputType:
+  properties:
+    TaskKind:
+      displayName: TaskKind
+      description: |-
+        利用者がこれから Claude にやらせるタスクを次のいずれか1つに分類する。
+        次の4つのうち1つだけを、そのままの文字列で返すこと。
+        Routine: 定型作業、整形、分類、要約、単純な編集、小さな差分
+        Normal: 通常の実装、分析、調査、複数ファイルの編集
+        Hard: 新規アーキテクチャの設計、難しいデバッグ、長時間の自律作業、探索が必要な曖昧なタスク
+        Unknown: 判断できない
+      type: String
+
+outputType: {}

@@ -1,0 +1,17 @@
+# 注意: このファイルを pull したフォルダへ丸ごと上書きしないこと。
+# schemaName は Power Platform の内部識別子で、テナントで採番された実値でなければ壊れます。
+# pull した settings.mcs.yml の schemaName と language を正とし、
+# configuration.settings.GenerativeActionsEnabled と configuration.recognizer.kind だけを合わせてください。
+# 詳細は PORT_NOTES.md の 3-2 を参照。
+displayName: Fable 5 プロンプト最適化アドバイザー
+schemaName: REPLACE_SCHEMA_PREFIX
+accessControlPolicy: ChatbotReaders
+authenticationMode: Integrated
+configuration:
+  settings:
+    GenerativeActionsEnabled: true
+
+  recognizer:
+    kind: GenerativeAIRecognizer
+
+language: 1041

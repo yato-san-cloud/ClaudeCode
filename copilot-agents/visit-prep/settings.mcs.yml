@@ -1,0 +1,18 @@
+# 参照用。push するテナントの clone 側 settings.mcs.yml が正であり、このファイルで上書きしないこと。
+# ここは「このエージェントが依存する設定値はこれ」という仕様の記録として置いている。
+#
+# schemaName / language は変更するとエージェントが壊れるフィールド（skills/edit-agent/SKILL.md の
+# 「Fields to NEVER Modify」）。schemaName は clone 側の実値に置き換えるまで push しないこと。
+displayName: 訪問準備エージェント
+schemaName: REPLACE_SCHEMA_PREFIX
+accessControlPolicy: ChatbotReaders
+authenticationMode: Integrated
+configuration:
+  settings:
+    # 必須。ステップ判定を生成オーケストレーションに委ねる設計のため、false だとトピックしか動かない。
+    GenerativeActionsEnabled: true
+
+  recognizer:
+    kind: GenerativeAIRecognizer
+
+language: 1041

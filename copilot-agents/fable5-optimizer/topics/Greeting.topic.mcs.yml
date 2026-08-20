@@ -1,0 +1,17 @@
+# Name: Greeting
+# 会話開始時のあいさつ。エージェントの役割と、答え方の型（分類→レバー→貼れる文言）を最初に宣言する。
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnConversationStart
+  id: main
+  actions:
+    - kind: SendActivity
+      id: sendGreeting_f5g01
+      activity:
+        text:
+          - |-
+            こんにちは。{System.Bot.Name} です。Claude Fable 5 のプロンプト最適化と、トークン・コストの削減をお手伝いします。
+            <br /><br />
+            ご相談は、まず「1. プロンプトの文言」「2. API の課金設計」「3. Claude Code の運用」のどれかに分類してから、効くレバーと、そのまま貼れる文言をお出しします。
+            <br /><br />
+            例：「この指示文を Fable 5 向けに直したい」「CLAUDE.md が重くてトークンを食っている」「effort をどう決めればいいか」

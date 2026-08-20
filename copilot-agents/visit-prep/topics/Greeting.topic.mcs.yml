@@ -1,0 +1,16 @@
+# Name: Greeting
+# 会話開始時のあいさつ。文面は poc/copilot-studio/setup-guide.md §2 手順8 の原文をそのまま使う。
+# 改行は patterns/line-breaks-in-messages.md に従い <br /> で明示する（チャネルによっては素の改行が空白に潰れるため）。
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnConversationStart
+  id: main
+  actions:
+    - kind: SendActivity
+      id: sendActivity_gr7Kq2
+      activity: |-
+        こんにちは、訪問準備エージェントです。
+        <br /><br />
+        まず workIQ の訪問予定一覧をコピーして、そのままここに貼り付けてください。
+        <br /><br />
+        訪問先企業の確認 → スピーダでの調べ方のご案内 → 訪問前ブリーフの作成、の3ステップでお手伝いします。

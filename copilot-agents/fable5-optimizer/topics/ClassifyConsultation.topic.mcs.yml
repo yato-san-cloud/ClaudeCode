@@ -1,0 +1,108 @@
+# Name: 相談の分類
+# 相談を3つのレイヤーに分類し、それを宣言してから回答に入るための決定的トピック。
+# 分類は AutomaticTaskInput（オーケストレーター生成変数）で行うため追加コストとレイテンシは発生しない。
+# 分類できなかった場合だけ、利用者に2点だけ確認する（元スキルのケースDに相当）。
+kind: AdaptiveDialog
+modelDescription: |-
+  Claude Fable 5 のプロンプト最適化、トークン消費、コスト削減、effort、プロンプトキャッシュ、CLAUDE.md、
+  コンテキストの肥大に関する相談を受け付ける入口。相談内容を「プロンプトの文言」「API の課金設計」
+  「Claude Code の運用」に分類し、分類できないときは利用者に確認する。
+  これらの話題で最初の相談を受けたときに呼ぶ。
+inputs:
+  - kind: AutomaticTaskInput
+    propertyName: SoudanLayer
+    description: |-
+      利用者の相談を次のいずれか1つに分類する。次の4つのうち1つだけを、そのままの文字列で返すこと。
+      Prompt: プロンプト、指示文、Skill の書き方や挙動の改善
+      Api: 自分で API を呼ぶ実装での課金設計（プロンプトキャッシュ、effort、max_tokens）
+      ClaudeCode: Claude Code のセッション運用（コンテキストの肥大、CLAUDE.md、/compact、/clear）
+      Unknown: 上のどれか判断できない
+    shouldPromptUser: false
+
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent: {}
+  actions:
+    - kind: ConditionGroup
+      id: conditionGroup_f5c02
+      conditions:
+        - id: conditionItem_f5c03
+          condition: =Topic.SoudanLayer = "Prompt"
+          actions:
+            - kind: SendActivity
+              id: sendPrompt_f5c04
+              activity:
+                text:
+                  - |-
+                    このご相談は「プロンプトの文言」として扱います。
+                    <br /><br />
+                    見るのはこの3つです。1. 過剰指示の棚卸し（CRITICAL や MUST の連発、挙動の逐一列挙を削る）。2. 冗長さを一文で抑える。3. 思考を本文に書かせる指示を外す（拒否応答の原因になります）。
+                    <br /><br />
+                    続けて、対象の指示文と用途を踏まえて、そのまま貼れる文言と推奨 effort をお出しします。
+
+        - id: conditionItem_f5c05
+          condition: =Topic.SoudanLayer = "Api"
+          actions:
+            - kind: SendActivity
+              id: sendApi_f5c06
+              activity:
+                text:
+                  - |-
+                    このご相談は「API の課金設計」として扱います。
+                    <br /><br />
+                    入力側と出力側の2軸で見ます。入力側はプロンプトキャッシュの並び順（変わらないものを前、毎回変わるものを後ろ）。出力側は effort による思考量の調整です。
+                    <br /><br />
+                    続けて、構成に合わせた具体的な並べ方と設定値をお出しします。
+
+        - id: conditionItem_f5c07
+          condition: =Topic.SoudanLayer = "ClaudeCode"
+          actions:
+            - kind: SendActivity
+              id: sendClaudeCode_f5c08
+              activity:
+                text:
+                  - |-
+                    このご相談は「Claude Code の運用」として扱います。
+                    <br /><br />
+                    削る前に測ります。/context か /usage の結果を貼っていただけると精度が上がります。効く順は、1. CLAUDE.md の肥大、2. 会話の蓄積、3. 曖昧な指示による探索の浪費です。
+                    <br /><br />
+                    続けて、上位から順に具体的な対策とコマンドをお出しします。
+
+      elseActions:
+        - kind: Question
+          id: question_f5c09
+          variable: init:Topic.Kakunin
+          prompt: |-
+            方向づけのために2点だけ確認させてください。
+            <br /><br />
+            1. 直したいのは「プロンプトの中身（挙動や品質）」ですか、「トークンやコスト」ですか。両方でも構いません。
+            <br /><br />
+            2. 舞台は Claude Code のセッション運用ですか、それとも自分で API を呼ぶ実装ですか。
+          entity: StringPrebuiltEntity
+          alwaysPrompt: true
+          interruptionPolicy:
+            allowInterruption: false
+
+        - kind: SendActivity
+          id: sendAfterKakunin_f5c10
+          activity:
+            text:
+              - |-
+                ありがとうございます。その前提で見ていきます。
+                <br /><br />
+                対象の指示文、または /context か /usage の結果を貼っていただければ、そのまま貼れる文言と推奨 effort までお出しします。
+
+inputType:
+  properties:
+    SoudanLayer:
+      displayName: SoudanLayer
+      description: |-
+        利用者の相談を次のいずれか1つに分類する。次の4つのうち1つだけを、そのままの文字列で返すこと。
+        Prompt: プロンプト、指示文、Skill の書き方や挙動の改善
+        Api: 自分で API を呼ぶ実装での課金設計（プロンプトキャッシュ、effort、max_tokens）
+        ClaudeCode: Claude Code のセッション運用（コンテキストの肥大、CLAUDE.md、/compact、/clear）
+        Unknown: 上のどれか判断できない
+      type: String
+
+outputType: {}

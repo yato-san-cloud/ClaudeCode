@@ -1,0 +1,18 @@
+# 参照用。push するテナントの clone 側 settings.mcs.yml が正であり、このファイルで上書きしないこと。
+# ここは「このエージェントが依存する設定値はこれ」という仕様の記録として置いている。
+#
+# schemaName / language は変更するとエージェントが壊れるフィールド（skills/edit-agent/SKILL.md の
+# 「Fields to NEVER Modify」）。schemaName は clone 側の実値に置き換えるまで push しないこと。
+displayName: 倉庫・物流 解法判定アドバイザー
+schemaName: REPLACE_SCHEMA_PREFIX
+accessControlPolicy: ChatbotReaders
+authenticationMode: Integrated
+configuration:
+  settings:
+    # 必須。相談の大半は生成オーケストレーション経由（判定フロートピックは明示起動時のみ）。
+    GenerativeActionsEnabled: true
+
+  recognizer:
+    kind: GenerativeAIRecognizer
+
+language: 1041

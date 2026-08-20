@@ -1,0 +1,58 @@
+# Name: HandoffToClaudeCode
+# .drawio / 処理一覧Excel の清書は Copilot Studio では生成できないため、
+# Claude Code(gyomu-flow スキル)への引き継ぎ手順を「固定文面」で案内する決定的トピック。
+# 手順・コマンド名・注意点を生成に任せると取り違えが起きるので、意図的に SendActivity で固定している。
+kind: AdaptiveDialog
+modelDescription: >-
+  完成した flow.yaml から draw.io の図や処理一覧Excelを作りたい、納品用に清書したい、
+  既存の drawio を読み込んで更新したい、と言われたときに、Claude Code の gyomu-flow スキルへの
+  引き継ぎ手順を案内する。このエージェント自身はファイルを生成できないため、必ずこのトピックで案内すること。
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: 清書の引き継ぎ手順
+    triggerQueries:
+      - drawio ファイルを作ってほしい
+      - draw.io の図にしてほしい
+      - 処理一覧のExcelがほしい
+      - 納品用に清書してほしい
+      - 既存のフロー図を更新したい
+      - この flow.yaml をこの後どうすればいいですか
+      - 図のファイルをダウンロードしたい
+
+  actions:
+    - kind: SendActivity
+      id: sendHandoff_c62d40
+      activity: |-
+        このエージェントでは .drawio ファイルや Excel は作れません（プログラムを実行できないため）。清書は Claude Code の gyomu-flow スキルに引き継ぎます。
+        <br /><br />
+        【引き継ぎ手順】
+        <br />
+        1. ここで確定した flow.yaml の全文をコピーし、flow.yaml という名前で保存します。
+        <br />
+        2. Claude Code を開き、その flow.yaml を置いたフォルダで「この flow.yaml から業務フロー図を作って」と依頼します（gyomu-flow スキルが起動します）。
+        <br />
+        3. Claude Code 側で次が実行されます。
+        <br />
+        ・validate.py … セル衝突・孤立ノード・未定義参照・要件トレースの検査（まず最初に通します）
+        <br />
+        ・preview.py … 配置確認用のSVG
+        <br />
+        ・flow2drawio.py … 納品物の .drawio
+        <br />
+        ・flow2xlsx.py … 処理一覧・接続一覧・データ一覧のExcel
+        <br /><br />
+        【要件トレースを掛ける場合】
+        <br />
+        要件IDを1行1件で書いた reqs.txt を用意すると、validate.py が「どの要件がフロー図に現れていないか（設計漏れ候補）」「要件一覧にない ref が付いていないか（スコープ膨張の疑い）」を出します。両方をゼロにするのが目的ではありません。非機能要件のようにフロー図に出ないのが正しいものは reqs.txt でコメントアウトし、除外の理由を書き添えてください。そのやり取り自体がレビューの成果物になります。
+        <br /><br />
+        【図を人が直した後】
+        <br />
+        draw.io 上で直した図は、Claude Code 側の drawio2flow.py で flow.yaml に戻せます。図を目で見比べるのではなく、戻した flow.yaml の差分を見るのが正しい順序です。差分が意図どおりなら再生成して図を上書きします。
+        <br /><br />
+        【つまずきやすい点】
+        <br />
+        ・.drawio が圧縮保存されていると読み戻せません。draw.io の ファイル → プロパティ → 圧縮 をオフにしてください（VS Code 拡張の既定は非圧縮です）。
+        <br />
+        ・箱を複製すると内部の ir_id が重複します。validate.py が検出するので、flow.yaml 側でIDを振り直してください。
