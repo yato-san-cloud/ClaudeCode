@@ -209,6 +209,28 @@ fetch(src, { cache: 'no-store' })
       scene._updateProps(t);
       scene._updateTotes(t);
       scene._updateWorkers(t, step);
+      // The rest of the movers, same order as Scene3D._loop. A concept scene
+      // rarely has them, but a REAL run's replay document plays here too (the
+      // shared-format promise), and skipping these froze its forklifts and AGVs
+      // mid-stride, left belt treads dead, and parked contact shadows on the
+      // floor where an agent stood three cuts ago.
+      scene._updateAgvs(t, step);
+      scene._updateForklifts(t, step);
+      scene._updateAsrs(t);
+      scene._updateStaging(t);
+      scene._updateBelts(step);
+      scene._updateContactShadows();
+      scene._updateGlowHalos();
+      // Shadow cadence, not every frame: rebaking the 2048² map of hundreds of
+      // static racks per captured frame cost 45% of the frame budget. Same
+      // policy as _tickShadows, driven by the capture step counter.
+      const sm = scene.renderer.shadowMap;
+      if (sm) {
+        sm.autoUpdate = false;
+        window.__seekFrame = ((window.__seekFrame || 0) + 1)
+          % Math.max(1, scene._shadowEvery || 1);
+        if (window.__seekFrame === 0) sm.needsUpdate = true;
+      }
       scene.renderer.render(scene.scene, scene.camera);
       return t;
     };

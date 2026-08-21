@@ -461,6 +461,10 @@ export const agentMethods = {
   //                                  └─ shoulderL/R ── elbowL/R
   //   g ── platform                                          (order-picker deck)
   _buildWorkers() {
+    // `meta.hide_workers` — a concept scene that wants to show only the goods
+    // flow. Documented in the replay contract since the concept work; this is
+    // where it takes effect (no meshes ⇒ _updateWorkers has nothing to move).
+    if (this.replay.meta && this.replay.meta.hide_workers) return;
     const workers = this.replay.workers || [];
     if (workers.length === 0) return;
     const A = this._agentAssets();
@@ -1312,6 +1316,23 @@ export const agentMethods = {
     return best;
   },
 
+  _nearestStation(x, z, maxD) {
+    // Replay coordinates: station y is the PLAN's second axis = scene z.
+    if (!this._stationPts) {
+      this._stationPts = (this.replay.stations || [])
+        .filter((s) => s && Number.isFinite(Number(s.x)))
+        .map((s) => ({ x: Number(s.x), z: Number(s.y) }));
+    }
+    let best = null;
+    let bestD = maxD * maxD;
+    for (const s of this._stationPts) {
+      const dx = s.x - x, dz = s.z - z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  },
+
   // Per-frame: place every tote off its keyframes. Behaviour by state:
   //   carry → handed to the nearest picker (its rig's own tote is revealed and
   //           the standalone box is hidden, so the carton is never double-drawn);
@@ -1392,6 +1413,15 @@ export const agentMethods = {
           surfaceY = r.baseY;
           py = r.baseY + r.bh / 2 + lvl * r.bh;
         } else if (place === 'pack') {
+          // The engine stamps the pack keyframe at the point the tote LEFT the
+          // belt (the 引き込み's discharge end), but the box is physically on
+          // the bench beside it. Drawing it at its own (x,y) at bench-top
+          // height floated it ~0.9 m over the belt end. Snap to the nearest
+          // station within arm's reach (BENCH_REACH); none nearby (concept
+          // scenes place packs on the bench already) ⇒ exactly the old
+          // placement. px/pz feed both the box matrix and its blob shadow.
+          const st = this._nearestStation(px, pz, 3.0);
+          if (st) { px = st.x; pz = st.z; }
           surfaceY = STATION_TOP_Y;
           py = STATION_TOP_Y + r.bh / 2 + lvl * r.bh;
         } else {                                  // 'belt' + any unknown state
