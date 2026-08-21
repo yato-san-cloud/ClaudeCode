@@ -392,6 +392,31 @@ class Process(BaseModel):
     #     on (past the pull-in, to the 停止線/末端). So an unmanned 引き込み takes
     #     nothing and the 本線 accumulates — which is what the line really does.
     divert_policy: Literal["auto", "pull"] = "auto"
+    # 時間分離運用 (mode_A ⇔ mode_B). ``None`` (default) = リリースは無い＝ストッパーは
+    # 開かない (byte-identical). A dict so a hand-authored model can state it:
+    #   ``{"period_s": 1800.0, "window_s": 300.0, "stack_rate_per_hr": 280.0,
+    #      "stackers": 1, "load_kind": "packed"}``
+    # 検品済みの容器と完成品は**同じ本線**を使うが、混ぜない: ふだんは mode_A
+    # (ストッパー閉＝検品済みが流れ、作業者が引き込む) で、``period_s`` ごとに mode_B
+    # へ切り替わる — 台に溜めた完成品をまとめて本線に載せ、ストッパーを**開けて**
+    # カーブ→積み付けへ流す。開いている間は本線が完成品に占有されるので検品済みの
+    # 投入は止まる: **その能力損失こそがリリース周期の判断材料**なので、隠さず
+    # ``stopper_induction_hold_s`` として計上する。
+    # ``window_s`` > 0 = その秒数だけ開ける。0/未指定 = **出し切るまで**（ただし次の
+    # リリースに重ならないよう ``period_s`` で頭打ち＝never-blocks）。
+    # ``stack_rate_per_hr`` = カーブの先の積み付け能力 (件/h・0/未指定＝制約なし)、
+    # ``stackers`` = その人数 (既定1)。``load_kind`` = 完成品に押す荷の種別。
+    # ``period_s`` ≤ 0 (または dict でない) ⇒ リリース無し＝機構ごと不活性。
+    release_schedule: dict | None = None
+    # 完成品staging (台脇の仮置き). ``None`` (default) = 完成品は梱包した瞬間に消える
+    # ＝ the historical behaviour, byte-identical. A dict:
+    #   ``{"capacity": 12}``  (capacity は**梱包台1台あたり**の置ける数)
+    # 梱包が終わった完成品は、次のリリースまで台の脇に置かれる。置き場が満杯なら
+    # **梱包者が止まる** — その背圧が「置き場をどれだけ取るか」を決める唯一の力で、
+    # ピーク (``bench_staging_peak``) がそのまま必要面積の根拠になる。
+    # 溜めたものを流す手段 (``release_schedule``) が無いモデルでは**不活性**:
+    # 出口の無いバッファはバッファではなく壁で、ラインを黙って止めるだけ。
+    bench_staging: dict | None = None
     # 段(level)からのピック垂直アクセス時間: picking an upper 段 costs vertical time on
     # top of the handle. lift_speed_mps = forklift/order-picker hoist speed (m/s,
     # up+down); manual_reach_s_per_m = the ergonomic reach/ladder penalty per metre
@@ -491,18 +516,30 @@ class Conveyor(BaseModel):
     # ので、両側の梱包台が使える（能力が倍になる）。図面は普通どちらとも書かない
     # ので、安全な側（片側）を既定にして、**言えるときだけ言う**。
     discharge_both: bool = False
-    # 選択停止ゲート (停止線): ``None`` (default) = no gate, byte-identical.
+    # 停止線 (ゲート/物理ストッパー): ``None`` (default) = no gate, byte-identical.
     # A dict so a hand-authored model can state it without a nested schema:
-    #   ``{"at_m": 24.5, "stop_states": ["inspected"], "pass_states": ["packed"]}``
+    #   選択停止  ``{"at_m": 24.5, "stop_states": ["inspected"], "pass_states": ["packed"]}``
+    #   物理      ``{"at_m": 24.5, "mode": "all"}``
     # ``at_m`` is the arc length from THIS belt's infeed (clamped to its length).
-    # 同じベルトの上を2種類の荷が流れる — 検品済み(梱包前)の容器は停止線で止まって
-    # 引き込みを待ち、梱包済みの完成品はそのまま通過してカーブ→積み付けへ行く。The
-    # gate is the only thing that can tell them apart, because they are physically
-    # on the same belt at the same time. A stopped load holds its slot until someone
-    # takes it off the line, so 滞留 propagates upstream exactly like a full 引き込み.
-    # Selection is never-blocks: ``stop_states`` names what stops (everything else
-    # passes); with only ``pass_states``, everything NOT named stops; a gate that
-    # names neither stops nothing.
+    #
+    # **選択停止** (``mode`` 未指定 = ``"select"``) — 同じベルトの上を2種類の荷が流れる:
+    # 検品済み(梱包前)の容器は停止線で止まって引き込みを待ち、梱包済みの完成品はその
+    # まま通過してカーブ→積み付けへ行く。The gate is the only thing that can tell them
+    # apart, because they are physically on the same belt at the same time. Selection
+    # is never-blocks: ``stop_states`` names what stops (everything else passes); with
+    # only ``pass_states``, everything NOT named stops; a gate that names neither
+    # stops nothing.
+    #
+    # **物理ストッパー** (``{"mode": "all"}``) — 選択性は無い。ぶつかった荷は種別に
+    # 関わらず**全部**止まり、後続がその上流に1個/``tote_pitch_m`` ずつ滞留する。
+    # 選り分けは時間分離運用 (``Process.release_schedule``) が受け持つ。滞留の列は
+    # 死荷物ではなく**取り置きバッファ**で、``pullable`` (物理ストッパーの既定 True /
+    # 選択停止の既定 False = 従来どおり) なら、列の尻が自分の合流点まで戻ってきた
+    # 引き込みの作業者が**止まっている荷を引ける**。専任の番人は前提にしない
+    # ——停止線に梱包台が描かれていればその人も取るが、居なければ出口は
+    # 「引き込みが引く」か「リリースで流す」の2つだけになる。
+    # A stopped load holds its slot until someone takes it off the line, so 滞留
+    # propagates upstream exactly like a full 引き込み — that IS the buffer.
     stop_gate: dict | None = None
 
 

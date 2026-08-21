@@ -12,7 +12,7 @@ from whsim.engine.build import Tote, Worker, build
 from whsim.engine.graph import AisleGraph
 from whsim.engine.processes import (
     agv_agent, forklift_agent, inspector_agent, order_source, packer_agent,
-    picker_agent, putaway_source, replenisher_agent,
+    picker_agent, putaway_source, release_agent, replenisher_agent,
 )
 from whsim.schema.model import WarehouseModel
 
@@ -71,6 +71,11 @@ class RunResult:
     n_inspectors: int = 0
     n_replenishers: int = 0                 # 補充要員 servers (0 = replenishment off)
     staging_capacity: int = 0               # 仮置き buffer capacity (0 = disabled)
+    # 完成品staging: 台脇に置ける完成品の総数 (0 = 機構オフ)。``bench_staging_peak``
+    # をこの数に対して読むと「天井に当たったのか、それが答えなのか」が分かる
+    # ——容器プールの ``pool_size`` と同じ読み方。
+    bench_staging_capacity: int = 0
+    n_stackers: int = 0                     # 積み付けの人数 (0 = 能力を書いていない)
     replay_window_s: float = 0.0
     # 経路拘束の実行時検査: replay legs that go THROUGH the drawn racking. Always
     # measured (no flag), always empty on a healthy layout. Detection and honest
@@ -258,6 +263,10 @@ def run_once(
             packers.append(pk)
             env.process(packer_agent(world, pk, world.pack_xy[i % len(world.pack_xy)]))
     env.process(order_source(world, rng))
+    # 時間分離運用 (mode_B): 周期でストッパーを開けて台の完成品をまとめて流す。
+    # ``release_schedule`` 未指定 ⇒ プロセスそのものが立たない＝既定は1バイトも不変。
+    if world.release_schedule is not None and world.stoppers:
+        env.process(release_agent(world))
 
     duration = model.simulation.duration_s
     if progress is not None:
@@ -303,6 +312,9 @@ def run_once(
         n_conveyors=len(world.conveyors),
         n_replenishers=world.n_replenishers,
         staging_capacity=world.staging_capacity,
+        bench_staging_capacity=sum(s.capacity
+                                   for s in (world.bench_staging or {}).values()),
+        n_stackers=(world.stack_crew.capacity if world.stack_crew is not None else 0),
         replay_window_s=window, cost=_cost_inputs(model),
         path_violations=violations,
         rep_day=rep_meta,

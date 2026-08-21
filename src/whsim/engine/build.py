@@ -98,20 +98,101 @@ class StopGate:
     ``bench``/``n_bench`` are the 梱包台 standing AT the stop line (same reach rule
     as a 引き込み's own benches). ``None`` = nobody stands there and a stopped load
     falls back to the shared pack pool — the same half-drawn-line fallback a
-    benchless 引き込み takes."""
+    benchless 引き込み takes.
+
+    ``stop_all`` is the **物理ストッパー**: selection is not a property it has. Every
+    load hits it and stops, and what sorts the two kinds apart is time
+    (``Process.release_schedule``), not the gate. ``pullable`` says the queue that
+    grows back from it is still WORK — 引き込みの作業者 can take a stationary load out
+    of it (``Stopper``). Both are False for every gate authored before they existed,
+    so a select gate is byte-identical."""
 
     arc: float
     stop_kinds: frozenset[str] = frozenset()
     pass_kinds: frozenset[str] = frozenset()
     bench: simpy.Resource | None = None
     n_bench: int = 0
+    stop_all: bool = False
+    pullable: bool = False
 
     def stops(self, kind: str) -> bool:
+        if self.stop_all:
+            return True
         if self.stop_kinds:
             return kind in self.stop_kinds
         if self.pass_kinds:
             return kind not in self.pass_kinds
         return False
+
+
+@dataclass
+class Stopper:
+    """物理ストッパーの前に育つ**列**: 取り置きバッファそのもの。
+
+    A :class:`StopGate` says where the loads stop; this says what the pile of them
+    IS. The queue grows BACKWARD from the gate, one load per ``pitch`` metres
+    (``Conveyor.tote_pitch_m`` — the same pitch that sets the belt's slot count), so
+    the load at index ``i`` stands at ``gate.arc - i*pitch``. That arc is the whole
+    point: a 引き込み whose junction the tail has reached back to can PULL a
+    stationary load out of the queue (``processes._pull_from_stopper``), and one it
+    has not reached cannot. Pulling from the middle compacts the queue forward,
+    exactly as the boxes slide down when you take one out.
+
+    ``is_open`` is mode_B: while the stopper is open everything in front of it rides
+    through to カーブ→積み付け, and 検品済み is not inducted onto the trunk at all
+    (混流させない). ``open_ev``/``close_ev`` are the broadcasts that carry those two
+    edges to the loads waiting on them.
+
+    Created ONLY for a gate that buffers (物理ストッパー, an authored ``pullable``, or
+    a line running a release schedule). A plain 選択停止ゲート has ``stopper=None``
+    and takes the code path it always did."""
+
+    line: ConveyorLine
+    gate: StopGate
+    pitch: float
+    queue: list = field(default_factory=list)     # index 0 = at the gate
+    is_open: bool = False
+    _open_ev: simpy.Event | None = None
+    _close_ev: simpy.Event | None = None
+
+    def arc_of(self, index: int) -> float:
+        """Where the load at queue position ``index`` physically stands."""
+        return max(self.gate.arc - index * max(self.pitch, 1e-9), 0.0)
+
+    def reach_index(self, junction_arc: float) -> int | None:
+        """The queued load a worker at ``junction_arc`` can reach — or ``None``.
+
+        The queue is contiguous and its arcs DECREASE with the index, so the first
+        index at or upstream of the junction is the load standing next to that
+        worker (the first one that could not get past them). Nothing further down
+        the line is within reach: you take the box in front of you, you do not walk
+        the trunk."""
+        for i in range(len(self.queue)):
+            if self.arc_of(i) <= junction_arc + 1e-9:
+                return i
+        return None
+
+    def open_ev(self, env) -> simpy.Event:
+        if self._open_ev is None or self._open_ev.triggered:
+            self._open_ev = env.event()
+        return self._open_ev
+
+    def close_ev(self, env) -> simpy.Event:
+        if self._close_ev is None or self._close_ev.triggered:
+            self._close_ev = env.event()
+        return self._close_ev
+
+    def open(self, env) -> None:
+        self.is_open = True
+        ev, self._open_ev = self._open_ev, None
+        if ev is not None and not ev.triggered:
+            ev.succeed()
+
+    def close(self, env) -> None:
+        self.is_open = False
+        ev, self._close_ev = self._close_ev, None
+        if ev is not None and not ev.triggered:
+            ev.succeed()
 
 
 @dataclass
@@ -175,6 +256,14 @@ class ConveyorLine:
     discharge_both: bool = False
     # 選択停止ゲート on THIS belt (``None`` = none, which is every belt by default).
     gate: StopGate | None = None
+    # 物理ストッパーの列 (``None`` = このベルトの荷は止まっても列にならない＝従来の
+    # 選択停止). See :class:`Stopper`.
+    stopper: Stopper | None = None
+    # Arc along the HOST trunk where this 引き込み hangs off it (0.0 when it is not a
+    # spur). ``junctions`` already carries the pair from the trunk's side; a spur
+    # needs it from its own side to know how far back the stopper queue must have
+    # grown before its worker can reach a stationary load.
+    host_arc: float = 0.0
 
     def project(self, p) -> tuple[tuple[float, float], float]:
         """Nearest point ON the polyline to ``p`` + its arc length from the infeed.
@@ -289,7 +378,15 @@ def _resolve_gate(cv, line: ConveyorLine) -> StopGate | None:
 
     ``None`` for an unstated gate, for a malformed one, and for one that names
     nothing to stop — in all three cases the belt behaves exactly as it always
-    has, so an existing model cannot acquire a gate by accident."""
+    has, so an existing model cannot acquire a gate by accident.
+
+    ``mode: "all"`` is the 物理ストッパー: it stops everything, so it is a gate even
+    though it names no kind at all (that is the whole difference — selection is not
+    something a lump of steel does). ``pullable`` defaults to the mode: a physical
+    stopper's queue is a 取り置きバッファ people work out of, a 選択停止ゲート's is
+    not (that keeps every gate authored before this byte-identical). A mis-typed
+    ``mode`` reads as the historical ``"select"`` rather than silently doubling what
+    the line holds — never-blocks."""
     spec = getattr(cv, "stop_gate", None)
     if not isinstance(spec, dict) or not spec:
         return None
@@ -297,10 +394,69 @@ def _resolve_gate(cv, line: ConveyorLine) -> StopGate | None:
         arc = float(spec.get("at_m", line.length))
     except (TypeError, ValueError):
         return None
+    stop_all = str(spec.get("mode", "select") or "select").strip().lower() == "all"
     gate = StopGate(arc=min(max(arc, 0.0), line.length),
                     stop_kinds=_kind_set(spec, "stop_states"),
-                    pass_kinds=_kind_set(spec, "pass_states"))
-    return gate if (gate.stop_kinds or gate.pass_kinds) else None
+                    pass_kinds=_kind_set(spec, "pass_states"),
+                    stop_all=stop_all,
+                    pullable=bool(spec.get("pullable", stop_all)))
+    return gate if (stop_all or gate.stop_kinds or gate.pass_kinds) else None
+
+
+def _num(spec: dict, key: str, default: float) -> float:
+    """One number out of a hand-authored dict — a mis-typed one is not a number.
+
+    Every mechanism dict on the schema is free-form (that is what lets a model state
+    it without a nested type), so every read has to survive a string, a ``None`` and
+    a typo. Falling back to the default is what keeps a half-typed mechanism from
+    taking the line down (never-blocks)."""
+    try:
+        return float(spec.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _resolve_release(model) -> dict | None:
+    """``Process.release_schedule`` → the resolved mode_B plan (or ``None``).
+
+    ``None`` for unstated, malformed, or a non-positive period — a schedule that
+    never fires is not a schedule, and the stoppers then simply never open (which
+    is exactly the model without this mechanism). ``window_s`` 0 means 「出し切る
+    まで」 and is capped at the period by the caller so two windows can never
+    overlap."""
+    spec = getattr(model.process, "release_schedule", None)
+    if not isinstance(spec, dict) or not spec:
+        return None
+    period = _num(spec, "period_s", 0.0)
+    if not (period > 0.0):
+        return None
+    return {
+        "period_s": period,
+        "window_s": max(0.0, _num(spec, "window_s", 0.0)),
+        "stack_rate_per_hr": max(0.0, _num(spec, "stack_rate_per_hr", 0.0)),
+        "stackers": max(1, int(_num(spec, "stackers", 1.0))),
+        "load_kind": str(spec.get("load_kind", "") or ""),
+    }
+
+
+def _staging_capacity(model) -> int:
+    """``Process.bench_staging`` → 梱包台1台あたりの置ける数 (0 = 不活性)."""
+    spec = getattr(model.process, "bench_staging", None)
+    if not isinstance(spec, dict) or not spec:
+        return 0
+    return max(0, int(_num(spec, "capacity", 0.0)))
+
+
+def _pitch_of(model, belt_id: str) -> float:
+    """A belt's トート間ピッチ — the engine's own slot rule, read back per belt.
+
+    The stopper queue is measured in the SAME pitch the belt's slot count is, so
+    「列が何メートル戻ったか」 and 「ベルトが何個で満杯か」 can never disagree."""
+    for cv in (model.resources.conveyors or []):
+        if str(cv.id) == str(belt_id):
+            p = cv.tote_pitch_m
+            return float(p) if (p is not None and float(p) > 0.0) else 1.0
+    return 1.0
 
 
 def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[ConveyorLine]:
@@ -413,6 +569,7 @@ def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[Conveyor
             host, host_arc, s.feed_arc = by_id[hit[0]], hit[1], hit[2]
             host.junctions.append((host_arc, s))
             s.host = host        # so freeing a spur slot can wake the trunk's waiters
+            s.host_arc = host_arc   # …and so its worker knows how far back they reach
     for c in lines:
         c.junctions.sort(key=lambda j: (j[0], j[1].id))
 
@@ -522,6 +679,25 @@ class World:
     # containers do not contend for slots, and counting the return deck's slots in
     # the conveyor KPIs would dilute the utilisation of the line that does the work.
     container_return_line: ConveyorLine | None = None
+    # --- 時間分離運用 (mode_A ⇔ mode_B) --------------------------------------
+    # ``release_schedule`` is ``Process.release_schedule`` resolved (``None`` = no
+    # release ⇒ ``stoppers`` never open and not one of these fields is read).
+    # NOTE the neighbouring ``release`` field is the WORK METHOD's E axis
+    # ("continuous"/"wave") and has nothing to do with this one.
+    release_schedule: dict | None = None
+    # The belts whose gate buffers (``ConveyorLine.stopper``), in drawn order.
+    stoppers: list[ConveyorLine] = field(default_factory=list)
+    # 完成品staging: 梱包が終わった完成品の置き場, one Store per belt whose benches
+    # produced it (capacity = 台あたり × その帯の台数). ``None`` = 不活性.
+    bench_staging: dict | None = None
+    # Where each staging Store's goods are put ON the line at the next release:
+    # ``belt id -> (trunk ConveyorLine, arc)``. The 引き込み's own junction, because
+    # that is where its packers physically stand.
+    stage_onto: dict = field(default_factory=dict)
+    # 積み付け: the crew at the far side of the カーブ and its seconds per load.
+    # ``None``/0.0 = 積み付け is not a constraint (never blocks).
+    stack_crew: simpy.Resource | None = None
+    stack_time_s: float = 0.0
     workers: list[Worker] = field(default_factory=list)
     helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
     totes: list[Tote] = field(default_factory=list)      # goods tracks (replay only)
@@ -1032,6 +1208,49 @@ def build(
 
     has_conveyor = bool(conveyor_lines)
 
+    # --- 物理ストッパー / 時間分離リリース / 完成品staging ----------------------
+    # Three opt-in mechanisms that only exist together: the stopper makes the line
+    # END a buffer, the release schedule is what empties it, and the bench staging
+    # is where the 完成品 wait for that release. Unstated ⇒ every one of the three
+    # resolves to None and not a single branch downstream is taken.
+    release_plan = _resolve_release(model)
+    for line in conveyor_lines:
+        g = line.gate
+        if g is not None and (g.stop_all or g.pullable or release_plan is not None):
+            line.stopper = Stopper(line=line, gate=g, pitch=_pitch_of(model, line.id))
+    stoppers = [c for c in conveyor_lines if c.stopper is not None]
+    # 完成品staging は「流す手段」があって初めてバッファになる。無ければ壁なので
+    # 張らない (never-blocks; see ``Process.bench_staging``).
+    bench_staging = None
+    stage_onto: dict[str, tuple] = {}
+    if release_plan is not None and stoppers:
+        per_bench = _staging_capacity(model)
+        if per_bench > 0:
+            bench_staging = {}
+            for line in conveyor_lines:
+                # 完成品が生まれるのは「梱包が起きうる場所」だけ: 引き込み/末端
+                # (``_convey_chain`` の終点) と、人の立っている停止線。通過するだけの
+                # ベルトに置き場を作ると、誰も置かない箱の置き場を売ることになる。
+                gate_hands = line.gate is not None and line.gate.n_bench > 0
+                if line.next_line is not None and not gate_hands:
+                    continue
+                n = line.n_bench or (line.gate.n_bench if line.gate else 0) or 1
+                bench_staging[line.id] = simpy.Store(env, capacity=per_bench * n)
+                # どのストッパーの本線へ、どの地点で載せるか — 引き込みなら自分の
+                # 合流点、そうでなければ本線の投入端。
+                host = line.host if line.host is not None else None
+                trunk = (host if (host is not None and host.stopper is not None)
+                         else (line if line.stopper is not None else
+                               (stoppers[0] if stoppers else None)))
+                if trunk is not None:
+                    arc = line.host_arc if trunk is host else 0.0
+                    stage_onto[line.id] = (trunk, min(arc, trunk.gate.arc))
+    stack_crew = None
+    stack_time_s = 0.0
+    if release_plan is not None and release_plan["stack_rate_per_hr"] > 0.0:
+        stack_crew = simpy.Resource(env, capacity=release_plan["stackers"])
+        stack_time_s = 3600.0 / release_plan["stack_rate_per_hr"]
+
     return World(
         env=env, model=model,
         order_store=simpy.Store(env),
@@ -1070,6 +1289,9 @@ def build(
         replen_faces=replen_faces, replen_store=replen_store,
         replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
         n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,
+        release_schedule=release_plan, stoppers=stoppers,
+        bench_staging=bench_staging, stage_onto=stage_onto,
+        stack_crew=stack_crew, stack_time_s=stack_time_s,
         aisle_locks=aisle_locks,
         aisle_cells=aisle_cells,
     )

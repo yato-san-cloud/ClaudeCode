@@ -58,17 +58,28 @@ _EXTREMUM_KEYS: dict[str, str] = {
     "unroutable_legs": "max",                   # 直線に縮退した移動 (欠陥カウンタ)
     "conveyor_time_to_first_block_s": "mean",   # 詰まり始めた時刻 (平均は詰まった回のみ)
     "pack_unmanned_loads": "mean",              # 終端で止まった荷 (件数＝回あたりの平均)
+    # 完成品staging のピーク＝**現場が置き場を何台分取るかの根拠**。レンタル容器と
+    # 同じ性質の数字なので、同じ扱い（平均するとどの回でも観測されなかった小さい
+    # 値になり、実際には溢れる置き場を売ることになる）。
+    "bench_staging_peak": "max",                # 完成品仮置きの同時ピーク (合計)
+    "stopper_queue_peak": "max",                # ストッパー前の滞留ピーク
+    "stopper_trunk_occupancy_peak": "max",      # 開放中の本線占有ピーク
+    "stopper_leaks": "mean",                    # 未梱包のまま流出した荷 (欠陥カウンタ)
 }
 
 # A "moment" key answers 「いつ起きたか」 for the extremum beside it, so it MUST be
 # read from the same replication as that extremum — a peak of 45 at t=3060 paired
 # with a mean time is a timestamp at which nothing happened in any run.
-_MOMENT_OF: dict[str, str] = {"containers_in_use_peak": "containers_in_use_peak_t"}
+_MOMENT_OF: dict[str, str] = {
+    "containers_in_use_peak": "containers_in_use_peak_t",
+    "bench_staging_peak": "bench_staging_peak_t",
+    "stopper_queue_peak": "stopper_queue_peak_t",
+}
 
 # Per-belt (``kpis["conveyors"]``) fields that are extrema of their own run: a mean
 # reports 14 of 20 slots for a 本線 that filled up in one replication, and 「満杯に
 # なったか」 is the entire question the per-belt read-out exists to answer.
-_PER_BELT_MAX_KEYS: frozenset[str] = frozenset({"peak_occupancy"})
+_PER_BELT_MAX_KEYS: frozenset[str] = frozenset({"peak_occupancy", "staging_peak"})
 
 
 def _t95(df: int) -> float:
@@ -411,6 +422,40 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     ct_held = [float(e.get("held", 0.0)) for e in ct_ret]
     ct_waits = [float(e.get("wait", 0.0)) for e in ct_take]
 
+    # --- 物理ストッパー / 時間分離リリース / 完成品staging ---------------------
+    # Every field is 0 unless the model authored one of the three — additive, no
+    # legacy KPI shifts. The two peaks are what the customer physically buys
+    # against: how much floor the 完成品 need beside the benches
+    # (``bench_staging_peak``) and how long the queue in front of the stopper gets
+    # (``stopper_queue_peak``, i.e. how much of the 本線 is buffer, not transport).
+    stop_moves = [e for e in res.events
+                  if e["event"] in ("stopper_hold", "stopper_take",
+                                    "stopper_pull", "stopper_release")]
+    stop_q_peak, stop_q_peak_t, stop_q_mean = _level_series(
+        [(float(e["t"]), int(e.get("total", 0))) for e in stop_moves],
+        res.duration_s)
+    stop_holds = [e for e in stop_moves if e["event"] == "stopper_hold"]
+    stop_pulls = [e for e in stop_moves if e["event"] == "stopper_pull"]
+    stop_takes = [e for e in stop_moves if e["event"] == "stopper_take"]
+    # 窓は ``stopper_close`` の側で数える: 開いたが閉じていない窓は run の終わりで
+    # 切れているので、開放時間も排出時間もまだ確定していない。
+    stop_closes = [e for e in res.events if e["event"] == "stopper_close"]
+    stop_boards = [e for e in res.events if e["event"] == "release_board"]
+    stop_leaks = [e for e in res.events if e["event"] == "stopper_leak"]
+    stop_holds_i = [e for e in res.events if e["event"] == "stopper_induct_hold"]
+    open_s = sum(float(e.get("open_s", 0.0)) for e in stop_closes)
+    drains = [float(e.get("drain_s", 0.0)) for e in stop_closes]
+    # 完成品staging の水位: 入る(``bench_stage``)と出る(``release_board``)の2つでしか
+    # 動かないので、(t, total) は EXACT な階段関数 — 積分すれば真の時間平均になる。
+    stage_puts = [e for e in res.events if e["event"] == "bench_stage"]
+    stage_peak, stage_peak_t, stage_mean = _level_series(
+        [(float(e["t"]), int(e.get("total", 0))) for e in stage_puts]
+        + [(float(e["t"]), int(e.get("level", 0))) for e in stop_boards],
+        res.duration_s)
+    stack_done = [e for e in res.events if e["event"] == "stack_done"]
+    stack_busy = sum(float(e.get("busy", 0.0)) for e in stack_done)
+    n_stackers = getattr(res, "n_stackers", 0)
+
     # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
     # Populated only when replenishment was enabled (replenish_done / stockout_wait
     # events exist); otherwise every field is 0 — additive, no legacy KPI shifts.
@@ -535,6 +580,55 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "conveyor_gate_stops": cv_gate_stops,
         # ライン終端に人が居ないため線上で止まった荷の数 (0 = 誰かが立っている).
         "pack_unmanned_loads": len(unmanned_ends),
+        # --- 物理ストッパー (全部止まる停止線) --------------------------------
+        # 止めた数と、その列から**引き戻せた**数。比が低いほど「近くの作業者が引く」
+        # という前提が成り立っていない＝専任か、リリース周期の見直しが要る。
+        "stopper_stops": len(stop_holds),
+        "stopper_pulls": len(stop_pulls),
+        "stopper_takes": len(stop_takes),
+        "stopper_recovery_ratio": (len(stop_pulls) / len(stop_holds)
+                                   if stop_holds else 0.0),
+        # 滞留のピーク＝本線のうち何個分が「取り置きバッファ」になっているか(＋その時刻).
+        "stopper_queue_peak": stop_q_peak,
+        "stopper_queue_peak_t": stop_q_peak_t,
+        "stopper_queue_mean": stop_q_mean,
+        # --- 時間分離リリース (mode_B) ---------------------------------------
+        # 窓の回数と占有率、1回あたりの排出時間、そして**干渉コスト**: 開けている間
+        # 検品済みの投入を止めた秒数。リリース周期を決めるのはこの秒数と滞留ピークの
+        # 取引で、どちらか片方だけでは決められない。
+        "stopper_windows": len(stop_closes),
+        "stopper_open_share": open_s / max(res.duration_s, 1e-9),
+        "stopper_open_total_s": open_s,
+        "stopper_drain_mean_s": statistics.fmean(drains) if drains else 0.0,
+        "stopper_drain_max_s": max(drains) if drains else 0.0,
+        "stopper_released_loads": len(stop_boards),
+        "stopper_released_queue": sum(1 for e in stop_moves
+                                      if e["event"] == "stopper_release"),
+        "stopper_trunk_occupancy_peak": max((int(e.get("occ", 0))
+                                             for e in stop_boards), default=0),
+        "stopper_induction_hold_s": sum(float(e.get("blocked", 0.0))
+                                        for e in stop_holds_i),
+        "stopper_induction_holds": len(stop_holds_i),
+        # 開放時に**梱包されないまま**流れ出た検品済みの数 (0 が健全). 周期が長すぎる
+        # か、引き込みの手が足りていないかのどちらか — 完了オーダーには数えない。
+        "stopper_leaks": len(stop_leaks),
+        # --- 完成品staging (台脇の仮置き) ------------------------------------
+        # ピークが**必要な置き場の下限**。``== bench_staging_capacity`` なら天井に
+        # 当たっただけ＝答えではない（容器プールと同じ読み方）、が同じ表から読める。
+        "bench_staging_peak": stage_peak,
+        "bench_staging_peak_t": stage_peak_t,
+        "bench_staging_mean": stage_mean,
+        "bench_staging_capacity": getattr(res, "bench_staging_capacity", 0),
+        "bench_staging_blocks": sum(1 for e in stage_puts
+                                    if float(e.get("blocked", 0.0)) > 1e-6),
+        "bench_staging_block_s": sum(float(e.get("blocked", 0.0))
+                                     for e in stage_puts),
+        # --- 積み付け (カーブの先) --------------------------------------------
+        "stack_loads": len(stack_done),
+        "stack_busy_s": stack_busy,
+        "stack_utilization": (stack_busy / max(n_stackers * res.duration_s, 1e-9)
+                              if n_stackers else 0.0),
+        "n_stackers": n_stackers,
         # 容器の有限循環: 保有数 / 投入待ち / 同時使用ピーク(＋その時刻) / 平均滞留.
         # ピークが「必要保有数の下限」— レンタル数量の根拠になる数字。
         "container_pool_size": ct_pool,
@@ -548,7 +642,8 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "containers_in_use_peak_t": ct_peak_t,
         # ...and WHERE (per belt), which is the only read-out that points at the
         # 引き込み/本線 to fix rather than at "the conveyor".
-        "conveyors": _per_belt(res, model, cv_on, cv_off, unmanned_ends),
+        "conveyors": _per_belt(res, model, cv_on, cv_off, unmanned_ends,
+                               stage_puts),
         "n_conveyors": getattr(res, "n_conveyors", 0),
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
@@ -599,9 +694,35 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     }
 
 
+def _level_series(points: list[tuple[float, int]],
+                  duration_s: float) -> tuple[int, float, float]:
+    """A logged (t, level) step function → ``(peak, when it peaked, time-average)``.
+
+    The engine logs the LEVEL AFTER each change rather than a delta, so the series
+    is exact and needs no reconstruction — the same trick the container pool uses.
+    Sorting is stable on ``t`` so a burst of changes at one instant keeps the order
+    they happened in, and the peak's timestamp is the FIRST moment that level was
+    reached (a later tie is the same height, not a new event). The last level is
+    carried to the end of the run: a queue that never drained was standing there
+    for the rest of the shift, and averaging it as zero would hide exactly that.
+    """
+    if not points:
+        return 0, 0.0, 0.0
+    pts = sorted(points, key=lambda p: p[0])
+    peak, peak_t, area, prev_t, prev = 0, 0.0, 0.0, 0.0, 0
+    for t, lvl in pts:
+        area += prev * (t - prev_t)
+        prev_t, prev = t, lvl
+        if lvl > peak:
+            peak, peak_t = lvl, t
+    area += prev * max(duration_s - prev_t, 0.0)
+    return peak, peak_t, area / max(duration_s, 1e-9)
+
+
 def _per_belt(res: RunResult, model: WarehouseModel | None,
               cv_on: list[dict], cv_off: list[dict],
-              unmanned: list[dict] | None = None) -> dict:
+              unmanned: list[dict] | None = None,
+              staged: list[dict] | None = None) -> dict:
     """Per-belt コンベア詰まり read-out — 1枚で「どのベルトで詰まっているか」.
 
     The line totals say the belt system is jammed; a chained line
@@ -620,8 +741,12 @@ def _per_belt(res: RunResult, model: WarehouseModel | None,
     answer: a full 引き込み and a slow 本線 are capacity problems, but a line END with
     nobody drawn at it is a hole in the DRAWING — same table, different fix, so the
     belt id has to travel with the count. 0 on every belt somebody stands at.
+
+    ``staged`` (``bench_stage`` events) adds the fourth: 完成品staging の**帯ごとの**
+    ピーク. The floor is bought per 引き込み — 「この列の脇に何台置けるか」 — so the
+    total alone cannot be turned into square metres. 0 on every belt with no staging.
     """
-    if not cv_on and not cv_off and not unmanned:
+    if not cv_on and not cv_off and not unmanned and not staged:
         return {}
     caps: dict[str, int] = {}
     if model is not None:
@@ -655,6 +780,14 @@ def _per_belt(res: RunResult, model: WarehouseModel | None,
         b = str(e.get("conveyor", ""))
         stalled[b] = stalled.get(b, 0) + 1
         steps.setdefault(b, [])
+    # 完成品staging: 帯ごとの最大水位。``bench_stage`` は入る側しか出さない (出るのは
+    # リリースで、そちらは合計しか持たない) ので、帯ごとの答えは PEAK だけ — 溜まる
+    # 一方の水位の最大値は入る側だけで正しく取れる。
+    stage_peaks: dict[str, int] = {}
+    for e in staged or ():
+        b = str(e.get("conveyor", ""))
+        stage_peaks[b] = max(stage_peaks.get(b, 0), int(e.get("level", 0)))
+        steps.setdefault(b, [])
 
     out: dict[str, dict] = {}
     for belt, pts in steps.items():
@@ -682,6 +815,8 @@ def _per_belt(res: RunResult, model: WarehouseModel | None,
             "wait_mean_s": statistics.fmean(d["waits"]) if d["waits"] else 0.0,
             # 終端に人が居ないまま止まった荷 (0 = 誰かが立っている).
             "unmanned": stalled.get(belt, 0),
+            # 完成品仮置きの最大水位 (0 = この帯に置き場は張られていない).
+            "staging_peak": stage_peaks.get(belt, 0),
         }
     return out
 
@@ -1055,6 +1190,58 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
             f"（{where}{_count(stalled)} 件が線上で停止{'・' + seen if seen else ''}）"
             "— 梱包台は全て引き込み/停止線に割り当てられており、"
             "末端まで来た荷を取る人が居ません。停止線／ライン終端に梱包台を描いてください")
+    # 物理ストッパー: the queue in front of it is the 取り置きバッファ, so a big one is
+    # not by itself a fault — a queue NOBODY can empty is. Say how much of the 本線
+    # it occupies, then say which of the two exits worked: 近傍の作業者が引き戻す
+    # (recovery) or the scheduled release. Neither ⇒ name it, because the drawing has
+    # no way to take the goods off the line at all. No stopper ⇒ 0 stops ⇒ nothing
+    # appended (verdict byte-identical).
+    if agg.get("stopper_stops"):
+        peak = agg.get("stopper_queue_peak", 0.0)
+        at_min = agg.get("stopper_queue_peak_t", 0.0) / 60.0
+        sp = (agg.get("spread") or {}).get("stopper_queue_peak") or {}
+        span = (f"（{sp['n_total']:.0f}回中の最大・{at_min:.0f}分時点／各回 "
+                f"{sp['min']:.0f}〜{sp['max']:.0f} 個）"
+                if sp else f"（{at_min:.0f}分時点）")
+        agg["verdict"] += f"。ストッパー前の滞留は最大 {peak:.0f} 個{span}"
+        rec = agg.get("stopper_recovery_ratio", 0.0)
+        if not agg.get("stopper_pulls") and not agg.get("stopper_windows"):
+            agg["verdict"] += (
+                "。⚠ その滞留を取る手段が図面にありません"
+                "（引き込みまで列が戻っていない／停止線に人が居ない／リリース周期が未設定）"
+                "— 引き込みの人員かリリース周期を決めてください")
+        elif agg.get("stopper_pulls"):
+            agg["verdict"] += f"（うち {rec * 100:.0f}% は近傍の作業者が引き戻し）"
+    # 時間分離リリース: 開けている間は検品済みの投入が止まる。その秒数こそが周期を
+    # 決める材料なので、窓の割合と一緒に必ず出す。未梱包のまま流れ出た荷は完了に
+    # 数えていないので、なぜ完了率が下がったのかをここで説明する。
+    if agg.get("stopper_windows"):
+        share = agg.get("stopper_open_share", 0.0) * 100
+        hold_min = agg.get("stopper_induction_hold_s", 0.0) / 60.0
+        agg["verdict"] += (
+            f"。完成品リリースは {agg['stopper_windows']:.0f} 回・本線占有 {share:.0f}%"
+            f"（検品済みの投入を止めた時間 {hold_min:.0f}分）")
+        if agg.get("stopper_leaks"):
+            seen = _reps_seen(agg, "stopper_leaks")
+            agg["verdict"] += (
+                f"。⚠ 開放時に未梱包のまま流れ出た荷 {_count(agg['stopper_leaks'])} 件"
+                f"{'・' + seen if seen else ''}"
+                "（周期を短くするか引き込みの人員を増やしてください）")
+    # 完成品staging: ピークがそのまま「台の脇に何台分の置き場が要るか」。天井に当たって
+    # いれば、その数は答えではなく制約なので、そう言う（容器プールと同じ読み方）。
+    if agg.get("bench_staging_capacity"):
+        peak = agg.get("bench_staging_peak", 0.0)
+        at_min = agg.get("bench_staging_peak_t", 0.0) / 60.0
+        sp = (agg.get("spread") or {}).get("bench_staging_peak") or {}
+        span = (f"（{sp['n_total']:.0f}回中の最大・{at_min:.0f}分時点／各回 "
+                f"{sp['min']:.0f}〜{sp['max']:.0f} 個）"
+                if sp else f"（{at_min:.0f}分時点）")
+        agg["verdict"] += f"。完成品の仮置きは同時最大 {peak:.0f} 個{span}"
+        if agg.get("bench_staging_blocks"):
+            agg["verdict"] += (
+                f"。⚠ 置き場が満杯で梱包が {agg['bench_staging_blocks']:.0f} 回止まりました"
+                f"（合計 {agg.get('bench_staging_block_s', 0.0) / 60.0:.0f}分）"
+                "— このピークは天井に当たった値で、必要容量そのものではありません")
     # 容器の有限循環: the pool is a constraint you can BUY your way out of, so it must
     # never hide inside "throughput was low". The peak is the number the customer
     # orders against (必要保有数の下限), and 投入待ち says the pool is already short.

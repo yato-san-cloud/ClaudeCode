@@ -10,16 +10,14 @@ Two operating modes share the same pack stage:
   orders, so the AGV fleet (not the picker) can become the real constraint and
   fewer pickers are needed.
 
-**解析オラクル未対応 (known limitation).** ``analytic.py`` mirrors the engine's
-work methods and the conveyor chain, but it does NOT yet mirror the three line
-mechanics added here — 選択停止ゲート (``Conveyor.stop_gate``), 容器の有限循環
-(``Process.container_pool``) and 引き込みの pull 方式 (``Process.divert_policy``).
-All three are opt-in and every bundled model leaves them off, so the closed-form
-estimate and the catalogue agreement pins (``tests/test_analytic_aisle_travel.py``)
-are unaffected — but a model that turns one ON will get an estimate that ignores
-it, and the estimate will read rosier than the run (invariant 5 in
-docs/ARCHITECTURE.md: 「エンジンが持つ機構は解析側にも要る」). Mirroring them is the
-next step, not a done one.
+**解析側との対応 (invariant 5).** 選択停止ゲート (``Conveyor.stop_gate``), 容器の
+有限循環 (``Process.container_pool``) と pull型引き込み (``Process.divert_policy``)
+は ``whsim.linemech`` に閉形式の鏡がある。**物理ストッパー** (``stop_gate`` の
+``mode: "all"``), **時間分離リリース** (``Process.release_schedule``) と
+**完成品staging** (``Process.bench_staging``) には**無い** — スケジュールで開閉
+する末端バッファに誠実な閉形式が無いので、``analytic`` はそれを**名乗って降りる**
+(``conveyor.line_mechanics_mirrored = False``)。黙って甘い数字を出さないことが
+ここでの正解で、事情は docs/ARCHITECTURE.md 不変条件17 に書いてある。
 """
 
 from __future__ import annotations
@@ -27,6 +25,7 @@ from __future__ import annotations
 import math
 import random
 import zlib
+from dataclasses import dataclass
 
 from whsim.engine.build import Worker, World
 from whsim.engine.routing import leg_cells, manhattan, nearest_neighbor_route
@@ -1030,10 +1029,11 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 # stands at the belt holding the goods and the shortage backs up
                 # into picking. No pool ⇒ not even a branch is taken (byte-identical).
                 held_from = yield from _take_container(world, o)
-                req_t = env.now
-                slot = line.belt.request()
-                yield slot   # blocks here when the conveyor is jammed
-                waited = env.now - req_t
+                # blocks here when the conveyor is jammed — and, when this belt has
+                # a 物理ストッパー, while a 完成品リリース is occupying it
+                # (時間分離＝混流させない). No stopper ⇒ the historical one-shot
+                # request/yield, byte for byte.
+                slot, waited = yield from _induct_slot(world, line, to_exit=False)
                 world.log(t=env.now, event="conveyor_on", order_id=o.order_id,
                           resource="conveyor", conveyor=line.id, wait=waited,
                           blocked=1 if waited > 1e-6 else 0,
@@ -1361,6 +1361,355 @@ def _signal_divert(spur) -> None:
         ev.succeed()
 
 
+# --- 物理ストッパー: 全部止まる・並んだ列は取り置きバッファ ---------------------
+# 停止線が選り分けない場合 (``StopGate.stop_all``) 、ぶつかった荷は種別に関わらず
+# **全部**止まり、後続がその上流へ 1個/ピッチ ずつ溜まる。この列は死荷物ではなく
+# **次に引く荷の置き場**で、列の尻が自分の合流点まで戻ってきた引き込みの作業者は、
+# 流れている荷ではなく**止まっている荷**を引く（専任の番人は前提にしない）。
+#
+# **デッドロックしない理由**（止まった荷は本線のスロットを持ったままで、それが
+# バッファの実体なので「本線が引けない荷で埋まる」形だけは構造的に潰しておく）:
+#
+# 1. 列に並ぶ荷が待つのは**人の判断**（引き込みの台が空く／停止線の台が空く／
+#    ストッパーが開く）であって、上流の誰かが握っている資源ではない。引き込みの
+#    スロットは**引く側が先に確保してから**列の荷を起こす（:func:`_pull_from_stopper`）
+#    ので、列の荷が本線のスロットを持ったまま下流のスロット待ち行列に並ぶことは
+#    無い。待ちグラフは前向きのまま＝循環が作れない。
+# 2. 唯一の循環候補は staging 経由だった: 梱包者が満杯の staging を待つ → staging を
+#    空けるのはリリース → リリースは本線のスロットが要る → そのスロットは列の荷が
+#    持っている。だから**開放したら列は全部流す**し、``auto`` で分岐待ちに止まって
+#    いる荷も同じ開放で叩き起こす（``Stopper.open_ev``）。開いている間、本線の
+#    スロットは必ず有限時間で空く。
+# 3. よって「列が届いている引き込みが1本でも人付きで開いている」限り、その台が
+#    空くたびに列から1つ抜け、残りは前へ詰まる＝本線のスロットが返る。上流は再び
+#    流れ出す。
+# 4. どの引き込みにも列が届かず、停止線に人も居ず、リリースも無い図面では線は
+#    本当に止まる。人を発明しないのが正しい答えで、止まったことは
+#    ``stopper_queue_peak`` と判定文が名指しする（``pack_unmanned`` と同じ扱い）。
+
+
+@dataclass
+class _Held:
+    """ストッパーの前で止まっている1個の荷。``event`` が次の行き先を運んでくる。"""
+
+    order: Order
+    kind: str
+    at: float
+    event: object = None
+
+
+def _stopper_level(world: World) -> int:
+    """全ストッパーの滞留数の合計 — 判定文と KPI が読む1つの水位。"""
+    return sum(len(c.stopper.queue) for c in world.stoppers)
+
+
+def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
+    """物理ストッパーの前に並び、次の行き先が決まるまで待つ。
+
+    出口は3つで、どれが先に来るかは人の都合で決まる:
+
+    * ``("bench", pool, req, waited)`` — 停止線に立っている人（描かれていれば）が
+      降ろした。誰も描かれていなければ ``processes._bench_pool`` の従来どおりの
+      フォールバック（共有プール／誰も居ない＝``None``）を使う——読み方を2つに
+      増やさない。
+    * ``("spur", spur, slot)`` — 手の空いた引き込みが**止まっている荷**を引いた。
+    * ``("release",)`` — ストッパーが開いた（mode_B）。前に居た荷はカーブへ流れる。
+
+    列に並んでいる間もベルトのスロットは握ったまま＝滞留は上流へ伝わる。
+    """
+    env = world.env
+    stp = line.stopper
+    held = _Held(order=order, kind=kind, at=env.now, event=env.event())
+    stp.queue.append(held)
+    world.log(t=env.now, event="stopper_hold", order_id=order.order_id,
+              resource="conveyor", conveyor=line.id, kind=kind,
+              queue=len(stp.queue), total=_stopper_level(world),
+              arc=stp.arc_of(len(stp.queue) - 1))
+    pool = stp.gate.bench if stp.gate.bench is not None else _bench_pool(world, line)
+    req = pool.request() if pool is not None else None
+    t0 = env.now
+    if req is not None:
+        yield req | held.event
+    else:
+        yield held.event
+
+    def _drop() -> None:
+        for i, h in enumerate(stp.queue):
+            if h is held:
+                stp.queue.pop(i)
+                return
+
+    if req is not None and req.triggered:
+        # 停止線の人が取った。列から抜けたので後続が前へ詰まる。
+        _drop()
+        world.log(t=env.now, event="stopper_take", order_id=order.order_id,
+                  resource="conveyor", conveyor=line.id, kind=kind,
+                  queue=len(stp.queue), total=_stopper_level(world),
+                  wait=env.now - t0)
+        return ("bench", pool, req, env.now - t0)
+    if req is not None:
+        req.cancel()          # 手が空く前に引かれた／流れた
+    _drop()
+    return held.event.value
+
+
+def _pull_from_stopper(world: World, spur) -> None:
+    """手の空いた引き込みが、ストッパー前に**止まっている**荷を引く。
+
+    流れている荷を取るのが ``_convey_chain`` の junction 判定で、こちらはその裏返し
+    ——列の尻が自分の合流点まで戻ってきたとき、作業者は振り返って止まっている荷を
+    取る（contract §stopper.recovery）。届く範囲は ``Stopper.reach_index``（合流点に
+    一番近い1個だけ。本線を歩いて拾いには行かない）。
+
+    引き込みのスロットは**ここで先に確保**してから荷を起こす: 起こしてから確保させる
+    と、列の荷が本線のスロットを握ったまま下流の待ち行列に並ぶことになり、待ちグラフ
+    が前向きでなくなる。
+
+    ``auto`` では分岐で止まっている荷（本線の上流に居る＝物理的に前）を先に通す:
+    ``divert_wake`` に待ち人が居るときは手を出さない。``pull`` では分岐待ちが構造的に
+    存在しないので、この条件は常に真になる。
+    """
+    host = spur.host
+    if host is None or host.stopper is None:
+        return
+    stp = host.stopper
+    if stp.is_open or not stp.queue or not stp.gate.pullable:
+        return
+    wake = host.divert_wake
+    if wake is not None and not wake.triggered:
+        return                      # 分岐で止まっている荷が先
+    if not _belt_room(spur) or not _bench_free(world, spur):
+        return
+    idx = stp.reach_index(spur.host_arc)
+    if idx is None:
+        return                      # 列がまだ自分のところまで戻っていない
+    held = stp.queue.pop(idx)
+    slot = spur.belt.request()
+    if not slot.triggered:          # room was just checked; never-blocks if not
+        slot.cancel()
+        stp.queue.insert(idx, held)
+        return
+    world.log(t=world.env.now, event="stopper_pull", order_id=held.order.order_id,
+              resource="conveyor", conveyor=host.id, spur=spur.id,
+              kind=held.kind, queue=len(stp.queue), total=_stopper_level(world),
+              wait=world.env.now - held.at)
+    held.event.succeed(("spur", spur, slot))
+
+
+def _induct_hold(world: World, line, to_exit: bool):
+    """時間分離: 開放中の本線には検品済みを入れない（混流させない）。
+
+    ここで止まった秒数が **mode_B が mode_A から奪った能力**そのもので、リリース
+    周期の判断はこの数字とのトレードオフになる。ストッパーの無いベルト（＝既定の
+    全モデル）では1度も yield しないので、イベント列も乱数列も動かない。
+    """
+    stp = getattr(line, "stopper", None)
+    if stp is None or to_exit or not stp.is_open:
+        return
+    env = world.env
+    t0 = env.now
+    while stp.is_open:
+        yield stp.close_ev(env)
+    world.log(t=env.now, event="stopper_induct_hold", resource="conveyor",
+              conveyor=line.id, blocked=env.now - t0)
+
+
+def _induct_slot(world: World, line, to_exit: bool):
+    """本線のスロットを1つ取る。開放中は入れずに待ち直す（混流させない）。
+
+    窓は**スロットを待っている間に**開くので、確保した後にもう一度見る必要がある
+    ——見ないと「開いた瞬間に本線へ入り、そのまま開放で流れ出る」荷ができて、時間
+    分離が分離しなくなる（実測: 3窓で16件がそれだった）。ストッパーの無いベルトでは
+    while が1周で抜ける＝従来の request/yield ひと組と同じ順序・同じ待ち秒数。
+    """
+    env = world.env
+    t0 = env.now
+    while True:
+        yield from _induct_hold(world, line, to_exit)
+        slot = line.belt.request()
+        yield slot
+        stp = getattr(line, "stopper", None)
+        if to_exit or stp is None or not stp.is_open:
+            return slot, env.now - t0
+        line.belt.release(slot)
+
+
+def _stage_finished(world: World, line, order: Order):
+    """梱包済みの完成品を台脇の仮置きへ。満杯なら**梱包者が止まる**。
+
+    台とベルトのスロットを握ったまま待つので、背圧はそのまま引き込み→本線へ落ちる
+    ——置き場の大きさが本当にラインを止めるかどうかが、これで初めて測れる。
+    """
+    stores = world.bench_staging
+    if not stores:
+        return
+    store = stores.get(line.id)
+    if store is None:
+        return
+    env = world.env
+    t0 = env.now
+    yield store.put({"order": order, "at": env.now})
+    world.log(t=env.now, event="bench_stage", order_id=order.order_id,
+              resource="staging", conveyor=line.id, level=len(store.items),
+              total=sum(len(s.items) for s in stores.values()),
+              blocked=env.now - t0)
+
+
+def _stack_out(world: World, order: Order, arrival: float, line, arc: float, slot,
+               tote, kind: str, held_from, dist_per_order: float,
+               leg: int, arc_in: float, board_t: float, packed: bool):
+    """カーブの先の積み付け — ストッパーを通り抜けた荷の終着点。
+
+    積み付けは能力を持つ工程なので、順番待ちの間も荷は**ベルトのスロットを握った
+    まま**＝リリースの排出速度がそのまま本線の空き具合になる。``stack_crew`` が
+    ``None``（能力を書いていない図面）なら待たない＝never-blocks。
+
+    ``packed`` が True の荷は**梱包済みの完成品**で、そのオーダーは梱包した時点で
+    既に ``order_complete`` 済み——ここで2度目を書くと同じオーダーを2回出荷したこと
+    になる。False の荷は「梱包されないまま開放で流れ出た検品済み」で、こちらは完了
+    にしない（未梱包の出荷を成果として売ることになる）。件数は ``stopper_leak`` と
+    して残り、判定文が名指しする。
+    """
+    env = world.env
+    end = line.point_at(arc)
+    if world.stack_crew is not None:
+        req = world.stack_crew.request()
+        yield req
+        yield env.timeout(world.stack_time_s)
+        world.stack_crew.release(req)
+    world.log(t=env.now, event="stack_done", order_id=order.order_id,
+              resource="stacking", conveyor=line.id, kind=kind,
+              busy=world.stack_time_s, packed=1 if packed else 0)
+    line.belt.release(slot)
+    _signal_divert(line)
+    _release_container(world, held_from, end, order)
+    if tote is not None and world.recording():
+        tote.kf(env.now, end[0], end[1], "pack")
+    _leg_off(world, order, line, leg, arc_in, arc, board_t, last=1)
+    if not packed:
+        world.log(t=env.now, event="stopper_leak", order_id=order.order_id,
+                  resource="conveyor", conveyor=line.id, kind=kind,
+                  cycle=env.now - arrival)
+
+
+def release_agent(world: World):
+    """mode_B 完成品リリース: 周期でストッパーを開け、台の完成品をまとめて流す。
+
+    1回の窓でやることは3つ — ①ストッパーを開ける（前に居た荷は全部カーブへ流れる。
+    ``auto`` で分岐待ちに止まっている荷も起こす＝本線のスロットが必ず返る）、②台の
+    仮置きから完成品を本線へ載せる（載せられるのは本線に空きがある分だけ＝ここが
+    排出時間になる）、③窓を閉じる。
+
+    ``window_s`` > 0 ならその秒数だけ開ける。0 なら**出し切るまで**だが、次の
+    リリースに重ならないよう ``period_s`` で頭打ちにする（never-blocks: 出し切れない
+    図面でも窓は必ず閉じる）。周期は**窓の開始間隔**で数える。
+    """
+    env = world.env
+    plan = world.release_schedule
+    period = plan["period_s"]
+    window = plan["window_s"]
+    next_t = period
+    while True:
+        if next_t > env.now:
+            yield env.timeout(next_t - env.now)
+        t0 = env.now
+        deadline = t0 + (window if window > 0.0 else period)
+        for trunk in world.stoppers:
+            trunk.stopper.open(env)
+        world.log(t=env.now, event="stopper_open", resource="conveyor",
+                  queue=_stopper_level(world),
+                  staged=sum(len(s.items) for s in (world.bench_staging or {}).values()))
+        _flush_queues(world)
+        boarded = yield from _load_staging(world, deadline)
+        drained = env.now - t0        # 台の完成品を本線へ出し切るのに要した時間
+        if window > 0.0 and env.now < t0 + window:
+            yield env.timeout(t0 + window - env.now)
+        for trunk in world.stoppers:
+            trunk.stopper.close(env)
+        world.log(t=env.now, event="stopper_close", resource="conveyor",
+                  boarded=boarded, open_s=env.now - t0, drain_s=drained,
+                  staged=sum(len(s.items) for s in (world.bench_staging or {}).values()))
+        next_t += period
+        if next_t <= env.now:
+            next_t = env.now + period      # 窓が周期を食い切った ⇒ 次は今から
+
+
+def _flush_queues(world: World) -> None:
+    """開放: ストッパーの前に居た荷を全部カーブへ向かわせる。
+
+    列に並んでいた荷も、``auto`` で分岐待ちに止まっていた荷も同じ開放で動かす——
+    「開いている間、本線のスロットは必ず有限時間で空く」を成り立たせているのが
+    この一斉解放で、それが staging 経由の循環待ちを潰している（上の議論の2）。
+    """
+    env = world.env
+    for trunk in world.stoppers:
+        stp = trunk.stopper
+        while stp.queue:
+            held = stp.queue.pop(0)
+            world.log(t=env.now, event="stopper_release",
+                      order_id=held.order.order_id, resource="conveyor",
+                      conveyor=trunk.id, kind=held.kind, queue=len(stp.queue),
+                      total=_stopper_level(world), wait=env.now - held.at)
+            held.event.succeed(("release",))
+        wake = trunk.divert_wake
+        if wake is not None and not wake.triggered:
+            trunk.divert_wake = None
+            wake.succeed()
+
+
+def _load_staging(world: World, deadline: float):
+    """台の仮置きから完成品を本線へ、空きスロット1つにつき1個ずつ載せる。
+
+    人が1個ずつ載せる作業なので直列。順番は**ベルトidのラウンドロビン**（全員が
+    自分の台の脇から同時に載せる形を、決定論的な1本の列に畳んだもの）。窓が閉じた
+    ら途中でやめる——載せ切れなかった分は次の窓まで台の脇に残り、それが必要容量の
+    答えになる。
+    """
+    env = world.env
+    stores = world.bench_staging or {}
+    belts = sorted(stores)
+    if not belts:
+        return 0
+    n, cursor = 0, 0
+    while env.now < deadline:
+        src = None
+        for k in range(len(belts)):
+            b = belts[(cursor + k) % len(belts)]
+            if stores[b].items:
+                src, cursor = b, (cursor + k + 1) % len(belts)
+                break
+        if src is None:
+            break                       # 出し切った
+        target = world.stage_onto.get(src)
+        if target is None:
+            break
+        trunk, arc = target
+        req = trunk.belt.request()
+        if not req.triggered:
+            res = yield req | env.timeout(max(0.0, deadline - env.now))
+            if req not in res:
+                req.cancel()
+                break                   # 窓が閉じた: 残りは次の周期へ
+        item = yield stores[src].get()
+        order = item["order"]
+        tote = world.new_tote(f"{order.order_id}-fin",
+                              kind=world.release_schedule["load_kind"] or None)
+        if tote is not None and world.recording():
+            p = trunk.point_at(arc)
+            tote.kf(env.now, p[0], p[1], "belt")
+        world.log(t=env.now, event="release_board", order_id=order.order_id,
+                  resource="conveyor", conveyor=trunk.id, bench=src, arc=arc,
+                  occ=trunk.belt.count, capacity=trunk.capacity,
+                  staged=env.now - item["at"],
+                  level=sum(len(s.items) for s in stores.values()))
+        env.process(_convey_chain(world, order, item["at"], trunk, arc, req,
+                                  0.0, tote,
+                                  kind=world.release_schedule["load_kind"],
+                                  to_exit=True, packed=True))
+        n += 1
+    return n
+
+
 def _ride_belt(world: World, line, a0: float, a1: float, tote):
     """Ride ``line`` from arc ``a0`` to arc ``a1``, drawing the tote along the path.
 
@@ -1411,7 +1760,8 @@ def _leg_off(world: World, order: Order, line, leg: int, arc_in: float,
 
 
 def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
-                  slot, dist_per_order, tote=None, kind: str = "", held_from=None):
+                  slot, dist_per_order, tote=None, kind: str = "", held_from=None,
+                  to_exit: bool = False, packed: bool = False):
     """One tote down a CHAINED line: hand-overs, 引き込み diverts, then 梱包.
 
     **Deadlock-freedom is structural, not lucky.** Every slot this process waits
@@ -1457,6 +1807,15 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
     the stop line, else the shared pool) and holds its slot until then, while loads
     of a passing kind never see the gate at all. That is how one belt carries
     検品済み容器 and 梱包済み完成品 at the same time and still sorts them.
+
+    **物理ストッパー (``mode: "all"``)** stops every kind and the loads QUEUE behind
+    it (:class:`build.Stopper`): the line end becomes a 取り置きバッファ people work
+    out of, not a place goods die. ``to_exit`` marks a load bound for カーブ→積み付け
+    — the finished goods a release put on the trunk, and whatever was standing in
+    front of the stopper when it opened. Such a load is not diverted into a 引き込み
+    (nobody pulls a carton that is on its way to the cage) and it ends at
+    :func:`_stack_out` instead of a 梱包台. Both default False, so every model
+    without a stopper takes exactly the path it always did.
     """
     env = world.env
     pack_time = max(world.model.process.pack_time_s, 0.0)
@@ -1466,6 +1825,7 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
     max_hops = max(1, len(world.conveyors))
     visited = {line.id}
     pack_wait = 0.0            # 引き込み待ち — charged to the pack stage's wait
+    seized = None              # 停止線で並んで確保できた台 (pool, request, wait)
     if tote is not None and world.recording():
         p0 = line.point_at(arc)
         tote.kf(env.now, p0[0], p0[1], "belt")
@@ -1486,10 +1846,15 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
         # and the gate vanished from its junction window.
         gate = (line.gate if (line.gate is not None and line.gate.stops(kind)
                               and line.gate.arc >= arc - 1e-9) else None)
+        # 開放中 (mode_B) のストッパーはゲートではない: 前に居た荷は全部カーブへ流れる
+        # ——物理ストッパーが開くとはそういうことで、まだ梱包されていない検品済みが
+        # 混じって出るのはこの運用の実費 (``stopper_leak`` が数える)。
+        if gate is not None and line.stopper is not None and line.stopper.is_open:
+            gate, to_exit = None, True
         end_arc = line.length if gate is None else min(gate.arc, line.length)
         branches = ([(a, s) for a, s in line.junctions
                      if arc - 1e-9 <= a <= end_arc + 1e-9 and s.id not in visited]
-                    if hops < max_hops else [])
+                    if (hops < max_hops and not to_exit) else [])
         if branches:
             i = 0
             while True:
@@ -1527,9 +1892,19 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
                     continue
                 # Nothing from here on has room: stall HERE, holding the 本線 slot,
                 # until some 引き込み frees up — then look again from this junction.
+                # …or until the ストッパー opens: while a release window is on, every
+                # slot of this trunk has to come free within a bounded time, which is
+                # what keeps 完成品staging から本線へ の道が deadlock-free.
                 wait0 = env.now
-                yield _divert_wake(world, line)
+                wake = _divert_wake(world, line)
+                stp = line.stopper
+                if stp is not None:
+                    yield wake | stp.open_ev(env)
+                else:
+                    yield wake
                 spur_wait += env.now - wait0
+                if stp is not None and stp.is_open:
+                    break               # 開放 ⇒ 分岐を諦めて末端(カーブ)へ流れる
 
         if spur is not None:
             pack_wait += spur_wait
@@ -1556,13 +1931,40 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
             # up the belt, which is precisely what a stop line does on the floor.
             world.log(t=env.now, event="conveyor_gate", order_id=order.order_id,
                       resource="conveyor", conveyor=line.id, kind=kind, arc=arc)
-            break
+            stp = line.stopper
+            if stp is None:
+                break                    # 選択停止: 停止線の人が降ろす (従来どおり)
+            if not stp.is_open:
+                hold_t = env.now
+                what = yield from _hold_at_stopper(world, line, order, kind, tote)
+                if what[0] == "spur":
+                    # 止まっている荷を作業者が引いた。スロットは引く側が確保済み。
+                    _, cand, spur_slot = what
+                    pack_wait += env.now - hold_t
+                    hops += 1
+                    leg += 1
+                    _leg_on(world, order, cand, leg, cand.feed_arc, 0.0)
+                    _leg_off(world, order, line, leg - 1, arc_in, arc, board_t, last=0)
+                    line.belt.release(slot)
+                    line, slot, arc = cand, spur_slot, cand.feed_arc
+                    visited.add(line.id)
+                    if tote is not None and world.recording():
+                        p0 = line.point_at(arc)
+                        tote.kf(env.now, p0[0], p0[1], "belt")
+                    continue
+                if what[0] == "bench":
+                    seized = what[1:]    # 停止線の台を確保できた ⇒ そこで梱包
+                    break
+            # 開放 (mode_B): ストッパーの先へ — カーブ→積み付けへ流れる。
+            to_exit = True
+            if line.length > arc + 1e-9:
+                yield from _ride_belt(world, line, arc, line.length, tote)
+                arc = line.length
         nxt = line.next_line
         if nxt is not None and nxt.id not in visited and hops < max_hops:
-            req_t = env.now
-            nslot = nxt.belt.request()
-            yield nslot                          # blocks when the belt ahead is full
-            waited = env.now - req_t
+            # blocks when the belt ahead is full, and (when it carries a
+            # 物理ストッパー) while a 完成品リリース is occupying it.
+            nslot, waited = yield from _induct_slot(world, nxt, to_exit)
             _, nxt_arc = nxt.project(line.points[-1])
             hops += 1
             leg += 1
@@ -1583,21 +1985,34 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
     # different set of hands from the 引き込み's benches — and the same fallback
     # applies when the drawing puts nobody there.
     end = line.point_at(arc)
-    pool = (gate.bench if (gate is not None and gate.bench is not None)
-            else _bench_pool(world, line))
-    if pool is None:
-        # 誰も立っていない末端に着いた: この荷を取る人が居ない。スロットを持った
-        # まま止まる＝ラインが詰まる、が物理的に正しい答え（人を発明しない）。
-        # 図面が末端に人を置いていない設計は、実際そこで止まる。
-        world.log(t=env.now, event="pack_unmanned", order_id=order.order_id,
-                  resource="packer", conveyor=line.id, arc=arc)
-        if tote is not None and world.recording():
-            tote.kf(env.now, end[0], end[1], "belt")
-        yield env.event()                    # never fires: the load stays put
+    if to_exit:
+        # ストッパーを通り抜けた荷 (リリースで載せた完成品 / 開放時に前に居た荷)。
+        # 梱包台ではなくカーブの先の積み付けが終着点。
+        yield from _stack_out(world, order, arrival, line, arc, slot, tote, kind,
+                              held_from, dist_per_order, leg, arc_in, board_t,
+                              packed)
         return
-    pack_req_t = env.now
-    preq = pool.request()
-    yield preq
+    if seized is not None:
+        # 停止線の前で並んでいる間に確保できた台 (物理ストッパーの列)。並んだ順に
+        # granted されるので、ここで取り直すと列の順番を失う。
+        pool, preq, pre_wait = seized
+        pack_req_t = env.now - pre_wait
+    else:
+        pool = (gate.bench if (gate is not None and gate.bench is not None)
+                else _bench_pool(world, line))
+        if pool is None:
+            # 誰も立っていない末端に着いた: この荷を取る人が居ない。スロットを持った
+            # まま止まる＝ラインが詰まる、が物理的に正しい答え（人を発明しない）。
+            # 図面が末端に人を置いていない設計は、実際そこで止まる。
+            world.log(t=env.now, event="pack_unmanned", order_id=order.order_id,
+                      resource="packer", conveyor=line.id, arc=arc)
+            if tote is not None and world.recording():
+                tote.kf(env.now, end[0], end[1], "belt")
+            yield env.event()                # never fires: the load stays put
+            return
+        pack_req_t = env.now
+        preq = pool.request()
+        yield preq
     seize_t = env.now
     # The 引き込み wait and the 梱包台 wait are both "this tote could not be packed
     # yet", so they land together on pack_start's existing wait field.
@@ -1606,12 +2021,23 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
     if tote is not None and world.recording():
         tote.kf(env.now, end[0], end[1], "pack")
     yield env.timeout(pack_time)
+    # 完成品staging: 梱包の出口は次のリリースを待つ置き場で、満杯なら台もベルトも
+    # 握ったまま止まる。この背圧が置き場の必要容量を決める唯一の力。張られていない
+    # モデルでは1度も yield しない＝イベント列も乱数列も不変。
+    yield from _stage_finished(world, line, order)
     pool.release(preq)
     # The tote occupies the 引き込み until it is packed: the belt AND the bench are
     # where it physically stands, so the slot is only freed now — and freeing it is
     # what lets a tote stalled on the trunk come in (no-op for a belt that is not a
     # 引き込み, which nobody is waiting on).
     line.belt.release(slot)
+    # …and the same free pair of hands can turn round and take a load that is
+    # STANDING at the 物理ストッパー (contract §stopper.recovery). BEFORE the
+    # broadcast, because a load stalled at this junction is physically in front of
+    # the queue and must get the slot first — ``_pull_from_stopper`` defers while a
+    # waiter is registered, and ``_signal_divert`` clears that registration.
+    # No-op unless this belt is a 引き込み off a stoppered trunk with a queue on it.
+    _pull_from_stopper(world, line)
     _signal_divert(line)
     _release_container(world, held_from, end, order)
     if tote is not None and world.recording():
