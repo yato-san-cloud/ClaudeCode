@@ -1246,11 +1246,6 @@ def _has_gate(model: WarehouseModel) -> bool:
                for cv in (model.resources.conveyors or []))
 
 
-# 開放時間が周期の何割を超えたら「ほぼ開きっぱなし」と読むか。1.0 を許すと能力0＝
-# 「このラインは何も通さない」になり、上界としては正しくても提案としては無意味。
-_RELEASE_SHARE_MAX = 0.95
-
-
 def _has_stopper(model: WarehouseModel) -> bool:
     """物理ストッパー（全部止まる停止線・引ける列）が書かれているか。
 
@@ -1279,12 +1274,18 @@ def _release_window(model: WarehouseModel) -> tuple[float, float] | None:
     spec = getattr(model.process, "release_schedule", None)
     if not isinstance(spec, dict) or not spec:
         return None
-    try:
-        period = float(spec.get("period_s", 0.0) or 0.0)
-        window = float(spec.get("window_s", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        return None
-    return (period, max(window, 0.0)) if period > 0.0 else None
+
+    def num(key: str) -> float:
+        # 値ごとに独立して既定へ落ちる (``build._num``): 窓の書き間違いで
+        # スケジュールごと消えると、engine は張っているのに解析は「何も無い」と
+        # 名乗ることになる＝鏡の無い機構を黙って価格してしまう。
+        try:
+            return float(spec.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    period = num("period_s")
+    return (period, max(num("window_s"), 0.0)) if period > 0.0 else None
 
 
 def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
@@ -1318,36 +1319,26 @@ def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
 
 def _declare_unmirrored(model: WarehouseModel, out: dict,
                         unmirrored: list[str]) -> dict:
-    """降りたことを**名乗る**（＋安い上界だけは付ける）。
+    """降りたことを**名乗る**。数字は歴史的な連鎖の答えのまま。
 
     ``line_mechanics_mirrored: False`` と ``unmirrored`` が付いているブロックは
     「この機構は解析では見ていない」の意味で、黙って従来の閉形式を返すのとは違う
-    ——読む側が DES を回すべきだと分かる。何も降りていないモデルにはこのキー自体が
-    出ない（＝同梱カタログはバイト同一）。
+    ——読む側が「これは DES で裏を取る数字だ」と分かる。何も降りていないモデルには
+    このキー自体が出ない（＝同梱カタログはバイト同一）。
 
-    上界を1つだけ足す: 開放中は検品済みの投入が止まる（``_induct_hold``）ので、
-    mode_A が使える能力は多くても ``capacity × (1 − 窓の割合)``。窓の長さが書いて
-    あるときだけ課す — 「出し切るまで」(``window_s`` 0) の窓は長さが結果側の量なので、
-    上界として名乗れる数字が無い（そこは素直に降りる）。
+    **安い上界 ``capacity × (1 − 窓の割合)`` は測った上で捨てた。**
+    「開放中は検品済みの投入が止まるのだから能力はその分減る」は induction の話で
+    あって throughput の話ではない: ストッパーの手前は 30 スロットのバッファで、
+    窓の間もそこから梱包台は食い続ける。合成ラインで実測すると 周期900s/窓300s
+    （割合 1/3）で上界 80件/h に対し **実測 81.5件/h** — 1.9% とはいえ甘い側に
+    外れる上界は上界ではない。窓の割合は**開示**としてだけ出し（``release_window_share``）、
+    能力には一切かけない。再導入を防ぐ計測は ``tests/test_line_stopper.py`` に残して
+    ある。
     """
     out = {**out, "line_mechanics_mirrored": False, "unmirrored": list(unmirrored)}
     win = _release_window(model)
-    if win is None or not (win[1] > 0.0) or not out.get("capacity_per_hr"):
-        return out
-    period, window = win
-    share = min(window / period, _RELEASE_SHARE_MAX)
-    cap = out["capacity_per_hr"] * (1.0 - share)
-    offered = out.get("offered_per_hr") or 0.0
-    out["capacity_per_hr_unbounded"] = out["capacity_per_hr"]
-    out["release_window_share"] = share
-    out["capacity_per_hr"] = cap
-    out["jams"] = bool(offered > cap)
-    if out["jams"]:
-        per_s = max(offered - cap, 1e-9) / 3600.0
-        out["time_to_jam_s"] = out.get("buffer_slots", 0) / per_s
-        # 通せない割合は手待ち率の下限 (通せなかった荷はどこかで待っている)。
-        out["block_ratio_est"] = min(max(out.get("block_ratio_est", 0.0),
-                                         1.0 - cap / max(offered, 1e-9)), 1.0)
+    if win is not None and win[1] > 0.0:
+        out["release_window_share"] = min(win[1] / win[0], 1.0)
     return out
 
 
@@ -1373,9 +1364,19 @@ def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
 
     ``None`` from a mechanism means "not in play on this drawing" and falls through,
     so a model can never lose the answer it has today (never-blocks).
+
+    **物理ストッパー / 時間分離リリース / 完成品staging が書かれていたら、両方の鏡を
+    使わずに降りる** (``_unmirrored_line_mechanics``). どちらの導出もこの形の線では
+    成り立たない: pull は「引かれなかった荷は失われる」損失系だが、ストッパーは
+    それを**待ち行列に戻す**（後で引ける・開放で流れる）し、停止線の式はゲートに
+    立つ手をサーバに置くが物理ストッパーに番人は居ない。**黙って別の機構の式を当てる
+    のが一番悪い**ので、歴史的な連鎖の答え（＝ベルトの能力）に降りて、降りたことを
+    ``line_mechanics_mirrored: False`` として名乗る。
     """
-    pull_on = str(getattr(model.process, "divert_policy", "auto") or "auto") == "pull"
-    gate_on = _has_gate(model)
+    unmirrored = _unmirrored_line_mechanics(model)
+    pull_on = (not unmirrored
+               and str(getattr(model.process, "divert_policy", "auto") or "auto") == "pull")
+    gate_on = not unmirrored and _has_gate(model)
     if pull_on or gate_on:
         line = _belt_stages(model)          # resolved ONCE and handed to the mirror
         if line is not None:
@@ -1391,7 +1392,10 @@ def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
                                                horizon_s, line=line)
                 if out is not None:
                     return out
-    return _conveyor_estimate(model, lam, n_stations, pack_time_s, horizon_s)
+    out = _conveyor_estimate(model, lam, n_stations, pack_time_s, horizon_s)
+    if unmirrored and out is not None:
+        out = _declare_unmirrored(model, out, unmirrored)
+    return out
 
 
 def _container_estimate(model: WarehouseModel, lam: float, n_stations: int,
