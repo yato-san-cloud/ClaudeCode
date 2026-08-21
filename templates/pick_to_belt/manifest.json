@@ -1,0 +1,77 @@
+{
+  "template_id": "pick_to_belt",
+  "name": "通販EC・コンベア出荷ライン",
+  "description": "通販EC の出荷ライン。ピッキング通路の端に集合コンベアを敷き、摘み終えたトートを投入口へ載せるだけで梱包ラインまで搬送する(ピック＆ベルト)。歩行を通路端までに抑え、梱包と工程を分離した提案規模(~290間口)のレイアウト。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "resources.stations.0.count",
+      "label": "梱包台数",
+      "type": "int",
+      "unit": "台"
+    },
+    {
+      "path": "resources.conveyors.0.speed_mps",
+      "label": "コンベア速度",
+      "type": "float",
+      "unit": "m/s"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.peak_factor",
+      "label": "ピーク係数",
+      "type": "float",
+      "unit": "倍"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "discrete",
+          "label": "シングルオーダー"
+        },
+        {
+          "value": "batch",
+          "label": "マルチオーダー"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン（リレー）"
+        },
+        {
+          "value": "wave",
+          "label": "バッチ投入"
+        }
+      ]
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間",
+      "type": "float",
+      "unit": "時間",
+      "scale": 3600
+    }
+  ]
+}

@@ -1,0 +1,1303 @@
+"""Turn a validated WarehouseModel into a runnable SimPy world.
+
+Engine v2: pickers are *individual* agents with a position, not an anonymous
+resource pool. That makes the run produce a per-worker trajectory (keyframes)
+which the 2D/3D viewers replay as motion -- "the simulation must move".
+"""
+
+from __future__ import annotations
+
+import itertools
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+import simpy
+
+from whsim import beltgeom
+from whsim.engine.graph import AisleGraph, simplify_collinear
+from whsim.engine.routing import manhattan
+from whsim.schema.model import WarehouseModel
+from whsim.workmethod import orders_per_trip as workmethod_orders_per_trip
+
+
+@dataclass
+class Worker:
+    """One picker agent. Keyframes are (t, x, y, state) waypoints; viewers lerp
+    position between consecutive frames, and apply `state` from each frame on.
+
+    A `pick` (or `putaway`) keyframe MAY carry a 5th `meta` dict
+    ``{"lv": 段, "by": "manual"|"forklift"|"crane", "h": pick-face height m}`` so
+    the 2D/3D replay can raise the picker/forklift to the right level. Ground-level
+    (段1) frames stay 4-tuples — byte-identical to the legacy contract."""
+
+    id: str
+    role: str
+    keyframes: list[tuple] = field(default_factory=list)
+
+    def kf(self, t: float, x: float, y: float, state: str, meta: dict | None = None) -> None:
+        f = (round(t, 2), round(x, 3), round(y, 3), state)
+        self.keyframes.append(f if meta is None else (*f, meta))
+
+
+@dataclass
+class Tote:
+    """One physical unit of goods moving through the warehouse, as a replay track.
+
+    Same keyframe contract as :class:`Worker` — ``(t, x, y, state)`` with the same
+    rounding — so a viewer lerps a tote exactly like it lerps an agent. ``state``
+    is one of ``"carry"`` (in a picker's hands), ``"belt"`` (riding a conveyor) or
+    ``"pack"`` (at the discharge/pack point). Purely a replay artefact: the DES
+    timing is unchanged whether or not a tote is being recorded.
+
+    ``kind`` is 荷の種別 (``Conveyor.load_kind`` — what a 選択停止ゲート sorts on) and
+    ``belt_id`` names the deck this box rides when one footprint carries two
+    (2段駆動コンベア). Both default to ``None`` and are then omitted from the replay
+    document entirely, so a model that states neither renders exactly as before."""
+
+    id: str
+    keyframes: list[tuple] = field(default_factory=list)
+    kind: str | None = None
+    belt_id: str | None = None
+
+    def kf(self, t: float, x: float, y: float, state: str) -> None:
+        self.keyframes.append((round(t, 2), round(x, 3), round(y, 3), state))
+
+
+# Replay memory guard: at most this many tote tracks are recorded per run (the
+# FIRST N totes inside the replay window; every later tote rides untracked). A
+# busy shift can move tens of thousands of totes and each track is a list of
+# keyframes, so an uncapped emitter would dwarf the worker tracks.
+MAX_TOTE_TRACKS = 400
+
+# Fallback belt speed for a conveyor authored with a non-positive speed (the
+# schema defaults to 0.5 m/s; a hand-edited 0 must not divide by zero or freeze
+# the belt -- never-blocks).
+DEFAULT_CONVEYOR_SPEED_MPS = 0.5
+
+
+@dataclass
+class StopGate:
+    """選択停止ゲート (停止線) resolved onto ONE belt: where it is, and what stops.
+
+    A real 出荷ライン carries two different loads on the SAME belt at the same time
+    — 検品済み(梱包前)の容器 and 梱包済みの完成品 — and the stop line near the far end
+    is what tells them apart: the containers stop there (they are what the 引き込み
+    workers pull in), the finished cartons run straight through to カーブ→積み付け.
+    Without it the belt can only be modelled as carrying one homogeneous load, and
+    the whole point of the stop line (holding goods on the line, in view, until
+    somebody takes them) disappears.
+
+    ``arc`` is the arc length from the belt's infeed, clamped to its length.
+    Selection is never-blocks and deliberately three-valued:
+
+    * ``stop_kinds`` non-empty  → exactly those stop, everything else passes;
+    * else ``pass_kinds`` non-empty → everything NOT named stops;
+    * neither → nothing stops (a gate that names nothing is not a gate).
+
+    ``bench``/``n_bench`` are the 梱包台 standing AT the stop line (same reach rule
+    as a 引き込み's own benches). ``None`` = nobody stands there and a stopped load
+    falls back to the shared pack pool — the same half-drawn-line fallback a
+    benchless 引き込み takes.
+
+    ``stop_all`` is the **物理ストッパー**: selection is not a property it has. Every
+    load hits it and stops, and what sorts the two kinds apart is time
+    (``Process.release_schedule``), not the gate. ``pullable`` says the queue that
+    grows back from it is still WORK — 引き込みの作業者 can take a stationary load out
+    of it (``Stopper``). Both are False for every gate authored before they existed,
+    so a select gate is byte-identical."""
+
+    arc: float
+    stop_kinds: frozenset[str] = frozenset()
+    pass_kinds: frozenset[str] = frozenset()
+    bench: simpy.Resource | None = None
+    n_bench: int = 0
+    stop_all: bool = False
+    pullable: bool = False
+
+    def stops(self, kind: str) -> bool:
+        if self.stop_all:
+            return True
+        if self.stop_kinds:
+            return kind in self.stop_kinds
+        if self.pass_kinds:
+            return kind not in self.pass_kinds
+        return False
+
+
+@dataclass
+class Stopper:
+    """物理ストッパーの前に育つ**列**: 取り置きバッファそのもの。
+
+    A :class:`StopGate` says where the loads stop; this says what the pile of them
+    IS. The queue grows BACKWARD from the gate, one load per ``pitch`` metres
+    (``Conveyor.tote_pitch_m`` — the same pitch that sets the belt's slot count), so
+    the load at index ``i`` stands at ``gate.arc - i*pitch``. That arc is the whole
+    point: a 引き込み whose junction the tail has reached back to can PULL a
+    stationary load out of the queue (``processes._pull_from_stopper``), and one it
+    has not reached cannot. Pulling from the middle compacts the queue forward,
+    exactly as the boxes slide down when you take one out.
+
+    ``is_open`` is mode_B: while the stopper is open everything in front of it rides
+    through to カーブ→積み付け, and 検品済み is not inducted onto the trunk at all
+    (混流させない). ``open_ev``/``close_ev`` are the broadcasts that carry those two
+    edges to the loads waiting on them.
+
+    Created ONLY for a gate that buffers (物理ストッパー, an authored ``pullable``, or
+    a line running a release schedule). A plain 選択停止ゲート has ``stopper=None``
+    and takes the code path it always did."""
+
+    line: ConveyorLine
+    gate: StopGate
+    pitch: float
+    queue: list = field(default_factory=list)     # index 0 = at the gate
+    is_open: bool = False
+    _open_ev: simpy.Event | None = None
+    _close_ev: simpy.Event | None = None
+
+    def arc_of(self, index: int) -> float:
+        """Where the load at queue position ``index`` physically stands."""
+        return max(self.gate.arc - index * max(self.pitch, 1e-9), 0.0)
+
+    def reach_index(self, junction_arc: float) -> int | None:
+        """The queued load a worker at ``junction_arc`` can reach — or ``None``.
+
+        The queue is contiguous and its arcs DECREASE with the index, so the first
+        index at or upstream of the junction is the load standing next to that
+        worker (the first one that could not get past them). Nothing further down
+        the line is within reach: you take the box in front of you, you do not walk
+        the trunk."""
+        for i in range(len(self.queue)):
+            if self.arc_of(i) <= junction_arc + 1e-9:
+                return i
+        return None
+
+    def open_ev(self, env) -> simpy.Event:
+        if self._open_ev is None or self._open_ev.triggered:
+            self._open_ev = env.event()
+        return self._open_ev
+
+    def close_ev(self, env) -> simpy.Event:
+        if self._close_ev is None or self._close_ev.triggered:
+            self._close_ev = env.event()
+        return self._close_ev
+
+    def open(self, env) -> None:
+        self.is_open = True
+        ev, self._open_ev = self._open_ev, None
+        if ev is not None and not ev.triggered:
+            ev.succeed()
+
+    def close(self, env) -> None:
+        self.is_open = False
+        ev, self._close_ev = self._close_ev, None
+        if ev is not None and not ev.triggered:
+            ev.succeed()
+
+
+@dataclass
+class ConveyorLine:
+    """ONE physical conveyor: its own polyline, speed and slot capacity.
+
+    Geometry is the authored polyline ``points[0] -> ... -> points[-1]``; the LAST
+    point is the discharge end (where totes leave the belt to be packed). A tote
+    boards at the nearest point *on the path* (``project``) and rides only the
+    REMAINING distance to the discharge end, so boarding next to the discharge is
+    genuinely quicker than boarding at the infeed.
+
+    ``belt`` is this line's own slot pool (one tote per ``Conveyor.tote_pitch_m``
+    of ITS length, historically 1/m, min 1), so two conveyors jam independently and
+    a slow pack stage backs up only the line that feeds it.
+
+    A line can also be a link in a CHAIN rather than a world of its own:
+
+    * ``next_line`` — the belt this one discharges ONTO (its last point sits on
+      that belt's path). A tote hands over there instead of being packed.
+    * ``junctions`` — ``(arc, spur)`` pairs in arc order: where a 引き込み(spur)
+      branches off THIS belt (the spur's infeed sits on this path). A tote riding
+      past turns into one of them.
+    * ``host`` — the reverse of ``junctions``: the trunk a spur branches off.
+    * ``bench`` / ``n_bench`` — a spur's OWN 梱包台 (the stations standing at its
+      discharge end). ``None`` = this belt has no bench of its own and its totes
+      fall back to the shared pack pool (never blocks).
+    * ``divert_wake`` — on a TRUNK, the broadcast a tote stalled at one of its
+      junctions waits on: fired whenever any 引き込み hanging off this trunk frees
+      a slot, so nobody sits still while a bench downstream of them goes idle."""
+
+    id: str
+    points: list[tuple[float, float]]
+    seglens: list[float]                    # euclidean length of each segment
+    length: float                           # total path length (m)
+    speed: float                            # m/s (> 0)
+    capacity: int                           # slots (length / tote pitch)
+    belt: simpy.Resource
+    next_line: ConveyorLine | None = None
+    junctions: list[tuple[float, ConveyorLine]] = field(default_factory=list)
+    host: ConveyorLine | None = None
+    bench: simpy.Resource | None = None
+    n_bench: int = 0
+    # True = benches ARE drawn at this spur's end but every count is 0 — the
+    # pull-in is deliberately unmanned. A closed spur takes no totes (its
+    # junction is not wired), which is different from bench=None-with-no-
+    # stations (half-drawn line → shared-pool fallback keeps it running).
+    closed: bool = False
+    # Arc along THIS belt where a diverted tote boards it. 0.0 for a 引き込み whose
+    # infeed sits on the trunk (every historical drawing); the crossing point for
+    # one drawn as a single belt CROSSING the 本線, which the trunk meets in the
+    # middle.
+    feed_arc: float = 0.0
+    divert_wake: simpy.Event | None = None
+    # 荷の種別 this belt stamps on a load boarding it (``Conveyor.load_kind``); the
+    # kind then travels with the load over every hand-over. ``""`` = one kind.
+    load_kind: str = ""
+    # 無動力(フリー)ローラのように両端から人が引く引き込みか (``Conveyor.discharge_both``).
+    # False (default) = a driven belt runs one way, so only ``points[-1]``'s benches
+    # are reachable. See ``beltgeom.discharge_ends``.
+    discharge_both: bool = False
+    # 選択停止ゲート on THIS belt (``None`` = none, which is every belt by default).
+    gate: StopGate | None = None
+    # 物理ストッパーの列 (``None`` = このベルトの荷は止まっても列にならない＝従来の
+    # 選択停止). See :class:`Stopper`.
+    stopper: Stopper | None = None
+    # Arc along the HOST trunk where this 引き込み hangs off it (0.0 when it is not a
+    # spur). ``junctions`` already carries the pair from the trunk's side; a spur
+    # needs it from its own side to know how far back the stopper queue must have
+    # grown before its worker can reach a stationary load.
+    host_arc: float = 0.0
+
+    def project(self, p) -> tuple[tuple[float, float], float]:
+        """Nearest point ON the polyline to ``p`` + its arc length from the infeed.
+
+        Projects onto every segment (clamped to its ends) rather than snapping to
+        the nearest vertex -- a picker standing beside the middle of a 30 m belt
+        boards there, not at the far corner."""
+        return beltgeom.project(p, self.points, self.seglens)
+
+    def remaining(self, arc: float) -> float:
+        """Metres left from arc length ``arc`` to the discharge end."""
+        return max(self.length - max(arc, 0.0), 0.0)
+
+    def tail(self, arc: float) -> list[tuple[float, float]]:
+        """Corner waypoints from arc length ``arc`` to the discharge end.
+
+        The route a tote physically travels, so the replay can follow a BENT belt
+        instead of cutting the corner (same idea as ``World.path`` for walkers)."""
+        arc = max(arc, 0.0)
+        acc = 0.0
+        for i, seg in enumerate(self.seglens):
+            if arc <= acc + seg + 1e-9:
+                a, b = self.points[i], self.points[i + 1]
+                t = ((arc - acc) / seg) if seg > 1e-12 else 0.0
+                t = 0.0 if t < 0.0 else (min(t, 1.0))
+                out = [(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)]
+                for p in self.points[i + 1:]:
+                    if math.dist(p, out[-1]) > 1e-9:   # drop a coincident head/corner
+                        out.append(p)
+                return out
+            acc += seg
+        return [self.points[-1]]
+
+    def point_at(self, arc: float) -> tuple[float, float]:
+        """The point on the path at arc length ``arc`` (clamped to both ends)."""
+        arc = max(arc, 0.0)
+        acc = 0.0
+        for i, seg in enumerate(self.seglens):
+            if arc <= acc + seg + 1e-9:
+                a, b = self.points[i], self.points[i + 1]
+                t = min(max((arc - acc) / seg, 0.0), 1.0) if seg > 1e-12 else 0.0
+                return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            acc += seg
+        return self.points[-1]
+
+    def slice_pts(self, a0: float, a1: float) -> list[tuple[float, float]]:
+        """Corner waypoints from arc ``a0`` to arc ``a1`` (``a0`` first, ``a1`` last).
+
+        The generalisation of :meth:`tail` a CHAINED ride needs: a tote may leave
+        this belt at a 引き込み junction partway along, so the replay track has to
+        follow the polyline between two arbitrary arcs, not only from an arc to the
+        discharge end. ``tail`` is left alone — it is the legacy single-belt path."""
+        a0 = max(a0, 0.0)
+        a1 = max(min(a1, self.length), a0)
+        out = [self.point_at(a0)]
+        acc = 0.0
+        for i, seg in enumerate(self.seglens):
+            acc += seg
+            if acc <= a0 + 1e-9:
+                continue
+            if acc >= a1 - 1e-9:
+                break
+            p = self.points[i + 1]
+            if math.dist(p, out[-1]) > 1e-9:
+                out.append(p)
+        end = self.point_at(a1)
+        if math.dist(end, out[-1]) > 1e-9:
+            out.append(end)
+        return out
+
+
+# Both live in ``whsim.beltgeom`` now, with the geometry that reads them: the
+# oracle needs the same two numbers, and a shared definition beats a mirrored
+# constant plus a parity test (invariant 11). Re-exported under the historical
+# names because callers and tests reach for ``build.JOIN_TOL_M``.
+JOIN_TOL_M = beltgeom.JOIN_TOL_M
+BENCH_REACH_M = beltgeom.BENCH_REACH_M
+
+
+def _attach_to(lines: list[ConveyorLine], p, exclude: set[str]):
+    """The belt whose PATH ``p`` sits on, as ``(line, arc)`` — or ``None``.
+
+    Pure geometry, no randomness: the nearest path within :data:`JOIN_TOL_M`, ties
+    broken by belt id so the resolved topology is identical on every run."""
+    hit = beltgeom.attach(p, [(c.id, c.points) for c in lines], exclude)
+    if hit is None:
+        return None
+    return next(c for c in lines if c.id == hit[0]), hit[1]
+
+
+def _seglens(pts: list[tuple[float, float]]) -> list[float]:
+    """Euclidean length of every segment of a drawn polyline."""
+    return [math.dist(a, b) for a, b in itertools.pairwise(pts)]
+
+
+def _kind_set(spec, key) -> frozenset[str]:
+    """A gate's ``stop_states``/``pass_states`` as a set of kind names.
+
+    Tolerant on purpose (the gate is authored as a plain dict): a string is read as
+    one name, a list as many, anything else as nothing — a mis-typed gate degrades
+    to "stops nothing" instead of breaking the run (never-blocks)."""
+    v = spec.get(key)
+    if isinstance(v, str):
+        return frozenset({v})
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return frozenset(str(x) for x in v if str(x))
+    return frozenset()
+
+
+def _resolve_gate(cv, line: ConveyorLine) -> StopGate | None:
+    """``Conveyor.stop_gate`` → a :class:`StopGate` on ``line`` (or ``None``).
+
+    ``None`` for an unstated gate, for a malformed one, and for one that names
+    nothing to stop — in all three cases the belt behaves exactly as it always
+    has, so an existing model cannot acquire a gate by accident.
+
+    ``mode: "all"`` is the 物理ストッパー: it stops everything, so it is a gate even
+    though it names no kind at all (that is the whole difference — selection is not
+    something a lump of steel does). ``pullable`` defaults to the mode: a physical
+    stopper's queue is a 取り置きバッファ people work out of, a 選択停止ゲート's is
+    not (that keeps every gate authored before this byte-identical). A mis-typed
+    ``mode`` reads as the historical ``"select"`` rather than silently doubling what
+    the line holds — never-blocks."""
+    spec = getattr(cv, "stop_gate", None)
+    if not isinstance(spec, dict) or not spec:
+        return None
+    try:
+        arc = float(spec.get("at_m", line.length))
+    except (TypeError, ValueError):
+        return None
+    stop_all = str(spec.get("mode", "select") or "select").strip().lower() == "all"
+    gate = StopGate(arc=min(max(arc, 0.0), line.length),
+                    stop_kinds=_kind_set(spec, "stop_states"),
+                    pass_kinds=_kind_set(spec, "pass_states"),
+                    stop_all=stop_all,
+                    pullable=bool(spec.get("pullable", stop_all)))
+    return gate if (stop_all or gate.stop_kinds or gate.pass_kinds) else None
+
+
+def _num(spec: dict, key: str, default: float) -> float:
+    """One number out of a hand-authored dict — a mis-typed one is not a number.
+
+    Every mechanism dict on the schema is free-form (that is what lets a model state
+    it without a nested type), so every read has to survive a string, a ``None`` and
+    a typo. Falling back to the default is what keeps a half-typed mechanism from
+    taking the line down (never-blocks)."""
+    try:
+        return float(spec.get(key, default))
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _resolve_release(model) -> dict | None:
+    """``Process.release_schedule`` → the resolved mode_B plan (or ``None``).
+
+    ``None`` for unstated, malformed, or a non-positive period — a schedule that
+    never fires is not a schedule, and the stoppers then simply never open (which
+    is exactly the model without this mechanism). ``window_s`` 0 means 「出し切る
+    まで」 and is capped at the period by the caller so two windows can never
+    overlap."""
+    spec = getattr(model.process, "release_schedule", None)
+    if not isinstance(spec, dict) or not spec:
+        return None
+    period = _num(spec, "period_s", 0.0)
+    if not (period > 0.0):
+        return None
+    return {
+        "period_s": period,
+        "window_s": max(0.0, _num(spec, "window_s", 0.0)),
+        "stack_rate_per_hr": max(0.0, _num(spec, "stack_rate_per_hr", 0.0)),
+        "stackers": max(1, int(_num(spec, "stackers", 1.0))),
+        "board_s": max(0.0, _num(spec, "board_time_s", 0.0)),
+        "load_kind": str(spec.get("load_kind", "") or ""),
+    }
+
+
+def _staging_capacity(model) -> int:
+    """``Process.bench_staging`` → 梱包台1台あたりの置ける数 (0 = 不活性)."""
+    spec = getattr(model.process, "bench_staging", None)
+    if not isinstance(spec, dict) or not spec:
+        return 0
+    return max(0, int(_num(spec, "capacity", 0.0)))
+
+
+def _pitch_of(model, belt_id: str) -> float:
+    """A belt's トート間ピッチ — the engine's own slot rule, read back per belt.
+
+    The stopper queue is measured in the SAME pitch the belt's slot count is, so
+    「列が何メートル戻ったか」 and 「ベルトが何個で満杯か」 can never disagree."""
+    for cv in (model.resources.conveyors or []):
+        if str(cv.id) == str(belt_id):
+            p = cv.tote_pitch_m
+            return float(p) if (p is not None and float(p) > 0.0) else 1.0
+    return 1.0
+
+
+def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[ConveyorLine]:
+    """Resolve the belts into ONE line: serial hand-overs, 引き込み branches, 梱包台.
+
+    A real 出荷ライン is a chain — 検品ライン → 本線 → 引き込み → 梱包台 — and its
+    interesting behaviour is the jam travelling BACKWARDS along it (引き込みが満杯
+    ⇒ 本線に滞留 ⇒ 検品ラインが止まる ⇒ ピッカーが手放せない). Modelling each belt as
+    its own world made every one of those couplings invisible.
+
+    Two different joints, both read off the drawn geometry (deterministic, no
+    search, no randomness):
+
+    * **直列** — belt A's DISCHARGE end (``points[-1]``) sits on belt B's path,
+      so A hands over to B (``A.next_line = B``).
+    * **枝分かれ** — a spur's INFEED (``points[0]``) sits on the trunk's path, so
+      the trunk carries a junction at that arc (``trunk.junctions``). Which belts
+      are spurs is a DESIGN statement, not geometry: they are the belts named by
+      the conveyor legs into 梱包 (``flowgraph.pack_conveyor_ids``).
+
+    Returns the belts a picker may board (``flowgraph.entry_conveyor_ids``,
+    falling back to every line). Nothing here fires unless the flow says so, so a
+    model with a single unchained belt comes back exactly as it went in."""
+    from whsim import flowgraph
+
+    def _refs(fn):
+        try:
+            return fn(model) or set()
+        except Exception:      # noqa: BLE001 — a broken flow must not break the run
+            return set()
+
+    by_id = {c.id: c for c in lines}
+    spurs = [by_id[r] for r in sorted(_refs(flowgraph.pack_conveyor_ids)) if r in by_id]
+    spur_ids = {s.id for s in spurs}
+
+    # 梱包台: the stations standing at a spur's discharge end become THAT spur's
+    # own bench pool. A spur nobody stands at keeps ``bench=None`` and its totes
+    # fall back to the shared pack pool — a half-drawn line still runs.
+    stations = list(getattr(model.resources, "stations", None) or [])
+    # Which 梱包台 belong to which 引き込み is ``beltgeom``'s rule, shared verbatim
+    # with the closed-form oracle so the two can never price different floors
+    # (invariant 5). Three answers, and the last two are NOT the same: a count of
+    # 0 means the pull-in is deliberately unmanned (it takes nothing), while
+    # nobody drawn at all means a half-drawn line that still runs off the shared
+    # pool. Falling back to the shared pool for the first case handed the spur the
+    # WHOLE bench line's capacity a second time (measured: packer_utilization 1.28
+    # and a jam that vanished when benches were REMOVED).
+    pools, claimed_i = beltgeom.bench_pools(
+        [(s.id, s.points) for s in spurs],
+        [(c.id, c.points) for c in lines],
+        [(st.x, st.y, st.count) for st in stations],
+        both={s.id for s in spurs if s.discharge_both})
+    claimed: set[int] = {id(stations[i]) for i in claimed_i}
+    for s in spurs:
+        n = pools.get(s.id)
+        if n and n > 0:
+            s.n_bench = n
+            s.bench = simpy.Resource(env, capacity=n)
+        elif n in beltgeom.NO_HANDS:
+            s.closed = True
+
+    # 停止線の作業者: the 梱包台 standing AT a stop gate belong to that gate — a load
+    # held there has to be taken off the line by somebody, and that somebody is the
+    # one standing at the stop line, not the whole packing floor. Benches already
+    # owned by a 引き込み are never counted twice (that double-count is what made a
+    # closed spur read packer_utilization 1.28 before ``closed`` existed).
+    for c in lines:
+        if c.gate is None:
+            continue
+        at = c.point_at(c.gate.arc)
+        nearby = [st for st in stations
+                  if id(st) not in claimed
+                  and math.dist((float(st.x), float(st.y)), at) <= BENCH_REACH_M]
+        n = sum(max(0, int(st.count)) for st in nearby)
+        if n > 0:
+            c.gate.n_bench = n
+            c.gate.bench = simpy.Resource(env, capacity=n)
+            claimed.update(id(st) for st in nearby)
+
+    # 誰の持ち物でもない梱包台 — what is left after every 引き込み and every 停止線
+    # has taken its own. This, not the whole floor, is what a pull-in nobody
+    # stands at may borrow: ``packers`` counts the private benches of the pull-ins
+    # already working them, so borrowing it books the same people twice.
+    spare = sum(max(0, int(st.count)) for st in stations if id(st) not in claimed)
+    if claimed and spare == 0:
+        # Every bench on the floor is spoken for, so a pull-in nobody stands at
+        # has nobody at all — it takes nothing, exactly like a closed one. (With
+        # NOTHING claimed the line is simply drawn without benches: everybody
+        # shares the pack pool, which is the historical never-blocks fallback and
+        # stays untouched.)
+        for s in spurs:
+            if s.bench is None:
+                s.closed = True
+
+    # 枝分かれ: hang each spur off the belt that FEEDS it. Normally that is the
+    # trunk its infeed sits on; a 引き込み drawn as one belt crossing the 本線 has
+    # no endpoint on the trunk at all and used to end up wired to nothing —
+    # keeping its 梱包台 and receiving not one load, while every tote rode past to
+    # the end of the line. ``beltgeom.feed_point`` falls back to where the two
+    # PATHS meet, and the tote then boards the spur THERE (``feed_arc``) rather
+    # than at its far end. Spurs are never junction hosts — a 引き込み feeds
+    # benches, not another 引き込み.
+    by_id = {c.id: c for c in lines}
+    for s in spurs:
+        if s.closed:
+            continue             # an unmanned pull-in diverts nothing
+        hit = beltgeom.feed_point(s.points, [(c.id, c.points) for c in lines],
+                                  exclude=spur_ids)
+        if hit is not None:
+            host, host_arc, s.feed_arc = by_id[hit[0]], hit[1], hit[2]
+            host.junctions.append((host_arc, s))
+            s.host = host        # so freeing a spur slot can wake the trunk's waiters
+            s.host_arc = host_arc   # …and so its worker knows how far back they reach
+    for c in lines:
+        c.junctions.sort(key=lambda j: (j[0], j[1].id))
+
+    # 直列: a belt discharging onto another belt hands over instead of packing.
+    # A spur is a terminal on both sides (it ends at its benches), so it is
+    # neither a hand-over source nor a hand-over target.
+    for a in lines:
+        if a.id in spur_ids:
+            continue
+        hit = _attach_to(lines, a.points[-1], exclude=spur_ids | {a.id})
+        if hit is not None:
+            a.next_line = hit[0]
+
+    entry_refs = _refs(flowgraph.entry_conveyor_ids)
+    entry = [c for c in lines if c.id in entry_refs]
+    return (entry or list(lines)), spare, bool(claimed)
+
+
+@dataclass
+class World:
+    env: simpy.Environment
+    model: WarehouseModel
+    order_store: simpy.Store
+    ready_store: simpy.Store                # AGV-fetched totes waiting for a picker
+    fork_store: simpy.Store                 # inbound putaway tasks for forklifts
+    packers: simpy.Resource
+    put_wall: simpy.Resource                # 種まき put-wall stations (capacity); full => sort queue
+    has_conveyor: bool
+    n_pickers: int
+    n_packers: int
+    n_agvs: int
+    agv_speed: float
+    pick_method: str                        # "manual" | "agv" | ...
+    pick_strategy: str                      # "discrete" | "batch" | "zone" | "wave"
+    batch_size: int
+    home: tuple[float, float]               # workers start/return here (pack area)
+    agv_home: tuple[float, float]           # AGV dock
+    fork_home: tuple[float, float]          # forklift / receiving dock
+    n_forklifts: int
+    fork_speed: float
+    slot_xy: list[tuple[float, float]]      # storage slots (forklift putaway targets)
+    sku_xy: dict[str, tuple[float, float]]
+    sku_ts: dict[str, float]
+    sku_pick: dict[str, tuple]
+    sku_weights: list[float]
+    sku_list: list[str]
+    grid_m: float
+    heat: np.ndarray
+    # 5-axis work method (the engine drives picking from these; see
+    # docs/WORK_METHOD_DESIGN.md). They are derived via Process.effective_work(),
+    # so legacy pick_strategy/batch_size models keep running unchanged.
+    zoning: str = "none"                    # C: "none" | "sequential" | "parallel"
+    consolidation: str = "pick"             # D: "pick" 摘み取り | "sort" 種まき
+    release: str = "continuous"             # E: "continuous" | "wave"
+    wave_interval_s: float = 1800.0
+    sort_time_s: float = 6.0                # 種まき: put-wall seconds per line
+    # 自動仕分機(sorter): when a sorter Equipment is placed AND consolidation=="sort",
+    # the sort phase runs an AUTOMATIC piece sorter (induction channels + destination
+    # chutes with back-pressure) instead of the manual put wall. None = no sorter
+    # (legacy manual wall path, byte-identical). Keys: xy, rate_per_hr, sort_s,
+    # chutes, chute_capacity, channels, release_s, induction (Resource),
+    # chute_containers (list[Container]). See _sorter_phase in processes.py.
+    sorter: dict | None = None
+    n_zones: int = 1                        # picking zones for C (spatial bands)
+    # Pick-sequence policy (ADDITIVE; default keeps the legacy greedy/S-shape).
+    # "default" = nearest-neighbour (discrete/batch/wave) or S-shape (zone);
+    # "optimized" = run picktour 2-opt over the greedy seed for shorter tours.
+    routing_policy: str = "default"
+    graph: AisleGraph | None = None         # wall-aware routing (when walls exist)
+    use_graph: bool = False
+    dist_overrides: dict = field(default_factory=dict)  # (rounded xy pair) -> metres
+    # コンベア搬送: one entry per authored conveyor (each with its own path,
+    # speed and slot capacity). Empty ⇒ no conveyor (has_conveyor False) and the
+    # engine takes the legacy carry-to-pack path unchanged.
+    conveyors: list[ConveyorLine] = field(default_factory=list)
+    # Which lines a PICKER may hand a tote to (``flowgraph.entry_conveyor_ids``).
+    # Always non-empty when ``conveyors`` is: it falls back to every active line,
+    # which is the behaviour from before belts could be chained.
+    entry_conveyors: list[ConveyorLine] = field(default_factory=list)
+    # 引き込み方式 ("auto" = 貪欲ディバート, the historical rule; "pull" = 作業者が引く).
+    divert_policy: str = "auto"
+    # 誰の持ち物でもない梱包台 — the stations no 引き込み and no 停止線 claimed.
+    # A pull-in nobody is drawn at falls back to THIS rather than to ``packers``,
+    # because ``packers`` counts every bench on the floor INCLUDING the private
+    # ones another 引き込み is already using: borrowing it books the same people
+    # twice (measured packer_utilization 1.675 on a floor of 4). ``None`` = every
+    # bench is spoken for, and then the historical shared pool is the fallback so
+    # a half-drawn line still runs (never-blocks).
+    spare_bench: simpy.Resource | None = None
+    # True = some 梱包台 belongs to a 引き込み or a 停止線. Then ``spare_bench``
+    # being ``None`` means every bench on the floor is spoken for, so there is
+    # NOBODY at a belt end that has no bench of its own — and a load arriving
+    # there is not packed by the whole floor a second time, it simply stands on
+    # the belt. With nothing claimed (every model without a 引き込み) this stays
+    # False and ``packers`` is the fallback exactly as it always was.
+    benches_claimed: bool = False
+    # 容器の有限循環. ``None`` = 容器は無限 (the historical behaviour: a picker can
+    # always put goods on the belt). When present it is a simpy.Container of empty
+    # containers: 投入 takes one and BLOCKS when the pool is dry, 梱包完了 sends it
+    # back round (return belt transit + ``container_return_s``). ``n_containers``
+    # is the pool size, i.e. the denominator every container KPI is read against.
+    container_pool: simpy.Container | None = None
+    n_containers: int = 0
+    container_return_s: float = 0.0
+    # The 還流ベルト an emptied container rides home on — geometry ONLY (transit
+    # time + the replay track). It is deliberately NOT one of ``conveyors``: empty
+    # containers do not contend for slots, and counting the return deck's slots in
+    # the conveyor KPIs would dilute the utilisation of the line that does the work.
+    container_return_line: ConveyorLine | None = None
+    # --- 時間分離運用 (mode_A ⇔ mode_B) --------------------------------------
+    # ``release_schedule`` is ``Process.release_schedule`` resolved (``None`` = no
+    # release ⇒ ``stoppers`` never open and not one of these fields is read).
+    # NOTE the neighbouring ``release`` field is the WORK METHOD's E axis
+    # ("continuous"/"wave") and has nothing to do with this one.
+    release_schedule: dict | None = None
+    # The belts whose gate buffers (``ConveyorLine.stopper``), in drawn order.
+    stoppers: list[ConveyorLine] = field(default_factory=list)
+    # 完成品staging: 梱包が終わった完成品の置き場, one Store per belt whose benches
+    # produced it (capacity = 台あたり × その帯の台数). ``None`` = 不活性.
+    bench_staging: dict | None = None
+    # Where each staging Store's goods are put ON the line at the next release:
+    # ``belt id -> (trunk ConveyorLine, arc)``. The 引き込み's own junction, because
+    # that is where its packers physically stand.
+    stage_onto: dict = field(default_factory=dict)
+    # 積み付け: the crew at the far side of the カーブ and its seconds per load.
+    # ``None``/0.0 = 積み付け is not a constraint (never blocks).
+    stack_crew: simpy.Resource | None = None
+    stack_time_s: float = 0.0
+    # 完成品を1個ベルトへ載せるのに要る秒数 (``release_schedule.board_time_s``).
+    # 0 = 未指定＝載せる手間は数えない。**推測しない**ためのゼロ既定で、排出時間は
+    # そのとき本線の空き待ちだけになる（測っていない秒数を売らない）。
+    release_board_s: float = 0.0
+    workers: list[Worker] = field(default_factory=list)
+    helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
+    totes: list[Tote] = field(default_factory=list)      # goods tracks (replay only)
+    tote_cap: int = MAX_TOTE_TRACKS
+    events: list[dict] = field(default_factory=list)
+    replay_window_s: float = 0.0            # only record keyframes up to this time
+    zone_edges: list[float] = field(default_factory=list)  # x cut points dividing picking zones
+    # 仮置き(staging): finite buffer between pick and pack. None = disabled (legacy
+    # inline pack). When present, pickers put totes here (blocking when full =
+    # back-pressure) and dedicated packer agents pull from it.
+    staging: simpy.Store | None = None
+    staging_capacity: int = 0
+    pack_xy: list[tuple[float, float]] = field(default_factory=list)  # packer agent stations
+    # 入荷検品(inbound inspection): when enabled, receipts queue here for inspector
+    # agents before forklift putaway. None = disabled (receipts go straight to fork).
+    inbound_store: simpy.Store | None = None
+    n_inspectors: int = 0
+    inspect_time_s: float = 0.0
+    # 在庫補充連鎖 (DES-internal inventory). None = disabled (pick faces have
+    # infinite stock, byte-identical legacy path). When present:
+    #   * replen_faces  — {face_key: dict(qty/trigger/refill_to/pending/event/xy)}
+    #     per slotted pick face; picks decrement it and empty faces block pickers.
+    #   * replen_store  — the replenishment task queue (each item is a face dict).
+    #   * replen_shared_forklift — the forklift agents also drain replen_store
+    #     (no dedicated replenishers); else dedicated replenisher agents do.
+    replen_faces: dict | None = None
+    replen_store: simpy.Store | None = None
+    replen_place_s: float = 0.0
+    replen_dedicated: int = 0               # dedicated replenisher agents to spawn
+    n_replenishers: int = 0                 # effective servers (for utilisation denom)
+    replen_shared_forklift: bool = False
+    # AGV通路相互排他・簡易干渉モデル (opt-in). None = disabled (AGVs never contend for
+    # aisle space — byte-identical legacy travel). When present it is a dict of
+    # lazily-created SimPy Resource(capacity=1) mutexes keyed by a COARSE aisle
+    # segment id, so at most one AGV occupies a ~3 m aisle stretch at a time and
+    # extra AGVs queue in shared corridors. See agv_agent / _agv_travel in
+    # processes.py. Only built when agv_interference AND the graph is active AND
+    # n_agvs > 1.
+    aisle_locks: dict | None = None
+    agv_deadlock_s: float = 120.0           # lock wait past this ⇒ warn + force-proceed
+    # 通路干渉 (walking agents contend for aisle cells). None = disabled: every
+    # ``_walk`` takes the legacy single-timeout path and the run is byte-identical.
+    # When present it is a dict of lazily-created capacity-1 SimPy Resources keyed
+    # by ``(cell_x, cell_y, direction)`` — the SAME lattice the congestion heatmap
+    # rasterises (``simulation.heatmap_grid_m``) plus the travel direction, so two
+    # agents crossing the same cell the same way queue while an agent going the
+    # other way (or across) passes freely (aisles are wide enough to pass, not to
+    # overtake). Built from ``simulation.aisle_interference``. See
+    # ``processes._walk`` for the traversal protocol and its forced-pass escape.
+    aisle_cells: dict | None = None
+    # Forced-pass threshold as a MULTIPLE of the cell's own traversal time: an
+    # agent that has waited this long at a cell boundary walks through anyway and
+    # logs ``aisle_pass_forced`` (never-blocks — a simulation must not stall).
+    aisle_wait_cap: float = 3.0
+    _helper_seq: int = 0                    # monotonic id source for helper tracks
+
+    def log(self, **kw) -> None:
+        self.events.append(kw)
+
+    @staticmethod
+    def _face_key(xy) -> tuple[float, float]:
+        """Round a pick position to a stable key for the inventory-face map."""
+        return (round(xy[0], 3), round(xy[1], 3))
+
+    def face_at(self, xy) -> dict | None:
+        """The inventory pick face at position ``xy`` (or None = infinite stock)."""
+        if self.replen_faces is None:
+            return None
+        return self.replen_faces.get(self._face_key(xy))
+
+    def helper_for(self, w: Worker, zone: int) -> Worker:
+        """A lightweight replay-only sub-worker track for one concurrent zone leg
+        of `w`. Parallel zoning runs several legs at the SAME simulated time, so
+        they cannot share `w.kf` (their keyframes would interleave and the worker
+        would appear to teleport). Each concurrent leg gets its own coherent
+        track instead; the primary worker `w` stays put while they run."""
+        self._helper_seq += 1
+        h = Worker(id=f"{w.id}.z{zone}#{self._helper_seq}", role=f"{w.role}-zone")
+        self.helpers.append(h)
+        return h
+
+    def zone_of(self, p: tuple[float, float]) -> int:
+        """Which picking zone (0..n_zones-1) a pick point falls in. Zones are
+        spatial x-bands across the storage area, so 'split by zone' (C axis) maps
+        to disjoint regions a picker can own without crossing another's."""
+        x = p[0]
+        z = 0
+        for edge in self.zone_edges:
+            if x >= edge:
+                z += 1
+        return min(z, max(self.n_zones - 1, 0))
+
+    @staticmethod
+    def _key(a, b):
+        return (round(a[0], 1), round(a[1], 1), round(b[0], 1), round(b[1], 1))
+
+    def dist(self, a, b) -> float:
+        """Travel distance a->b: measured override > wall-aware graph > Manhattan."""
+        if self.dist_overrides:
+            d = self.dist_overrides.get(self._key(a, b))
+            if d is None:
+                d = self.dist_overrides.get(self._key(b, a))
+            if d is not None:
+                return d
+        if self.use_graph and self.graph is not None:
+            return self.graph.distance(a, b)
+        return manhattan(a, b)
+
+    def path(self, a, b) -> list[tuple[float, float]]:
+        """Corner waypoints a→b along the REAL route (wall-aware aisle graph), for
+        replay/動線 viz. The viewer lerps between keyframes, so emitting the route's
+        turns makes agents follow aisles instead of cutting straight through
+        shelves. Collinear runs are collapsed to the few corner vertices. Falls back
+        to the straight segment [a, b] when no graph is active or it cannot route —
+        viz must never break the run."""
+        if self.use_graph and self.graph is not None:
+            try:
+                wp = self.graph.path(a, b)
+                if wp and len(wp) >= 2:
+                    return simplify_collinear(wp)
+            except Exception:  # noqa: BLE001 — fall back to the straight segment
+                pass
+        return [tuple(a), tuple(b)]
+
+    def stand(self, p) -> tuple[float, float]:
+        """Where an agent physically STANDS to serve point ``p``.
+
+        Slots are addressed at the rack centre-line, but a picker stands in the
+        aisle and reaches in — so every *stationary* keyframe at a slot (pick,
+        putaway, replenish) is emitted here, matching the aisle node the router
+        measures from. Without this the replay draws a half-rack-depth hop into
+        and back out of the rack around every pick. Identity when no graph is
+        active or the point is already on free floor."""
+        if self.use_graph and self.graph is not None:
+            try:
+                return self.graph.access_point(p)
+            except Exception:  # noqa: BLE001 — viz must never break the run
+                pass
+        return (float(p[0]), float(p[1]))
+
+    def recording(self) -> bool:
+        return self.env.now <= self.replay_window_s
+
+    def new_tote(self, order_id: str, kind: str | None = None,
+                 belt_id: str | None = None) -> Tote | None:
+        """A replay track for one tote — or ``None`` when we are outside the replay
+        window or past ``tote_cap`` (MAX_TOTE_TRACKS). Callers treat ``None`` as
+        "move it, don't draw it", so the physics never depend on recording.
+
+        ``kind``/``belt_id`` are additive replay metadata (荷の種別 / which deck of a
+        2段駆動コンベア it rides). Unset ⇒ the track is exactly the legacy one."""
+        if not self.recording() or len(self.totes) >= self.tote_cap:
+            return None
+        t = Tote(id=f"tote-{order_id}", kind=kind or None, belt_id=belt_id or None)
+        self.totes.append(t)
+        return t
+
+    def aisle_lock(self, seg) -> simpy.Resource:
+        """The mutex (capacity-1 Resource) for a coarse aisle segment, created on
+        first use. Only reached when ``aisle_locks`` is not None (interference on)."""
+        lk = self.aisle_locks.get(seg)
+        if lk is None:
+            lk = simpy.Resource(self.env, capacity=1)
+            self.aisle_locks[seg] = lk
+        return lk
+
+    def aisle_cell(self, key) -> simpy.Resource:
+        """The capacity-1 Resource for one ``(cell_x, cell_y, direction)``, created
+        on first use — so only the cells agents actually walk through ever exist
+        (a 100x50 m floor would otherwise pre-allocate 20,000 resources nobody
+        touches). Only reached when ``aisle_cells`` is not None (通路干渉 on)."""
+        lk = self.aisle_cells.get(key)
+        if lk is None:
+            lk = simpy.Resource(self.env, capacity=1)
+            self.aisle_cells[key] = lk
+        return lk
+
+
+def build(
+    model: WarehouseModel,
+    env: simpy.Environment | None = None,
+    replay_window_s: float = 0.0,
+    graph: AisleGraph | None = None,
+    routing_policy: str = "default",
+) -> World:
+    """``graph`` (optional) injects a pre-built routing graph so replications
+    over the SAME layout share one graph (and its distance caches) instead of
+    rebuilding it per rep; ``None`` keeps the classic build-from-model path.
+
+    ``routing_policy`` is ADDITIVE and defaults to ``"default"`` (the legacy
+    greedy nearest-neighbour / zone S-shape). Pass ``"optimized"`` to route each
+    pick with picktour's 2-opt instead — strictly shorter tours, opt-in only, so
+    every existing run is byte-identical when left at the default."""
+    env = env or simpy.Environment()
+
+    # "default" resolves to the MODEL's own routing_policy, so a scenario JSON
+    # edit of `process.routing_policy` switches disciplines with no code change.
+    # The schema default "nearest" lands on the same nearest-neighbour branch the
+    # literal "default" always took, so plumbing the model value through changes
+    # nothing for existing models. An explicit kwarg still wins (tests use it).
+    if routing_policy == "default":
+        routing_policy = str(getattr(model.process, "routing_policy", "nearest") or "nearest")
+
+    workers = model.resources.workers
+    n_pickers = sum(w.count for w in workers if w.role == "picker") or 1
+    station = model.resources.stations[0] if model.resources.stations else None
+    # 梱包台数 = the WHOLE bench line, not just the first entry. The editor places
+    # every bench as its own Station (``designer/place.js`` writes ``count: 1``), so
+    # a 20-bench packing line arrives as 20 entries and reading ``stations[0]``
+    # alone modelled it as ONE bench. Summing is byte-identical for the single-group
+    # form every template and importer produced before, and ``analytic`` counts the
+    # same benches (they must not disagree about the pack stage's capacity).
+    n_packers = sum(max(0, s.count) for s in model.resources.stations) or 1
+    home = (station.x, station.y) if station else (0.0, 0.0)
+
+    agvs = [e for e in model.resources.equipment if e.type == "agv"]
+    n_agvs = sum(e.count for e in agvs)
+    agv_speed = (sum(e.speed_mps for e in agvs) / len(agvs)) if agvs else 1.6
+    # AGVs dock at the first AGV's position, else at the pack area.
+    agv_home = (agvs[0].x, agvs[0].y) if agvs and (agvs[0].x or agvs[0].y) else home
+    pick_method = model.process.pick_method()
+    # AGV picking with no AGVs placed falls back to manual so it still runs.
+    if pick_method == "agv" and n_agvs == 0:
+        pick_method = "manual"
+
+    loc_by_id = model.location_by_id()
+    # sku_xy = pick position; sku_pick = per-visit pick meta carrying the vertical
+    # access time AND the 段(level)/height/mover so the engine can both *time* the
+    # lift and *animate* it (the 2D/3D replay raise the picker/forklift to height).
+    from whsim import racktypes
+    _lift = float(model.process.lift_speed_mps)
+    _reach = float(model.process.manual_reach_s_per_m)
+
+    def _pick_meta(loc):
+        rt = getattr(loc, "rack_type", None)
+        lv = int(getattr(loc, "level", 1) or 1)
+        return (racktypes.vertical_pick_s(rt, lv, _lift, _reach),  # [0] seconds
+                lv,                                                  # [1] 段(level)
+                racktypes.mover(rt),                                 # [2] manual/forklift/crane
+                racktypes.level_height_m(rt, lv))                    # [3] pick-face height (m)
+
+    sku_xy: dict[str, tuple[float, float]] = {}
+    sku_pick: dict[str, tuple] = {}
+    sku_loc: dict[str, object] = {}       # sku -> the Location backing its pick face
+    for it in model.items:
+        if it.default_location and it.default_location in loc_by_id:
+            loc = loc_by_id[it.default_location]
+            sku_xy[it.sku] = (loc.x, loc.y)
+            sku_pick[it.sku] = _pick_meta(loc)
+            sku_loc[it.sku] = loc
+    for loc in model.locations:
+        if loc.sku and loc.sku not in sku_xy:
+            sku_xy[loc.sku] = (loc.x, loc.y)
+            sku_pick[loc.sku] = _pick_meta(loc)
+            sku_loc[loc.sku] = loc
+
+    sku_ts = {it.sku: it.ts_per_unit for it in model.items}
+    by_sku = model.item_by_sku()
+    sku_list = [it.sku for it in model.items if it.sku in sku_xy]
+    sku_weights = [max(by_sku[s].pick_freq, 1e-6) for s in sku_list]
+
+    grid_m = model.simulation.heatmap_grid_m or 1.0
+    gw = max(1, math.ceil(model.layout.bounds.width / grid_m))
+    gh = max(1, math.ceil(model.layout.bounds.depth / grid_m))
+    heat = np.zeros((gh, gw), dtype=float)
+
+    # Drive picking from the 5-axis work method. effective_work() derives it
+    # from legacy pick_strategy/batch_size when not set explicitly, so old models
+    # keep running identically. pick_strategy is still surfaced for routing.
+    work = model.process.effective_work()
+    strategy = model.process.pick_strategy
+    # orders_per_trip (B) generalises batch_size: how many orders to pull per
+    # trip. The rule lives in ``workmethod.orders_per_trip`` so the closed-form
+    # oracle (analytic.estimate) resolves the SAME batch the engine sweeps.
+    batch_size = workmethod_orders_per_trip(model)
+
+    # Forklifts handle inbound putaway (their own moving 動線).
+    forks = [e for e in model.resources.equipment if e.type == "forklift"]
+    n_forklifts = sum(e.count for e in forks)
+    fork_speed = (sum(e.speed_mps for e in forks) / len(forks)) if forks else 2.0
+    recv = next((z for z in model.layout.zones if z.type == "receiving"), None)
+    fork_home = ((recv.x + recv.w / 2, recv.y + recv.h / 2) if recv
+                 else (forks[0].x, forks[0].y) if forks else (0.0, model.layout.bounds.depth / 2))
+    slot_xy = [(loc.x, loc.y) for loc in model.locations] or [home]
+
+    # --- コンベア搬送: one ConveyorLine per authored conveyor -----------------
+    # Each belt keeps its OWN geometry, speed and capacity (~1 tote per metre of
+    # its own length, min 1) instead of being merged into one virtual belt, so a
+    # tote pays only the distance from where it boards to THAT line's discharge
+    # end. Degenerate entries (<2 points, or every point coincident) are skipped
+    # entirely — they are not physical transport (never blocks, never divides by
+    # zero); a non-positive speed falls back to the schema default.
+    # WHICH belts the design actually commits to. `None` = no leg of the flow
+    # says 「コンベアで受け取る」, so no belt runs at all -- drawing a conveyor is no
+    # longer enough to make every picker use it. An empty SET = "conveyor, but no
+    # specific machine named", which keeps every drawn belt available (the
+    # behaviour before flow edges existed). See flowgraph.conveyor_ids_in_use.
+    from whsim import flowgraph
+    try:
+        designed = flowgraph.conveyor_ids_in_use(model)
+    except Exception:      # noqa: BLE001 — a broken flow must not break the run
+        designed = set()
+
+    conveyor_lines: list[ConveyorLine] = []
+    for cv in (model.resources.conveyors if designed is not None else []):
+        if designed and str(cv.id) not in designed:
+            continue          # a belt the design does not route through
+        pts = [(float(p[0]), float(p[1])) for p in cv.points if len(p) >= 2]
+        seglens = _seglens(pts)
+        total = sum(seglens)
+        if len(pts) < 2 or total <= 1e-9:
+            continue
+        speed = float(cv.speed_mps)
+        if not (speed > 0.0):
+            speed = DEFAULT_CONVEYOR_SPEED_MPS
+        # Slots = how many totes physically fit, i.e. length / tote pitch. An
+        # unstated (or non-positive) pitch keeps the historical 1 個/m.
+        pitch = float(cv.tote_pitch_m) if cv.tote_pitch_m is not None else 0.0
+        cap = max(1, int(total / pitch)) if pitch > 0.0 else max(1, int(total))
+        line = ConveyorLine(
+            id=cv.id, points=pts, seglens=seglens, length=total, speed=speed,
+            capacity=cap, belt=simpy.Resource(env, capacity=cap),
+            load_kind=str(getattr(cv, "load_kind", "") or ""),
+            discharge_both=bool(getattr(cv, "discharge_both", False)))
+        line.gate = _resolve_gate(cv, line)
+        conveyor_lines.append(line)
+    entry_lines, n_spare_bench, benches_claimed = _wire_conveyor_chain(
+        model, env, conveyor_lines)
+
+    # --- 容器の有限循環 (finite container pool) -------------------------------
+    # Unstated ⇒ None ⇒ 投入 never waits for a container and nothing is logged, so
+    # the run is byte-identical. The return belt is resolved from the DRAWN belts
+    # rather than the designed ones: 上段の還流ベルト carries no order and is
+    # therefore not part of any flow leg, so it never appears in ``conveyor_lines``.
+    container_pool = None
+    n_containers = 0
+    container_return_s = 0.0
+    container_return_line = None
+    cpool = getattr(model.process, "container_pool", None)
+    if isinstance(cpool, dict) and cpool:
+        try:
+            n_containers = int(cpool.get("count", 0) or 0)
+        except (TypeError, ValueError):
+            n_containers = 0
+        try:
+            container_return_s = max(0.0, float(cpool.get("return_time_s", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            container_return_s = 0.0
+        if n_containers > 0:
+            container_pool = simpy.Container(env, capacity=n_containers,
+                                             init=n_containers)
+            ref = str(cpool.get("return_belt", "") or "")
+            rcv = next((c for c in model.resources.conveyors if str(c.id) == ref), None)
+            if rcv is not None:
+                rpts = [(float(p[0]), float(p[1])) for p in rcv.points if len(p) >= 2]
+                rseg = _seglens(rpts)
+                rlen = sum(rseg)
+                if len(rpts) >= 2 and rlen > 1e-9:
+                    rspeed = float(rcv.speed_mps)
+                    if not (rspeed > 0.0):
+                        rspeed = DEFAULT_CONVEYOR_SPEED_MPS
+                    container_return_line = ConveyorLine(
+                        id=rcv.id, points=rpts, seglens=rseg, length=rlen,
+                        speed=rspeed, capacity=1,
+                        belt=simpy.Resource(env, capacity=1))
+        else:
+            # A pool of 0 (or a mis-typed count) is not a pool. Fall all the way
+            # back to 容器は無限 rather than to a pool nobody can ever draw from —
+            # a warehouse with no containers cannot ship anything (never-blocks).
+            n_containers = 0
+            container_return_s = 0.0
+
+    # Wall-aware routing graph (only meaningful when walls exist). A caller may
+    # inject a pre-built one (shared across replications of the same layout).
+    if graph is None:
+        graph = AisleGraph.from_model(model)
+    use_graph = graph.enabled
+    # Resolve measured shelf-to-shelf distances to a fast xy-keyed override map.
+    dist_overrides: dict = {}
+    if model.distance_overrides:
+        loc_by_id = model.location_by_id()
+        for key, d in model.distance_overrides.items():
+            a_id, _, b_id = key.partition("|")
+            la, lb = loc_by_id.get(a_id), loc_by_id.get(b_id)
+            if la and lb:
+                dist_overrides[World._key((la.x, la.y), (lb.x, lb.y))] = float(d)
+
+    # --- Zoning (C): divide the picking area into spatial x-bands -----------
+    # When zoning is on, pickers own disjoint x-bands of the storage region.
+    # We cut the occupied x-range into n_zones equal slices; n_zones tracks the
+    # picker headcount (capped) so 'parallel' actually parallelises across them.
+    zoning = work.zoning
+    n_zones = 1
+    zone_edges: list[float] = []
+    if zoning != "none":
+        xs = [xy[0] for xy in sku_xy.values()]
+        if xs and max(xs) > min(xs):
+            n_zones = max(2, min(n_pickers, 4))
+            lo, hi = min(xs), max(xs)
+            span = (hi - lo) / n_zones
+            zone_edges = [lo + span * (i + 1) for i in range(n_zones - 1)]
+
+    # --- 種まき put wall (D): sortation stations for consolidation=="sort" ---
+    # The wall is a capacitated resource so a slow sort backs up (queue), like a
+    # real DAS / put-to-light wall. One station per pack station by default.
+    put_wall_cap = max(1, n_packers)
+
+    # --- 自動仕分機(sorter): an automatic piece sorter for total picking (D=="sort").
+    # When a sorter Equipment is placed, the sort phase inducts the swept lines onto
+    # the machine (capacitated by its induction channels) and routes each line to a
+    # destination chute (a finite buffer that back-pressures when full) — instead of
+    # the manual put wall. Built whenever a sorter exists; the sort phase only uses
+    # it when consolidation=="sort", so no sorter => the World.sorter stays None and
+    # the legacy manual-wall path is byte-identical.
+    sorters = [e for e in model.resources.equipment if e.type == "sorter" and e.count > 0]
+    sorter: dict | None = None
+    if sorters:
+        se = sorters[0]
+        rate = max(float(se.sorter_rate_per_hr), 1e-9)
+        n_chutes = max(1, int(se.chutes))
+        chute_cap = max(1, int(se.chute_capacity))
+        channels = max(1, int(se.induction_workers))
+        sorter = {
+            "xy": (se.x, se.y) if (se.x or se.y) else None,
+            "rate_per_hr": rate,
+            "sort_s": 3600.0 / rate,               # seconds per line on the sorter
+            "chutes": n_chutes,
+            "chute_capacity": chute_cap,
+            "channels": channels,
+            "release_s": max(0.0, float(se.chute_release_s)),
+            "induction": simpy.Resource(env, capacity=channels),
+            "chute_containers": [simpy.Container(env, capacity=chute_cap, init=0)
+                                 for _ in range(n_chutes)],
+        }
+
+    # 仮置き(staging) buffer: only the manual non-conveyor path uses it (the AGV
+    # and conveyor paths already model their own buffering/back-pressure). A finite
+    # simpy.Store blocks put() when full, giving real pick->pack back-pressure.
+    staging_cap = max(0, int(model.process.staging_capacity))
+    staging = simpy.Store(env, capacity=staging_cap) if staging_cap > 0 else None
+    pack_xy = [(s.x, s.y) for s in model.resources.stations] or [home]
+
+    # 入荷検品(inbound inspection) stage: receipts wait here for inspector agents
+    # before forklift putaway (an explicit upstream WIP), when enabled.
+    n_inspectors = max(0, int(model.process.inspector_count))
+    inbound_store = simpy.Store(env) if n_inspectors > 0 else None
+    inspect_time_s = max(0.0, float(model.process.inbound_inspection_time_s))
+
+    # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
+    # Opt-in (Process.replenishment_enabled). Build one inventory face per slotted
+    # pick position from its Location's qty/capacity. A SKU with no finite-capacity
+    # location gets no face => effectively infinite stock (never blocks). Faces are
+    # keyed by ROUNDED position so the picker's arrival point (== sku_xy coord)
+    # resolves them in O(1) without threading the sku through the pick pipeline.
+    replen_faces: dict | None = None
+    replen_store = None
+    replen_place_s = 0.0
+    replen_dedicated = 0
+    n_replenishers = 0
+    replen_shared_forklift = False
+    if model.process.replenishment_enabled:
+        trig = max(0.0, float(model.process.replenish_trigger_frac))
+        qfrac = max(0.0, float(model.process.replenish_qty_frac))
+        replen_place_s = max(0.0, float(model.process.replenish_place_s))
+        faces: dict[tuple[float, float], dict] = {}
+        for sku, loc in sku_loc.items():
+            cap = max(0, int(getattr(loc, "capacity", 0) or 0))
+            if cap <= 0:
+                continue                     # no finite capacity => infinite stock
+            key = World._face_key((loc.x, loc.y))
+            if key in faces:
+                continue                     # one face per pick position
+            q0 = int(loc.qty) if int(getattr(loc, "qty", 0) or 0) > 0 else cap
+            faces[key] = {
+                "xy": (loc.x, loc.y), "loc_id": loc.id, "sku": sku,
+                "qty": q0, "capacity": cap,
+                "trigger": cap * trig,
+                "refill_to": max(1.0, cap * qfrac),
+                "pending": False, "event": None,
+            }
+        replen_faces = faces
+        replen_store = simpy.Store(env)
+        # Who services replenishment: dedicated agents if asked, else the forklift
+        # fleet shares the work, else auto-spawn one dedicated agent so an empty
+        # face can never deadlock the picker (never-blocks).
+        dedicated = max(0, int(model.process.replenishers))
+        if dedicated > 0:
+            replen_dedicated = dedicated
+            n_replenishers = dedicated
+        elif n_forklifts > 0:
+            replen_shared_forklift = True
+            n_replenishers = n_forklifts
+        else:
+            replen_dedicated = 1
+            n_replenishers = 1
+
+    # AGV通路相互排他: build the aisle-segment mutex map only when the feature is
+    # opt-in enabled, the wall-aware graph is active (segments are meaningful), and
+    # more than one AGV can actually contend. Otherwise None ⇒ AGVs travel the
+    # legacy way and the run is byte-identical.
+    aisle_locks = ({} if (model.process.agv_interference and use_graph and n_agvs > 1)
+                   else None)
+
+    # 通路干渉: walking agents contend for aisle cells. Strictly opt-in — with the
+    # flag off this stays None and every ``_walk`` runs the legacy single-timeout
+    # body, so the event log, the RNG draw order and the keyframes are unchanged.
+    aisle_cells = {} if model.simulation.aisle_interference else None
+
+    has_conveyor = bool(conveyor_lines)
+
+    # --- 物理ストッパー / 時間分離リリース / 完成品staging ----------------------
+    # Three opt-in mechanisms that only exist together: the stopper makes the line
+    # END a buffer, the release schedule is what empties it, and the bench staging
+    # is where the 完成品 wait for that release. Unstated ⇒ every one of the three
+    # resolves to None and not a single branch downstream is taken.
+    release_plan = _resolve_release(model)
+    for line in conveyor_lines:
+        g = line.gate
+        if g is not None and (g.stop_all or g.pullable or release_plan is not None):
+            line.stopper = Stopper(line=line, gate=g, pitch=_pitch_of(model, line.id))
+    stoppers = [c for c in conveyor_lines if c.stopper is not None]
+    # 完成品staging は「流す手段」があって初めてバッファになる。無ければ壁なので
+    # 張らない (never-blocks; see ``Process.bench_staging``).
+    bench_staging = None
+    stage_onto: dict[str, tuple] = {}
+    if release_plan is not None and stoppers:
+        per_bench = _staging_capacity(model)
+        if per_bench > 0:
+            bench_staging = {}
+            for line in conveyor_lines:
+                # 完成品が生まれるのは「梱包が起きうる場所」だけ: 引き込み/末端
+                # (``_convey_chain`` の終点) と、人の立っている停止線。通過するだけの
+                # ベルトに置き場を作ると、誰も置かない箱の置き場を売ることになる。
+                gate_hands = line.gate is not None and line.gate.n_bench > 0
+                if line.next_line is not None and not gate_hands:
+                    continue
+                n = line.n_bench or (line.gate.n_bench if line.gate else 0) or 1
+                bench_staging[line.id] = simpy.Store(env, capacity=per_bench * n)
+                # どのストッパーの本線へ、どの地点で載せるか — 引き込みなら自分の
+                # 合流点、そうでなければ本線の投入端。
+                host = line.host if line.host is not None else None
+                trunk = (host if (host is not None and host.stopper is not None)
+                         else (line if line.stopper is not None else
+                               (stoppers[0] if stoppers else None)))
+                if trunk is not None:
+                    arc = line.host_arc if trunk is host else 0.0
+                    stage_onto[line.id] = (trunk, min(arc, trunk.gate.arc))
+    stack_crew = None
+    stack_time_s = 0.0
+    if release_plan is not None and release_plan["stack_rate_per_hr"] > 0.0:
+        stack_crew = simpy.Resource(env, capacity=release_plan["stackers"])
+        stack_time_s = 3600.0 / release_plan["stack_rate_per_hr"]
+
+    return World(
+        env=env, model=model,
+        order_store=simpy.Store(env),
+        ready_store=simpy.Store(env),
+        fork_store=simpy.Store(env),
+        packers=simpy.Resource(env, capacity=n_packers),
+        spare_bench=(simpy.Resource(env, capacity=n_spare_bench)
+                     if 0 < n_spare_bench < n_packers else None),
+        benches_claimed=benches_claimed,
+        put_wall=simpy.Resource(env, capacity=put_wall_cap),
+        has_conveyor=has_conveyor, conveyors=conveyor_lines,
+        entry_conveyors=entry_lines,
+        divert_policy=str(getattr(model.process, "divert_policy", "auto") or "auto"),
+        container_pool=container_pool, n_containers=n_containers,
+        container_return_s=container_return_s,
+        container_return_line=container_return_line,
+        n_pickers=n_pickers, n_packers=n_packers,
+        n_agvs=n_agvs, agv_speed=max(agv_speed, 0.1), pick_method=pick_method,
+        pick_strategy=strategy, batch_size=max(1, batch_size),
+        routing_policy=routing_policy,
+        zoning=zoning, consolidation=work.consolidation, release=work.release,
+        wave_interval_s=max(work.wave_interval_s, 1.0),
+        sort_time_s=max(model.process.sort_time_s, 0.0),
+        sorter=sorter,
+        n_zones=n_zones, zone_edges=zone_edges,
+        home=home, agv_home=agv_home,
+        fork_home=fork_home, n_forklifts=n_forklifts, fork_speed=max(fork_speed, 0.1),
+        slot_xy=slot_xy,
+        sku_xy=sku_xy, sku_ts=sku_ts, sku_pick=sku_pick,
+        sku_weights=sku_weights, sku_list=sku_list,
+        grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
+        graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,
+        staging=staging, staging_capacity=staging_cap, pack_xy=pack_xy,
+        inbound_store=inbound_store, n_inspectors=n_inspectors,
+        inspect_time_s=inspect_time_s,
+        replen_faces=replen_faces, replen_store=replen_store,
+        replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
+        n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,
+        release_schedule=release_plan, stoppers=stoppers,
+        release_board_s=(release_plan["board_s"] if release_plan else 0.0),
+        bench_staging=bench_staging, stage_onto=stage_onto,
+        stack_crew=stack_crew, stack_time_s=stack_time_s,
+        aisle_locks=aisle_locks,
+        aisle_cells=aisle_cells,
+    )

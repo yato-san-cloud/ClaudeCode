@@ -1,0 +1,54 @@
+{
+  "template_id": "food_chilled",
+  "name": "食品・定温物流 (FEFO)",
+  "description": "賞味期限管理(FEFO)・温度帯のある定温食品倉庫。コンベア併用、短時間シフト。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.peak_factor",
+      "label": "ピーク係数",
+      "type": "float",
+      "unit": "倍"
+    },
+    {
+      "path": "resources.stations.0.count",
+      "label": "梱包台数",
+      "type": "int",
+      "unit": "台"
+    },
+    {
+      "path": "process.batch_size",
+      "label": "バッチ数",
+      "type": "int",
+      "unit": "件/トリップ"
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間",
+      "type": "float",
+      "unit": "時間",
+      "scale": 3600
+    }
+  ]
+}

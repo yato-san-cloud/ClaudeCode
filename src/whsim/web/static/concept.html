@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>whsim — 概念シーン</title>
+<!--
+  concept.html — a standalone host for an AUTHORED 3D scene.
+
+  Deliberately NOT part of the SPA. A concept scene is a storyboard played to a
+  room: it has no project, no run, no phases, and it must be recordable frame by
+  frame. Mounting it inside app.js would have meant threading a fake project
+  through the journey stepper and fighting the SPA's own clock for control of
+  playback. Here the page owns the clock outright, which is also what makes the
+  headless capture deterministic — see __conceptSeek below.
+
+  Scene data is loaded from ?scene=<url> (default ./scene.json) and is NEVER
+  bundled here: a scene is somebody's layout, so it lives with their project,
+  not in the product's static assets.
+-->
+<style>
+  html, body { margin:0; padding:0; background:#0f141d; overflow:hidden; }
+  /* The stage is a fixed 16:9 box scaled to fit the window, so what a recorder
+     captures at 1920x1080 is pixel-identical to what a presenter sees on any
+     screen. Letting the canvas track the viewport would silently re-frame every
+     shot in the storyboard when the window differs from the projector. */
+  #stage {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:1920px; height:1080px; transform-origin:center center;
+    background:#0f141d;
+    font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif;
+  }
+  #stage canvas { display:block; }
+
+  /* --- loading splash ----------------------------------------------------
+     A dark plate with one line of type and a slow indeterminate rule. It is
+     the first thing a room sees when the presenter opens the file, so it is
+     deliberately quiet: no spinner, no logo, nothing that competes with the
+     scene that is about to replace it. Removed the moment the scene mounts. */
+  #boot {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:26px;
+    color:#93a8c0; background:#0f141d;
+    font-size:20px; font-weight:400; line-height:1.7; letter-spacing:.10em;
+    text-align:center; white-space:pre-wrap;
+  }
+  #boot .rule { width:280px; height:2px; background:rgba(147,168,192,.18); overflow:hidden; }
+  #boot .rule i { display:block; width:38%; height:100%; background:rgba(190,214,238,.75);
+    animation:bootslide 1.7s cubic-bezier(.44,.06,.32,.96) infinite; }
+  #boot.error { color:#c98d8d; letter-spacing:.02em; }
+  #boot.error .rule { display:none; }
+  @keyframes bootslide { 0% { transform:translateX(-110%); } 100% { transform:translateX(370%); } }
+
+  /* --- opening title card ------------------------------------------------
+     `meta.title` again, once, big, over the first seconds of the scene, then
+     gone. The persistent corner title (drawn by the renderer) is the running
+     credit; this is the slate. */
+  #titlecard {
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; opacity:0; transition:opacity .85s ease;
+    background:linear-gradient(180deg, rgba(10,14,20,.55), rgba(10,14,20,.28));
+  }
+  #titlecard.on { opacity:1; }
+  #titlecard .inner { text-align:center; padding:0 8%; }
+  #titlecard .t {
+    color:#fff; font-size:58px; font-weight:600; letter-spacing:.08em; line-height:1.4;
+    text-shadow:0 4px 26px rgba(0,0,0,.6);
+  }
+  #titlecard .w {
+    margin-top:26px; color:rgba(226,235,245,.78); font-size:20px; font-weight:400;
+    letter-spacing:.06em; text-shadow:0 2px 12px rgba(0,0,0,.55);
+  }
+  #titlecard .bar { width:96px; height:2px; margin:34px auto 0; background:rgba(255,255,255,.42); }
+
+  /* --- transport ---------------------------------------------------------
+     Hidden until the pointer moves, gone again 2.5 s later, so a projected
+     scene is just the scene. */
+  #transport {
+    position:absolute; left:0; right:0; bottom:0; height:130px; z-index:8;
+    display:flex; align-items:center; gap:22px; padding:0 40px;
+    /* Just enough scrim to seat white controls over either a pale studio sweep
+       or a dark warehouse floor — any heavier and it reads as a letterbox. */
+    background:linear-gradient(0deg, rgba(9,13,19,.48), rgba(9,13,19,0));
+    opacity:0; pointer-events:none; transition:opacity .35s ease;
+  }
+  #transport.on { opacity:1; pointer-events:auto; }
+  #transport button {
+    flex:0 0 auto; width:46px; height:46px; border-radius:50%; cursor:pointer;
+    border:1px solid rgba(226,235,245,.34); background:rgba(16,22,30,.5);
+    color:#e8eef6; display:flex; align-items:center; justify-content:center;
+    padding:0; transition:background .2s ease, border-color .2s ease;
+  }
+  #transport button:hover { background:rgba(40,52,68,.72); border-color:rgba(226,235,245,.6); }
+  #transport .track {
+    flex:1 1 auto; height:26px; display:flex; align-items:center; cursor:pointer;
+  }
+  #transport .rail { position:relative; width:100%; height:3px; background:rgba(226,235,245,.24); }
+  #transport .fill { position:absolute; left:0; top:0; bottom:0; background:#e8eef6; width:0; }
+  #transport .knob {
+    position:absolute; top:50%; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%;
+    background:#f2f6fa; box-shadow:0 1px 4px rgba(0,0,0,.5);
+  }
+  /* Numbers are OPTIONAL and off in `bare` scenes — see the note in the script.
+     The bar position is the only time cue a concept recording may carry. */
+  #transport .tc {
+    flex:0 0 auto; color:rgba(226,235,245,.8); font-size:17px; font-weight:400;
+    letter-spacing:.06em; font-variant-numeric:tabular-nums; min-width:104px; text-align:right;
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="boot"><span>シーンを読み込んでいます</span><span class="rule"><i></i></span></div></div>
+<!-- The vendored OrbitControls imports the bare specifier "three"; index.html
+     carries the same map. Without it the module graph fails to resolve and the
+     page sits on the boot message forever. -->
+<script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.js" } }
+</script>
+<script type="module">
+import { Scene3D } from './js/view3d.js';
+
+const stage = document.getElementById('stage');
+const boot = document.getElementById('boot');
+const params = new URLSearchParams(location.search);
+const src = params.get('scene') || './scene.json';
+
+// Fit the fixed 1920x1080 stage into the window without changing its geometry.
+function fit() {
+  const k = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+  stage.style.transform = `translate(-50%,-50%) scale(${k})`;
+}
+window.addEventListener('resize', fit);
+fit();
+
+// --- clock -----------------------------------------------------------------
+// Two mutually exclusive modes:
+//   play  — wall-clock playback, for a person watching in a browser.
+//   seek  — the page is a pure function of a time the caller sets, for capture.
+// Capture MUST NOT use wall-clock: a software rasteriser renders a heavy frame
+// in far more than 1/30 s, so a real-time recorder would drop most of the
+// storyboard and land the hero moment on whichever frame it happened to catch.
+let t = 0;
+const capture = params.has('seek');
+let playing = !capture;
+let t0 = performance.now();
+const speed = Number(params.get('speed')) || 1;
+let duration = 90;
+
+function now() {
+  if (playing) {
+    t = ((performance.now() - t0) / 1000) * speed;
+    if (duration > 0 && t > duration) { t0 = performance.now(); t = 0; }
+  }
+  return t;
+}
+
+// Re-anchor the wall clock so `now()` continues from `t` instead of jumping back
+// to wherever the elapsed time says it should be. Every transport control goes
+// through here; nothing else may touch t0.
+function setTime(v) {
+  t = Math.max(0, Math.min(duration, Number(v) || 0));
+  t0 = performance.now() - (t * 1000) / speed;
+}
+
+fetch(src, { cache: 'no-store' })
+  .then((r) => {
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  })
+  .then((replay) => {
+    boot.remove();
+    duration = Number((replay.meta || {}).duration_s) || 90;
+    const scene = new Scene3D(stage, replay, now);
+    // In seek mode, stop the scene's own animation loop. It renders on every
+    // rAF whether or not the time changed, so during a capture the software
+    // rasteriser is drawing the full frame continuously in the background while
+    // the driver is trying to screenshot — every captured frame gets rendered
+    // twice and the run takes hours. Cancelling the pending frame is enough:
+    // _loop only re-requests from inside itself.
+    if (!playing && scene._raf) {
+      cancelAnimationFrame(scene._raf);
+      scene._raf = null;
+    }
+    // Handles the capture harness drives. Kept on window (not exported) because
+    // the driver is Playwright, which evaluates in page scope.
+    window.__scene = scene;
+    window.__conceptDuration = duration;
+    // `dt` is what the smoothed parts of the scene (vest colour, facing, gait)
+    // integrate. Sequential capture passes the real frame step so the walk cycle
+    // advances exactly as it would in playback; a one-shot probe that jumps to an
+    // arbitrary time passes a large dt so those smoothers snap to their target
+    // instead of rendering a pose still easing out of whatever came before.
+    window.__conceptSeek = (sec, dt) => {
+      playing = false;
+      t = Number(sec) || 0;
+      const step = Number.isFinite(Number(dt)) ? Number(dt) : 1.0;
+      // One synchronous render at exactly this time, so the screenshot the
+      // caller takes next cannot be a frame early or late.
+      // Same order as Scene3D._loop: resolve the camera first, because the props
+      // pass range-gates its captions against it. Updating props first meant a
+      // probe that jumps straight to a close-up still measured the PREVIOUS
+      // camera, and left a 2 m-wide name plate covering the shot.
+      scene.controls.update();
+      scene._updateCameraTrack(t);
+      // The cutaway is a function of where the camera IS, so it has to run here
+      // too. The rAF loop calls it every frame; the seek path did not, so during
+      // a capture the roof and the near walls stayed exactly as the constructor
+      // left them — every aerial came out with the roof steel drawn across it.
+      scene._updateCutaway();
+      scene._updateProps(t);
+      scene._updateTotes(t);
+      scene._updateWorkers(t, step);
+      // The rest of the movers, same order as Scene3D._loop. A concept scene
+      // rarely has them, but a REAL run's replay document plays here too (the
+      // shared-format promise), and skipping these froze its forklifts and AGVs
+      // mid-stride, left belt treads dead, and parked contact shadows on the
+      // floor where an agent stood three cuts ago.
+      scene._updateAgvs(t, step);
+      scene._updateForklifts(t, step);
+      scene._updateAsrs(t);
+      scene._updateStaging(t);
+      scene._updateBelts(step);
+      scene._updateContactShadows();
+      scene._updateGlowHalos();
+      // Shadow cadence, not every frame: rebaking the 2048² map of hundreds of
+      // static racks per captured frame cost 45% of the frame budget. Same
+      // policy as _tickShadows, driven by the capture step counter.
+      const sm = scene.renderer.shadowMap;
+      if (sm) {
+        sm.autoUpdate = false;
+        window.__seekFrame = ((window.__seekFrame || 0) + 1)
+          % Math.max(1, scene._shadowEvery || 1);
+        if (window.__seekFrame === 0) sm.needsUpdate = true;
+      }
+      scene.renderer.render(scene.scene, scene.camera);
+      return t;
+    };
+    window.__conceptReady = true;
+    // Host chrome. Built ONLY for a human watching in a browser: in capture mode
+    // (`?seek=`) the page must be a pure function of the time the harness sets,
+    // and a title card that fades on wall-clock or a transport that reacts to the
+    // pointer would put non-deterministic pixels in the recording.
+    if (!capture) {
+      showTitleCard(replay.meta || {});
+      buildTransport(replay.meta || {});
+    }
+  })
+  .catch((e) => {
+    // The scene may have loaded and the RENDERER then failed, in which case the
+    // splash is already detached and writing to it would put the message
+    // nowhere. Put it back before saying anything.
+    if (!boot.isConnected) stage.appendChild(boot);
+    boot.className = 'error';
+    boot.textContent = `シーンを読み込めませんでした\n${src}\n${e.message}`;
+    window.__conceptError = String(e.message || e);
+  });
+
+// --- opening title card ------------------------------------------------------
+// Fade up over the first seconds of the scene, then out. Shown once: the scene
+// loops, and a slate that came back every 90 s would read as a stutter.
+function showTitleCard(meta) {
+  if (!meta.title) return;
+  const card = document.createElement('div');
+  card.id = 'titlecard';
+  const inner = document.createElement('div');
+  inner.className = 'inner';
+  const h = document.createElement('div');
+  h.className = 't';
+  h.textContent = String(meta.title);
+  inner.appendChild(h);
+  if (meta.watermark) {
+    const w = document.createElement('div');
+    w.className = 'w';
+    w.textContent = String(meta.watermark);
+    inner.appendChild(w);
+  }
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  inner.appendChild(bar);
+  card.appendChild(inner);
+  stage.appendChild(card);
+  // setTimeout, NOT requestAnimationFrame. The scene shares this page's rAF, and
+  // on a software rasteriser one frame of a 700-shelf hall takes the better part
+  // of a second — so the "start the fade" callback landed after the timers below
+  // had already fired and the slate never appeared at all. A timer is the right
+  // clock for a wall-clock animation anyway.
+  setTimeout(() => card.classList.add('on'), 20);
+  setTimeout(() => card.classList.remove('on'), 2600);
+  setTimeout(() => card.remove(), 3700);
+}
+
+// --- transport ---------------------------------------------------------------
+// Play/pause + a scrub bar that appear on pointer movement and hide again after
+// a short idle. Deliberately minimal, and deliberately WITHOUT A CLOCK in bare
+// scenes: `meta.bare` is the switch that says "no measured number may appear in
+// this frame", and 00:42 / 01:30 is a measured number. The fill and the knob
+// carry the same information as a position, which is a claim about the film, not
+// about the warehouse.
+function buildTransport(meta) {
+  const bar = document.createElement('div');
+  bar.id = 'transport';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  const track = document.createElement('div');
+  track.className = 'track';
+  const rail = document.createElement('div');
+  rail.className = 'rail';
+  const fill = document.createElement('div');
+  fill.className = 'fill';
+  const knob = document.createElement('div');
+  knob.className = 'knob';
+  rail.appendChild(fill);
+  rail.appendChild(knob);
+  track.appendChild(rail);
+  bar.appendChild(btn);
+  bar.appendChild(track);
+  let tc = null;
+  if (!meta.bare) {
+    tc = document.createElement('div');
+    tc.className = 'tc';
+    bar.appendChild(tc);
+  }
+  stage.appendChild(bar);
+
+  const PLAY = '<svg width="16" height="18" viewBox="0 0 16 18" aria-hidden="true">'
+    + '<path d="M2 1.5 14 9 2 16.5Z" fill="currentColor"/></svg>';
+  const PAUSE = '<svg width="14" height="18" viewBox="0 0 14 18" aria-hidden="true">'
+    + '<rect x="1" y="1" width="4" height="16" fill="currentColor"/>'
+    + '<rect x="9" y="1" width="4" height="16" fill="currentColor"/></svg>';
+  const syncBtn = () => {
+    btn.innerHTML = playing ? PAUSE : PLAY;
+    btn.setAttribute('aria-label', playing ? '一時停止' : '再生');
+  };
+  syncBtn();
+
+  btn.addEventListener('click', () => {
+    if (playing) { playing = false; } else { setTime(t); playing = true; }
+    syncBtn();
+    show();
+  });
+
+  const seekFromEvent = (ev) => {
+    const r = rail.getBoundingClientRect();
+    if (r.width <= 0) return;
+    setTime(((ev.clientX - r.left) / r.width) * duration);
+  };
+  let dragging = false;
+  track.addEventListener('pointerdown', (ev) => {
+    dragging = true;
+    track.setPointerCapture(ev.pointerId);
+    seekFromEvent(ev);
+    ev.preventDefault();
+  });
+  track.addEventListener('pointermove', (ev) => { if (dragging) seekFromEvent(ev); });
+  const endDrag = () => { dragging = false; };
+  track.addEventListener('pointerup', endDrag);
+  track.addEventListener('pointercancel', endDrag);
+
+  // Auto-hide. The timer restarts on any pointer movement over the page and is
+  // held open whenever the pointer is on the bar itself or a scrub is in flight.
+  let hideAt = 0;
+  const show = () => { bar.classList.add('on'); hideAt = performance.now() + 2500; };
+  let over = false;
+  bar.addEventListener('pointerenter', () => { over = true; });
+  bar.addEventListener('pointerleave', () => { over = false; show(); });
+  window.addEventListener('pointermove', show);
+  window.addEventListener('pointerdown', show);
+  show();
+
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === ' ' || ev.key === 'k') { btn.click(); ev.preventDefault(); }
+    else if (ev.key === 'ArrowLeft') { setTime(t - 5); show(); }
+    else if (ev.key === 'ArrowRight') { setTime(t + 5); show(); }
+    else return;
+    show();
+  });
+
+  const mmss = (s) => {
+    const v = Math.max(0, Math.round(s));
+    return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`;
+  };
+  // 10 Hz, not per-frame: this only moves a knob, and the scene's own rAF is
+  // already the expensive thing on a software rasteriser.
+  setInterval(() => {
+    const f = duration > 0 ? Math.max(0, Math.min(1, t / duration)) : 0;
+    fill.style.width = `${f * 100}%`;
+    knob.style.left = `${f * 100}%`;
+    if (tc) tc.textContent = `${mmss(t)} / ${mmss(duration)}`;
+    if (bar.classList.contains('on') && !over && !dragging
+        && performance.now() > hideAt) bar.classList.remove('on');
+  }, 100);
+}
+</script>
+</body>
+</html>

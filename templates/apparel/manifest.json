@@ -1,0 +1,83 @@
+{
+  "template_id": "apparel",
+  "name": "アパレル物流・ゾーンピッキング",
+  "description": "多SKU・小口出荷・返品の多いアパレル倉庫。ゾーンピッキングとS字ルート。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.lines_per_order_mean",
+      "label": "平均行数",
+      "type": "float",
+      "unit": "行/件"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "discrete",
+          "label": "シングルオーダー"
+        },
+        {
+          "value": "batch",
+          "label": "マルチオーダー"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン（リレー）"
+        },
+        {
+          "value": "wave",
+          "label": "バッチ投入"
+        }
+      ]
+    },
+    {
+      "path": "process.routing_policy",
+      "label": "巡回ルート",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "s_shape",
+          "label": "S字"
+        },
+        {
+          "value": "return",
+          "label": "リターン"
+        },
+        {
+          "value": "nearest",
+          "label": "最近傍"
+        }
+      ]
+    },
+    {
+      "path": "process.pack_time_s",
+      "label": "梱包時間",
+      "type": "float",
+      "unit": "秒/件"
+    }
+  ]
+}

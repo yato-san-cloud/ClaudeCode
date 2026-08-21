@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Generated project workspaces (the simulator's runtime data)
+projects/
+
+# Headless scenario-run artifacts (whsim.sim / MCP lab) — run outputs, never source
+runs/
+
+# Generated demo data
+examples/*.zip
+
+# Claude Code local state / transient agent worktrees
+.claude/
+
+# Personal "my" samples — local-only project snapshots (may contain real
+# customer data); never committed.
+samples/

@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whsim"
+version = "0.3.0"
+description = "営業がゆるく組めて、裏で重厚なシミュレーションが走る倉庫シミュレータ (warehouse simulator)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "simpy>=4.0",
+    "pydantic>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "typer>=0.9",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+    "python-calamine>=0.2",
+    "javaobj-py3>=0.4",
+    "duckdb>=0.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.1", "httpx>=0.24", "pytest-cov>=4.0"]
+web = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9"]
+docs = ["ezdxf>=1.1", "python-pptx>=0.6", "reportlab>=4.0"]
+# MCP実験装置 (whsim.mcp_server): MCP公式Python SDK。stdioサーバー/クライアントの
+# 一次実装で、他に依存は足さない（図は既存の matplotlib Agg を使う）。
+lab = ["mcp>=1.2"]
+# 単独ツール群 (tools/ — WHSiM本体に依存しない、WHSIM_CONTRACTS v1.0 準拠):
+# cad2loc = DXF→契約layout (shapely=ポリゴン演算, networkx=通路グラフ,
+# scikit-learn=ラック列クラスタリング, pyyaml=mapping.yaml)。
+# logforge = WMS実績→契約入力群 (scipy=分布フィットとKS検定; 本体は scipy 不使用の
+# 規約のままで、これは tools 限定の依存)。chrono-lens は依存ゼロ (単一HTML)。
+cad2loc = ["ezdxf>=1.1", "shapely>=2.0", "networkx>=3.0", "scikit-learn>=1.3", "pyyaml>=6.0"]
+logforge = ["pandas>=2.0", "openpyxl>=3.1", "scipy>=1.11", "pyyaml>=6.0"]
+
+[project.scripts]
+whsim = "whsim.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+whsim = ["../../templates/**/*.json", "web/static/**/*", "data/**/*.json"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# NOTE: coverage flags are intentionally NOT in addopts so a plain `pytest`
+# still works when pytest-cov is not installed. To measure coverage, run:
+#   pytest --cov=whsim --cov-report=term-missing
+# The [tool.coverage.*] config below applies whenever --cov is used.
+
+[tool.coverage.run]
+source = ["whsim"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__main__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WHSiM — WAREHOUSE SIMULATOR</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./js/cody.css" />
+</head>
+<body>
+  <div id="boot" aria-hidden="true">
+    <svg class="boot-cube" viewBox="0 0 64 64" width="88" height="88" fill="none" aria-hidden="true">
+      <polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#1685b4"/>
+      <polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0c5a82"/>
+      <polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#3ae6ff"/>
+      <g fill="none" stroke="#7ef6ff" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g>
+      <g fill="none" stroke="#bdf8ff" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g>
+    </svg>
+    <div class="boot-word">WHSiM</div>
+    <div class="boot-bar"><span></span></div>
+    <div class="boot-tx">WAREHOUSE&nbsp;SIMULATOR&nbsp;·&nbsp;起動中</div>
+  </div>
+  <header>
+    <div class="brand-group">
+      <button id="sidebarToggle" type="button" class="icon-btn" title="メニューの開閉" aria-label="メニューの開閉">☰</button>
+      <div class="brand" aria-label="WHSiM — WAREHOUSE SIMULATOR" title="WHSiM — WAREHOUSE SIMULATOR">
+        <span class="wm" aria-hidden="true"><span class="wm-t">WHS</span><span class="wm-i"><span class="wm-tittle"><svg class="wm-cube wm-cube-light" viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#0e8fd1"/><polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0664a0"/><polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#5cc8f7"/><g fill="none" stroke="#0b4f78" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g><g fill="none" stroke="#0e7bb0" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g></svg><svg class="wm-cube wm-cube-dark" viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="9.83,19.2 32,32 32,57.6 9.83,44.8" fill="#1685b4"/><polygon points="32,32 54.17,19.2 54.17,44.8 32,57.6" fill="#0c5a82"/><polygon points="9.83,19.2 32,6.4 54.17,19.2 32,32" fill="#3ae6ff"/><g fill="none" stroke="#7ef6ff" stroke-width="3.84" stroke-linejoin="round"><polygon points="32,6.4 54.17,19.2 54.17,44.8 32,57.6 9.83,44.8 9.83,19.2"/></g><g fill="none" stroke="#bdf8ff" stroke-width="3.072" stroke-linejoin="round" opacity=".9"><polyline points="54.17,19.2 32,32 32,57.6"/><line x1="32" y1="32" x2="9.83" y2="19.2"/></g></svg></span><span class="wm-stem"></span></span><span class="wm-t">M</span></span><span class="brand-tag">WAREHOUSE SIMULATOR</span></div>
+    </div>
+    <div class="header-tools">
+      <span id="versionBadge" class="version-badge" hidden></span>
+      <div class="provenance" id="provenance"
+           style="max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;line-height:1.9">— your data</div>
+      <button id="runBtn" class="primary" disabled style="white-space:nowrap"
+              title="シミュレーションを実行（③設計の「実行する」と同じ）"
+              aria-label="シミュレーションを実行">▶ 実行</button>
+      <button id="themeToggle" type="button" style="white-space:nowrap" title="表示テーマを切り替え" aria-label="ダークモード切替">🌙 ダーク</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <!-- Primary navigation lives in the rail (the 5-phase journey rendered
+           vertically). Same journey.js, same .jn-pill/.jn-sub markup and data
+           attributes — only the CSS axis changes, so the onboarding coachmarks
+           and every existing handler keep working. -->
+      <div id="journey" class="journey-nav is-rail"></div>
+
+      <section class="card">
+        <h2>プロジェクト</h2>
+        <div class="row proj-row">
+          <select id="projectSelect" aria-label="プロジェクトを選択"><option value="">（新規作成）</option></select>
+          <div class="proj-menu-wrap">
+            <button id="projMenuBtn" type="button" class="icon-btn" title="プロジェクト操作"
+                    aria-label="プロジェクト操作メニュー" aria-haspopup="menu" aria-expanded="false"
+                    aria-controls="projMenu" disabled>⋯</button>
+            <div id="projMenu" class="proj-menu" role="menu" aria-label="プロジェクト操作" hidden>
+              <button type="button" role="menuitem" data-act="save-sample">📌 マイサンプルとして保存</button>
+              <button type="button" role="menuitem" data-act="duplicate">複製</button>
+              <button type="button" role="menuitem" data-act="rename">名前変更</button>
+              <button type="button" role="menuitem" data-act="delete" class="danger-item">削除</button>
+            </div>
+          </div>
+        </div>
+        <!-- マイサンプル: local-only saved project snapshots (gitignored; never
+             uploaded). Populated by js/mysamples.js. -->
+        <div id="mySamples"></div>
+        <div class="row new-proj">
+          <input id="newName" placeholder="プロジェクト名 例: acme" />
+          <select id="templateSelect"></select>
+          <button id="createBtn" class="primary">作成</button>
+        </div>
+      </section>
+
+      <section class="card" id="historyCard">
+        <h2>操作履歴</h2>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div id="historyList"></div>
+      </section>
+
+      <section class="card settings-card">
+        <h2>
+          <button id="settingsToggle" type="button" class="settings-summary"
+                  aria-expanded="false" aria-controls="settingsBody" disabled>
+            <span class="settings-gear" aria-hidden="true">⚙</span>コスト・稼働条件
+            <span class="settings-chevron" aria-hidden="true">▾</span>
+          </button>
+        </h2>
+        <div id="settingsBody" class="settings-body" hidden>
+          <form id="settingsForm" class="settings-form">
+            <div class="settings-field">
+              <label for="set_currency">通貨</label>
+              <select id="set_currency" name="currency">
+                <option value="¥">¥ (円)</option>
+                <option value="$">$ (ドル)</option>
+                <option value="€">€ (ユーロ)</option>
+              </select>
+            </div>
+            <div class="settings-field">
+              <label for="set_labor">人件費</label>
+              <input id="set_labor" name="labor_cost_per_hour" type="number"
+                     min="0" step="50" inputmode="numeric" />
+              <span class="unit">¥/時</span>
+            </div>
+            <div class="settings-field">
+              <label for="set_hours">1日の稼働時間</label>
+              <input id="set_hours" name="working_hours_per_day" type="number"
+                     min="0" max="24" step="0.5" inputmode="decimal" />
+              <span class="unit">時間</span>
+            </div>
+            <div class="settings-field">
+              <label for="set_days">月の稼働日数</label>
+              <input id="set_days" name="working_days_per_month" type="number"
+                     min="0" max="31" step="1" inputmode="numeric" />
+              <span class="unit">日</span>
+            </div>
+            <div class="settings-field">
+              <label for="set_agv">AGV費用</label>
+              <input id="set_agv" name="agv_cost_per_month" type="number"
+                     min="0" step="1000" inputmode="numeric" />
+              <span class="unit">¥/月</span>
+            </div>
+
+            <div class="settings-subhead" style="margin-top:10px;font-weight:600">
+              提案書ブランド
+            </div>
+            <p class="settings-hint" style="margin:2px 0 6px;font-size:12px;opacity:.7">
+              提案書（PPTX / PDF）の表紙に反映します。
+            </p>
+            <div class="settings-field">
+              <label for="set_brand_client">宛先（顧客名）</label>
+              <input id="set_brand_client" name="client_name" type="text"
+                     maxlength="80" placeholder="〇〇物流株式会社" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_company">自社名（提案元）</label>
+              <input id="set_brand_company" name="company_name" type="text"
+                     maxlength="80" placeholder="貴社名" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_accent">アクセント色</label>
+              <input id="set_brand_accent" name="accent_color" type="color"
+                     value="#2383E2" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_footer">表紙フッター</label>
+              <input id="set_brand_footer" name="footer_note" type="text"
+                     maxlength="120" placeholder="担当・連絡先など（任意）" />
+            </div>
+            <div class="settings-field">
+              <label for="set_brand_logo">ロゴ画像</label>
+              <input id="set_brand_logo" type="file"
+                     accept="image/png,image/jpeg,image/gif" />
+            </div>
+            <button id="set_brand_logo_btn" type="button" style="width:100%;margin-top:2px">
+              ロゴをアップロード
+            </button>
+            <div id="set_brand_logo_status" class="status" role="status" aria-live="polite"></div>
+
+            <button id="settingsSave" type="submit" class="primary" style="width:100%;margin-top:6px">保存</button>
+            <div id="settingsStatus" class="status" role="status" aria-live="polite"></div>
+          </form>
+        </div>
+      </section>
+    </aside>
+
+    <main class="main">
+      <div class="tabs" role="navigation" aria-label="ビュー操作">
+        <label id="presetCtl" class="preset-ctl" title="3D表現" style="display:none">3D表現
+          <select id="presetSelect">
+            <option value="brand">ブランド</option>
+            <option value="natural">ナチュラル</option>
+            <option value="evening">夕</option>
+            <option value="night">夜</option>
+            <option value="mono">モノ</option>
+          </select>
+        </label>
+        <!-- 2D/3D の最大化。パネル規約(不変条件9)はそのまま — #view2d / #view3d は
+             .panel のまま、body に is-maxview クラスが付くだけ。Esc で戻る。 -->
+        <button id="expandViewBtn" type="button" class="expand-view-btn"
+                style="display:none" aria-pressed="false"
+                title="ビューを最大化（Esc で戻る）">⛶ 拡大</button>
+      </div>
+
+      <div class="stage">
+        <div id="phaseHint"></div>
+        <!-- Secondary in-view toggle for merged views (判定⇄原価 / 2D⇄3D /
+             作業方法⇄ピック順序). Populated by app.js when a grouped view is active. -->
+        <div id="viewToggle" class="view-toggle" role="tablist" aria-label="表示切替" hidden></div>
+        <div id="overview" class="panel active" role="tabpanel" tabindex="0">
+          <div id="overviewDash"></div>
+          <!-- Persistent ①取込 assets: hidden file inputs + the key-figure body +
+               the detailed import log. The hub (overview.js) ADOPTS #keyfigBody /
+               #importLog into its cards (live nodes move, ID wiring survives)
+               and parks them back here before any rebuild. -->
+          <div id="ihubAssets" hidden>
+            <input type="file" id="fileInput" accept=".zip" hidden />
+            <input type="file" id="cadInput" accept=".dxf" hidden />
+            <input type="file" id="distInput" accept=".csv,.json" hidden />
+            <input type="file" id="mapcsvInput" accept=".csv" hidden />
+            <input type="file" id="rmpmInput" accept=".rmpm,.json" hidden />
+            <input type="file" id="tableInput" accept=".csv,.xlsx,.xls,.json" multiple hidden />
+            <input type="file" id="itemsInput" accept=".csv,.xlsx,.xls,.json" hidden />
+            <div id="keyfigBody">
+              <div id="headline" class="headline"></div>
+              <button id="applyBtn">反映</button>
+            </div>
+            <div id="importLog" class="log"></div>
+          </div>
+        </div>
+        <!-- ダッシュボード: the single "how is this warehouse doing" screen.
+             Four self-contained modules fill these hosts (js/dashboard/*.js);
+             the shell only owns the grid. -->
+        <div id="dashboard" class="panel" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0" hidden>
+          <div class="dash">
+            <div class="dash-top" id="dashTop"></div>
+            <div class="dash-kpis" id="dashKpis"></div>
+            <div class="dash-main">
+              <div class="dash-stage" id="dashStage">
+                <div class="dash-stage-3d" id="dashStage3d"></div>
+                <div class="dash-ov dash-ov-l" id="dashOvLeft"></div>
+                <div class="dash-ov dash-ov-r" id="dashOvRight"></div>
+                <div class="dash-pins" id="dashPins" aria-hidden="true"></div>
+              </div>
+              <div class="dash-rail" id="dashRail"></div>
+            </div>
+            <div class="dash-bottom" id="dashBottom"></div>
+          </div>
+        </div>
+        <div id="bi" class="panel" role="tabpanel" tabindex="0" hidden></div>
+        <div id="bianalytics" class="panel" role="tabpanel" tabindex="0" hidden></div>
+        <div id="chat" class="panel" role="tabpanel" aria-labelledby="tab-chat" tabindex="0" hidden></div>
+        <div id="design" class="panel" role="tabpanel" aria-labelledby="tab-design" tabindex="0" hidden></div>
+        <div id="analysis" class="panel" role="tabpanel" aria-labelledby="tab-analysis" tabindex="0" hidden></div>
+        <div id="dataanalysis" class="panel" role="tabpanel" aria-labelledby="tab-dataanalysis" tabindex="0" hidden></div>
+        <div id="materialflow" class="panel" role="tabpanel" aria-labelledby="tab-materialflow" tabindex="0" hidden></div>
+        <div id="timetable" class="panel" role="tabpanel" aria-labelledby="tab-timetable" tabindex="0" hidden></div>
+        <div id="storage" class="panel" role="tabpanel" aria-labelledby="tab-storage" tabindex="0" hidden></div>
+        <div id="view2d" class="panel" role="tabpanel" aria-labelledby="tab-view2d" tabindex="0" hidden>
+          <canvas id="canvas2d" aria-label="2Dシミュレーション再生"></canvas>
+        </div>
+        <div id="view3d" class="panel" role="tabpanel" aria-labelledby="tab-view3d" tabindex="0" hidden></div>
+        <div id="viewpng" class="panel" role="tabpanel" aria-labelledby="tab-viewpng" tabindex="0" hidden>
+          <div class="pstory">
+            <div class="pstory-verdict" id="pstoryVerdict" role="status" aria-live="polite" hidden></div>
+            <figure class="pstory-figure"><img id="pngImg" alt="提案PNG（実行後に表示）" /></figure>
+            <div class="pstory-kpis" id="pstoryKpis" hidden></div>
+            <div class="pstory-foot" id="pstoryFoot" hidden></div>
+          </div>
+        </div>
+        <div id="cost" class="panel" role="tabpanel" aria-labelledby="tab-cost" tabindex="0" hidden></div>
+        <div id="pickrate" class="panel" role="tabpanel" aria-labelledby="tab-pickrate" tabindex="0" hidden></div>
+        <div id="slotting" class="panel" role="tabpanel" aria-labelledby="tab-slotting" tabindex="0" hidden></div>
+        <div id="pickseq" class="panel" role="tabpanel" aria-labelledby="tab-pickseq" tabindex="0" hidden></div>
+        <div id="workcompare" class="panel" role="tabpanel" aria-labelledby="tab-workcompare" tabindex="0" hidden></div>
+        <div id="compare" class="panel" role="tabpanel" aria-labelledby="tab-compare" tabindex="0" hidden>
+          <div class="compare-bar">
+            <button id="runScenariosBtn" class="primary">シナリオを比較（現行 / ピーク日 / AGV導入）</button>
+            <span id="compareStatus" class="status" role="status" aria-live="polite"></span>
+          </div>
+          <div id="compareView"></div>
+        </div>
+        <div id="export" class="panel" role="tabpanel" aria-labelledby="tab-export" tabindex="0" hidden></div>
+        <div id="notes" class="panel" role="tabpanel" aria-labelledby="tab-notes" tabindex="0" hidden></div>
+
+        <div class="transport">
+          <button id="playBtn">⏸</button>
+          <input type="range" id="scrub" min="0" max="1000" value="0" />
+          <span id="clock" class="clock">0.0 min</span>
+          <label class="speed">速度
+            <select id="speed">
+              <option value="30">30×</option>
+              <option value="60" selected>60×</option>
+              <option value="120">120×</option>
+            </select>
+          </label>
+          <span class="legend">
+            <i style="background:#9e9e9e"></i>待機
+            <i style="background:#1f78b4"></i>移動
+            <i style="background:#33a02c"></i>ピック
+            <i style="background:#6a3d9a"></i>運搬
+            <i style="background:#e31a1c"></i>梱包
+          </span>
+        </div>
+      </div>
+
+      <div id="kpiBar" class="kpibar"></div>
+    </main>
+  </div>
+
+  <!-- 採点表レール (Scorecard Rail): persistent right dock mounted by app.js via
+       js/scorecard.js. This is the host anchor; the rail is a fixed-position
+       <aside> appended here (it reserves its own footprint on .main, so the
+       .layout/.main grid is untouched). Hidden until a rail phase (②③④). -->
+  <div id="scorecardDock"></div>
+
+  <div id="toastHost" class="toast-host" role="region" aria-label="通知" aria-live="polite" aria-atomic="false"></div>
+
+  <script type="importmap">
+  { "imports": {
+      "three": "./vendor/three/three.module.js",
+      "echarts": "./vendor/echarts/echarts.esm.min.js"
+  } }
+  </script>
+  <script type="module" src="./app.js"></script>
+  <script type="module" src="./js/version.js"></script>
+</body>
+</html>
