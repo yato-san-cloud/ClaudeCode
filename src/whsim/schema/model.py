@@ -405,7 +405,9 @@ class Process(BaseModel):
     # ``window_s`` > 0 = その秒数だけ開ける。0/未指定 = **出し切るまで**（ただし次の
     # リリースに重ならないよう ``period_s`` で頭打ち＝never-blocks）。
     # ``stack_rate_per_hr`` = カーブの先の積み付け能力 (件/h・0/未指定＝制約なし)、
-    # ``stackers`` = その人数 (既定1)。``load_kind`` = 完成品に押す荷の種別。
+    # ``stackers`` = その人数 (既定1)、``board_time_s`` = 完成品を1個ベルトへ載せる
+    # のに要る秒数 (既定0＝載せる手間は数えない。測っていない秒数は推測しない)。
+    # ``load_kind`` = 完成品に押す荷の種別。
     # ``period_s`` ≤ 0 (または dict でない) ⇒ リリース無し＝機構ごと不活性。
     release_schedule: dict | None = None
     # 完成品staging (台脇の仮置き). ``None`` (default) = 完成品は梱包した瞬間に消える

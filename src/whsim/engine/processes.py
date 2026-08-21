@@ -1691,12 +1691,20 @@ def _load_staging(world: World, deadline: float):
                 req.cancel()
                 break                   # 窓が閉じた: 残りは次の周期へ
         item = yield stores[src].get()
+        if world.release_board_s > 0.0:
+            yield env.timeout(world.release_board_s)   # 1個載せるのに要る時間
         order = item["order"]
         tote = world.new_tote(f"{order.order_id}-fin",
                               kind=world.release_schedule["load_kind"] or None)
         if tote is not None and world.recording():
             p = trunk.point_at(arc)
             tote.kf(env.now, p[0], p[1], "belt")
+        ride_m = trunk.remaining(arc)
+        # 本線に載った瞬間の ``conveyor_on``: ピッカーが投入するときと同じ形で書く
+        # ——書かないと `conveyor_off` だけが増えて、ベルトの占有積分が負になる。
+        world.log(t=env.now, event="conveyor_on", order_id=order.order_id,
+                  resource="conveyor", conveyor=trunk.id, wait=0.0, blocked=0,
+                  transit=ride_m / trunk.speed, ride_m=ride_m, leg=0, entry=1)
         world.log(t=env.now, event="release_board", order_id=order.order_id,
                   resource="conveyor", conveyor=trunk.id, bench=src, arc=arc,
                   occ=trunk.belt.count, capacity=trunk.capacity,

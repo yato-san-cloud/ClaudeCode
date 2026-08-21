@@ -1220,7 +1220,7 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         hold_min = agg.get("stopper_induction_hold_s", 0.0) / 60.0
         agg["verdict"] += (
             f"。完成品リリースは {agg['stopper_windows']:.0f} 回・本線占有 {share:.0f}%"
-            f"（検品済みの投入を止めた時間 {hold_min:.0f}分）")
+            f"（検品済みの投入待ち 延べ {hold_min:.0f}分）")
         if agg.get("stopper_leaks"):
             seen = _reps_seen(agg, "stopper_leaks")
             agg["verdict"] += (

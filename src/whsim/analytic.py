@@ -1246,6 +1246,111 @@ def _has_gate(model: WarehouseModel) -> bool:
                for cv in (model.resources.conveyors or []))
 
 
+# 開放時間が周期の何割を超えたら「ほぼ開きっぱなし」と読むか。1.0 を許すと能力0＝
+# 「このラインは何も通さない」になり、上界としては正しくても提案としては無意味。
+_RELEASE_SHARE_MAX = 0.95
+
+
+def _has_stopper(model: WarehouseModel) -> bool:
+    """物理ストッパー（全部止まる停止線・引ける列）が書かれているか。
+
+    ``engine.build._resolve_gate`` の同じ2つの読み: ``mode: "all"`` は選択性の無い
+    ストッパー、``pullable`` は「止まった荷を人が引ける列」。どちらも列が育つので、
+    停止線の閉形式（ゲートの手が唯一のサーバ）はもう当てはまらない。
+    """
+    for cv in (model.resources.conveyors or []):
+        spec = getattr(cv, "stop_gate", None)
+        if not isinstance(spec, dict) or not spec:
+            continue
+        if str(spec.get("mode", "select") or "select").strip().lower() == "all":
+            return True
+        if spec.get("pullable"):
+            return True
+    return False
+
+
+def _release_window(model: WarehouseModel) -> tuple[float, float] | None:
+    """``Process.release_schedule`` の ``(周期, 開放時間)`` — 不活性なら ``None``.
+
+    ``engine.build._resolve_release`` と同じ判定（周期 ≤ 0 はスケジュールではない）。
+    写しであることは ``tests/test_line_stopper.py`` が build の結果と突き合わせて
+    固定する（不変条件11）。
+    """
+    spec = getattr(model.process, "release_schedule", None)
+    if not isinstance(spec, dict) or not spec:
+        return None
+    try:
+        period = float(spec.get("period_s", 0.0) or 0.0)
+        window = float(spec.get("window_s", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return (period, max(window, 0.0)) if period > 0.0 else None
+
+
+def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
+    """解析側に**鏡が無い**機構の名前（空 = 全部映せている）。
+
+    誠実に降りるための一覧。閉形式が無いのは「末端のバッファがスケジュールで開閉
+    する」形で、これを既存の閉形式に押し込むと必ず甘い側に倒れる:
+
+    * ``stopper`` — 停止線の閉形式は「ゲートに立つ手がサーバ」で価格する。物理
+      ストッパーには番人が居らず、列は**上流の引き込みが引き戻す**か開放で流れる。
+      サーバが誰なのかが違う以上、同じ式は使えない。
+    * ``release_schedule`` — 窓の内と外で系が別物になる（周期的に非定常）。定常
+      待ち行列の言葉では書けない。安い上界だけは付ける（``_declare_unmirrored``）。
+    * ``bench_staging`` — ピークは**リリース周期との相互作用**そのもので、それが
+      顧客の問い（置き場を何台分取るか）。閉形式で答えると測っていない数を売る。
+    """
+    out = []
+    if _has_stopper(model):
+        out.append("stopper")
+    if _release_window(model) is not None:
+        out.append("release_schedule")
+        spec = getattr(model.process, "bench_staging", None)
+        if isinstance(spec, dict) and spec:
+            try:
+                if float(spec.get("capacity", 0) or 0) > 0:
+                    out.append("bench_staging")
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def _declare_unmirrored(model: WarehouseModel, out: dict,
+                        unmirrored: list[str]) -> dict:
+    """降りたことを**名乗る**（＋安い上界だけは付ける）。
+
+    ``line_mechanics_mirrored: False`` と ``unmirrored`` が付いているブロックは
+    「この機構は解析では見ていない」の意味で、黙って従来の閉形式を返すのとは違う
+    ——読む側が DES を回すべきだと分かる。何も降りていないモデルにはこのキー自体が
+    出ない（＝同梱カタログはバイト同一）。
+
+    上界を1つだけ足す: 開放中は検品済みの投入が止まる（``_induct_hold``）ので、
+    mode_A が使える能力は多くても ``capacity × (1 − 窓の割合)``。窓の長さが書いて
+    あるときだけ課す — 「出し切るまで」(``window_s`` 0) の窓は長さが結果側の量なので、
+    上界として名乗れる数字が無い（そこは素直に降りる）。
+    """
+    out = {**out, "line_mechanics_mirrored": False, "unmirrored": list(unmirrored)}
+    win = _release_window(model)
+    if win is None or not (win[1] > 0.0) or not out.get("capacity_per_hr"):
+        return out
+    period, window = win
+    share = min(window / period, _RELEASE_SHARE_MAX)
+    cap = out["capacity_per_hr"] * (1.0 - share)
+    offered = out.get("offered_per_hr") or 0.0
+    out["capacity_per_hr_unbounded"] = out["capacity_per_hr"]
+    out["release_window_share"] = share
+    out["capacity_per_hr"] = cap
+    out["jams"] = bool(offered > cap)
+    if out["jams"]:
+        per_s = max(offered - cap, 1e-9) / 3600.0
+        out["time_to_jam_s"] = out.get("buffer_slots", 0) / per_s
+        # 通せない割合は手待ち率の下限 (通せなかった荷はどこかで待っている)。
+        out["block_ratio_est"] = min(max(out.get("block_ratio_est", 0.0),
+                                         1.0 - cap / max(offered, 1e-9)), 1.0)
+    return out
+
+
 def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
                    pack_time_s: float, horizon_s: float) -> dict | None:
     """The 搬送ライン block: the mechanism the model switched on, else the belt chain.

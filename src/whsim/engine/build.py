@@ -435,6 +435,7 @@ def _resolve_release(model) -> dict | None:
         "window_s": max(0.0, _num(spec, "window_s", 0.0)),
         "stack_rate_per_hr": max(0.0, _num(spec, "stack_rate_per_hr", 0.0)),
         "stackers": max(1, int(_num(spec, "stackers", 1.0))),
+        "board_s": max(0.0, _num(spec, "board_time_s", 0.0)),
         "load_kind": str(spec.get("load_kind", "") or ""),
     }
 
@@ -698,6 +699,10 @@ class World:
     # ``None``/0.0 = 積み付け is not a constraint (never blocks).
     stack_crew: simpy.Resource | None = None
     stack_time_s: float = 0.0
+    # 完成品を1個ベルトへ載せるのに要る秒数 (``release_schedule.board_time_s``).
+    # 0 = 未指定＝載せる手間は数えない。**推測しない**ためのゼロ既定で、排出時間は
+    # そのとき本線の空き待ちだけになる（測っていない秒数を売らない）。
+    release_board_s: float = 0.0
     workers: list[Worker] = field(default_factory=list)
     helpers: list[Worker] = field(default_factory=list)  # parallel-zone sub-tracks (replay only)
     totes: list[Tote] = field(default_factory=list)      # goods tracks (replay only)
@@ -1290,6 +1295,7 @@ def build(
         replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
         n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,
         release_schedule=release_plan, stoppers=stoppers,
+        release_board_s=(release_plan["board_s"] if release_plan else 0.0),
         bench_staging=bench_staging, stage_onto=stage_onto,
         stack_crew=stack_crew, stack_time_s=stack_time_s,
         aisle_locks=aisle_locks,
