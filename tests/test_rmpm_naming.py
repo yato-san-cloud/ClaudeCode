@@ -918,3 +918,31 @@ def test_the_endpoint_reports_gates_that_work_separately_from_gates_it_placed():
         assert cv["stop_gate"]["stop_states"] == ["検品済オリコン"]
     finally:
         client.delete("/api/projects/rmpmgate")
+
+
+def test_a_stopper_that_stops_everything_is_a_mode_not_a_kind():
+    """「全ての荷が停止」は荷種ではなくストッパーの無選択性の宣言。
+
+    荷種として読むと幻の `load_kind="全ての荷"` が上流ベルトに押され、ゲートは
+    **その偶然によってだけ**全停止になる（実荷種を書いたモデルでは黙って外れる）。
+    普遍量化の主語と「物理ストッパー」は `{"mode": "all"}` に解決し、種別推定は
+    走らない・armed 扱い（種別宣言を待たない）。"""
+    g, cvs = _gate_of([
+        {"type": "StationObject", "id": 1, "x": 0, "y": 20000, "w": 40000, "h": 600,
+         "name": "本線コンベア(東向き)"},
+        {"type": "StationObject", "id": 2, "x": 2000, "y": 12000, "w": 600, "h": 8000,
+         "name": "検品コンベア西列"},
+        {"type": "WallObject", "id": 3, "x": 35000, "y": 19000, "w": 100, "h": 2600,
+         "name": "停止線(新設)｜物理ストッパー・全ての荷が停止"},
+    ])
+    trunk = next(c for c in cvs if "本線" in c["id"])
+    assert trunk["stop_gate"].get("mode") == "all"
+    assert "stop_states" not in trunk["stop_gate"]
+    assert g["positioned"] == 1 and g["armed"] == 1 and g["pending"] == 0
+    # no phantom kind stamped anywhere
+    assert all(c.get("load_kind", "") != "全ての荷" for c in cvs)
+    assert not any("全ての荷」を" in w and "推定" in w for w in g["warnings"])
+    # a plain 「すべての荷は停止」 subject resolves the same way
+    assert rmpm.stop_rule_from_name("停止線｜すべての荷は停止") == {"mode": "all"}
+    assert rmpm.stop_rule_from_name("停止線｜検品済オリコンは停止") == \
+        {"stop_states": ["検品済オリコン"]}

@@ -931,13 +931,26 @@ def stop_rule_from_name(name) -> dict[str, list[str]]:
 
     Subjects come back NFKC-normalised, because they are matched against the
     kinds belts stamp (`load_kind_from_name`) and 半角カナ on one drawing and
-    全角 on the other must not read as two different loads."""
+    全角 on the other must not read as two different loads.
+
+    A subject that is a UNIVERSAL quantifier (「全ての荷が停止」「物理ストッパー」)
+    is not a load kind — it is the drawing saying the line has no selectivity at
+    all. Reading it as a kind mints a phantom `load_kind="全ての荷"` that gets
+    stamped onto the feeder belts, and the gate then stops everything only by
+    that accident: authored models with real kinds would silently mismatch. Such
+    a name resolves to ``{"mode": "all"}`` (the engine's 物理ストッパー), and no
+    kind inference runs for it."""
+    s_all = _nfkc(name)
+    if "物理ストッパ" in s_all:
+        return {"mode": "all"}
     stop: list[str] = []
     pas: list[str] = []
-    for subject, verb in _STOP_RULE_RE.findall(_nfkc(name)):
+    for subject, verb in _STOP_RULE_RE.findall(s_all):
         s = subject.strip(" 　")
         if not s or s in ("停止線", "停止位置"):
             continue
+        if verb == "停止" and s in _ALL_LOADS_SUBJECTS:
+            return {"mode": "all"}
         bucket = stop if verb == "停止" else pas
         if s not in bucket:
             bucket.append(s)
@@ -947,6 +960,13 @@ def stop_rule_from_name(name) -> dict[str, list[str]]:
     if pas:
         out["pass_states"] = pas
     return out
+
+
+# Subjects that mean "everything", not a kind. 「全ての荷が停止」 is a statement
+# about the STOPPER (no selectivity), not about a load called 全ての荷.
+_ALL_LOADS_SUBJECTS = frozenset({
+    "全ての荷", "すべての荷", "全部の荷", "全荷", "全て", "すべて", "全ての荷物",
+})
 
 
 def _seg_cross(a0, a1, b0, b1) -> bool:
@@ -1218,6 +1238,12 @@ def resolve_stop_gates(conveyors: list[dict], non_barriers: list[dict]) -> dict:
     for cv, gate in keep.values():
         stop_states = list(gate.get("stop_states") or [])
         pass_states = list(gate.get("pass_states") or [])
+        # 物理ストッパー: no selectivity, so it needs no declared kinds to work —
+        # it is armed by construction and never pending.
+        if gate.get("mode") == "all":
+            armed += 1
+            cv["stop_gate"] = gate
+            continue
         # Mirrors the engine's three-valued selection (`build.StopGate.stops`):
         # 止める荷 wins when written, otherwise everything NOT passing stops.
         if stop_states:
