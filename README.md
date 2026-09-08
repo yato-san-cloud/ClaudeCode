@@ -43,6 +43,7 @@
 - RK連携のデータ契約（埋め込みJSON・台帳CSVスキーマ・作業指示書取込）: [docs/rk-interface-spec.md](docs/rk-interface-spec.md)
 - 市販ツール（Teachme Biz / tebiki 等）調査と設計判断・乗り換え条件: [docs/market-research.md](docs/market-research.md)
 - Copilot 365 エージェント版のビルド手順・受け入れテスト・費用: [docs/copilot-planner-agent.md](docs/copilot-planner-agent.md)
+- 引き継ぎ資料（正本の所在・凍結契約・設計判断ログ・フェーズ2計画）: [docs/HANDOVER.md](docs/HANDOVER.md) ／ 過去マニュアル評価メモ: [docs/lumen-manual-review.md](docs/lumen-manual-review.md)
 
 ## 開発
 
