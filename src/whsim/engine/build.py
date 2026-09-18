@@ -91,6 +91,12 @@ MAX_TOTE_TRACKS = 400
 # the belt -- never-blocks).
 DEFAULT_CONVEYOR_SPEED_MPS = 0.5
 
+# 完成品リリースの周期の下限 (秒)。人が台の完成品を本線へ載せてストッパーを開け閉め
+# する運用の周期なので、これより短い値は運用ではなく**タイプミス**。0.001 を素通し
+# すると1時間のシフトが36万回の窓になり、``POST /run`` を同期で回している web app が
+# そのまま固まる。丸めた事実は ``release_schedule`` の解決値に出る。
+MIN_RELEASE_PERIOD_S = 1.0
+
 
 @dataclass
 class StopGate:
@@ -170,6 +176,35 @@ class Stopper:
     is_open: bool = False
     _open_ev: simpy.Event | None = None
     _close_ev: simpy.Event | None = None
+    _room_ev: simpy.Event | None = None
+
+    @property
+    def capacity(self) -> int:
+        """How many loads the queue can physically hold: the belt in FRONT of the
+        gate, one per pitch, plus the one standing at the gate itself.
+
+        The docstring above always said the queue grows one load per pitch;
+        nothing enforced it, so the queue was bounded only by the belt's TOTAL slot
+        count — including every slot DOWNSTREAM of the gate, which is belt the queue
+        can never reach. A stop line 10 m along a 40 m trunk buffered 40 loads where
+        the floor holds 11 (3.6×), and ``arc_of`` clamped the overflow to 0.0, so
+        the extras all reported standing on the infeed on top of each other. That
+        error is 甘い側: the line absorbs a surge 3.6 times bigger than the real one
+        before anything backs up, and ``stopper_queue_peak`` — which we sell as
+        「本線のどれだけが取り置きバッファか」 — reads the inflated number."""
+        return max(1, int(self.gate.arc / max(self.pitch, 1e-9)) + 1)
+
+    def room_ev(self, env) -> simpy.Event:
+        """列に1つ空きが出たときの合図（満杯で待っている荷が起きる）。"""
+        if self._room_ev is None or self._room_ev.triggered:
+            self._room_ev = env.event()
+        return self._room_ev
+
+    def signal_room(self) -> None:
+        """列から1つ抜けた ⇒ 満杯で上流に止まっている荷を起こす。"""
+        ev, self._room_ev = self._room_ev, None
+        if ev is not None and not ev.triggered:
+            ev.succeed()
 
     def arc_of(self, index: int) -> float:
         """Where the load at queue position ``index`` physically stands."""
@@ -433,11 +468,20 @@ def _num(spec: dict, key: str, default: float) -> float:
     Every mechanism dict on the schema is free-form (that is what lets a model state
     it without a nested type), so every read has to survive a string, a ``None`` and
     a typo. Falling back to the default is what keeps a half-typed mechanism from
-    taking the line down (never-blocks)."""
+    taking the line down (never-blocks).
+
+    **``nan``/``inf`` are typos too.** ``float()`` accepts them (JSON can carry the
+    strings, and ``Infinity`` is a JSON literal in most writers), and they then pass
+    every ``> 0`` test and blow up at the first ``int()`` — ``int(nan)`` raises
+    ValueError, ``int(inf)`` OverflowError, so ``build()`` itself raised on six
+    malformed specs and the model could not be opened at all. A number that is not
+    finite is not a number a line can be run with, so it takes the default here
+    (invariant 2: never blocks)."""
     try:
-        return float(spec.get(key, default))
+        v = float(spec.get(key, default))
     except (TypeError, ValueError):
         return float(default)
+    return v if math.isfinite(v) else float(default)
 
 
 def _resolve_release(model) -> dict | None:
@@ -446,17 +490,29 @@ def _resolve_release(model) -> dict | None:
     ``None`` for unstated, malformed, or a non-positive period — a schedule that
     never fires is not a schedule, and the stoppers then simply never open (which
     is exactly the model without this mechanism). ``window_s`` 0 means 「出し切る
-    まで」 and is capped at the period by the caller so two windows can never
-    overlap."""
+    まで」.
+
+    **窓は必ず閉じる** (不変条件17) なので ``window_s`` はここで周期に丸める。
+    ``release_agent`` は 0 の枝しか丸めていなかったので、``window_s > period_s`` の
+    図面では窓が周期をまたいで重なり、``window_s`` が巨大なら **開いたきり閉じない**
+    （実測: 開放率 0.667 で窓が周期の4倍、``window_s`` 1e9 では開放1回・閉鎖0回なのに
+    ``stopper_open_share`` は 0.000 と読める）。丸める場所は1つ＝ここ。
+
+    **周期には下限がある**。``period_s`` は人が荷を載せてストッパーを開け閉めする
+    運用の周期なので、ミリ秒の周期は運用ではなくタイプミス。下限を置かないと
+    ``period_s: 0.001`` の1時間シフトが 36万回の窓＝72万イベントになり、
+    ``POST /run`` が同期で回る web app がそのまま固まる（実測45秒で終わらず）。
+    下限で走らせて数字を出す方が、黙って機構を消すより正直（never-blocks）。"""
     spec = getattr(model.process, "release_schedule", None)
     if not isinstance(spec, dict) or not spec:
         return None
     period = _num(spec, "period_s", 0.0)
     if not (period > 0.0):
         return None
+    period = max(period, MIN_RELEASE_PERIOD_S)
     return {
         "period_s": period,
-        "window_s": max(0.0, _num(spec, "window_s", 0.0)),
+        "window_s": min(max(0.0, _num(spec, "window_s", 0.0)), period),
         "stack_rate_per_hr": max(0.0, _num(spec, "stack_rate_per_hr", 0.0)),
         "stackers": max(1, int(_num(spec, "stackers", 1.0))),
         "board_s": max(0.0, _num(spec, "board_time_s", 0.0)),

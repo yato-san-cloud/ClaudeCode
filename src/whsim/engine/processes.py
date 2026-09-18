@@ -1500,7 +1500,8 @@ def _stopper_level(world: World) -> int:
     return sum(len(c.stopper.queue) for c in world.stoppers)
 
 
-def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
+def _hold_at_stopper(world: World, line, order: Order, kind: str, tote,
+                     to_exit: bool = False):
     """物理ストッパーの前に並び、次の行き先が決まるまで待つ。
 
     出口は3つで、どれが先に来るかは人の都合で決まる:
@@ -1513,9 +1514,31 @@ def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
     * ``("release",)`` — ストッパーが開いた（mode_B）。前に居た荷はカーブへ流れる。
 
     列に並んでいる間もベルトのスロットは握ったまま＝滞留は上流へ伝わる。
+
+    **列は無限ではない** (:attr:`build.Stopper.capacity`): ゲートまでの区間に入る数
+    しか並べない。満杯なら後ろの荷は**自分の居る場所で**止まる（本線のスロットを
+    握ったまま＝背圧はそのまま上流へ）。待っている間は列の尻のさらに上流に描く
+    ——ベルトに載り切らない列は、実際に上流のベルトまで伸びている。
+
+    ``to_exit`` は**もう梱包しない荷**（リリースが本線へ載せた完成品が、窓が閉じた
+    後にゲートへ着いた場合）。停止線の人はそれを降ろさない: 完成品の行き先は次の
+    開放でカーブへ出ることだけで、ここで人に掴ませると **その台は永久に返ってこない**
+    （出口が ``_stack_out`` なので ``pool.release`` を通らない＝窓ごとに1台ずつ
+    停止線から人が消え、実測では 10,800 秒のうち 93% を無人で走っていた）。
     """
     env = world.env
     stp = line.stopper
+    # 列が満杯: 入れるようになるまで、いま居る場所で待つ。
+    if len(stp.queue) >= stp.capacity:
+        waiting = _stall_join(world, line, -stp.pitch, tote, True)
+        t_full = env.now
+        while len(stp.queue) >= stp.capacity:
+            yield stp.room_ev(env)
+        _stall_leave(world, waiting)
+        world.log(t=env.now, event="stopper_backup", order_id=order.order_id,
+                  resource="conveyor", conveyor=line.id, kind=kind,
+                  queue=len(stp.queue), capacity=stp.capacity,
+                  blocked=env.now - t_full)
     held = _Held(order=order, kind=kind, at=env.now, event=env.event(), tote=tote)
     stp.queue.append(held)
     _stall_draw(world, line, stp.gate.arc, stp.queue, False)
@@ -1523,7 +1546,8 @@ def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
               resource="conveyor", conveyor=line.id, kind=kind,
               queue=len(stp.queue), total=_stopper_level(world),
               arc=stp.arc_of(len(stp.queue) - 1))
-    pool = stp.gate.bench if stp.gate.bench is not None else _bench_pool(world, line)
+    pool = (None if to_exit else
+            (stp.gate.bench if stp.gate.bench is not None else _bench_pool(world, line)))
     req = pool.request() if pool is not None else None
     t0 = env.now
     if req is not None:
@@ -1535,8 +1559,9 @@ def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
         for i, h in enumerate(stp.queue):
             if h is held:
                 stp.queue.pop(i)
-                # 抜けた分だけ後ろが前へ詰まる（箱を1つ取ると残りが滑り込む）。
+                # 抜けた分だけ後ろが前へ詰まる（箱を1つ取ると残りが滑り込む）…
                 _stall_draw(world, line, stp.gate.arc, stp.queue, False)
+                stp.signal_room()   # …そして列の外で待っている荷が1つ入れる
                 return
 
     if req is not None and req.triggered:
@@ -1590,6 +1615,7 @@ def _pull_from_stopper(world: World, spur) -> None:
         stp.queue.insert(idx, held)
         return
     _stall_draw(world, host, stp.gate.arc, stp.queue, False)   # 列が前へ詰まる
+    stp.signal_room()                                          # 1つ空いた
     world.log(t=world.env.now, event="stopper_pull", order_id=held.order.order_id,
               resource="conveyor", conveyor=host.id, spur=spur.id,
               kind=held.kind, queue=len(stp.queue), total=_stopper_level(world),
@@ -1763,6 +1789,8 @@ def _flush_queues(world: World) -> None:
                       conveyor=trunk.id, kind=held.kind, queue=len(stp.queue),
                       total=_stopper_level(world), wait=env.now - held.at)
             held.event.succeed(("release",))
+        # 列が空いた ⇒ 満杯で上流に止まっていた荷も入れる（開放中はそのまま流れる）。
+        stp.signal_room()
         wake = trunk.divert_wake
         if wake is not None and not wake.triggered:
             trunk.divert_wake = None
@@ -1776,14 +1804,27 @@ def _load_staging(world: World, deadline: float):
     自分の台の脇から同時に載せる形を、決定論的な1本の列に畳んだもの）。窓が閉じた
     ら途中でやめる——載せ切れなかった分は次の窓まで台の脇に残り、それが必要容量の
     答えになる。
+
+    **載せ切れない荷には手を出さない**。``board_time_s`` を使い切った瞬間に窓が閉じる
+    と、その完成品は「自分がそこを通って出ていくはずのストッパー」の前で並び直す
+    ——``release_agent`` は ``_load_staging`` が返った直後に閉めるので、これは毎窓
+    きっかり1個 起きていた（実測 11/11・23/23 窓）。その1個は本線のスロットを次の
+    周期まで握り、``stopper_stops`` と ``stopper_queue_peak``（＝「本線のどれだけが
+    取り置きバッファか」として売る数字）を押し上げる。窓に**1個も**載せられないほど
+    短い設定でも最初の1個だけは載せる (never-blocks: 機構を黙って止めない。その1個は
+    並び直すが、それは「窓が短すぎる」という実在の設計問題で、置き場と列の数字がそう
+    言う)。
     """
     env = world.env
     stores = world.bench_staging or {}
     belts = sorted(stores)
     if not belts:
         return 0
+    board_s = max(0.0, world.release_board_s)
     n, cursor = 0, 0
     while env.now < deadline:
+        if n and env.now + board_s >= deadline - 1e-9:
+            break                       # 載せ切れない（閉まる瞬間に載る＝並び直す）
         src = None
         for k in range(len(belts)):
             b = belts[(cursor + k) % len(belts)]
@@ -1802,6 +1843,9 @@ def _load_staging(world: World, deadline: float):
             if req not in res:
                 req.cancel()
                 break                   # 窓が閉じた: 残りは次の周期へ
+            if n and env.now + board_s >= deadline - 1e-9:
+                trunk.belt.release(req)  # スロットを待つ間に載せ切れなくなった
+                break
         item = yield stores[src].get()
         if world.release_board_s > 0.0:
             yield env.timeout(world.release_board_s)   # 1個載せるのに要る時間
@@ -2068,7 +2112,8 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
                 break                    # 選択停止: 停止線の人が降ろす (従来どおり)
             if not stp.is_open:
                 hold_t = env.now
-                what = yield from _hold_at_stopper(world, line, order, kind, tote)
+                what = yield from _hold_at_stopper(world, line, order, kind, tote,
+                                                   to_exit=to_exit)
                 if what[0] == "spur":
                     # 止まっている荷を作業者が引いた。スロットは引く側が確保済み。
                     _, cand, spur_slot = what
@@ -2123,6 +2168,15 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
     if to_exit:
         # ストッパーを通り抜けた荷 (リリースで載せた完成品 / 開放時に前に居た荷)。
         # 梱包台ではなくカーブの先の積み付けが終着点。
+        if seized is not None:
+            # この荷は梱包しないので、停止線の台は**ここで返す**。返さないと
+            # ``_stack_out`` で終わる経路には ``pool.release`` が1つも無いので、
+            # その台は二度と空かない（窓ごとに1台ずつ停止線から人が消える）。
+            # ``_hold_at_stopper`` が ``to_exit`` の荷に台を要求しなくなったので
+            # 通常は空振りするが、**唯一その資源を返す場所**なので残す。
+            pool, preq, _pre_wait = seized
+            pool.release(preq)
+            seized = None
         yield from _stack_out(world, order, arrival, line, arc, slot, tote, kind,
                               held_from, dist_per_order, leg, arc_in, board_t,
                               packed)
