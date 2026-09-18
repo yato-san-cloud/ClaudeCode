@@ -554,10 +554,17 @@ def pool_spec(model) -> dict | None:
     spec = getattr(getattr(model, "process", None), "container_pool", None)
     if not isinstance(spec, dict) or not spec:
         return None
+    # Non-finite is a typo too, and `int(inf)` raises OverflowError — an
+    # ArithmeticError, NOT a ValueError, so the obvious `except (TypeError,
+    # ValueError)` does not catch it and the oracle raised on the drag path.
+    # This mirrors `engine.build`'s reading, which is now `_num`-based; the two are
+    # pinned against each other over a set of broken values, because a mirrored
+    # RULE that only agrees on well-formed input is the drift invariant 11 forbids.
     try:
-        n = int(spec.get("count", 0) or 0)
+        raw = float(spec.get("count", 0) or 0)
     except (TypeError, ValueError):
         return None
+    n = int(raw) if math.isfinite(raw) else 0
     return spec if n > 0 else None
 
 

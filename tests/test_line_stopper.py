@@ -951,3 +951,47 @@ def test_a_model_with_none_of_them_reports_every_new_kpi_as_zero():
         assert k[key] == 0, key
     assert all(v["staging_peak"] == 0 for v in k["conveyors"].values())
     assert not math.isnan(k["conveyor_utilization"])
+
+
+# ============================================ 非有限値は「数」ではない（不変条件2/5）
+
+@pytest.mark.parametrize("at_m", ["nan", float("nan"), float("inf"), float("-inf")])
+def test_a_gate_at_a_non_finite_arc_is_no_gate_not_a_gate_that_never_fires(at_m):
+    """`at_m` が非有限なら**ゲート無し**に落ちる。3つ目の状態を作らせない。
+
+    `min(max(nan, 0), length)` は nan のまま通る（nan の比較は全て False）ので、
+    ゲートは**構築され・在ると報告され**、しかし `_convey_chain` の
+    `gate.arc >= arc` も nan 比較なので**一度も作動しない**。ラインは停止線を
+    描いていないかのように走り、`_has_gate` も取込の armed 集計も「在る」と
+    言い続ける（実測: 0 件/h であるべき構成が 450 件/h を返した）。
+    `at_m="abc"` が素直に「ゲート無し」に落ちるのと同じ扱いにする —— 甘い側へ
+    黙って倒れるのは不変条件5が唯一禁じる向き。"""
+    m = _line(gate={"at_m": at_m, "mode": "all"}, junction_x=28.0)
+    world = build(m)
+    assert all(c.gate is None for c in world.conveyors), \
+        "非有限の arc は『効かないゲート』ではなく『ゲート無し』"
+    assert world.stoppers == []
+    # …そして実際に走る（never-blocks）
+    assert len(_events(run_once(m, seed=5), "order_complete")) > 0
+
+
+def test_the_pool_reader_and_its_mirror_agree_on_broken_values():
+    """`engine.build` と `linemech.container` は**壊れた値でも**同じ答えに落ちる。
+
+    両者は同じ規則の写しで、片方だけ `except (TypeError, ValueError)` を持って
+    いた。`int(inf)` は OverflowError（ArithmeticError であって ValueError では
+    ない）なので素通りし、`build()` と **`analytic.estimate()` の両方**が送出した
+    —— estimate はドラッグ中に回る経路なので、編集画面がその一打鍵で固まる。
+    正常値だけで一致する写しは、不変条件11が禁じるドリフトそのもの。"""
+    from whsim.linemech.container import pool_spec
+
+    broken = [float("inf"), float("-inf"), float("nan"), "nan", "inf", "abc",
+              None, [1], {}, 0, -3, "12"]
+    for v in broken:
+        m = templates.load_template_model("line_inspection")
+        m.process.container_pool = {"count": v, "return_time_s": 60.0}
+        world = build(m)                      # 送出しないこと自体が検査
+        engine_on = world.container_pool is not None
+        mirror_on = pool_spec(m) is not None
+        assert engine_on == mirror_on, (v, engine_on, mirror_on)
+        analytic.estimate(m)                  # ドラッグ経路も落ちないこと

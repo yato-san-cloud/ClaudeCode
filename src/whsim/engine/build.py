@@ -453,6 +453,17 @@ def _resolve_gate(cv, line: ConveyorLine) -> StopGate | None:
         arc = float(spec.get("at_m", line.length))
     except (TypeError, ValueError):
         return None
+    # A gate at a non-finite arc is the WORST of the three readings: `min(max(nan,
+    # 0), length)` leaves nan (every nan comparison is False), so the gate is BUILT
+    # and reported as present — but `_convey_chain`'s `gate.arc >= arc` is also a
+    # nan comparison, so it never once fires. The line then runs as if no stopper
+    # were drawn while `_has_gate` and rmpm's armed/pending count both say one is
+    # (measured: 0 件/h expected, 450 件/h returned, no warning anywhere). A
+    # mis-typed `at_m` already means "no gate" (`"abc"` → None); nan and inf mean
+    # the same thing (invariant 2 — and invariant 5, because the silent reading is
+    # the rosy one).
+    if not math.isfinite(arc):
+        return None
     stop_all = str(spec.get("mode", "select") or "select").strip().lower() == "all"
     gate = StopGate(arc=min(max(arc, 0.0), line.length),
                     stop_kinds=_kind_set(spec, "stop_states"),
@@ -1146,10 +1157,13 @@ def build(
     container_return_line = None
     cpool = getattr(model.process, "container_pool", None)
     if isinstance(cpool, dict) and cpool:
-        try:
-            n_containers = int(cpool.get("count", 0) or 0)
-        except (TypeError, ValueError):
-            n_containers = 0
+        # `int(inf)` raises OverflowError, which is an ArithmeticError and NOT a
+        # ValueError — so it sailed past this very guard and took `build()` AND
+        # `analytic.estimate()` down (the estimate runs on the drag path, so the
+        # editor froze on the keystroke). `Infinity` is a JSON literal Python's own
+        # `json.loads` accepts, and this dict is documented as hand-authorable.
+        # `_num` is the one rule for "a number out of a free-form dict"; use it.
+        n_containers = int(_num(cpool, "count", 0.0))
         try:
             container_return_s = max(0.0, float(cpool.get("return_time_s", 0.0) or 0.0))
         except (TypeError, ValueError):
