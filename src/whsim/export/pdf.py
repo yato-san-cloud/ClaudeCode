@@ -15,7 +15,7 @@ from ._data import (
     SUBTLE,
     _SCENARIO_METRICS,
     _SEV_COLOR,
-    _assumptions_lines,
+    _assumption_blocks,
     _brand_section,
     _date_str,
     _delta_str,
@@ -37,7 +37,8 @@ from .fonts import _register_cjk_font
 
 def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
               png_path, out_path, *, scenarios=None, insights=None,
-              provenance=None, storage=None, model=None, brand=None) -> Path:
+              provenance=None, storage=None, model=None, brand=None,
+              assumptions=None) -> Path:
     """Build a multi-section A4 proposal PDF and write it to `out_path`.
 
     Mirrors the PPTX sections: cover header -> executive summary (verdict + hero
@@ -48,6 +49,14 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     shows 宛先「〇〇御中」+ 提案元 + optional logo and the accent colour drives every
     heading rule / table header. A default/absent brand keeps the built-in accent.
     Missing inputs degrade gracefully.
+
+    ``assumptions`` carries the same 前提条件 data as :func:`build_pptx`, so a
+    危険側 前提 stated on the deck is stated here too — a fact that reaches one
+    deliverable and not its sibling is its own kind of failure.
+
+    Overflow: platypus already flows the story onto further pages, which is the
+    same contract the deck now honours (paginate, never clip); the 前提条件 are
+    xml-escaped so a ``&`` or ``<`` in caller text cannot break the build.
     """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
@@ -385,8 +394,15 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Methodology / provenance footer -------------------------------------
     _section("⑤ 裏付け：前提条件とデータ出所")
-    for line in _assumptions_lines(kpis, prov):
-        story.append(Paragraph(f"・ {line}", foot_style))
+    for blk in _assumption_blocks(kpis, prov, assumptions, model=model):
+        if blk["level"] == "info":
+            style = foot_style  # unchanged for every pre-existing export
+        else:
+            style = ParagraphStyle(
+                f"assume_{blk['level']}", parent=foot_style,
+                fontName=font, textColor=_rgb(blk["color"]),
+            )
+        story.append(Paragraph(f"・ {_xml_escape(blk['text'])}", style))
 
     doc.build(story)
     return out_path

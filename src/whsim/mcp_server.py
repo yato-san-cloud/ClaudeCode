@@ -25,7 +25,10 @@ runs/ の場所は ``WHSIM_RUNS_DIR`` があればそれ、無ければ
 
 from __future__ import annotations
 
+import ast
 import datetime as _dt
+import functools
+import inspect
 import itertools
 import json
 import os
@@ -48,6 +51,14 @@ MAX_SWEEP_CASES = 64
 MAX_SEED = 2 ** 32 - 1
 # 1回のスイープで表に載せられる指標の数（表であって生ログではない）。
 MAX_SWEEP_METRICS = 60
+# 連動軸（tied axis）: 1水準＝まとめて当てる編集の集合。その1水準に書ける編集の数。
+# 上限は「実験変数1つ」の常識的な広さ（実ラインの引き込み10ヶ所×両側でも足りる）。
+MAX_TIED_EDITS = 200
+
+# 連動軸の綴り。``{"軸名": {"levels": [{"name": …, "edits": {path: 値}}, …]}}``。
+LEVELS_KEY = "levels"
+EDITS_KEY = "edits"
+NAME_KEY = "name"
 
 SWEEPS_SUBDIR = "sweeps"
 
@@ -186,6 +197,12 @@ def _validate_metrics(metrics: Any) -> list[str]:
     return keys
 
 
+def _compact_value(v: Any) -> Any:
+    """スカラーはそのまま、複合値（配列/オブジェクト）は形だけ。"""
+    return v if (v is None or isinstance(v, (str, int, float, bool))) \
+        else f"<{type(v).__name__} len={len(v)}>"
+
+
 def _compact_params(params: dict) -> dict:
     """応答に載せる params（配列/オブジェクトの値は要約する）。
 
@@ -193,11 +210,125 @@ def _compact_params(params: dict) -> dict:
     それを 64 ケース分そのまま返すと応答が実験そのものより大きくなるので、複合値は
     形だけにする（全量は ``table.json`` に残っている＝出所は失わない）。
     """
-    out = {}
-    for k, v in (params or {}).items():
-        out[k] = v if (v is None or isinstance(v, (str, int, float, bool))) \
-            else f"<{type(v).__name__} len={len(v)}>"
-    return out
+    return {k: _compact_value(v) for k, v in (params or {}).items()}
+
+
+# --------------------------------------------------------------------------
+# 自由 dict のキー検証（綴り違いは「効かなかった」より悪い＝嘘をつく）
+# --------------------------------------------------------------------------
+# ``Conveyor.stop_gate`` / ``Process.container_pool`` のような機構の dict は
+# 型を持たない（＝手書きのモデルが入れ子スキーマ無しで書ける）。その代償として
+# ``container_pool.size`` のような綴り違いは **書けてしまい・読み戻せてしまい**、
+# 「適用された」と報告されるのにエンジンは一生読まない。落ちたパスより悪い。
+#
+# 認識されるキーの表をこの層に写すと不変条件11（ハードコピー増殖の禁止）に
+# 触れるので、**エンジンのパーサそのもの**（``whsim.engine.build``）から導出する:
+# 「そのフィールドを ``getattr`` で受けた変数から、どの文字列キーを読んでいるか」。
+# フィールドの一覧も手で書かず、スキーマ側で ``dict | None`` と宣言されている
+# フィールド＝自由 dict、として引く。どちらか一方でも導出できなければ **検査ごと
+# 黙って降りる**（never-blocks — 検査が実験を止める方が害が大きい）。
+
+
+@functools.lru_cache(maxsize=1)
+def _free_dict_fields() -> frozenset[str]:
+    """スキーマが ``dict | None`` と宣言しているフィールド名＝自由 dict。"""
+    try:
+        from pydantic import BaseModel
+
+        from whsim.schema import model as schema_mod
+    except ImportError:                                 # pragma: no cover
+        return frozenset()
+    free = dict | None
+    out: set[str] = set()
+    for obj in vars(schema_mod).values():
+        if not (isinstance(obj, type) and issubclass(obj, BaseModel)):
+            continue
+        for name, field in getattr(obj, "model_fields", {}).items():
+            if field.annotation == free:
+                out.add(name)
+    return frozenset(out)
+
+
+@functools.lru_cache(maxsize=1)
+def mechanism_keys() -> dict[str, frozenset[str]]:
+    """自由 dict フィールド → **エンジンが実際に読むキー**（``engine/build.py`` 由来）。
+
+    写しではなく導出: ``build.py`` を構文木で読み、``spec = getattr(cv,
+    "stop_gate", None)`` のような束縛を見つけ、その変数から読まれている文字列キー
+    （``spec.get("at_m", …)`` と ``_kind_set(spec, "stop_states")`` のような
+    ヘルパ呼び出しの第2引数）を集める。エンジンがキーを増やせばこちらも増える。
+    """
+    fields = _free_dict_fields()
+    if not fields:
+        return {}
+    try:
+        from whsim.engine import build as build_mod
+        tree = ast.parse(Path(inspect.getfile(build_mod)).read_text("utf-8"))
+    except (ImportError, OSError, SyntaxError, TypeError, ValueError):  # pragma: no cover
+        return {}
+
+    out: dict[str, set[str]] = {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        # 関数スコープ単位で「この変数はどのフィールドの dict か」を拾う
+        # （``spec`` は複数の resolver で使い回されているので、関数をまたがない）。
+        bound: dict[str, str] = {}
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == "getattr"
+                    and len(node.value.args) >= 2
+                    and isinstance(node.value.args[1], ast.Constant)
+                    and node.value.args[1].value in fields):
+                bound[node.targets[0].id] = node.value.args[1].value
+        if not bound:
+            continue
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            if (isinstance(f, ast.Attribute) and f.attr == "get"
+                    and isinstance(f.value, ast.Name) and f.value.id in bound
+                    and node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                out.setdefault(bound[f.value.id], set()).add(node.args[0].value)
+            elif (len(node.args) >= 2 and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id in bound
+                    and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)):
+                out.setdefault(bound[node.args[0].id], set()).add(node.args[1].value)
+    return {k: frozenset(v) for k, v in out.items() if v}
+
+
+def _unknown_mechanism_keys(path: str, want: Any) -> tuple[str, list[str]] | None:
+    """編集が自由 dict に**エンジンが読まないキー**を書いていれば ``(欄, キー列)``。
+
+    2つの書き方を見る: 下位パス（``…stop_gate.at_mm``）と、dict 丸ごとの差し替え
+    （``process.container_pool = {"size": 300}``）。表が引けないときは ``None``。
+    """
+    known = mechanism_keys()
+    if not known:
+        return None
+    segs = path.split(".")
+    if len(segs) >= 2 and segs[-2] in known:
+        return None if segs[-1] in known[segs[-2]] else (segs[-2], [segs[-1]])
+    if segs[-1] in known and isinstance(want, dict):
+        bad = sorted(k for k in want if str(k) not in known[segs[-1]])
+        return (segs[-1], bad) if bad else None
+    return None
+
+
+def _unknown_key_entry(path: str, field: str, unknown: list[str]) -> dict:
+    known = sorted(mechanism_keys()[field])
+    return {"path": path,
+            "reason": (f"エンジンが読まないキーです（書けてしまいますが無視されます）: "
+                       f"{', '.join(unknown)} — {field} が読むのは "
+                       f"{' / '.join(known)}"),
+            "unknown_keys": list(unknown),
+            "recognized_keys": known}
 
 
 def _check_applied(run_id: str, diff: dict) -> tuple[list[str], list[dict]]:
@@ -206,6 +337,10 @@ def _check_applied(run_id: str, diff: dict) -> tuple[list[str], list[dict]]:
     ``apply_scenario`` は寛容（解決できない dotted-path は黙って捨てる）ので、
     「台数を減らした」と言いながら何も変わっていない、が起こり得る。焼かれた
     モデルを読み直して突き合わせれば、その齟齬は実験者に見える。
+
+    自由 dict（``stop_gate`` / ``container_pool`` …）の**キーの綴り違い**は
+    モデルに書けてしまい・読み戻せてしまうので、値の一致だけでは「適用された」に
+    なる。エンジンが読むキーかどうかも見る（:func:`mechanism_keys`）。
     """
     model = lab.load_artifact(run_id, lab.MODEL_JSON, _runs_dir())
     applied, unapplied = [], []
@@ -215,6 +350,10 @@ def _check_applied(run_id: str, diff: dict) -> tuple[list[str], list[dict]]:
             got = lab.get_by_path(model, segs)
         except LabError:
             unapplied.append({"path": path, "reason": "モデルに存在しないパスです"})
+            continue
+        typo = _unknown_mechanism_keys(path, want)
+        if typo is not None:
+            unapplied.append(_unknown_key_entry(path, *typo))
             continue
         if isinstance(want, (str, int, float, bool)) or want is None:
             if lab.same_value(got, want):
@@ -270,6 +409,119 @@ def _stamp(prefix: str, key: Any) -> str:
 
 
 # --------------------------------------------------------------------------
+# 格子の軸 — スカラー軸（従来）と連動軸（1水準＝まとめて当てる編集の集合）
+# --------------------------------------------------------------------------
+# 実験変数は1つでも編集はN本、が現場の普通: 「引き込みあたりの梱包台」は実ラインで
+# 10本の station パス、「停止線の位置」は**線の位置と、そこに立つ人**の2本。直積で
+# 回すと (1) 対角以外の無意味なケースを買わされ、(2) 実寸では上限に当たって始まる前に
+# 断られる（引き込み5ヶ所＝3水準^10×4seed＝236,196ケース）。連動軸は**水準数で
+# 数える**ので、同じ実験が 3×4＝12 ケースになる。
+# スカラー軸（値がリスト）の綴りは1バイトも変えない — 追加は dict 形だけ。
+
+
+def _auto_level_name(edits: dict) -> str:
+    """名前を書かなかった水準の表示名（表で読めるだけの最小の手掛かり）。"""
+    items = list(edits.items())
+    head = ", ".join(f"{k}={_compact_value(v)}" for k, v in items[:2])
+    return head if len(items) <= 2 else f"{head} ほか{len(items) - 2}件"
+
+
+def _tied_levels(key: str, spec: dict) -> list[dict]:
+    """連動軸の ``levels`` → ``[{"name", "edits"}, …]``（検証込み）。"""
+    levels = spec.get(LEVELS_KEY)
+    if not isinstance(levels, list) or not levels:
+        raise LabError(f"連動軸 {key} の {LEVELS_KEY} は空でないリストで指定してください")
+    unknown = sorted(set(spec) - {LEVELS_KEY})
+    if unknown:
+        raise LabError(f"連動軸 {key} が知らないキーを持っています: {unknown}"
+                       f"（指定できるのは {LEVELS_KEY} だけです）")
+    out: list[dict] = []
+    for i, raw in enumerate(levels, start=1):
+        if not isinstance(raw, dict) or not raw:
+            raise LabError(f"連動軸 {key} の水準は編集のオブジェクトで指定してください"
+                           f"（{i}番目: {raw!r}）")
+        if EDITS_KEY in raw:
+            edits = raw[EDITS_KEY]
+            if not isinstance(edits, dict) or not edits:
+                raise LabError(f"連動軸 {key} の {i}番目の水準の {EDITS_KEY} は"
+                               "空でないオブジェクトで指定してください")
+        else:
+            edits = {k: v for k, v in raw.items() if k != NAME_KEY}
+            if not edits:
+                raise LabError(f"連動軸 {key} の {i}番目の水準に編集が1つもありません")
+        bad = [k for k in edits if not isinstance(k, str) or not k.strip()]
+        if bad:
+            raise LabError(f"連動軸 {key} の編集キーは dotted-path 文字列である必要が"
+                           f"あります: {bad}")
+        if len(edits) > MAX_TIED_EDITS:
+            raise LabError(f"連動軸 {key} の {i}番目の水準の編集が多すぎます: "
+                           f"{len(edits)} > {MAX_TIED_EDITS}")
+        name = raw.get(NAME_KEY)
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise LabError(f"連動軸 {key} の水準名は文字列で指定してください"
+                           f"（{i}番目: {name!r}）")
+        out.append({"name": name.strip() if isinstance(name, str) else _auto_level_name(edits),
+                    "edits": dict(edits)})
+    names = [lv["name"] for lv in out]
+    if len(set(names)) != len(names):
+        raise LabError(f"連動軸 {key} の水準名が重複しています: {sorted(names)}"
+                       "（表の行が区別できなくなります）")
+    return out
+
+
+def _parse_grid(grid: dict) -> list[dict]:
+    """``param_grid`` → 軸の列。値がリストならスカラー軸、``{"levels": …}`` なら連動軸。"""
+    axes: list[dict] = []
+    for k, v in grid.items():
+        if not isinstance(k, str) or not k.strip():
+            raise LabError(f"param_grid のキーは dotted-path 文字列である必要があります: {k!r}")
+        if isinstance(v, list):
+            if not v:
+                raise LabError(f"param_grid の値は空でないリストである必要があります: {k} → {v!r}")
+            axes.append({"key": k, "tied": False, "levels": [{"value": x} for x in v]})
+        elif isinstance(v, dict) and LEVELS_KEY in v:
+            axes.append({"key": k, "tied": True, "levels": _tied_levels(k, v)})
+        else:
+            raise LabError(
+                "param_grid の値は空でないリスト（スカラー軸: dotted-path → 値の並び）か、"
+                f'{{"{LEVELS_KEY}": [...]}}（連動軸: 1水準＝まとめて当てる編集の集合）'
+                f"である必要があります: {k} → {v!r}")
+    # 2つの軸が同じパスを書くと、直積の中で**あとから来た軸が黙って勝つ**。
+    owner: dict[str, str] = {}
+    for a in axes:
+        paths = ([a["key"]] if not a["tied"]
+                 else sorted({p for lv in a["levels"] for p in lv["edits"]}))
+        for p in paths:
+            if p in owner and owner[p] != a["key"]:
+                raise LabError(f"2つの軸が同じパスを編集しています: {p}"
+                               f"（{owner[p]} と {a['key']}）— どちらが効いたか"
+                               "表から読めなくなるので、片方にまとめてください")
+            owner[p] = a["key"]
+    return axes
+
+
+def _case_edits(axes: list[dict], combo: tuple) -> tuple[dict, dict, dict]:
+    """1ケース分の ``(params, edits, tied)``。
+
+    ``params`` は表に出る「つまみの値」（連動軸は**水準名**）、``edits`` は実際に
+    モデルへ当てる dotted-path 編集（連動軸は水準の編集を展開したもの）、``tied`` は
+    水準の全量（``table.json`` に残す）。
+    """
+    params: dict[str, Any] = {}
+    edits: dict[str, Any] = {}
+    tied: dict[str, dict] = {}
+    for ax, lv in zip(axes, combo):
+        if ax["tied"]:
+            params[ax["key"]] = lv["name"]
+            edits.update(lv["edits"])
+            tied[ax["key"]] = {"name": lv["name"], "edits": dict(lv["edits"])}
+        else:
+            params[ax["key"]] = lv["value"]
+            edits[ax["key"]] = lv["value"]
+    return params, edits, tied
+
+
+# --------------------------------------------------------------------------
 # ツール（MCP I/F）— どれも whsim.sim / whsim.lab_report の薄い呼び出し
 # --------------------------------------------------------------------------
 
@@ -304,7 +556,10 @@ def apply_diff_and_run(base_scenario: dict[str, Any] | str,
     ``{"resources.workers.0.count": 9}`` のような dotted-path 編集で、基準の
     ``edits`` にマージされる（同じキーは差分が勝つ）。実行後、焼かれた
     ``model.json`` を読み直して差分が本当に効いたかを確かめ、効かなかった
-    パスは ``unapplied_edits`` に出す（黙って無視しない）。
+    パスは ``unapplied_edits`` に出す（黙って無視しない）。自由 dict
+    （``stop_gate`` / ``container_pool`` …）に**エンジンが読まないキー**を
+    書いた場合も同じく ``unapplied_edits`` に出る（``container_pool.size`` は
+    モデルに書けてしまうが、エンジンは ``count`` しか読まない）。
     """
     base = _validate_scenario(_resolve_base_scenario(base_scenario))
     diff = _validate_diff(diff_json)
@@ -351,6 +606,25 @@ def sweep(base_scenario: dict[str, Any] | str,
     上限を超えるときは実行前に断る。**1本失敗してもスイープは止まらず**、
     その失敗は結果テーブル（``index.jsonl``）にエラー行として残る。
 
+    **連動軸（実験変数1つ＝編集N本）**: 1つのつまみが複数パスの編集になる実験
+    （「引き込みあたりの梱包台」＝station 10本、「停止線の位置」＝線の位置**と**
+    そこに立つ人）は、軸の値を値の並びではなく**水準の並び**で渡す::
+
+        {"台数±": {"levels": [
+            {"name": "-1台", "edits": {"resources.stations.1.count": 0,
+                                       "resources.stations.3.count": 0}},
+            {"name": "現状",  "edits": {"resources.stations.1.count": 1,
+                                       "resources.stations.3.count": 1}}]}}
+
+    キーは dotted-path ではなく**軸の名前**。1水準の編集は**まとめて**当たるので、
+    直積は水準どうしの間にしか立たない（ケース数は**水準数**で数える＝
+    引き込み5ヶ所の台数± が 3^10×4=236,196 ではなく 3×4=12 ケースになる）。
+    スカラー軸と同じ格子に混ぜられる。``name`` 省略可（編集から作る）、
+    ``{"edits": {...}}`` を書かずに編集そのものを水準として渡してもよい。
+    表と応答には**水準名**が出て、水準の全量は ``table.json`` に残る。
+    水準の中の1本が効かなくても ``unapplied_edits`` はパス単位で出る
+    （綴り違いが他の編集の陰に隠れない）。
+
     ``metrics`` は表に載せる KPI キー（未指定＝既定の主要KPI）。既定に入っていない
     読み出し（``containers_in_use_peak`` / ``conveyor_gate_stops`` /
     ``conveyor_block_ratio`` など）はここで名指しする — 名指ししないと、その KPI は
@@ -362,39 +636,39 @@ def sweep(base_scenario: dict[str, Any] | str,
 
     掃引した dotted-path が効かなかった場合は ``unapplied_edits`` に出し、全ケースの
     KPI が完全一致した場合は ``warnings`` に出す（``apply_scenario`` は解決できない
-    パスを黙って捨て、自由 dict のキー名違いは「適用された」ように見えるので、
-    **同じ数字が並んだだけの掃引**を「効かなかった」と読み違えないため）。
+    パスを黙って捨て、自由 dict のキー名違い（``container_pool.size``）は書けてしまう
+    ので、**同じ数字が並んだだけの掃引**を「効かなかった」と読み違えないため）。
     """
     base = _validate_scenario(_resolve_base_scenario(base_scenario))
     mets = _validate_metrics(metrics)
     grid = _as_dict(param_grid, "param_grid")
     if not grid:
         raise LabError("param_grid が空です（dotted-path → 値のリスト を指定してください）")
-    for k, v in grid.items():
-        if not isinstance(k, str) or not k.strip():
-            raise LabError(f"param_grid のキーは dotted-path 文字列である必要があります: {k!r}")
-        if not isinstance(v, list) or not v:
-            raise LabError(f"param_grid の値は空でないリストである必要があります: {k} → {v!r}")
+    axes = _parse_grid(grid)
     if not isinstance(seeds, list) or not seeds:
         raise LabError("seeds に seed を1つ以上（配列で）渡してください")
     seed_list = [_validate_seed(s) for s in seeds]
 
-    keys = list(grid)
-    combos = list(itertools.product(*[grid[k] for k in keys]))
+    combos = list(itertools.product(*[a["levels"] for a in axes]))
     total = len(combos) * len(seed_list)
     if total > MAX_SWEEP_CASES:
-        raise LabError(f"ケース数が上限を超えています: {total} > {MAX_SWEEP_CASES}"
-                       "（格子かseedを減らしてください）")
+        raise LabError(
+            f"ケース数が上限を超えています: {total} > {MAX_SWEEP_CASES}"
+            "（格子かseedを減らしてください。1つの実験変数が複数パスの編集なら、"
+            f'連動軸 {{"軸名": {{"{LEVELS_KEY}": [...]}}}} にまとめると直積ではなく'
+            "水準数で数えます）")
 
     sweep_id = _stamp("s", {"base": base, "grid": grid, "seeds": seed_list})
     sdir = _runs_dir() / SWEEPS_SUBDIR / sweep_id
     rows: list[dict] = []
     for i, (combo, sd) in enumerate(itertools.product(combos, seed_list), start=1):
-        params = dict(zip(keys, combo))
+        params, edits, tied = _case_edits(axes, combo)
         scen = dict(base)
-        scen["edits"] = {**(base.get("edits") or {}), **params}
+        scen["edits"] = {**(base.get("edits") or {}), **edits}
         scen["name"] = f"{base.get('name') or 'sweep'} #{i}"
         row: dict[str, Any] = {"case": i, "seed": sd, "params": params}
+        if tied:
+            row["tied"] = tied
         try:
             summary = _run(scen, sd)
         except Exception as e:                      # noqa: BLE001 — 1本の失敗で掃引を止めない
@@ -403,8 +677,10 @@ def sweep(base_scenario: dict[str, Any] | str,
         else:
             # 焼かれた model.json で「そのケースの編集が本当に効いたか」を確かめる
             # （効かなかったケースが黙って基準と同じ数字を出すのが一番危ない）。
+            # 連動軸は**展開した編集**を渡す＝水準の中の1本の綴り違いが、同じ水準の
+            # 他の編集が効いたことの陰に隠れない。
             try:
-                _applied, unapplied = _check_applied(summary["run_id"], params)
+                _applied, unapplied = _check_applied(summary["run_id"], edits)
             except LabError as e:                   # 確認できないことは確認できないと言う
                 unapplied = [{"path": "*", "reason": f"適用結果を確認できませんでした: {e}"}]
             row.update({"status": "ok", "run_id": summary["run_id"],
@@ -429,6 +705,9 @@ def sweep(base_scenario: dict[str, Any] | str,
             e = unapplied.setdefault(str(u.get("path")),
                                      {"path": u.get("path"), "reason": u.get("reason"),
                                       "cases": []})
+            if u.get("unknown_keys"):
+                e["unknown_keys"] = list(u["unknown_keys"])
+                e["recognized_keys"] = list(u.get("recognized_keys") or ())
             e["cases"].append(r["case"])
     # 同一seedのケースのKPIが1つ残らず一致＝掃引したつまみが動いていない疑い。
     # 「効かない」と「本当に効果が無い」は別物なので、断定せず注意として返す。
@@ -441,13 +720,32 @@ def sweep(base_scenario: dict[str, Any] | str,
     if unapplied:
         warnings.append("モデルに効かなかった編集があります（unapplied_edits）: "
                         + ", ".join(sorted(unapplied)))
+    # 自由 dict のキーの綴り違いは「落ちたパス」と別物（書けてしまう＝黙って
+    # 「適用された」に見える）ので、別の一文で名指しする。
+    typos = sorted(e["path"] for e in unapplied.values() if e.get("unknown_keys"))
+    if typos:
+        warnings.append("自由 dict にエンジンが読まないキーを書いています"
+                        "（モデルには書けますが無視されます）: " + ", ".join(typos))
     if kpi_identical:
         warnings.append(
             "同一seedの全ケースでKPIが完全に一致しました — 掃引したつまみが"
             "モデルに効いていない可能性があります（自由 dict のキー名違い・配列の"
             "添字違いなど）。焼かれた model.json で確かめてください。")
 
-    return {
+    def row_out(r: dict) -> dict:
+        out = {"case": r["case"], "seed": r["seed"],
+               "params": _compact_params(r.get("params")),
+               "status": r["status"], "run_id": r.get("run_id"),
+               "kpis": r.get("kpis") or {},
+               "unapplied_edits": r.get("unapplied_edits") or [],
+               "error": r.get("error")}
+        if r.get("tied"):
+            # 応答は水準名＋編集本数まで（全量は table.json の rows[].tied）。
+            out["tied"] = {k: {"name": v["name"], "edits": len(v["edits"])}
+                           for k, v in r["tied"].items()}
+        return out
+
+    out = {
         "sweep_id": sweep_id,
         "dir": paths["dir"],
         "table_path": paths["table_csv"],
@@ -458,12 +756,7 @@ def sweep(base_scenario: dict[str, Any] | str,
         "failed": total - len(ok),
         "metrics": mets,
         "run_ids": [r["run_id"] for r in ok],
-        "rows": [{"case": r["case"], "seed": r["seed"],
-                  "params": _compact_params(r.get("params")),
-                  "status": r["status"], "run_id": r.get("run_id"),
-                  "kpis": r.get("kpis") or {},
-                  "unapplied_edits": r.get("unapplied_edits") or [],
-                  "error": r.get("error")} for r in rows],
+        "rows": [row_out(r) for r in rows],
         "summary": lab.summarize_rows(rows, mets),
         "unapplied_edits": list(unapplied.values()),
         "warnings": warnings,
@@ -471,6 +764,14 @@ def sweep(base_scenario: dict[str, Any] | str,
                     "seed": r["seed"], "error": r["error"]}
                    for r in rows if r["status"] == "error"],
     }
+    tied_axes = [{"axis": a["key"],
+                  "levels": [{"name": lv["name"], "edits": len(lv["edits"])}
+                             for lv in a["levels"]],
+                  "paths": sorted({p for lv in a["levels"] for p in lv["edits"]})}
+                 for a in axes if a["tied"]]
+    if tied_axes:                       # 連動軸を使っていない掃引の応答は不変
+        out["tied_axes"] = tied_axes
+    return out
 
 
 def query_events(run_id: str, filter: dict[str, Any] | str | None = None,

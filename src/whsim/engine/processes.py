@@ -27,6 +27,7 @@ import random
 import zlib
 from dataclasses import dataclass
 
+from whsim import beltgeom
 from whsim.engine.build import Worker, World
 from whsim.engine.routing import leg_cells, manhattan, nearest_neighbor_route
 from whsim.schema.model import Order, OrderLine
@@ -1033,7 +1034,10 @@ def picker_agent(world: World, w: Worker, rng: random.Random):
                 # a 物理ストッパー, while a 完成品リリース is occupying it
                 # (時間分離＝混流させない). No stopper ⇒ the historical one-shot
                 # request/yield, byte for byte.
-                slot, waited = yield from _induct_slot(world, line, to_exit=False)
+                # 投入待ちの荷は乗り口の**上流側に1個/ピッチで並ぶ**（まだベルトには
+                # 載っていないので ``carry`` のまま、列は始端を越えて伸びる）。
+                slot, waited = yield from _induct_slot(
+                    world, line, to_exit=False, queue=(line, arc, tote, True))
                 world.log(t=env.now, event="conveyor_on", order_id=o.order_id,
                           resource="conveyor", conveyor=line.id, wait=waited,
                           blocked=1 if waited > 1e-6 else 0,
@@ -1241,7 +1245,11 @@ def _convey_tote(world: World, order: Order, arrival: float, line, arc: float,
     end = pts[-1]
     pack_req_t = env.now
     preq = world.packers.request()
+    # 梱包待ちの行列は末端の1点ではなくベルトの上に伸びる（荷はスロットを握ったまま
+    # 止まっている＝それが accumulation そのもの）。単線でも規則は同じ。
+    held = _stall_join(world, line, line.length, tote)
     yield preq
+    _stall_leave(world, held)
     seize_t = env.now
     world.log(t=env.now, event="pack_start", order_id=order.order_id,
               wait=seize_t - pack_req_t, resource="packer")
@@ -1271,6 +1279,91 @@ def _convey_tote(world: World, order: Order, arrival: float, line, arc: float,
 # 引き込み holds totes on the 本線, which holds them on the 検品ライン, which is what
 # finally stops the picker from letting go. Modelling each belt as its own world
 # made every one of those couplings invisible.
+
+
+# --- 待っている荷は「列」であって1点ではない (replay only) ---------------------
+# A load that cannot go on holds its slot and STOPS. The engine only has to know
+# THAT it stopped, so every one of them used to be drawn at the single arc where
+# it stopped — ~21 totes waiting to enter a 検品ライン all on the same square
+# centimetre, and every 3D consumer re-deriving the spacing for itself. The
+# spacing is not new information: the loads stand one ``tote_pitch_m`` apart, the
+# very pitch that says how many of them fit on the belt.
+#
+# So each belt keeps a register of who is stopped WHERE (``ConveyorLine.stalls``,
+# keyed by the stall arc — a trunk has one queue per junction, not one queue) and
+# the replay draws the queue off it. Nothing here is read by the DES: joining and
+# leaving emit keyframes and touch no resource, so a run with no queue (or with
+# recording off) is byte-identical, and the HEAD of a queue is never redrawn at
+# all — it is standing exactly where the caller already put it.
+
+
+@dataclass
+class _Stalled:
+    """列に並んでいる1個の荷の replay 用の席。``drawn`` は最後に描いた位置。"""
+
+    tote: object
+    drawn: tuple | None = None
+
+
+def _stall_draw(world: World, line, arc: float, q: list, beyond: bool) -> None:
+    """列の全員を、いま立っている場所へ描く（動いた者だけ）。
+
+    リプレイ窓の外では1本も描かない（軌跡は窓の中だけ）。追跡していない荷
+    (``tote is None``) は席だけ占める——列の**順番**は追跡の有無では変わらないので、
+    描かないだけで位置は正しく詰まる。"""
+    if not world.recording():
+        return
+    pts = beltgeom.queue_points(line.points, arc, len(q), line.pitch,
+                                line.seglens, beyond)
+    for i, (rec, p) in enumerate(zip(q, pts)):
+        if rec.tote is None or rec.drawn == p:
+            continue
+        first = rec.drawn is None
+        rec.drawn = p
+        if first and i == 0:
+            continue        # 先頭は呼び出し側が既にそこへ描いている（1バイトも足さない）
+        # ``place``: 到着した瞬間と同じ時刻なら差し替える＝前へ進んで後ろへ跳ぶ絵に
+        # しない。以降の詰め直しは新しい時刻なので普通に足される（ビューアは補間
+        # するので、列が1つ空くと荷はそこまで滑って進む）。
+        rec.tote.place(world.env.now, p[0], p[1],
+                       "carry" if beyond else "belt")
+
+
+def _stall_join(world: World, line, arc: float, tote, beyond: bool = False):
+    """``line`` の ``arc`` で止まる列の最後尾につく。返り値は :func:`_stall_leave` 用。
+
+    ``beyond`` は「ベルトに載っていない列」＝投入待ち: 荷はまだ人の手の中なので
+    状態は ``carry`` のままで、列は乗り口より上流へ（ベルトの始端を越えて）伸びる。
+    """
+    if not world.recording():
+        return None
+    # 追跡していない荷 (``tote is None``) も**席は取る**: 列の順番は「誰を描いて
+    # いるか」では変わらないので、席を飛ばすと描いている荷が前へ寄ってしまう。
+    key = round(float(arc), 3)
+    q = line.stalls.setdefault(key, [])
+    rec = _Stalled(tote=tote)
+    q.append(rec)
+    _stall_draw(world, line, key, q, beyond)
+    return (line, key, rec, beyond)
+
+
+def _stall_leave(world: World, handle) -> None:
+    """列から抜ける ⇒ 後ろの荷が1つずつ前へ詰まる。"""
+    if handle is None:
+        return
+    line, key, rec, beyond = handle
+    q = line.stalls.get(key)
+    if not q:
+        return
+    try:
+        q.remove(rec)
+    except ValueError:
+        return
+    if not q:
+        line.stalls.pop(key, None)
+        return
+    if world.recording():
+        _stall_draw(world, line, key, q, beyond)
 
 
 def _belt_load(line) -> int:
@@ -1390,12 +1483,19 @@ def _signal_divert(spur) -> None:
 
 @dataclass
 class _Held:
-    """ストッパーの前で止まっている1個の荷。``event`` が次の行き先を運んでくる。"""
+    """ストッパーの前で止まっている1個の荷。``event`` が次の行き先を運んでくる。
+
+    ``tote``/``drawn`` は replay のための席（:func:`_stall_draw` と同じ形）。列の
+    位置は ``Stopper.arc_of`` が既に知っていたのに、絵は全員をゲートの1点に置いて
+    いた——引き込みの作業者が「どこまで戻った荷に手が届くか」を決めているのと
+    同じ列なので、描かないのは持っている情報を捨てることだった。"""
 
     order: Order
     kind: str
     at: float
     event: object = None
+    tote: object = None
+    drawn: tuple | None = None
 
 
 def _stopper_level(world: World) -> int:
@@ -1419,8 +1519,9 @@ def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
     """
     env = world.env
     stp = line.stopper
-    held = _Held(order=order, kind=kind, at=env.now, event=env.event())
+    held = _Held(order=order, kind=kind, at=env.now, event=env.event(), tote=tote)
     stp.queue.append(held)
+    _stall_draw(world, line, stp.gate.arc, stp.queue, False)
     world.log(t=env.now, event="stopper_hold", order_id=order.order_id,
               resource="conveyor", conveyor=line.id, kind=kind,
               queue=len(stp.queue), total=_stopper_level(world),
@@ -1437,6 +1538,8 @@ def _hold_at_stopper(world: World, line, order: Order, kind: str, tote):
         for i, h in enumerate(stp.queue):
             if h is held:
                 stp.queue.pop(i)
+                # 抜けた分だけ後ろが前へ詰まる（箱を1つ取ると残りが滑り込む）。
+                _stall_draw(world, line, stp.gate.arc, stp.queue, False)
                 return
 
     if req is not None and req.triggered:
@@ -1489,6 +1592,7 @@ def _pull_from_stopper(world: World, spur) -> None:
         slot.cancel()
         stp.queue.insert(idx, held)
         return
+    _stall_draw(world, host, stp.gate.arc, stp.queue, False)   # 列が前へ詰まる
     world.log(t=world.env.now, event="stopper_pull", order_id=held.order.order_id,
               resource="conveyor", conveyor=host.id, spur=spur.id,
               kind=held.kind, queue=len(stp.queue), total=_stopper_level(world),
@@ -1514,20 +1618,31 @@ def _induct_hold(world: World, line, to_exit: bool):
               conveyor=line.id, blocked=env.now - t0)
 
 
-def _induct_slot(world: World, line, to_exit: bool):
+def _induct_slot(world: World, line, to_exit: bool, queue=None):
     """本線のスロットを1つ取る。開放中は入れずに待ち直す（混流させない）。
 
     窓は**スロットを待っている間に**開くので、確保した後にもう一度見る必要がある
     ——見ないと「開いた瞬間に本線へ入り、そのまま開放で流れ出る」荷ができて、時間
     分離が分離しなくなる（実測: 3窓で16件がそれだった）。ストッパーの無いベルトでは
     while が1周で抜ける＝従来の request/yield ひと組と同じ順序・同じ待ち秒数。
+
+    ``queue`` = ``(line, arc, tote, beyond)`` — **待っている間どこに立つか**（replay
+    だけの話で、待ち秒数も順序も1つも変わらない）。乗り継ぎ待ちの荷は手前のベルトの
+    末端で止まっているので自分の居るベルトの列に、投入待ちの荷はまだ人の手の中なので
+    乗り口より上流の列（``beyond``）に並ぶ。``None`` ＝ 描かない（従来どおり）。
     """
     env = world.env
     t0 = env.now
     while True:
         yield from _induct_hold(world, line, to_exit)
         slot = line.belt.request()
+        held = None
+        if queue is not None and not slot.triggered:
+            # 満杯で待たされた＝列ができる。空いていれば即 granted なので、列の無い
+            # ラインでは1本もキーフレームが増えない。
+            held = _stall_join(world, queue[0], queue[1], queue[2], queue[3])
         yield slot
+        _stall_leave(world, held)
         stp = getattr(line, "stopper", None)
         if to_exit or stp is None or not stp.is_open:
             return slot, env.now - t0
@@ -1906,10 +2021,15 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
                 wait0 = env.now
                 wake = _divert_wake(world, line)
                 stp = line.stopper
+                # 分岐で止まった荷は本線のスロットを握ったままここに立つ。後ろの荷も
+                # 同じ合流点で止まるので、列はこの arc から上流へ 1個/ピッチ で伸びる
+                # （本線が引き込み待ちで埋まる、その絵そのもの）。
+                held = _stall_join(world, line, arc, tote)
                 if stp is not None:
                     yield wake | stp.open_ev(env)
                 else:
                     yield wake
+                _stall_leave(world, held)
                 spur_wait += env.now - wait0
                 if stp is not None and stp.is_open:
                     break               # 開放 ⇒ 分岐を諦めて末端(カーブ)へ流れる
@@ -1971,8 +2091,11 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
         nxt = line.next_line
         if nxt is not None and nxt.id not in visited and hops < max_hops:
             # blocks when the belt ahead is full, and (when it carries a
-            # 物理ストッパー) while a 完成品リリース is occupying it.
-            nslot, waited = yield from _induct_slot(world, nxt, to_exit)
+            # 物理ストッパー) while a 完成品リリース is occupying it. 待っている間、荷は
+            # **手前のベルトの末端**に居る（スロットを握ったまま）ので、列はそこから
+            # 上流へ伸びる — 次のベルトの上ではない。
+            nslot, waited = yield from _induct_slot(world, nxt, to_exit,
+                                                    queue=(line, arc, tote, False))
             _, nxt_arc = nxt.project(line.points[-1])
             hops += 1
             leg += 1
@@ -2020,7 +2143,11 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
             return
         pack_req_t = env.now
         preq = pool.request()
+        # 台が空くのを待つ荷は末端で止まり、後続がその上流に溜まる（引き込みが
+        # 詰まるとはこのこと）。先頭は今 ``end`` に居るので描き直さない。
+        held = _stall_join(world, line, arc, tote)
         yield preq
+        _stall_leave(world, held)
     seize_t = env.now
     # The 引き込み wait and the 梱包台 wait are both "this tote could not be packed
     # yet", so they land together on pack_start's existing wait field.

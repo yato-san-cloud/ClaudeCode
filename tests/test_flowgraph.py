@@ -267,3 +267,252 @@ def test_an_authored_manual_leg_overrides_a_stale_stage_method():
     assert flowgraph.transport_into(m, "pack") == ("manual", "")
     assert flowgraph.conveyor_ids_in_use(m) is None
     assert _conveyor_events(m) == 0
+
+
+# --- 近接ミス: geometry that ALMOST connects ----------------------------------
+# Four times over one real engagement, a drawing missed a threshold by
+# centimetres, every rule answered "not connected", and THE MODEL STILL RAN AND
+# STILL COMPLETED ITS ORDERS — so nothing in the numbers said the line's
+# mechanism was absent. Each fixture below is one of those four, reproduced on
+# the shipped 引き込み line, and each asserts the warning names the two objects,
+# the measured gap, the threshold and what to do about it.
+
+def _line(**moves):
+    """``line_inspection`` with belts moved: ``_line(spur3n=[[x, y], ...])``."""
+    m = templates.load_template_model("line_inspection")
+    for cv in m.resources.conveyors:
+        if cv.id in moves:
+            cv.points = moves[cv.id]
+    return m
+
+
+def _only(model, kind: str) -> dict:
+    """The one warning of ``kind`` — and proof nothing else got noisy."""
+    ws = flowgraph.diagnose(model)
+    mine = [w for w in ws if w["kind"] == kind]
+    assert len(mine) == 1, f"expected exactly one {kind}, got {[w['kind'] for w in ws]}"
+    return mine[0]
+
+
+def test_a_spur_that_misses_the_trunk_is_reported_as_receiving_NOTHING():
+    """歴史ケース①: a 引き込み with no endpoint within 0.8 m of the 本線.
+
+    It got no junction at all, kept its 4 梱包台 and received not one load. The
+    orders completed anyway (everything rode to the end and packed out of the
+    shared pool), so it read as a healthy line with dead belts.
+    """
+    m = _line(spur3n=[[26.5, 5.044], [26.5, 7.644]])
+    w = _only(m, "spur_no_junction")
+    assert w["belt"] == "spur3n" and w["other"] == "trunk_low"
+    assert w["gap"] == pytest.approx(1.044, abs=1e-3)
+    assert w["tolerance"] == 0.8 and w["severity"] == "critical"
+    for phrase in ("spur3n", "trunk_low", "1.04 m", "0.80 m", "0.3 m"):
+        assert phrase in w["message"]
+    # never-blocks: the very thing that hid it must keep working.
+    assert sum(1 for e in run_once(m, seed=3).events
+               if e["event"] == "order_complete") > 0
+
+
+def test_a_belt_end_just_past_the_join_tolerance_is_reported():
+    """歴史ケース②: the west 検品 belt's discharge end 1.044 m from the trunk.
+
+    Just past the 0.8 m threshold, so the two 検品 belts resolved SERIAL instead
+    of parallel and every load rode the east belt. Nobody noticed until a
+    capacity number looked odd; the fix was to lengthen the west belt by 0.3 m.
+    """
+    m = _line(insp2=[[10.0, 8.8], [43.2, 8.8], [43.2, 5.044]])
+    w = _only(m, "near_join")
+    assert w["belt"] == "insp2" and w["other"] == "trunk_low"
+    assert w["gap"] == pytest.approx(1.044, abs=1e-3) and w["tolerance"] == 0.8
+    for phrase in ("insp2", "trunk_low", "1.04 m", "0.80 m", "0.3 m 伸ばせば"):
+        assert phrase in w["message"]
+
+
+def test_a_belt_end_that_already_touches_is_not_a_near_miss():
+    """The shipped geometry: insp2 discharges ON the trunk. Silence is correct."""
+    assert not [w for w in flowgraph.diagnose(_line()) if w["kind"] == "near_join"]
+
+
+def test_the_near_join_report_stops_at_three_times_the_tolerance():
+    """Past 3×0.8 m the two belts are simply elsewhere on the floor.
+
+    The shipped line already leans on that bound: ``trunk_low`` ends at 積み付け
+    5.9 m from the nearest belt, and a line has to end somewhere. A check that
+    shouted about it would be a check nobody reads.
+    """
+    from whsim import beltgeom
+
+    def west_belt_ending_at(y):
+        return _line(insp2=[[10.0, 8.8], [37.0, 8.8], [37.0, y]])
+
+    inside = west_belt_ending_at(4.0 + beltgeom.NEAR_JOIN_M - 0.1)
+    outside = west_belt_ending_at(4.0 + beltgeom.NEAR_JOIN_M + 0.1)
+    assert _only(inside, "near_join")["other"] == "trunk_low"
+    assert not [w for w in flowgraph.diagnose(outside) if w["kind"] == "near_join"]
+
+
+def test_a_contested_bench_says_who_won_and_by_how_much():
+    """歴史ケース③: a bench 2.6 m from one spur and 1.6 m from another.
+
+    It silently belonged to the nearer one — correct, and invisible.
+    """
+    m = _line(spur1n=[[12.5, 4.0], [12.5, 5.6]])
+    for s in m.resources.stations:
+        if s.id == "pack1sL":
+            s.x, s.y = 12.5, 3.0
+    w = _only(m, "bench_contested")
+    assert w["station"] == "pack1sL" and w["belt"] == "spur1s" and w["other"] == "spur1n"
+    assert (w["gap"], w["rival_gap"]) == (pytest.approx(1.6), pytest.approx(2.6))
+    for phrase in ("pack1sL", "1.60 m", "2.60 m", "差 1.00 m"):
+        assert phrase in w["message"]
+
+
+def test_a_bench_just_out_of_everybody_s_reach_is_reported():
+    """It belongs to nobody and quietly falls back to the shared pack pool."""
+    m = _line()
+    for s in m.resources.stations:
+        if s.id == "pack2nL":
+            s.x, s.y = 19.5, 9.9                 # 3.3 m from spur2n's discharge end
+    w = _only(m, "bench_out_of_reach")
+    assert w["station"] == "pack2nL" and w["belt"] == "spur2n" and w["reach"] == 3.0
+    assert w["gap"] == pytest.approx(3.3)
+    for phrase in ("pack2nL", "3.30 m", "3.0 m", "0.3 m 近づければ"):
+        assert phrase in w["message"]
+
+
+def test_a_bench_in_another_part_of_the_building_is_not_a_near_miss():
+    """Past 2× the reach it is simply a bench somewhere else — no advice to give."""
+    m = _line()
+    for s in m.resources.stations:
+        if s.id == "pack2nL":
+            s.x, s.y = 19.5, 20.0
+    assert not [w for w in flowgraph.diagnose(m) if w["kind"] == "bench_out_of_reach"]
+
+
+def test_unmanned_and_taken_are_two_different_diagnoses():
+    """歴史ケース④: 「drawn but unmanned」 and 「a neighbour took my bench」.
+
+    Both leave the 引き込み with no hands (``beltgeom.NO_HANDS``) and look
+    identical from outside — but one is fixed by entering a count and the other
+    by moving a bench, so the warning has to say WHICH.
+    """
+    closed = _line()
+    for s in closed.resources.stations:
+        if s.id in ("pack5nL", "pack5nR"):
+            s.count = 0
+    w = _only(closed, "spur_closed")
+    assert w["belt"] == "spur5n" and "0 台" in w["message"] and "台数" in w["message"]
+
+    lost = _line()
+    lost.resources.stations = [s for s in lost.resources.stations
+                               if s.id not in ("pack5nL", "pack5nR")]
+    for s in lost.resources.stations:
+        if s.id == "pack5sL":
+            s.x, s.y = 40.5, 3.8
+    w = _only(lost, "spur_bench_lost")
+    assert w["belt"] == "spur5n" and w["other"] == "spur5s" and w["station"] == "pack5sL"
+    assert (w["gap"], w["rival_gap"]) == (pytest.approx(2.8), pytest.approx(2.4))
+    assert "2.40 m" in w["message"] and "2.80 m" in w["message"]
+    # ...and the two diagnoses are genuinely different kinds, not one message
+    # reused: the closed line never says "taken", the taken line never says "0 台".
+    assert not [x for x in flowgraph.diagnose(closed) if x["kind"] == "spur_bench_lost"]
+    assert not [x for x in flowgraph.diagnose(lost) if x["kind"] == "spur_closed"]
+
+
+def test_a_belt_drawn_but_wired_into_nothing_is_reported():
+    """The asymmetry ARCHITECTURE warns about (不変条件5).
+
+    The engine gates on ``conveyor_ids_in_use`` while ``analytic._belt_access``
+    reads every drawn belt, so a belt visible to only one of them means the two
+    are computing different warehouses.
+    """
+    from whsim.schema.model import Conveyor
+
+    m = _line()
+    m.resources.conveyors = [*m.resources.conveyors,
+                             Conveyor(id="decoy", points=[[2.0, 20.0], [10.0, 20.0]])]
+    w = _only(m, "belt_not_wired")
+    assert w["conveyor"] == "decoy" and "decoy" in w["message"]
+    assert flowgraph.conveyor_ids_in_use(m) == set(
+        flowgraph.conveyor_ids_in_use(_line()))
+
+
+def test_the_upper_deck_of_a_two_tier_belt_is_not_that_asymmetry():
+    """``trunk_up`` (2段駆動の上段・空容器の還流) is drawn over ``trunk_low``'s XY.
+
+    It is not wired into the flow, and it must NOT be reported: both readers are
+    still looking at the same floor, which is the only reason a belt one of them
+    cannot see is worth a warning at all.
+    """
+    m = _line()
+    assert "trunk_up" not in (flowgraph.conveyor_ids_in_use(m) or set())
+    assert not [w for w in flowgraph.diagnose(m) if w["kind"] == "belt_not_wired"]
+
+
+@pytest.mark.parametrize("template_id", ALL_TEMPLATES)
+def test_no_near_miss_is_reported_on_a_shipped_template(template_id):
+    """No false alarms on what we ship — a noisy check is an ignored check."""
+    assert flowgraph.diagnose(templates.load_template_model(template_id)) == []
+
+
+def test_the_warnings_do_not_depend_on_the_order_of_the_drawing():
+    """Deterministic by ID, not by drawing order.
+
+    A re-saved file with its belts and benches in another order is the SAME
+    warehouse; if it produced a different list, no one could diff two runs.
+    """
+    m = _line(spur3n=[[26.5, 5.044], [26.5, 7.644]],
+              insp2=[[10.0, 8.8], [43.2, 8.8], [43.2, 5.044]])
+    for s in m.resources.stations:
+        if s.id == "pack2nL":
+            s.x, s.y = 19.5, 9.9
+    first = flowgraph.diagnose(m)
+    assert len(first) >= 3
+    m.resources.conveyors = list(reversed(m.resources.conveyors))
+    m.resources.stations = list(reversed(m.resources.stations))
+    assert flowgraph.diagnose(m) == first
+
+
+def test_a_near_miss_never_blocks_and_never_changes_the_wiring():
+    """Warnings only (不変条件13): the resolved topology is untouched."""
+    from whsim.engine.build import build
+
+    m = _line(spur3n=[[26.5, 5.044], [26.5, 7.644]])
+    before = {c.id: (c.n_bench, bool(c.junctions)) for c in build(m).conveyors}
+    assert flowgraph.diagnose(m), "the near miss is reported"
+    after = {c.id: (c.n_bench, bool(c.junctions)) for c in build(m).conveyors}
+    assert before == after
+    assert before["spur3n"] == (2, False), "still dead, still holding its benches"
+
+
+def test_the_near_miss_checks_survive_junk_geometry():
+    """Never raises: a broken drawing must not cost the caller the other checks."""
+    from whsim.schema.model import Conveyor
+
+    m = _line()
+    m.resources.conveyors = [*m.resources.conveyors,
+                             Conveyor(id="dot", points=[[1.0, 1.0], [1.0, 1.0]]),
+                             Conveyor(id="stub", points=[[2.0, 2.0]]),
+                             Conveyor(id="empty", points=[])]
+    kinds = [w["kind"] for w in flowgraph.diagnose(m)]      # must not raise
+    assert not [k for k in kinds if k == "belt_not_wired"], \
+        "degenerate geometry is not transport, so it is not a missing belt either"
+
+
+def test_a_bench_standing_at_a_stop_line_belongs_to_it_not_to_nobody():
+    """停止線の作業者 are not orphans (不変条件17's mechanism, read once).
+
+    A load held at a 停止線 has to be taken off the line by somebody, and
+    ``engine.build`` gives that bench to the gate. Calling it ownerless would
+    send the user to move a bench that is exactly where it belongs.
+    """
+    m = _line()
+    for s in m.resources.stations:
+        if s.id == "pack2nL":
+            s.x, s.y = 19.5, 9.9             # 3.3 m past spur2n's reach
+    assert _only(m, "bench_out_of_reach")["station"] == "pack2nL"
+    # ...now put a 停止線 on the 検品 belt that runs right beside it.
+    for cv in m.resources.conveyors:
+        if cv.id == "insp2":
+            cv.stop_gate = {"at_m": 9.5, "stop_states": ["inspected"]}
+    assert not [w for w in flowgraph.diagnose(m) if w["kind"] == "bench_out_of_reach"]

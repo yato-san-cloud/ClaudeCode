@@ -230,22 +230,148 @@ def _is_ok(kpis: dict) -> bool:
     return bool(kpis.get("can_handle_demand"))
 
 
-def _assumptions_lines(kpis: dict, provenance_summary: str) -> list[str]:
-    rate = _fmt_money(kpis.get("labour_rate_per_hr"), kpis)
-    capex = _fmt_money(kpis.get("capex_total"), kpis)
-    lines = [
-        "本提案は離散事象シミュレーション(SimPy)に基づく概算です。",
-    ]
+# --- 前提条件 (assumptions) ----------------------------------------------------
+# WHY these are data and not a constant: a proposal that cannot state its own
+# 危険側の前提 ON its 前提条件 slide pushes that caveat into the spoken pitch, where
+# the customer never gets it. The default below reproduces the historical line
+# exactly, so an export that supplies nothing is unchanged.
+
+#: Caller-facing level aliases -> canonical level. Japanese aliases are accepted
+#: because the people writing these lines write them in Japanese.
+_ASSUMPTION_LEVELS = {
+    "danger": "danger", "危険側": "danger", "unsafe": "danger", "risk": "danger",
+    "warn": "caution", "warning": "caution", "caution": "caution",
+    "注意": "caution", "info": "info", "": "info",
+}
+#: Rendered prefix per level. The badge travels IN the text so every surface
+#: (pptx run, pdf paragraph, html line, plain-string API) carries it identically —
+#: a level that only exists as a colour is lost the moment text is extracted.
+_ASSUMPTION_BADGE = {"danger": "危険側", "caution": "注意", "info": ""}
+_ASSUMPTION_COLOR = {"danger": RED, "caution": AMBER, "info": INK}
+
+_METHODOLOGY_LINE = "本提案は離散事象シミュレーション(SimPy)に基づく概算です。"
+
+
+def _assumption_level(value) -> str:
+    """Canonical level for a caller-supplied marker; unknown markers are 情報."""
+    try:
+        key = str(value or "").strip().lower()
+    except (TypeError, ValueError):  # pragma: no cover — defensive
+        return "info"
+    return _ASSUMPTION_LEVELS.get(key, "info")
+
+
+def _cost_assumption_line(kpis: dict) -> str:
+    """The built-in cost 前提 — the historical hardcoded line, now a default."""
+    rate = _fmt_money((kpis or {}).get("labour_rate_per_hr"), kpis or {})
+    capex = _fmt_money((kpis or {}).get("capex_total"), kpis or {})
+    return f"前提条件: 人件費 {rate}/人時 ・ AGV投資 {capex} ・ 36ヶ月償却"
+
+
+def _looks_like_item(d: dict) -> bool:
+    """True when a dict is a single assumption rather than the ``{"lines": …}``
+    envelope — so ``{"text": "…", "level": "危険側"}`` can be passed on its own."""
+    return any(k in d for k in ("text", "line", "label"))
+
+
+def _normalize_assumptions(assumptions) -> tuple[list[dict], bool]:
+    """Coerce caller-supplied 前提条件 into ``([{text, level}], keep_cost_line)``.
+
+    Accepted shapes (every one of them optional — anything unusable degrades to
+    "nothing supplied", never raises)::
+
+        None                                  # nothing; the built-ins stand
+        "…"                                   # one 情報 line
+        ["…", {"text": "…", "level": "危険側"}]  # several, in caller order
+        {"lines": [...], "replace": True}     # ... and DROP the built-in cost
+                                              #     line (noise on a deck that
+                                              #     proposes neither 人件費 nor AGV)
+
+    An item may be a string, a ``{"text"/"line"/"label", "level"/"severity"}``
+    dict, a ``(text, level)`` pair, or any object exposing ``model_dump()`` — so a
+    future ``settings.assumptions`` field drops straight in.
+    """
+    keep_cost = True
+    if assumptions is None:
+        return [], keep_cost
+    seq = assumptions
+    if isinstance(assumptions, dict):
+        if _looks_like_item(assumptions):
+            seq = [assumptions]          # a lone {"text": …, "level": …}
+        else:
+            seq = assumptions.get("lines") or assumptions.get("items") or []
+            keep_cost = not bool(assumptions.get("replace")
+                                 or assumptions.get("replace_default"))
+    if isinstance(seq, str):
+        seq = [seq]
+    out: list[dict] = []
+    try:
+        for raw in seq:
+            item = raw
+            if hasattr(item, "model_dump"):
+                try:
+                    item = item.model_dump()
+                except Exception:  # noqa: BLE001 — a bad row must not sink the deck
+                    item = str(raw)
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("line") or item.get("label") or ""
+                level = _assumption_level(item.get("level") or item.get("severity"))
+            elif isinstance(item, (tuple, list)) and item:
+                text = item[0]
+                level = _assumption_level(item[1] if len(item) > 1 else "")
+            else:
+                text, level = item, "info"
+            text = _strip_html(text)
+            if text:
+                out.append({"text": text, "level": level})
+    except TypeError:  # not iterable
+        return [], keep_cost
+    return out, keep_cost
+
+
+def _assumption_blocks(kpis: dict, provenance_summary: str, assumptions=None,
+                       *, model=None) -> list[dict]:
+    """The 前提条件 section, as ``[{text, level, color}]``.
+
+    Order is built-ins first (方法論 → 出所 → 費用前提), then the caller's lines in
+    the order they were given: the caller decides emphasis, we never reorder
+    their argument. ``level`` is one of ``info``/``caution``/``danger``; ``text``
+    already carries the 【危険側】/【注意】 badge, and ``color`` is the RGB tuple both
+    builders paint it with.
+
+    When ``assumptions`` is None the model's own ``settings.assumptions`` is used
+    if it carries any (forward-compatible: absent field → nothing), so the deck
+    states what the MODEL assumes rather than what the template hardcoded."""
+    if assumptions is None and model is not None:
+        assumptions = getattr(getattr(model, "settings", None), "assumptions", None)
+    extra, keep_cost = _normalize_assumptions(assumptions)
+    blocks: list[dict] = [{"text": _METHODOLOGY_LINE, "level": "info"}]
     if provenance_summary:
-        lines.append(str(provenance_summary))
-    lines.append(
-        f"前提条件: 人件費 {rate}/人時 ・ AGV投資 {capex} ・ 36ヶ月償却"
-    )
-    return lines
+        blocks.append({"text": str(provenance_summary), "level": "info"})
+    if keep_cost:
+        blocks.append({"text": _cost_assumption_line(kpis or {}), "level": "info"})
+    blocks.extend(extra)
+    for b in blocks:
+        badge = _ASSUMPTION_BADGE.get(b["level"], "")
+        if badge and not b["text"].startswith(f"【{badge}】"):
+            b["text"] = f"【{badge}】{b['text']}"
+        b["color"] = _ASSUMPTION_COLOR.get(b["level"], INK)
+    return blocks
+
+
+def _assumptions_lines(kpis: dict, provenance_summary: str, assumptions=None,
+                       *, model=None) -> list[str]:
+    """Plain-string view of :func:`_assumption_blocks` (badges included)."""
+    return [b["text"] for b in
+            _assumption_blocks(kpis, provenance_summary, assumptions, model=model)]
 
 
 def _methodology_footer(provenance_summary: str) -> str:
-    """One-line methodology + data-provenance footer used on every document."""
+    """The SHORT form: one-line methodology + provenance, for the page footer.
+
+    Deliberately separate from :func:`_assumption_blocks`: the footer is a 0.4in
+    strip on the slide edge, so it must stay one short line however long the
+    document's 前提条件 grow. Callers pass it through ``textfit.fit_line``."""
     base = "本提案は離散事象シミュレーション(SimPy)に基づく"
     if provenance_summary:
         return f"{base} ／ {provenance_summary}"

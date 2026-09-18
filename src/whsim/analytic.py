@@ -649,6 +649,82 @@ def _aisle_congestion(model: WarehouseModel, det: dict | None,
             "bound": "upper"}
 
 
+# AGV通路干渉: ``engine.processes._agv_seg_key`` はレグの中点を 3 m に量子化して
+# 相互排他の鍵にする。下の**棄却された**上界を再現するのに要る唯一の定数で、
+# ずれていないことは ``tests/test_analytic_agv_interference.py`` が engine の
+# 関数そのものから測り直して固定する（不変条件11）。
+_AGV_SEG_M = 3.0
+
+
+def _agv_interference(model: WarehouseModel, det: dict | None,
+                      trip_travel_m: float, lam: float, speed: float,
+                      n_agvs: int) -> dict | None:
+    """AGV同士の通路干渉 — **測った上で鏡写さないと決めた**。名乗るだけ。
+
+    ``process.agv_interference`` は AGV のレグごとに「中点を 3 m に量子化した通路
+    セグメント」の容量1ミューテックスを取らせる（``engine.build`` は フラグON かつ
+    グラフ有効 かつ AGV>1 のときだけ ``aisle_locks`` を張る）。歩行側の同じ機構
+    (``simulation.aisle_interference``) は :func:`_aisle_congestion` が **上界**として
+    映せている。同じ形が AGV にも効くかを実装して測り、**効かないことが分かった**。
+
+    **棄却①: セル1つ＝M/M/1（歩行側と同じ形）**。Little から ``ρ = A/N_seg``、
+    待ちは走行時間の ``ρ/(1−ρ)`` 倍——ピッチが約分で消えるところまで歩行側と同型。
+    実測は逆向きに外れる: 合成の一本廊下（AGV 2〜12台・速度2種、12構成）で上界/実測
+    ＝ **0.00〜0.17**、racked GTP（``ecommerce_xl``、AGV 2〜32台×需要3種、15構成）で
+    **0.055〜0.14**。つまり**実測の待ちの 1/7〜1/18 しか言えていない**＝甘い側に
+    外れる上界は上界ではない（窓の割合の件と同じ失敗の形）。
+
+    **なぜ同型にならないか**（ここが本質で、歩行側の導出の前提が2つとも崩れる）:
+
+    1. 歩行側は「同速の追従は自己消滅する——一度待てば以後は1セル後ろを付いて行く
+       だけ」で緩い側に倒れていた。AGV のロックは**コーナー間のレグ丸ごと**を保持
+       するので、後続は1セル分ではなく**レグ1本分**待たされ、待ちは消滅せず
+       **直列化する**。
+    2. 歩行側のセルは格子なので床全体に一様に散る。AGV の鍵はレグ中点の量子化なので
+       通路1本の交通が**数個の鍵に集中**し、床の平均 ρ（実測 0.002〜0.03）は
+       ホットな鍵の ρ（ほぼ1）と2桁違う。どのセグメントが熱いかは**経路探索**でしか
+       分からず、この関数は 50 ms 予算で経路探索をしない（不変条件5の「爆速」）。
+
+    **棄却②: 逆の極——全レグが共有廊下（完全直列化）**。台数に依らず
+    ``1/trip_s`` で頭打ちという上界は、``ecommerce_xl`` で 19.9件/h と読む一方
+    実測は 379件/h＝**19倍辛い**。答えを破壊するので使えない。
+
+    一様分散は10倍甘く、完全直列化は19倍辛く、その間のどこかは**経路の形**で決まる。
+    だから「名乗る」。同じ扱いを既に受けているのが ``routing_policy``（不変条件5）。
+
+    **名乗るときに開示する実測**（``ecommerce_xl``、ON/OFF 同一シード15構成）:
+    通路待ちは AGV の busy の **1.5〜35.7%**、``agv_utilization`` の動きは
+    **−0.025〜+0.044**（一致ピン 0.08 の半分以下・符号は両方向）、スループットは
+    **−2〜−30%**（台数が増えるほど効く）。⚠️ **能力側は映していない**ので、
+    大きな船団では DES の方が出荷が少ない。稼働率については、自由走行の読みが実測の
+    ``agv_utilization`` を 15/15 構成で下回らなかった（最小マージン +0.005）が、
+    これは**測っただけで証明ではない**。
+
+    ``None`` — フラグOFF（同梱テンプレは全部OFF ⇒ カタログはキーごと出ない）、
+    AGV が1台以下（engine もロックを張らない）、あるいは GTP ではない図面。
+    """
+    if not getattr(model.process, "agv_interference", False):
+        return None
+    if n_agvs <= 1 or trip_travel_m <= 0.0 or lam <= 0.0 or speed <= 0.0:
+        return None
+    segs = (2.0 * max(det["n_aisles"], 1) * max(det["run_len_m"], _AGV_SEG_M)
+            / _AGV_SEG_M if det else 0.0)
+    b = model.layout.bounds
+    segs = max(segs, 2.0 * (b.width + b.depth) / _AGV_SEG_M, 1.0)
+    trip_s = trip_travel_m / speed
+    # 開示のみ: 実測の待ちと比べるための「床の平均占有」。能力にも稼働率にも一切
+    # 掛けない——掛けた瞬間に 1/7〜1/18 の甘い上界を売ることになる。
+    return {
+        "mirrored": False,
+        "fleet": int(n_agvs),
+        "segment_utilization_mean": min(lam * trip_s, float(n_agvs)) / segs,
+        "segments": segs,
+        "measured_wait_share_of_busy": [0.015, 0.357],
+        "measured_utilization_delta": [-0.025, 0.044],
+        "measured_throughput_delta": [-0.30, -0.02],
+    }
+
+
 def _open_spurs(line: dict) -> list:
     """The 引き込み that actually TAKE a tote — i.e. not the deliberately unmanned.
 
@@ -1164,11 +1240,22 @@ def _steady_block(model: WarehouseModel, line: dict, lam: float,
 
 
 def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
-                       pack_time_s: float, horizon_s: float) -> dict | None:
+                       pack_time_s: float, horizon_s: float,
+                       ceiling: float = float("inf"),
+                       ceiling_label: str = "") -> dict | None:
     """Does this conveyor line jam, and if so when? ``None`` when there is no line.
 
     ``lam`` is the tote arrival rate (1 order = 1 tote, the engine's own rule:
     ``processes`` hands the belt one tote per order in the batch).
+
+    ``ceiling`` is an OPTIONAL extra rate the line cannot beat, in orders/second,
+    contributed by a mechanism this function does not otherwise model — today only
+    the 完成品staging の排出天井 (:func:`_release_drain`). It enters exactly where a
+    belt stage would, so ``jams`` / ``time_to_jam_s`` / ``block_ratio_est`` are all
+    computed against the same ceiling rather than being patched afterwards (a cap
+    bolted on after the fact would say 「詰まらない」 and 「能力はこれだけ」 in the same
+    breath). ``inf`` — the default, and every model that authors no mechanism —
+    leaves this function byte-identical.
     """
     line = _belt_stages(model)
     if line is None:
@@ -1197,6 +1284,11 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
             cap = r
             idx = i
             binding = str(min(stages[i], key=lambda cv: (_belt_rate(cv), str(cv.id))).id)
+    # A mechanism ceiling is not a belt, so it buffers NOTHING: everything drawn is
+    # still upstream of it (``idx`` unchanged ⇒ ``buffer_slots`` stays the whole
+    # line). It only lowers what the line passes.
+    if ceiling < cap:
+        cap, binding = ceiling, (ceiling_label or "ceiling")
     # Everything from the picker's hand-off up to and including the constraint is
     # buffer: it all starts empty and has to fill before the picker feels the jam.
     buffer_slots = sum(slots) if idx >= len(stages) else sum(slots[:idx + 1])
@@ -1264,28 +1356,143 @@ def _has_stopper(model: WarehouseModel) -> bool:
     return False
 
 
-def _release_window(model: WarehouseModel) -> tuple[float, float] | None:
-    """``Process.release_schedule`` の ``(周期, 開放時間)`` — 不活性なら ``None``.
+def _release_plan(model: WarehouseModel) -> dict | None:
+    """``Process.release_schedule`` を解決した mode_B の計画 — 不活性なら ``None``.
 
-    ``engine.build._resolve_release`` と同じ判定（周期 ≤ 0 はスケジュールではない）。
-    写しであることは ``tests/test_line_stopper.py`` が build の結果と突き合わせて
-    固定する（不変条件11）。
+    ``engine.build._resolve_release`` と同じ判定（周期 ≤ 0 はスケジュールではない）
+    かつ**値ごとに独立して既定へ落ちる**（``build._num``）: 窓の書き間違いで
+    スケジュールごと消えると、engine は張っているのに解析は「何も無い」と名乗る
+    ことになる＝鏡の無い機構を黙って価格してしまう。写しであることは
+    ``tests/test_line_stopper.py`` が build の結果と突き合わせて固定する（不変条件11）。
     """
     spec = getattr(model.process, "release_schedule", None)
     if not isinstance(spec, dict) or not spec:
         return None
 
-    def num(key: str) -> float:
-        # 値ごとに独立して既定へ落ちる (``build._num``): 窓の書き間違いで
-        # スケジュールごと消えると、engine は張っているのに解析は「何も無い」と
-        # 名乗ることになる＝鏡の無い機構を黙って価格してしまう。
+    def num(key: str, default: float = 0.0) -> float:
         try:
-            return float(spec.get(key, 0.0) or 0.0)
+            return float(spec.get(key, default))
         except (TypeError, ValueError):
-            return 0.0
+            return float(default)
 
     period = num("period_s")
-    return (period, max(num("window_s"), 0.0)) if period > 0.0 else None
+    if not (period > 0.0):
+        return None
+    return {"period_s": period,
+            "window_s": max(0.0, num("window_s")),
+            "stack_rate_per_hr": max(0.0, num("stack_rate_per_hr")),
+            "stackers": max(1, int(num("stackers", 1.0))),
+            "board_s": max(0.0, num("board_time_s"))}
+
+
+def _release_window(model: WarehouseModel) -> tuple[float, float] | None:
+    """``(周期, 開放時間)`` だけを読む薄い窓口（``None`` = スケジュール無し）。"""
+    plan = _release_plan(model)
+    return None if plan is None else (plan["period_s"], plan["window_s"])
+
+
+def _staging_capacity(model: WarehouseModel) -> int:
+    """``Process.bench_staging`` → 梱包台1台あたりの置ける数 (0 = 不活性).
+
+    ``engine.build._staging_capacity`` の写し。
+    """
+    spec = getattr(model.process, "bench_staging", None)
+    if not isinstance(spec, dict) or not spec:
+        return 0
+    try:
+        return max(0, int(float(spec.get("capacity", 0) or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _release_drain(model: WarehouseModel, line: dict, n_packers: int,
+                   pack_time_s: float) -> dict | None:
+    """完成品staging の**排出天井** — 周期ごとに台の脇から何個出せるか。
+
+    鏡写しできない3機構のうち、**閉形式が実際に在ったのはここだけ**。ストッパーの
+    列も時間分離そのものも定常待ち行列の言葉では書けないが（``_unmirrored_line_mechanics``）、
+    「完成品は staging を通ってしか出荷に出られず、staging はリリースの窓の中でしか
+    空かない」という**保存則**は周期で閉じる。だから鏡ではなく**天井**を置く。
+
+    **導出**。置き場の水位 N(t) は窓の外では単調増加（``processes._load_staging`` は
+    ``release_agent`` の窓の中でしか ``get`` しない）。定常では 1周期あたりの put と
+    get が等しいので、周期あたりの完成数は「窓が閉じた瞬間に空いていた場所」＋「窓の
+    中で作れた分」で頭打ちになる。さらに ``_load_staging`` は**全部の置き場が空に
+    なった瞬間に break する**ので、1つの窓で出て行くのは
+
+        置き場の総数 ``room`` ＋ 満杯で put をブロックされている梱包者 ``hands``
+
+    ——後者は「梱包し終えて手に持ったまま止まっている1個」で、drain が1個引くたびに
+    その put が通る。よって **X ≤ (room + hands) / period**。
+
+    **どこまでが上界で、どこからが較正値か**（この関数の要点）:
+
+    * ``bound_per_hr`` は**証明できる上界**。窓の外の完成数 ≤ room + hands、窓の中の
+      完成数 ≤ 窓長 × μ_pack（サーバ能力）。``board_time_s`` が書いてあれば
+      「1個ずつ人が載せる」直列性 ``窓長 / board_s`` も効く。
+    * ``per_hr`` は**較正値（上界ではない）**。上の break の議論は「drain がシミュ時間
+      を消費しない」ときに厳密で、本線に空きが無くて待つ窓ではその間に梱包が進む分だけ
+      甘くなる。窓長 × μ_pack の項を**落とした**読みで、実測でしか正当化できない。
+
+    **実測**（合成フィクスチャ 288構成＝周期3×置き場4×引き込み3×台数2×窓割合2×
+    board 2、需要は全構成の天井を超える 3000件/h、8時間、2 seed 平均）:
+
+    * 歴史的な答え（``min(ベルト段, μ_pack)``）は**全288構成で実測スループットより
+      上**、平均 **+472%**・最悪 **+1614%**（周期1200s・置き場1個で 60件/h と言って
+      実測 8.5件/h）。能力を売る数字としては、これが不変条件5の言う「甘い側」。
+    * 証明できる上界を min に入れると 平均 +207%・最悪 +871%。
+    * ``per_hr``（較正値）を min に入れると **平均 +19.8%・最悪 +111.8%・最小 −15.0%**、
+      天井が効いた240構成では 平均 +9.7%・最悪 +68.0%。実測より**辛い側**に出たのは
+      14/288 構成で最大 −15.0%（能力の天井としては安全側）。
+    * 残る +112% は天井が効かない（置き場が潤沢で μ_pack が縛る）構成で、そこの差は
+      ストッパー自身の損失（``stopper_leaks``＝未梱包で流れ出る分）であって staging の
+      話ではない——**そちらは今も鏡が無い**。
+
+    ``None`` — リリースも置き場も書かれていない、あるいは末端に手が1つも無い図面。
+    """
+    plan = _release_plan(model)
+    cap = _staging_capacity(model)
+    if plan is None or cap <= 0 or pack_time_s <= 0 or not line:
+        return None
+    succ = line.get("succ") or {}
+    benches = line.get("benches") or {}
+    spare = int(line.get("spare") or 0)
+    # ``build`` gives a Store to every belt 完成品 can be born on — its own reading
+    # is 「末端、または人の立っている停止線」. Only the TERMINAL belts are taken here:
+    # resolving 停止線の手 needs ``linemech.bench_ledger`` (invariant 11 forbids a
+    # second copy) and this branch must not import it, so the stop line's own room
+    # is LEFT OUT — which lowers the ceiling, i.e. the gloomy side. A belt that
+    # hands over and has no hands packs nothing at all, so nothing bypasses the
+    # staging this counts.
+    ends = [cv for cv in (line.get("belts") or []) if str(cv.id) not in succ]
+    own = {str(cv.id): benches.get(str(cv.id)) for cv in ends}
+    borrowers = [cv for cv in ends
+                 if not isinstance(own[str(cv.id)], int) or own[str(cv.id)] <= 0]
+    share = spare // max(len(borrowers), 1)   # 余り台は分け合う (``_bank_of`` と同じ)
+    room = hands = 0
+    for cv in ends:
+        n = own[str(cv.id)]
+        seats = n if (isinstance(n, int) and n > 0) else share
+        room += cap * seats
+        hands += seats
+    if hands <= 0:
+        return None                          # 末端に手が無い＝別の機構の話 (pack_unmanned)
+    period = plan["period_s"]
+    window = plan["window_s"] or period      # 0 = 出し切るまで ⇒ 窓は周期いっぱい
+    per_cycle = room + hands
+    bound = per_cycle + window * (n_packers / pack_time_s)
+    if plan["board_s"] > 0.0:
+        bound = min(bound, per_cycle + window / plan["board_s"])
+    return {
+        "per_hr": per_cycle / period * 3600.0,
+        "bound_per_hr": bound / period * 3600.0,
+        "per_cycle": per_cycle,
+        "staging_slots": room,
+        "blocked_hands": hands,
+        "period_s": period,
+        # 「上界」ではなく「較正値」であることを読む側に見せる (docstring と同じ主張)
+        "calibrated": True,
+    }
 
 
 def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
@@ -1301,6 +1508,10 @@ def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
       待ち行列の言葉では書けない。安い上界だけは付ける（``_declare_unmirrored``）。
     * ``bench_staging`` — ピークは**リリース周期との相互作用**そのもので、それが
       顧客の問い（置き場を何台分取るか）。閉形式で答えると測っていない数を売る。
+      ⚠️ 鏡は今も無いが、**能力の天井だけは閉じた**（``_release_drain``）——
+      「完成品は置き場を通ってしか出荷に出られず、置き場は窓の中でしか空かない」は
+      保存則なので周期で閉じる。天井は名乗ったまま能力に効く（降りたことと、
+      降りた先が甘くないことは別の話）。
     """
     out = []
     if _has_stopper(model):
@@ -1317,9 +1528,9 @@ def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
     return out
 
 
-def _declare_unmirrored(model: WarehouseModel, out: dict,
-                        unmirrored: list[str]) -> dict:
-    """降りたことを**名乗る**。数字は歴史的な連鎖の答えのまま。
+def _declare_unmirrored(model: WarehouseModel, out: dict, unmirrored: list[str],
+                        drain: dict | None = None) -> dict:
+    """降りたことを**名乗る**。数字は歴史的な連鎖の答え＋staging の排出天井。
 
     ``line_mechanics_mirrored: False`` と ``unmirrored`` が付いているブロックは
     「この機構は解析では見ていない」の意味で、黙って従来の閉形式を返すのとは違う
@@ -1334,11 +1545,20 @@ def _declare_unmirrored(model: WarehouseModel, out: dict,
     外れる上界は上界ではない。窓の割合は**開示**としてだけ出し（``release_window_share``）、
     能力には一切かけない。再導入を防ぐ計測は ``tests/test_line_stopper.py`` に残して
     ある。
+
+    **``release_drain`` はその反対の例**: 窓の割合ではなく**周期あたりに置き場から
+    出せる個数**で、こちらは保存則なので閉じる（``_release_drain``）。窓長には依存
+    しない——「窓を長くすれば能力が上がる」は staging が空になった瞬間に drain が
+    止まる以上、成り立たないから。降りた宣言と同居するのは矛盾ではない: 機構を
+    鏡写しできていない（ピーク・背圧・滞留は DES に渡す）ことと、降りた先の**能力が
+    甘くない**ことは別の主張である。
     """
     out = {**out, "line_mechanics_mirrored": False, "unmirrored": list(unmirrored)}
     win = _release_window(model)
     if win is not None and win[1] > 0.0:
         out["release_window_share"] = min(win[1] / win[0], 1.0)
+    if drain is not None:
+        out["release_drain"] = drain
     return out
 
 
@@ -1372,6 +1592,14 @@ def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
     立つ手をサーバに置くが物理ストッパーに番人は居ない。**黙って別の機構の式を当てる
     のが一番悪い**ので、歴史的な連鎖の答え（＝ベルトの能力）に降りて、降りたことを
     ``line_mechanics_mirrored: False`` として名乗る。
+
+    **降りた先が甘くないことは、別に確かめなければならない**。実測（合成288構成、
+    需要飽和）では、歴史的な答えは 完成品staging が張られた図面で**全構成が実測
+    スループットより上**（平均 +472%・最悪 +1614%）だった——名乗ってさえいれば良い
+    わけではない。staging の排出天井 (:func:`_release_drain`) はその1点だけを閉じる。
+    staging を張っていない図面（ストッパー単独 / リリースのみ）では歴史的な答えは
+    実測の 1.01〜1.81倍で収まっており（48構成、甘い側に外れた構成は0）、天井は計算
+    されないまま歴史的な数字がそのまま出る。
     """
     unmirrored = _unmirrored_line_mechanics(model)
     pull_on = (not unmirrored
@@ -1392,9 +1620,16 @@ def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
                                                horizon_s, line=line)
                 if out is not None:
                     return out
-    out = _conveyor_estimate(model, lam, n_stations, pack_time_s, horizon_s)
+    drain = None
+    if "bench_staging" in unmirrored:
+        stage_line = _belt_stages(model)
+        if stage_line is not None:
+            drain = _release_drain(model, stage_line, n_stations, pack_time_s)
+    ceiling = (drain["per_hr"] / 3600.0) if drain is not None else float("inf")
+    out = _conveyor_estimate(model, lam, n_stations, pack_time_s, horizon_s,
+                             ceiling=ceiling, ceiling_label="staging")
     if unmirrored and out is not None:
-        out = _declare_unmirrored(model, out, unmirrored)
+        out = _declare_unmirrored(model, out, unmirrored, drain)
     return out
 
 
@@ -1520,16 +1755,21 @@ def estimate(model: WarehouseModel) -> dict:
     # not demand -- the engine's ready_store simply runs dry. Without this the
     # oracle read 0.311 against a measured 0.192.
     agv_util = agv_rate = None
+    agv_jam = None
     if gtp:
         agv_speed = ([e.speed_mps for e in model.resources.equipment
                       if e.type == "agv"] or [1.6])[0]
         # One AGV trip fetches ONE order's totes (the engine's agv_agent pulls a
         # single order per trip), out and back from its dock.
-        agv_trip_s = _trip_travel_m(depot_leg, hop, max(lines_per, 1.0),
-                                    det) / max(agv_speed, 0.1)
+        agv_trip_m = _trip_travel_m(depot_leg, hop, max(lines_per, 1.0), det)
+        agv_trip_s = agv_trip_m / max(agv_speed, 0.1)
         agv_rate = n_agvs / agv_trip_s if agv_trip_s > 0 else float("inf")
         agv_util = min(lam / agv_rate, 1.0) if agv_rate > 0 else 1.0
         lam = min(lam, agv_rate)
+        # AGV同士の通路干渉: 開示だけ。数字は1つも動かさない（``_agv_interference``
+        # に棄却の測定が書いてある）。フラグOFFなら ``None`` ＝キーごと出ない。
+        agv_jam = _agv_interference(model, det, agv_trip_m, lam,
+                                    max(agv_speed, 0.1), n_agvs)
 
     # コンベア詰まり: the belt chain is a capacitated stage DOWNSTREAM of the
     # picker, so — exactly like the AGV fleet above — it cannot be offered more

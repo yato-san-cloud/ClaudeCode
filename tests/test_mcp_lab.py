@@ -393,6 +393,324 @@ def test_sweep_rejects_bad_metrics(runs, metrics, needle):
     assert needle in str(e.value)
 
 
+# --- sweep: 連動軸（実験変数1つ＝編集N本） --------------------------------
+# 現場の実験変数は「つまみ1つ＝編集1本」ではない。顧客の実ライン
+# （`line_inspection` ＝ 引き込み5ヶ所×両側＝10本）で
+#
+#   * 「引き込みあたりの梱包台」 = station 10本の編集、
+#   * 「停止線の位置」          = 線の位置**と**そこに立つ人、の2本
+#
+# を直積で回すと、(1) 対角以外の無意味なケースを買わされ、(2) 実寸では上限に
+# 当たって始まる前に断られる（3水準^10 × 4seed = 236,196ケース）。連動軸は
+# **水準数で数える**ので、同じ実験が 3×4 = 12 ケースになる。
+
+# 「2台目の梱包台」は奇数番の station（引き込み1つにつき1台）＝10本。
+BENCH_PATHS = [f"resources.stations.{i}.count" for i in range(1, 20, 2)]
+BENCH_SEEDS = [1, 2, 3, 4]
+BENCH_LEVELS = [{"name": f"{n + 1}台/引き込み", "edits": {p: n for p in BENCH_PATHS}}
+                for n in (0, 1, 2)]
+LINE_BASE = {"name": "実ライン（引き込み5ヶ所・両側）", "template": "line_inspection",
+             "reps": 1, "duration_s": 420.0,
+             "edits": {"orders.profile.peak_factor": 3.0}}
+
+# 停止線は「線」と「そこに立つ人」の2本。動かすのは insp1 の直線部なので人の y は
+# 変わらず、連動するのは `stop_gate.at_m` と station の x の2パス。
+GATE_ARC_PATH = "resources.conveyors.0.stop_gate.at_m"
+GATE_BENCH_X = "resources.stations.19.x"
+GATE_AT = {10.0: 20.0, 18.0: 28.0, 26.0: 36.0}      # 停止線の位置 → 立つ人の x
+GATE_BASE = {
+    "name": "停止線つきライン", "template": "line_inspection",
+    "reps": 1, "duration_s": 600.0,
+    # 停止線（物理ストッパー）と、そこに立つ人（station 19）。station 17 は
+    # どの引き込みにも属さない共有プール＝「線だけ動かした」ときの受け皿。
+    "edits": {"resources.conveyors.0.stop_gate": {"at_m": 18.0, "mode": "all"},
+              "resources.stations.17.x": 12.0, "resources.stations.17.y": 12.0,
+              "resources.stations.17.count": 8,
+              "resources.stations.19.x": 28.0, "resources.stations.19.y": 12.0},
+}
+GATE_LEVELS = [{"name": f"停止線 {a}m",
+                "edits": {GATE_ARC_PATH: a, GATE_BENCH_X: x}}
+               for a, x in GATE_AT.items()]
+
+
+@pytest.fixture(scope="module")
+def bench_sweep(runs):
+    """顧客の 台数± を連動軸1本で（＝実寸のまま）掃引した結果。"""
+    return M.sweep(LINE_BASE, {"台数±": {"levels": BENCH_LEVELS}}, BENCH_SEEDS,
+                   metrics=["completion_rate", "packer_utilization"])
+
+
+@pytest.fixture(scope="module")
+def gate_sweeps(runs):
+    """停止線位置±: 線だけ動かした掃引 と 線＋人を連動させた掃引。"""
+    naive = M.sweep(GATE_BASE, {GATE_ARC_PATH: list(GATE_AT)}, [1, 2],
+                    metrics=["completion_rate"])
+    tied = M.sweep(GATE_BASE, {"停止線位置±": {"levels": GATE_LEVELS}}, [1, 2],
+                   metrics=["completion_rate"])
+    return naive, tied
+
+
+def test_the_real_lines_bench_sweep_is_refused_as_a_cross_product(runs):
+    """顧客が最初にぶつかる壁: 台数± を素直に書くと**始まる前に**断られる。
+
+    引き込み5ヶ所×両側＝10本のパスに ±1 の3水準、seed 4本で 3^10×4 = 236,196
+    ケース。上限は64なので1本も走らない（これは掃引の欠陥ではなく、格子が
+    「1つの実験変数」を表現できないことの帰結）。
+    """
+    grid = {p: [0, 1, 2] for p in BENCH_PATHS}
+    with pytest.raises(LabError) as e:
+        M.sweep(LINE_BASE, grid, BENCH_SEEDS)
+    assert "上限を超えています" in str(e.value)
+    assert "236196" in str(e.value)               # 3^10 × 4seed
+    assert "連動軸" in str(e.value)                # 出口を名指しする
+
+
+def test_a_tied_axis_runs_the_same_experiment_in_twelve_cases(bench_sweep, runs):
+    """同じ実験を連動軸1本で: 236,196 → 12ケース（水準3 × seed4）。"""
+    out = bench_sweep
+    assert out["cases"] == 12 and out["ok"] == 12 and out["failed"] == 0
+    assert out["unapplied_edits"] == [] and out["warnings"] == []
+    # 軸は1本・水準は3つ・1水準あたり10本の編集（＝直積なら 3^10 だったもの）
+    assert [a["axis"] for a in out["tied_axes"]] == ["台数±"]
+    axis = out["tied_axes"][0]
+    assert [lv["name"] for lv in axis["levels"]] == [lv["name"] for lv in BENCH_LEVELS]
+    assert all(lv["edits"] == 10 for lv in axis["levels"])
+    assert axis["paths"] == sorted(BENCH_PATHS)
+    # 12ケースは「水準 × seed」の全数（対角の掃き残しが無い）
+    assert {(r["params"]["台数±"], r["seed"]) for r in out["rows"]} == \
+        {(lv["name"], s) for lv in BENCH_LEVELS for s in BENCH_SEEDS}
+
+
+def test_the_tied_bench_sweep_answers_the_question_it_was_asked(bench_sweep, runs):
+    """臨界点が読める曲線になっていること（数字は全て summary.json からの転記）。"""
+    out = bench_sweep
+    by_level: dict[str, list[float]] = {}
+    for r in out["rows"]:
+        disk = json.loads(
+            (runs / r["run_id"] / "summary.json").read_text("utf-8"))["kpis"]
+        assert r["kpis"]["completion_rate"] == disk["completion_rate"]   # 転記そのもの
+        by_level.setdefault(r["params"]["台数±"], []).append(r["kpis"]["completion_rate"])
+    means = {k: sum(v) / len(v) for k, v in by_level.items()}
+    assert len(means) == 3 and all(len(v) == len(BENCH_SEEDS) for v in by_level.values())
+    ordered = [means[lv["name"]] for lv in BENCH_LEVELS]
+    assert ordered[0] < ordered[1] < ordered[2]     # 台を足すほど完了率が上がる
+
+
+def test_a_tied_level_is_counted_once_not_as_a_cross_product(runs):
+    """数え方そのものの回帰: 同じ2パス3水準でも、連動軸は水準数で数える。"""
+    paths = ["resources.workers.0.count", "resources.workers.1.count"]
+    levels = [{"name": f"L{n}", "edits": dict(zip(paths, (4 + n, 1 + n)))}
+              for n in (0, 1, 2)]
+    tied = M.sweep({**SHORT, "duration_s": 60.0}, {"連動": {"levels": levels}}, [1, 2],
+                   metrics=["completion_rate"])
+    cross = M.sweep({**SHORT, "duration_s": 60.0},
+                    {paths[0]: [4, 5, 6], paths[1]: [1, 2, 3]}, [1, 2],
+                    metrics=["completion_rate"])
+    assert tied["cases"] == 3 * 2                  # 水準 × seed
+    assert cross["cases"] == 3 * 3 * 2             # 直積 × seed
+    # 連動軸の3ケースは直積の対角そのもの（焼かれたシナリオの編集が一致する）
+    def edits_of(out, keep):
+        return sorted(
+            tuple(sorted(lab.load_artifact(r["run_id"], "scenario.json",
+                                           runs)["edits"].items()))
+            for r in out["rows"] if r["seed"] == 1 and keep(r))
+
+    diag = {(4, 1), (5, 2), (6, 3)}
+    want = edits_of(cross, lambda r: (r["params"][paths[0]], r["params"][paths[1]]) in diag)
+    got = edits_of(tied, lambda _r: True)
+    assert len(got) == 3 and got == want
+
+
+def test_the_stop_line_sweep_needs_both_knobs_or_the_answer_flatters(gate_sweeps, runs):
+    """顧客の 停止線位置±: 線だけ動かすと停止線が**黙って作業者を失う**。
+
+    梱包台は幾何で持ち主が決まるので、停止線を動かして人を置き去りにすると、
+    その停止線の荷は共有プール（このモデルでは8台）が拾ったことになる ——
+    掃引の表は「位置を変えても捌ける」と読める。線と人を連動させた答えは
+    **同じ seed で大きく低い**（甘い側に外れるのが一番危ない向き）。
+    """
+    naive, tied = gate_sweeps
+    assert naive["cases"] == tied["cases"] == 6
+    n = {(r["params"][GATE_ARC_PATH], r["seed"]): r["kpis"]["completion_rate"]
+         for r in naive["rows"]}
+    t = {(float(r["params"]["停止線位置±"].split()[1].rstrip("m")), r["seed"]):
+         r["kpis"]["completion_rate"] for r in tied["rows"]}
+    assert set(n) == set(t)
+    for seed in (1, 2):
+        # 基準モデルが既に人を置いている 18m では両者が一致する（対照）
+        assert n[(18.0, seed)] == t[(18.0, seed)]
+        # 動かした水準では、線だけの掃引が甘い側に外れる
+        for arc in (10.0, 26.0):
+            assert n[(arc, seed)] > t[(arc, seed)] + 0.15, (arc, seed)
+    assert max(n[k] - t[k] for k in n) > 0.4       # 実測: 最大でおよそ0.5
+
+
+def test_a_typo_inside_a_tied_level_does_not_hide_behind_the_others(runs):
+    """水準の中の1本が効かなくても、パス単位で名指しされる。
+
+    連動軸は「まとめて当てる」ので、綴り違いの1本は他の9本が効いたことの陰に
+    隠れやすい。隠れた瞬間、その水準は**別の実験**になっている。
+    """
+    good = {"resources.workers.0.count": 4, "orders.profile.peak_factor": 2.0}
+    levels = [{"name": "正しい", "edits": good},
+              {"name": "1本だけ綴り違い",
+               "edits": {**good, "resources.stations.99.count": 1}}]
+    out = M.sweep({**SHORT, "duration_s": 60.0}, {"台数±": {"levels": levels}}, [1],
+                  metrics=["completion_rate"])
+    assert out["ok"] == 2
+    assert [u["path"] for u in out["unapplied_edits"]] == ["resources.stations.99.count"]
+    assert out["unapplied_edits"][0]["cases"] == [2]      # 綴り違いの水準だけ
+    assert out["rows"][0]["unapplied_edits"] == []
+    assert out["rows"][1]["unapplied_edits"][0]["path"] == "resources.stations.99.count"
+    assert any("効かなかった編集" in w for w in out["warnings"])
+
+
+def test_rows_and_the_table_summarise_a_tied_level_readably(bench_sweep, runs):
+    """応答とCSVは**水準名**、全量（編集の集合）は table.json。"""
+    out = bench_sweep
+    for r in out["rows"]:
+        assert isinstance(r["params"]["台数±"], str)          # 表に出るのは名前
+        assert r["tied"]["台数±"]["edits"] == 10              # 応答は本数まで
+    header = (Path(out["table_path"]).read_text("utf-8")
+              .lstrip("﻿").splitlines()[0].split(","))
+    assert "台数±" in header                                  # 軸の名前が1列
+    assert not any(p in header for p in BENCH_PATHS)          # 10列にはならない
+    body = Path(out["table_path"]).read_text("utf-8").splitlines()[1]
+    assert BENCH_LEVELS[0]["name"] in body
+    rows = json.loads((Path(out["dir"]) / "table.json").read_text("utf-8"))["rows"]
+    assert rows[0]["tied"]["台数±"]["edits"] == BENCH_LEVELS[0]["edits"]   # 全量
+    assert rows[0]["tied"]["台数±"]["name"] == BENCH_LEVELS[0]["name"]
+    # 台帳(index.jsonl)にも水準名が残る
+    ledger = [json.loads(x) for x in
+              (Path(out["dir"]) / "index.jsonl").read_text("utf-8").splitlines()]
+    assert ledger[0]["params"]["台数±"] == BENCH_LEVELS[0]["name"]
+
+
+def test_a_scalar_axis_sweep_is_untouched_by_the_tied_axis(runs):
+    """既存の掃引（dotted-path → 値のリスト）は1バイトも変わらない。"""
+    out = M.sweep(SHORT, {"resources.workers.0.count": [4, 5]}, [1])
+    assert "tied_axes" not in out
+    assert all("tied" not in r for r in out["rows"])
+    assert out["rows"][0]["params"] == {"resources.workers.0.count": 4}
+    rows = json.loads((Path(out["dir"]) / "table.json").read_text("utf-8"))["rows"]
+    assert all("tied" not in r for r in rows)
+
+
+def test_a_tied_level_without_a_name_still_reads(runs):
+    """名前は任意。書かなければ編集から作る（表の行が識別できればよい）。"""
+    out = M.sweep({**SHORT, "duration_s": 60.0},
+                  {"軸": {"levels": [{"resources.workers.0.count": 4},
+                                     {"resources.workers.0.count": 5}]}}, [1],
+                  metrics=["completion_rate"])
+    names = [r["params"]["軸"] for r in out["rows"]]
+    assert names == ["resources.workers.0.count=4", "resources.workers.0.count=5"]
+
+
+@pytest.mark.parametrize(("grid", "needle"), [
+    ({"軸": {}}, "空でないリスト"),
+    ({"軸": {"levels": []}}, "空でないリスト"),
+    ({"軸": {"levels": [1, 2]}}, "編集のオブジェクト"),
+    ({"軸": {"levels": [{}]}}, "編集のオブジェクト"),
+    ({"軸": {"levels": [{"name": "x"}]}}, "編集が1つもありません"),
+    ({"軸": {"levels": [{"edits": []}]}}, "空でないオブジェクト"),
+    ({"軸": {"levels": [{"edits": {"": 1}}]}}, "dotted-path 文字列"),
+    ({"軸": {"levels": [{"name": 5, "edits": {"a.b": 1}}]}}, "水準名は文字列"),
+    ({"軸": {"levels": [{"name": "同", "edits": {"a.b": 1}},
+                        {"name": "同", "edits": {"a.b": 2}}]}}, "水準名が重複"),
+    ({"軸": {"levels": [{"edits": {"a.b": 1}}], "step": 2}}, "知らないキー"),
+    ({"軸": {"levels": [{"edits": {f"a.{i}": 1 for i in range(201)}}]}}, "編集が多すぎます"),
+    ({"軸": 3}, "空でないリスト"),
+    ({"軸": {"levels": [{"edits": {"a.b": 1}}]}, "a.b": [1, 2]}, "同じパスを編集"),
+])
+def test_tied_axes_reject_broken_shapes(runs, grid, needle):
+    with pytest.raises(LabError) as e:
+        M.sweep(SHORT, grid, [1])
+    assert needle in str(e.value)
+
+
+# --- 自由 dict のキーの綴り違い（「適用された」と嘘をつく側） --------------
+# `stop_gate` / `container_pool` は型を持たない dict なので、`container_pool.size`
+# は**モデルに書けてしまい・読み戻せてしまう**。落ちたパス（黙って捨てられる）より
+# 悪い: 落ちたパスは「同じ数字が並んだ」で気づけるが、これは「適用された」と
+# 報告されたうえでエンジンが読まない。
+
+def test_a_mistyped_key_in_a_free_dict_is_not_reported_as_applied(runs):
+    pool = {"template": "ecommerce_small", "seed": 3, "reps": 1, "duration_s": 60.0,
+            "edits": {"process.container_pool": {"count": 50}}}
+    # (1) 下位パスの綴り違い（.size は書けるが engine は .count しか読まない）
+    bad = M.apply_diff_and_run(pool, {"process.container_pool.size": 12})
+    assert bad["applied_edits"] == []
+    u = bad["unapplied_edits"][0]
+    assert u["path"] == "process.container_pool.size"
+    assert u["unknown_keys"] == ["size"]
+    assert "count" in u["recognized_keys"] and "エンジンが読まない" in u["reason"]
+    assert "count" in u["reason"]                 # 正しいキーを名指しする
+    # (2) dict 丸ごとの差し替えでも同じ
+    whole = M.apply_diff_and_run(SHORT, {"process.container_pool": {"size": 300}})
+    assert whole["applied_edits"] == []
+    assert whole["unapplied_edits"][0]["unknown_keys"] == ["size"]
+    # (3) 対照: 正しいキーは applied のまま
+    ok = M.apply_diff_and_run(pool, {"process.container_pool.count": 12})
+    assert ok["applied_edits"] == ["process.container_pool.count"] and ok["unapplied_edits"] == []
+
+
+def test_a_sweep_of_a_mistyped_free_dict_key_says_so_instead_of_a_flat_curve(runs):
+    """掃引だと「同じ数字が6本並んだ」しか返らなかったやつ。"""
+    base = {"template": "line_inspection", "seed": 3, "reps": 1, "duration_s": 300.0,
+            "edits": {"process.container_pool": {"count": 50}}}
+    out = M.sweep(base, {"process.container_pool.size": [10, 20, 30]}, [1],
+                  metrics=["containers_in_use_peak", "container_pool_size"])
+    assert out["ok"] == 3                                   # 走るには走る
+    assert [u["path"] for u in out["unapplied_edits"]] == ["process.container_pool.size"]
+    assert out["unapplied_edits"][0]["cases"] == [1, 2, 3]
+    assert any("エンジンが読まない" in w for w in out["warnings"])
+    assert all(r["kpis"]["container_pool_size"] == 50 for r in out["rows"])
+
+
+def test_the_stop_gate_keys_are_checked_the_same_way(runs):
+    base = {"template": "pick_to_belt", "seed": 3, "reps": 1, "duration_s": 60.0,
+            "edits": {"resources.conveyors.0.stop_gate":
+                      {"at_m": 2.0, "stop_states": ["inspected"]}}}
+    out = M.apply_diff_and_run(base, {"resources.conveyors.0.stop_gate.position_m": 4.0})
+    assert out["applied_edits"] == []
+    assert out["unapplied_edits"][0]["unknown_keys"] == ["position_m"]
+    assert "at_m" in out["unapplied_edits"][0]["recognized_keys"]
+    good = M.apply_diff_and_run(base, {"resources.conveyors.0.stop_gate.at_m": 4.0})
+    assert good["applied_edits"] == ["resources.conveyors.0.stop_gate.at_m"]
+
+
+def test_the_recognized_keys_are_derived_from_the_engine_not_copied():
+    """認識キーの表は**エンジンのパーサから導出**する（不変条件11）。
+
+    ここに表を写すと、``build.py`` がキーを増やした瞬間に実験装置だけが古い表で
+    「そんなキーは無い」と言い出す。導出元は ``engine/build.py``、対象フィールドは
+    スキーマが ``dict | None`` と宣言しているもの。
+    """
+    keys = M.mechanism_keys()
+    assert set(keys) == set(M._free_dict_fields())
+    assert {"stop_gate", "container_pool"} <= set(keys)
+    # スキーマの docstring が並べているキーと一致している（形だけの一致ではない）
+    assert {"at_m", "mode", "stop_states", "pass_states", "pullable"} == keys["stop_gate"]
+    assert {"count", "return_belt", "return_time_s"} == keys["container_pool"]
+    # そして **この層にはその文字列が1つも無い**（docstring の説明文は除く）
+    import ast as _ast
+    tree = _ast.parse(Path(M.__file__).read_text("utf-8"))
+    docs = set()
+    for node in _ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (_ast.Module, _ast.ClassDef, _ast.FunctionDef,
+                             _ast.AsyncFunctionDef)) and body \
+                and isinstance(body[0], _ast.Expr) \
+                and isinstance(body[0].value, _ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            docs.add(id(body[0].value))
+    literals = {n.value for n in _ast.walk(tree)
+                if isinstance(n, _ast.Constant) and isinstance(n.value, str)
+                and id(n) not in docs}
+    copied = literals & {k for ks in keys.values() for k in ks}
+    assert not copied, f"認識キーの写しがMCP層に居ます: {sorted(copied)}"
+
+
 def test_the_line_mechanics_kpis_have_labels_a_proposal_can_print(runs):
     """比較表の行ラベル。数字を含めてはいけない — 見出しは値ではないので、本文の
     数値照合（`verify_report`）に拾われた瞬間に「台帳に無い数字」になる。"""

@@ -135,11 +135,40 @@ class Door(BaseModel):
     w: float = 3.0
 
 
+class NonBarrier(BaseModel):
+    """停止線・仕切り — 図面に**線として描かれているが、通れる**もの。
+
+    A :class:`Wall` and one of these are the same rectangle in MapMaker
+    (``WallObject``); only the NAME says which (不変条件18). The difference is not
+    cosmetic: a wall blocks routing, and a 仕切り that becomes one walls off the
+    floor the people actually walk across — the picker then routes the long way
+    round, or the zone behind it goes unreachable and the run reports a layout
+    problem the drawing does not have.
+
+    So they live BESIDE ``walls``, never inside it: every obstacle reader
+    (``engine.graph`` / ``navnet`` / ``rackgeom``) walks ``layout.walls``, and
+    keeping these out of that list IS the statement "this is not a barrier". What
+    they carry instead is their own meaning — a 停止線 is where a load stops
+    (``rmpm.resolve_stop_gates`` turns it into a belt's ``stop_gate``) and a 仕切り
+    is where a zone ends. Dropping them lost the second one entirely."""
+
+    id: str = "nb"
+    name: str = ""                 # 図面の名前 verbatim (意味は名前にしか無い)
+    kind: str = ""                 # "stop_line" / "partition" (rmpm.classify_name)
+    points: list[list[float]] = Field(default_factory=list)  # [[x,y], ...] 中心線
+    # 線の太さ (m) — 描画のためだけの値。躯体壁 (0.2) より薄いのが普通なので、
+    # 図面が言わないときは細い方に倒す（太い方に倒すと壁に見える）。
+    thickness: float = 0.1
+
+
 class Layout(BaseModel):
     bounds: Bounds = Field(default_factory=Bounds)
     zones: list[Zone] = Field(default_factory=list)
     walls: list[Wall] = Field(default_factory=list)
     doors: list[Door] = Field(default_factory=list)
+    # 障壁ではない線。``walls`` の隣に置くことが「壁にしない」の宣言そのもの
+    # (see :class:`NonBarrier`). 既定 [] ＝ 従来のモデルは1バイトも変わらない。
+    non_barriers: list[NonBarrier] = Field(default_factory=list)
 
 
 class Location(BaseModel):
@@ -568,11 +597,41 @@ class Station(BaseModel):
     role: str = ""
 
 
+class Marker(BaseModel):
+    """立ち位置マーカー — 図面が「**ここに人が立つ**」と言っている点。
+
+    MapMaker には人という種別が無いので、作図者は 500 mm 角の作業台を置いて名前に
+    「検品者立ち位置マーカー」と書く（不変条件18）。読み取れるのに置き場が無かった
+    間、それは保存の瞬間に消えていた: 実案件の 22 人（検品者2＋梱包者20）の員数照合は
+    生図面を数え直してやる羽目になり、動画は「人はここに立っている」をモデルの外側で
+    注入していた（=モデルは人の居場所を知らないまま絵だけが知っている状態）。
+
+    人は :class:`WorkerGroup`（何人居るか）と :class:`Station`（何台の台が在るか）で
+    数えるが、**どこに立つか**はどちらも持っていない。だから居場所は resources の
+    3本目として在る: 台＝物、人数＝勘定、マーカー＝位置。
+
+    エンジンは役割の合う人をここに立たせ（``engine.build``: 梱包者→``pack_xy``、
+    検品者→``inspect_xy``）、誰も立たなかったマーカーは replay が「描かれた人」として
+    出す（``render.replay``）。**台数や人数には数えない** — 図面に描かれた立ち位置が
+    そのまま人員計画になるわけではないので、能力に効く数字は今までどおり
+    ``WorkerGroup.count`` / ``Station.count`` だけが決める。"""
+
+    id: str = "mk"
+    name: str = ""            # 図面の名前 verbatim (役割はここから読む)
+    # 役割: "inspector" / "packer" / "picker" / "worker" (rmpm.classify_name の tag)。
+    # 既定は「人が立つ」以上のことを言わない 'worker'。
+    role: str = "worker"
+    x: float = 0.0
+    y: float = 0.0
+
+
 class Resources(BaseModel):
     workers: list[WorkerGroup] = Field(default_factory=lambda: [WorkerGroup()])
     equipment: list[Equipment] = Field(default_factory=list)
     conveyors: list[Conveyor] = Field(default_factory=list)
     stations: list[Station] = Field(default_factory=lambda: [Station()])
+    # 人の立ち位置 (see :class:`Marker`). 既定 [] ＝ 従来のモデルは1バイトも変わらない。
+    markers: list[Marker] = Field(default_factory=list)
 
 
 class OrderLine(BaseModel):

@@ -285,3 +285,83 @@ def test_project_matches_the_engines_own_conveyor_line():
     for p in [(5.0, 3.0), (-4.0, 20.0), (39.0, 10.0), (100.0, -100.0)]:
         assert ln.project(p) == beltgeom.project(p, ln.points, ln.seglens)
         assert math.isfinite(ln.project(p)[1])
+
+
+# --------------------------------------------------- 近接: どれだけ外したのか
+# Every rule above answers "are these joined?" with yes or no, so a drawing that
+# misses by centimetres is indistinguishable from one that misses by the width of
+# the building. These three helpers measure the miss instead — pure geometry
+# still, reported by ``flowgraph.diagnose`` and acted on by nobody.
+
+def test_nearest_path_measures_what_attach_only_refuses():
+    spur_end = (20.0, 10.0 + beltgeom.JOIN_TOL_M + 0.244)
+    assert beltgeom.attach(spur_end, [TRUNK]) is None, "too far to be ON the trunk"
+    bid, gap, arc = beltgeom.nearest_path(spur_end, [TRUNK])
+    assert bid == "T" and gap == pytest.approx(1.044) and arc == pytest.approx(20.0)
+
+
+def test_nearest_path_breaks_ties_by_id_like_attach():
+    """Two belts equally close must resolve the same way on every run."""
+    twins = [("b", [(0.0, 0.0), (10.0, 0.0)]), ("a", [(0.0, 0.0), (10.0, 0.0)])]
+    assert beltgeom.nearest_path((5.0, 2.0), twins)[0] == "a"
+    assert beltgeom.nearest_path((5.0, 2.0), twins[::-1])[0] == "a"
+    assert beltgeom.nearest_path((5.0, 2.0), twins, exclude={"a"})[0] == "b"
+    assert beltgeom.nearest_path((5.0, 2.0), []) is None
+
+
+def test_bench_distances_ranks_by_the_same_rule_that_hands_out_the_pools():
+    """The first entry within reach IS the owner — not a second opinion.
+
+    The whole reason this exists beside ``bench_pools`` is the runner-up: a bench
+    2.6 m from one pull-in and 1.6 m from another resolves correctly and
+    invisibly, and the pool count alone cannot say who else was close.
+    """
+    spurs = [("A", [(20.0, 10.0), (20.0, 15.0)]), ("B", [(24.0, 10.0), (24.0, 15.0)])]
+    stations = [(20.5, 15.0, 1), (22.6, 15.0, 1), (24.5, 15.0, 1)]
+    ranked = beltgeom.bench_distances(spurs, [TRUNK, *spurs], stations)
+    assert [r[0][1] for r in ranked.values()] == ["A", "B", "B"]
+    assert ranked[1][0][0] == pytest.approx(1.4) and ranked[1][1][0] == pytest.approx(2.6)
+    pools, _claimed = beltgeom.bench_pools(spurs, [TRUNK, *spurs], stations)
+    for i, rank in ranked.items():
+        owner = rank[0][1] if rank[0][0] <= beltgeom.BENCH_REACH_M else None
+        assert owner is None or pools[owner] > 0
+    assert pools == {"A": 1, "B": 2}
+
+
+def test_bench_distances_uses_the_same_tie_break_as_the_pools():
+    spurs = [("A", [(20.0, 10.0), (20.0, 15.0)]), ("B", [(24.0, 10.0), (24.0, 15.0)])]
+    mid = [(22.0, 15.0, 1)]                       # exactly 2.0 m from both
+    assert beltgeom.bench_distances(spurs, [TRUNK, *spurs], mid)[0][0][1] == "A"
+    assert beltgeom.bench_distances(spurs[::-1], [TRUNK, *spurs], mid)[0][0][1] == "B"
+    assert beltgeom.bench_pools(spurs, [TRUNK, *spurs], mid)[0]["A"] == 1
+    assert beltgeom.bench_pools(spurs[::-1], [TRUNK, *spurs], mid)[0]["B"] == 1
+
+
+def test_bench_distances_follows_a_spur_worked_from_both_ends():
+    """``discharge_both`` moves the reach, so it must move the ranking too."""
+    spur = ("S", [(20.0, 6.0), (20.0, 14.0)])
+    far = [(20.0, 6.5, 2)]                        # beside the INFEED extremity
+    one = beltgeom.bench_distances([spur], [TRUNK, spur], far)[0][0][0]
+    two = beltgeom.bench_distances([spur], [TRUNK, spur], far, both={"S"})[0][0][0]
+    assert one == pytest.approx(7.5) and two == pytest.approx(0.5)
+
+
+def test_an_upper_deck_drawn_over_a_lower_one_counts_as_covered():
+    """2段駆動コンベア: 下段=搬送 / 上段=空容器の還流 over ONE footprint.
+
+    Both decks are the same line on the floor, so a reader that runs only the
+    lower one is not looking at a different warehouse.
+    """
+    lower = [(11.4, 4.0), (44.5, 4.0)]
+    upper = [(44.5, 4.0), (11.4, 4.0)]
+    assert beltgeom.path_covered_by(upper, [("low", lower)])
+    assert beltgeom.path_covered_by([(20.0, 4.3), (30.0, 4.3)], [("low", lower)])
+
+
+def test_a_belt_that_merely_crosses_another_is_not_covered_by_it():
+    """It touches at one point; sampling only the vertices would call that lying on."""
+    trunk = [(0.0, 10.0), (40.0, 10.0)]
+    crossing = [(20.0, 6.0), (20.0, 14.0)]
+    assert not beltgeom.path_covered_by(crossing, [("T", trunk)])
+    assert not beltgeom.path_covered_by(trunk, [])
+    assert not beltgeom.path_covered_by([(0.0, 0.0)], [("T", trunk)])

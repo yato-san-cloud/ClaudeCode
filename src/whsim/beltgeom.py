@@ -33,6 +33,24 @@ JOIN_TOL_M = 0.8
 # not a couple of centimetres.
 BENCH_REACH_M = 3.0
 
+# --- near misses -------------------------------------------------------------
+# Everything above answers "are these two things joined?" with yes or no, and a
+# drawing that misses by centimetres gets the same silent "no" as one that misses
+# by the width of the building. That silence is what let four separate real
+# drawings run to completion with the mechanism they were drawn for absent (a
+# 引き込み 1.04 m off the 本線 that never received a load, a 検品 belt that read as
+# serial instead of parallel, a bench that belonged to nobody). The wiring rules
+# above are NOT relaxed by these numbers — they only say how far past the
+# threshold is still worth telling a human about.
+#
+# Three times the join tolerance is a belt width plus a drawn corner's slop; past
+# that the two lines are simply elsewhere on the floor and there is nothing to
+# report.
+NEAR_JOIN_M = 3.0 * JOIN_TOL_M
+# Twice the bench reach is still "standing beside that belt end"; four times is a
+# bench somewhere else in the building.
+NEAR_REACH_M = 2.0 * BENCH_REACH_M
+
 # ``bench_pools`` says one of three things about a 引き込み, and they are NOT the
 # same thing (conflating the last two handed a spur the whole floor's capacity a
 # second time — measured packer_utilization 1.28):
@@ -89,6 +107,70 @@ def project(p, pts, seglens=None) -> tuple[tuple[float, float], float]:
     return best_xy, best_arc
 
 
+def point_at(pts, arc: float, seglens=None, beyond: bool = False) -> tuple[float, float]:
+    """The point ON the polyline ``pts`` at arc length ``arc`` from its infeed.
+
+    The inverse of :func:`project` (that one asks "where on the belt is this
+    point", this one "what is at this arc"), and the reason it lives here rather
+    than on the engine's ``ConveyorLine``: the replay has to draw a QUEUE along a
+    belt, and the third copy of this walk would be the one that drifts
+    (不変条件11).
+
+    Clamped to the two ends by default — a load ON a belt cannot stand past
+    either end of it, which is the rule ``Stopper.arc_of`` already applies.
+    ``beyond=True`` extends the first/last segment instead, for the one queue that
+    is NOT on the belt: the loads waiting to be PUT ON it stand behind the
+    induction point, and the infeed is not a wall to them.
+    """
+    if not pts:
+        return (0.0, 0.0)
+    if len(pts) == 1:
+        return (float(pts[0][0]), float(pts[0][1]))
+    if arc < 0.0:
+        if not beyond:
+            arc = 0.0
+        else:
+            # Behind the infeed: keep going along the FIRST segment's direction.
+            a, b = pts[0], pts[1]
+            seg = (seglens[0] if seglens is not None else math.dist(a, b))
+            if seg <= 1e-12:
+                return (float(a[0]), float(a[1]))
+            t = arc / seg                      # negative ⇒ upstream of points[0]
+            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+    acc = 0.0
+    n = len(pts) - 1
+    for i in range(n):
+        a, b = pts[i], pts[i + 1]
+        seg = (seglens[i] if seglens is not None else math.dist(a, b))
+        if arc <= acc + seg + 1e-9:
+            t = min(max((arc - acc) / seg, 0.0), 1.0) if seg > 1e-12 else 0.0
+            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+        acc += seg
+    if beyond:
+        a, b = pts[-2], pts[-1]
+        seg = (seglens[-1] if seglens is not None else math.dist(a, b))
+        if seg > 1e-12:
+            t = 1.0 + (arc - acc) / seg
+            return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+    return (float(pts[-1][0]), float(pts[-1][1]))
+
+
+def queue_points(pts, arc: float, n: int, pitch: float, seglens=None,
+                 beyond: bool = False) -> list[tuple[float, float]]:
+    """Where ``n`` loads QUEUED at arc ``arc`` physically stand, head first.
+
+    One load per ``pitch`` metres back up the path — the same pitch that sets the
+    belt's slot count, so 「列が何メートル戻ったか」 and 「ベルトが何個で満杯か」 can
+    never disagree (``Stopper.arc_of`` is this list's index 0..n-1).
+
+    This is the whole of the replay's queue geometry. Writing every waiting load
+    at the ONE arc where it stopped is what put ~21 totes on the same square
+    centimetre and made every 3D consumer re-derive the spacing itself.
+    """
+    p = max(float(pitch), 1e-9)
+    return [point_at(pts, arc - i * p, seglens, beyond) for i in range(max(0, int(n)))]
+
+
 def distance_to(p, pts) -> float:
     """How far ``p`` is from a polyline — ``build._attach_to``'s "do they touch" test.
 
@@ -116,6 +198,26 @@ def attach(p, belts, exclude=()) -> tuple[str, float] | None:
         if d <= JOIN_TOL_M and (best is None or (d, bid) < (best[0], best[1])):
             best = (d, bid, arc)
     return (best[1], best[2]) if best is not None else None
+
+
+def nearest_path(p, belts, exclude=()) -> tuple[str, float, float] | None:
+    """The nearest belt PATH to ``p`` at ANY distance: ``(belt id, gap, arc)``.
+
+    :func:`attach` answers "does this end sit ON a belt" and says nothing at all
+    when it does not — the right answer for wiring, and the wrong one for telling
+    somebody HOW FAR OFF they are. Same projection and the same id tie-break, with
+    the tolerance dropped. ``None`` only when there is no candidate belt at all.
+    """
+    skip = set(exclude)
+    best = None
+    for bid, pts in belts:
+        if bid in skip or len(pts) < 2:
+            continue
+        xy, arc = project(p, pts)
+        d = math.dist((float(p[0]), float(p[1])), xy)
+        if best is None or (d, bid) < (best[0], best[1]):
+            best = (d, bid, arc)
+    return None if best is None else (best[1], best[0], best[2])
 
 
 def _seg_nearest(a0, a1, b0, b1):
@@ -162,6 +264,32 @@ def path_nearest(pts_a, pts_b):
             arc_b += lb
         arc_a += la
     return best
+
+
+def path_covered_by(pts, others, tol: float = JOIN_TOL_M) -> bool:
+    """Does the WHOLE of ``pts`` run within ``tol`` of one of ``others``?
+
+    The 2段駆動コンベア asks this. Its upper deck (空容器の還流) is drawn over the
+    same XY as the lower deck, so a reader that runs it and a reader that ignores
+    it are still looking at the same floor — which is the only reason a belt
+    missing from one of two readers is worth reporting at all.
+
+    Sampled along every segment, not at the vertices only: a belt that merely
+    CROSSES another touches it at one point and must not be mistaken for one
+    lying along it.
+    """
+    if len(pts) < 2:
+        return False
+    cand = [q for _bid, q in others if len(q) >= 2]
+    if not cand:
+        return False
+    for i in range(len(pts) - 1):
+        a, b = pts[i], pts[i + 1]
+        for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+            s = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            if min(distance_to(s, q) for q in cand) > tol:
+                return False
+    return True
 
 
 def feed_point(spur_pts, belts, exclude=()):
@@ -271,3 +399,33 @@ def bench_pools(spurs, belts, stations, reach: float = BENCH_REACH_M, both=()):
         else:
             pools[sid] = UNSTAFFED       # nobody drawn: shared-pool fallback
     return pools, claimed
+
+
+def bench_distances(spurs, belts, stations, both=()) -> dict[int, list[tuple[float, str]]]:
+    """How far every 梱包台 stands from every 引き込み's discharge end.
+
+    ``{station index: [(distance, spur id), ...]}``, nearest first, ties broken by
+    the caller's spur order — :func:`bench_pools`' own tie-break, off the same
+    :func:`discharge_ends`. So the first entry within :data:`BENCH_REACH_M` is
+    exactly the pull-in the pool arithmetic handed that bench to.
+
+    ``bench_pools`` returns the ANSWER (how many benches each pull-in gets);
+    this returns the WORKING, which is what a reader needs to say anything useful
+    about a near miss: a bench two pull-ins can both reach belongs to one of them
+    and the drawing does not say which, and a bench 3.2 m from the only pull-in
+    near it belongs to nobody and falls back to the shared floor. Both read as
+    silence from the answer alone.
+    """
+    spur_ids = {sid for sid, _ in spurs}
+    both = set(both)
+    order = {sid: i for i, (sid, _pts) in enumerate(spurs)}
+    ends = {sid: discharge_ends(pts, belts, spur_ids, sid in both)
+            for sid, pts in spurs}
+    out: dict[int, list[tuple[float, str]]] = {}
+    for i, st in enumerate(stations):
+        p = (float(st[0]), float(st[1]))
+        ranked = sorted(
+            ((min(math.dist(p, e) for e in ends[sid]), sid) for sid, _pts in spurs),
+            key=lambda r: (r[0], order[r[1]]))
+        out[i] = ranked
+    return out

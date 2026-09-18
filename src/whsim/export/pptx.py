@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from . import textfit
 from ._data import (
     DASH,
     GREEN,
@@ -16,7 +17,7 @@ from ._data import (
     WHITE,
     _SCENARIO_METRICS,
     _SEV_COLOR,
-    _assumptions_lines,
+    _assumption_blocks,
     _brand_section,
     _date_str,
     _delta_str,
@@ -38,7 +39,8 @@ from ._data import (
 
 def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                png_path, out_path, *, scenarios=None, insights=None,
-               provenance=None, storage=None, model=None, brand=None) -> Path:
+               provenance=None, storage=None, model=None, brand=None,
+               assumptions=None) -> Path:
     """Build an editable, multi-section proposal deck and write it to `out_path`.
 
     Sections (slides): cover -> executive summary -> layout & congestion -> KPI
@@ -61,7 +63,19 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                           accent colour drives the title bars/strips. Defaults to
                           the built-in accent, so a default/absent brand is a
                           no-op. When None, ``model.settings.brand`` is used.
+      * ``assumptions`` -- 前提条件 for the ⑤ slide, as data instead of a constant:
+                          a string, a list of strings / ``{"text","level"}`` items
+                          (``level`` accepts ``危険側``/``danger`` and ``注意``/``warn``
+                          so an unsafe-side 前提 renders in red ON the assumptions
+                          slide), or ``{"lines": [...], "replace": True}`` to also
+                          drop the built-in 人件費/AGV投資 line. None → the model's
+                          ``settings.assumptions``, else the historical default,
+                          so an unchanged export stays byte-identical.
     Robust: missing/None inputs degrade to graceful placeholders, never raise.
+
+    Overflow: text-heavy slides (④推奨 / ⑤前提条件) are measured before they are
+    written — shrink-to-fit first, then continue onto a 「（続き）」 slide. Content is
+    never silently clipped, and never has to be rewritten shorter to fit.
     """
     from pptx import Presentation
     from pptx.dml.color import RGBColor
@@ -141,10 +155,61 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         tf = _textbox(slide, Inches(0.5), Inches(0.12), Inches(12.3), Inches(0.6))
         _para(tf, title, size=24, bold=True, color=WHITE, first=True)
 
+    FOOTER_W = 12.3   # inches — the footer strip's usable width
+    FOOTER_PT = 9.0
+
     def _footer(slide):
+        # The footer carries the SHORT methodology form, forced onto one line:
+        # this strip is 0.4in tall at the slide's bottom edge, so a second line
+        # would print off the page. The full 前提条件 live on the ⑤ slide.
+        text, pt = textfit.fit_line(_methodology_footer(prov), FOOTER_W, FOOTER_PT)
         tf = _textbox(slide, Inches(0.5), SH - Inches(0.45),
-                      Inches(12.3), Inches(0.4))
-        _para(tf, _methodology_footer(prov), size=9, color=SUBTLE, first=True)
+                      Inches(FOOTER_W), Inches(0.4))
+        _para(tf, text, size=pt, color=SUBTLE, first=True)
+
+    def _fill(slide, paras, left, top, width, height, room=None):
+        """Write `paras` into a NEW box of the given geometry, shrunk to fit.
+
+        Every free-text box on the deck goes through here: python-pptx writes
+        runs past the bottom edge without a word of complaint, so the only
+        feedback the author ever got was the deck looking broken in front of the
+        customer. Fixed boxes (cover, tiles, verdict) can only shrink — they have
+        nowhere to continue to. `paras` are ``{"text", "pt", "bold", "color"}``.
+        Text that already fits is written at its authored size, untouched.
+
+        `room` is the vertical space the text may actually occupy before it hits
+        whatever sits below it, which is what "overflow" really means; it
+        defaults to the box's own height, and is passed explicitly where a box
+        deliberately sits in a larger gap (the cover)."""
+        scale = textfit.fit_scale(paras, width / 914400,
+                                  (room if room is not None else height) / 914400)
+        tf = _textbox(slide, left, top, width, height)
+        for i, para in enumerate(paras):
+            _para(tf, para["text"], size=para["pt"] * scale,
+                  bold=para.get("bold", False),
+                  color=para.get("color", INK), first=(i == 0))
+        return tf
+
+    def _text_slides(title, paras, *, left, top, width, height, footer=True):
+        """Lay `paras` into as many slides as the text actually needs.
+
+        The flowing counterpart of :func:`_fill`, for the text-heavy sections:
+        shrink while the text stays legible, then continue onto a 「（続き）」 slide
+        rather than clipping. Nothing is ever dropped — a slide that silently
+        swallows content lets the LAYOUT dictate what the proposal is allowed to
+        say, which is how two required 危険側 前提 got rewritten out of an audit."""
+        w_in, h_in = width / 914400, height / 914400  # EMU -> inches
+        scale = textfit.fit_scale(paras, w_in, h_in)
+        for pi, page in enumerate(textfit.paginate(paras, w_in, h_in, scale)):
+            slide = prs.slides.add_slide(blank)
+            _header_band(slide, title if pi == 0 else f"{title}（続き）")
+            tf = _textbox(slide, left, top, width, height)
+            for i, para in enumerate(page):
+                _para(tf, para["text"], size=para["pt"] * scale,
+                      bold=para.get("bold", False),
+                      color=para.get("color", INK), first=(i == 0))
+            if footer:
+                _footer(slide)
 
     # --- Slide 1: Cover -------------------------------------------------------
     s1 = prs.slides.add_slide(blank)
@@ -171,30 +236,37 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                 width=Inches(lw), height=Inches(lh))
         except Exception:  # noqa: BLE001 — brand logo is optional, never fatal
             pass
-    # 宛先「〇〇御中」 above the deck title (only when a client is named).
+    # 宛先「〇〇御中」 above the deck title (only when a client is named). Every
+    # cover box is shrink-to-fit: a long 倉庫名 or 会社名 must not run into the band
+    # below it, and the cover has no continuation slide to spill onto.
     if bstyle["client_name"]:
-        atf = _textbox(s1, Inches(1.0), Inches(2.35), Inches(11.3), Inches(0.6))
-        _para(atf, f"{bstyle['client_name']} 御中", size=24, bold=True,
-              color=INK, first=True)
-    tf = _textbox(s1, Inches(1.0), Inches(3.0), Inches(11.3), Inches(2.0))
-    _para(tf, f"{model_name}", size=46, bold=True, color=INK, first=True)
-    _para(tf, "倉庫運用シミュレーション提案", size=24, color=accent)
-    sub = _textbox(s1, Inches(1.0), Inches(5.4), Inches(11.3), Inches(1.4))
-    _para(sub, f"{_date_str()} ・ 概算見積り", size=18, color=SUBTLE, first=True)
+        _fill(s1, [{"text": f"{bstyle['client_name']} 御中", "pt": 24,
+                    "bold": True, "color": INK}],
+              Inches(1.0), Inches(2.35), Inches(11.3), Inches(0.6))
+    # room = 2.4in: the title may run down to the 提案日 block at 5.4in, and only
+    # a name long enough to reach IT is shrunk.
+    _fill(s1, [{"text": f"{model_name}", "pt": 46, "bold": True, "color": INK},
+               {"text": "倉庫運用シミュレーション提案", "pt": 24, "color": accent}],
+          Inches(1.0), Inches(3.0), Inches(11.3), Inches(2.0), room=Inches(2.4))
+    subs = [{"text": f"{_date_str()} ・ 概算見積り", "pt": 18, "color": SUBTLE}]
     if bstyle["company_name"]:
-        _para(sub, f"提案元：{bstyle['company_name']}", size=16, bold=True,
-              color=INK)
-    _para(sub, _methodology_footer(prov), size=11, color=SUBTLE)
+        subs.append({"text": f"提案元：{bstyle['company_name']}", "pt": 16,
+                     "bold": True, "color": INK})
+    subs.append({"text": _methodology_footer(prov), "pt": 11, "color": SUBTLE})
     if bstyle["footer_note"]:
-        _para(sub, bstyle["footer_note"], size=11, color=SUBTLE)
+        subs.append({"text": bstyle["footer_note"], "pt": 11, "color": SUBTLE})
+    # room = 1.85in: down to the ink rule at the foot of the cover.
+    _fill(s1, subs, Inches(1.0), Inches(5.4), Inches(11.3), Inches(1.4),
+          room=Inches(1.85))
 
     # --- Slide 2: Executive summary (verdict + 4 hero tiles) -----------------
     s2 = prs.slides.add_slide(blank)
     _header_band(s2, "① 課題：エグゼクティブサマリー")
     ok = _is_ok(kpis)
     vcolor = GREEN if ok else RED
-    vtf = _textbox(s2, Inches(0.5), Inches(1.1), Inches(12.3), Inches(1.0))
-    _para(vtf, _verdict_text(kpis), size=26, bold=True, color=vcolor, first=True)
+    _fill(s2, [{"text": _verdict_text(kpis), "pt": 26, "bold": True,
+                "color": vcolor}],
+          Inches(0.5), Inches(1.1), Inches(12.3), Inches(1.0))
 
     tiles = _headline_tiles(kpis)
     tile_w = Inches(2.95)
@@ -204,12 +276,14 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         left = Inches(0.5 + i * (2.95 + 0.18))
         _rect(s2, left, top, tile_w, th, LIGHT)
         _rect(s2, left, top, tile_w, Inches(0.12), accent)  # accent strip
-        ltf = _textbox(s2, left, top + Inches(0.3), tile_w, Inches(0.6))
-        _para(ltf, label, size=14, bold=True, color=SUBTLE, first=True)
-        vtf2 = _textbox(s2, left, top + Inches(0.95), tile_w, Inches(1.2))
-        _para(vtf2, value, size=28, bold=True, color=INK, first=True)
+        _fill(s2, [{"text": label, "pt": 14, "bold": True, "color": SUBTLE}],
+              left, top + Inches(0.3), tile_w, Inches(0.6))
+        # A long ボトルネック name is the realistic overflow here: it shrinks to
+        # stay inside its tile rather than printing over the one below.
+        vparas = [{"text": value, "pt": 28, "bold": True, "color": INK}]
         if unit:
-            _para(vtf2, unit, size=13, color=SUBTLE)
+            vparas.append({"text": unit, "pt": 13, "color": SUBTLE})
+        _fill(s2, vparas, left, top + Inches(0.95), tile_w, Inches(1.2))
     _footer(s2)
 
     # --- Slide 3: Layout & congestion (embed PNG) ----------------------------
@@ -294,10 +368,9 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         ty = 1.2
         for label, value in tiles:
             _rect(s4b, Inches(9.5), Inches(ty), Inches(3.2), Inches(1.0), LIGHT)
-            tf = _textbox(s4b, Inches(9.65), Inches(ty + 0.08),
-                          Inches(2.95), Inches(0.85))
-            _para(tf, label, size=10, color=SUBTLE, first=True)
-            _para(tf, value, size=16, bold=True)
+            _fill(s4b, [{"text": label, "pt": 10, "color": SUBTLE},
+                        {"text": value, "pt": 16, "bold": True, "color": INK}],
+                  Inches(9.65), Inches(ty + 0.08), Inches(2.95), Inches(0.85))
             ty += 1.15
         _footer(s4b)
 
@@ -314,8 +387,8 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
             left = Inches(0.5 + i * (3.9 + 0.25))
             _rect(s4c, left, ttop, tw, tth, LIGHT)
             _rect(s4c, left, ttop, tw, Inches(0.1), accent)  # accent strip
-            ltf = _textbox(s4c, left, ttop + Inches(0.22), tw, Inches(0.4))
-            _para(ltf, label, size=13, bold=True, color=SUBTLE, first=True)
+            _fill(s4c, [{"text": label, "pt": 13, "bold": True, "color": SUBTLE}],
+                  left, ttop + Inches(0.22), tw, Inches(0.4))
             vtf3 = _textbox(s4c, left, ttop + Inches(0.62), tw, Inches(0.7))
             vp = _para(vtf3, value, size=24, bold=True, color=INK, first=True)
             if unit:
@@ -323,14 +396,15 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                 r_u.text = f" {unit}"
                 _set_run(r_u, size=13, color=SUBTLE)
         # 判定 line (充足/不足).
-        jtf = _textbox(s4c, Inches(0.5), Inches(2.75), Inches(12.3), Inches(0.5))
-        _para(jtf, staff["verdict"], size=16, bold=True,
-              color=(GREEN if staff["verdict_ok"] else RED), first=True)
-        # Optional バッチ投入 one-line summary.
+        _fill(s4c, [{"text": staff["verdict"], "pt": 16, "bold": True,
+                     "color": (GREEN if staff["verdict_ok"] else RED)}],
+              Inches(0.5), Inches(2.75), Inches(12.3), Inches(0.5))
+        # Optional バッチ投入 one-line summary (a long schedule shrinks in place
+        # rather than sliding under the 工程フロー table below it).
         flow_top = 3.4
         if staff["batch_line"]:
-            btf = _textbox(s4c, Inches(0.5), Inches(3.25), Inches(12.3), Inches(0.4))
-            _para(btf, staff["batch_line"], size=12, color=SUBTLE, first=True)
+            _fill(s4c, [{"text": staff["batch_line"], "pt": 12, "color": SUBTLE}],
+                  Inches(0.5), Inches(3.25), Inches(12.3), Inches(0.4))
             flow_top = 3.75
         # 工程フロー table (工程 / 区分 / 生産性 / 依存).
         header = staff["flow_header"]
@@ -401,33 +475,31 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- Slide 6: Recommendations (only if insights provided) ----------------
     if recs:
-        s6 = prs.slides.add_slide(blank)
-        _header_band(s6, "④ 推奨：ご提案・次のステップ")
-        rtf = _textbox(s6, Inches(0.6), Inches(1.2), Inches(12.1), Inches(5.6))
-        first = True
+        rec_paras = []
         for ins in recs:
             color = _SEV_COLOR.get(ins["severity"], INK)
             title = ins["title"] or ins["action"]
-            p = rtf.paragraphs[0] if first else rtf.add_paragraph()
-            first = False
-            r0 = p.add_run()
-            r0.text = f"■ {title}"
-            _set_run(r0, size=17, bold=True, color=color)
             detail = " ".join(x for x in (ins["fact"], ins["action"]) if x)
+            # keep_next: a 指摘 headline must not be orphaned from its 提案.
+            rec_paras.append({"text": f"■ {title}", "pt": 17, "bold": True,
+                              "color": color, "keep_next": bool(detail)})
             if detail:
-                rd = rtf.add_paragraph().add_run()
-                rd.text = f"　→ {detail}"
-                _set_run(rd, size=13, color=INK)
-        _footer(s6)
+                rec_paras.append({"text": f"　→ {detail}", "pt": 13, "color": INK})
+        _text_slides("④ 推奨：ご提案・次のステップ", rec_paras,
+                     left=Inches(0.6), top=Inches(1.2),
+                     width=Inches(12.1), height=Inches(5.6))
 
     # --- Final slide: Methodology / provenance -------------------------------
-    sN = prs.slides.add_slide(blank)
-    _header_band(sN, "⑤ 裏付け：前提条件とデータ出所")
-    atf = _textbox(sN, Inches(0.6), Inches(1.3), Inches(12.1), Inches(5.0))
-    first = True
-    for line in _assumptions_lines(kpis, prov):
-        _para(atf, line, size=16, color=INK, bullet=True, first=first)
-        first = False
+    # 前提条件 come from the caller / the model (see ``assumptions``); 危険側 and 注意
+    # lines are bold + coloured so an unsafe-side 前提 reads as one AT A GLANCE.
+    # No footer here: this slide IS the methodology statement.
+    _text_slides(
+        "⑤ 裏付け：前提条件とデータ出所",
+        [{"text": f"・ {b['text']}", "pt": 16, "bold": b["level"] != "info",
+          "color": b["color"]}
+         for b in _assumption_blocks(kpis, prov, assumptions, model=model)],
+        left=Inches(0.6), top=Inches(1.3), width=Inches(12.1), height=Inches(5.0),
+        footer=False)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(out_path))

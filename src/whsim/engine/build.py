@@ -63,6 +63,22 @@ class Tote:
     def kf(self, t: float, x: float, y: float, state: str) -> None:
         self.keyframes.append((round(t, 2), round(x, 3), round(y, 3), state))
 
+    def place(self, t: float, x: float, y: float, state: str) -> None:
+        """Same instant, CORRECTED position — replace rather than append.
+
+        A load that rides up to a full 引き込み/停止線 and joins the queue there is
+        drawn arriving at the blocking point and then standing one pitch behind
+        it, both at the same ``t``. Appending both would make it ride forward and
+        snap backwards; two keyframes on the same timestamp are also ambiguous to
+        a viewer that lerps. So the last frame of that instant is rewritten: the
+        box simply decelerates into the back of the queue, which is what it
+        physically does (it never reaches the gate)."""
+        f = (round(t, 2), round(x, 3), round(y, 3), state)
+        if self.keyframes and self.keyframes[-1][0] == f[0]:
+            self.keyframes[-1] = f
+        else:
+            self.keyframes.append(f)
+
 
 # Replay memory guard: at most this many tote tracks are recorded per run (the
 # FIRST N totes inside the replay window; every later tote rides untracked). A
@@ -264,6 +280,17 @@ class ConveyorLine:
     # needs it from its own side to know how far back the stopper queue must have
     # grown before its worker can reach a stationary load.
     host_arc: float = 0.0
+    # トート間ピッチ (m) — ``Conveyor.tote_pitch_m``、未指定は歴史既定 1 個/m。The belt's
+    # slot count is derived from it at build time, and the SAME number spaces the
+    # queue the replay draws (``Stopper.pitch`` is this value): 「ベルトが何個で満杯か」
+    # と「列が何メートル戻ったか」 must be one number, not two.
+    pitch: float = 1.0
+    # 待っている荷の列 — REPLAY ONLY (``processes._stall_join``). ``{stall arc: [...]}``:
+    # loads stopped at the SAME point on this belt, in the order they stopped, so
+    # they can be drawn one pitch apart instead of on top of each other. The DES
+    # itself never reads it — a belt's slots are a counting resource and its
+    # timing does not depend on where a stopped load is drawn.
+    stalls: dict = field(default_factory=dict)
 
     def project(self, p) -> tuple[tuple[float, float], float]:
         """Nearest point ON the polyline to ``p`` + its arc length from the infeed.
@@ -297,17 +324,14 @@ class ConveyorLine:
             acc += seg
         return [self.points[-1]]
 
-    def point_at(self, arc: float) -> tuple[float, float]:
-        """The point on the path at arc length ``arc`` (clamped to both ends)."""
-        arc = max(arc, 0.0)
-        acc = 0.0
-        for i, seg in enumerate(self.seglens):
-            if arc <= acc + seg + 1e-9:
-                a, b = self.points[i], self.points[i + 1]
-                t = min(max((arc - acc) / seg, 0.0), 1.0) if seg > 1e-12 else 0.0
-                return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
-            acc += seg
-        return self.points[-1]
+    def point_at(self, arc: float, beyond: bool = False) -> tuple[float, float]:
+        """The point on the path at arc length ``arc`` (clamped to both ends).
+
+        Delegates to :func:`beltgeom.point_at` — the arc walk is now also what
+        draws a QUEUE along a belt (``beltgeom.queue_points``), and two copies of
+        it is exactly the shape invariant 11 forbids. ``beyond=True`` lets the
+        arc run past either end (the loads waiting to get ON the belt)."""
+        return beltgeom.point_at(self.points, arc, self.seglens, beyond)
 
     def slice_pts(self, a0: float, a1: float) -> list[tuple[float, float]]:
         """Corner waypoints from arc ``a0`` to arc ``a1`` (``a0`` first, ``a1`` last).
@@ -448,16 +472,32 @@ def _staging_capacity(model) -> int:
     return max(0, int(_num(spec, "capacity", 0.0)))
 
 
-def _pitch_of(model, belt_id: str) -> float:
-    """A belt's トート間ピッチ — the engine's own slot rule, read back per belt.
+def markers_of(model, role: str) -> list:
+    """図面に描かれた立ち位置のうち、``role`` の人のもの (``Resources.markers``)。
 
-    The stopper queue is measured in the SAME pitch the belt's slot count is, so
-    「列が何メートル戻ったか」 and 「ベルトが何個で満杯か」 can never disagree."""
-    for cv in (model.resources.conveyors or []):
-        if str(cv.id) == str(belt_id):
-            p = cv.tote_pitch_m
-            return float(p) if (p is not None and float(p) > 0.0) else 1.0
-    return 1.0
+    The drawing is the only thing that knows WHERE a person stands — a 作業台 says
+    where the bench is and ``WorkerGroup.count`` says how many people there are,
+    and neither of them is a position. Without this the engine had to invent one
+    (the bench's own centre, the dock), and the 3D then drew the packing line's
+    people standing inside their benches.
+
+    Extension point: 役割は図面の名前が決める (``rmpm.classify_name``) ので、新しい
+    役割の人をエンジンに立たせたければ、名前の表に1語足してここを1回呼ぶだけでよい
+    ——ピッカーの ``picker`` マーカーは**まだ使っていない**（ピッカーは歩き回るので
+    「立ち位置」は開始点の意味しか持たず、それを ``home`` に流し込むと距離が動く＝
+    位置だけの変更ではなくなる）。"""
+    return [m for m in (getattr(model.resources, "markers", None) or [])
+            if str(getattr(m, "role", "") or "") == role]
+
+
+def _pitch_of(cv) -> float:
+    """A belt's トート間ピッチ (m) — ONE rule, read once per belt at build time.
+
+    The slot count, the stopper queue and the queue the replay draws are all
+    measured in this pitch, so 「列が何メートル戻ったか」 and 「ベルトが何個で満杯か」
+    can never disagree. Unstated (or non-positive) ⇒ the historical 1 個/m."""
+    p = getattr(cv, "tote_pitch_m", None)
+    return float(p) if (p is not None and float(p) > 0.0) else 1.0
 
 
 def _wire_conveyor_chain(model, env, lines: list[ConveyorLine]) -> list[ConveyorLine]:
@@ -716,11 +756,18 @@ class World:
     staging: simpy.Store | None = None
     staging_capacity: int = 0
     pack_xy: list[tuple[float, float]] = field(default_factory=list)  # packer agent stations
+    # 立ち位置マーカーの id、``pack_xy`` / ``inspect_xy`` と同じ並び（マーカーから来て
+    # いないときは空）。誰がどのマーカーに立ったかを replay が知るため — 立った
+    # マーカーに人をもう1人描くと、同じ人を2回描くことになる。
+    pack_marks: list[str] = field(default_factory=list)
+    inspect_marks: list[str] = field(default_factory=list)
     # 入荷検品(inbound inspection): when enabled, receipts queue here for inspector
     # agents before forklift putaway. None = disabled (receipts go straight to fork).
     inbound_store: simpy.Store | None = None
     n_inspectors: int = 0
     inspect_time_s: float = 0.0
+    # 検品者の立ち位置 (空 = 従来どおり ``fork_home`` に立つ).
+    inspect_xy: list[tuple[float, float]] = field(default_factory=list)
     # 在庫補充連鎖 (DES-internal inventory). None = disabled (pick faces have
     # infinite stock, byte-identical legacy path). When present:
     #   * replen_faces  — {face_key: dict(qty/trigger/refill_to/pending/event/xy)}
@@ -1020,12 +1067,12 @@ def build(
             speed = DEFAULT_CONVEYOR_SPEED_MPS
         # Slots = how many totes physically fit, i.e. length / tote pitch. An
         # unstated (or non-positive) pitch keeps the historical 1 個/m.
-        pitch = float(cv.tote_pitch_m) if cv.tote_pitch_m is not None else 0.0
-        cap = max(1, int(total / pitch)) if pitch > 0.0 else max(1, int(total))
+        pitch = _pitch_of(cv)
+        cap = max(1, int(total / pitch))
         line = ConveyorLine(
             id=cv.id, points=pts, seglens=seglens, length=total, speed=speed,
             capacity=cap, belt=simpy.Resource(env, capacity=cap),
-            load_kind=str(getattr(cv, "load_kind", "") or ""),
+            load_kind=str(getattr(cv, "load_kind", "") or ""), pitch=pitch,
             discharge_both=bool(getattr(cv, "discharge_both", False)))
         line.gate = _resolve_gate(cv, line)
         conveyor_lines.append(line)
@@ -1143,13 +1190,24 @@ def build(
     # simpy.Store blocks put() when full, giving real pick->pack back-pressure.
     staging_cap = max(0, int(model.process.staging_capacity))
     staging = simpy.Store(env, capacity=staging_cap) if staging_cap > 0 else None
-    pack_xy = [(s.x, s.y) for s in model.resources.stations] or [home]
+    # 梱包者/検品者の立ち位置: the DRAWN 立ち位置マーカー when the drawing has them
+    # (``Resources.markers``), else where they have always stood — the bench itself
+    # for a packer, the dock for an inspector. A bench is a 台, not a person: the
+    # operator stands BESIDE it, which is why a 500 mm 角のマーカー is drawn at all.
+    # Position only: headcount and every timing stay exactly what they were, so a
+    # model with no markers is byte-identical (and one WITH them moves only the
+    # keyframes of the agents standing at them).
+    pack_marks = markers_of(model, "packer")
+    inspect_marks = markers_of(model, "inspector")
+    pack_xy = ([(m.x, m.y) for m in pack_marks]
+               or [(s.x, s.y) for s in model.resources.stations] or [home])
 
     # 入荷検品(inbound inspection) stage: receipts wait here for inspector agents
     # before forklift putaway (an explicit upstream WIP), when enabled.
     n_inspectors = max(0, int(model.process.inspector_count))
     inbound_store = simpy.Store(env) if n_inspectors > 0 else None
     inspect_time_s = max(0.0, float(model.process.inbound_inspection_time_s))
+    inspect_xy = [(m.x, m.y) for m in inspect_marks]
 
     # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
     # Opt-in (Process.replenishment_enabled). Build one inventory face per slotted
@@ -1222,7 +1280,7 @@ def build(
     for line in conveyor_lines:
         g = line.gate
         if g is not None and (g.stop_all or g.pullable or release_plan is not None):
-            line.stopper = Stopper(line=line, gate=g, pitch=_pitch_of(model, line.id))
+            line.stopper = Stopper(line=line, gate=g, pitch=line.pitch)
     stoppers = [c for c in conveyor_lines if c.stopper is not None]
     # 完成品staging は「流す手段」があって初めてバッファになる。無ければ壁なので
     # 張らない (never-blocks; see ``Process.bench_staging``).
@@ -1289,8 +1347,10 @@ def build(
         grid_m=grid_m, heat=heat, replay_window_s=replay_window_s,
         graph=graph, use_graph=use_graph, dist_overrides=dist_overrides,
         staging=staging, staging_capacity=staging_cap, pack_xy=pack_xy,
+        pack_marks=[m.id for m in pack_marks],
+        inspect_marks=[m.id for m in inspect_marks],
         inbound_store=inbound_store, n_inspectors=n_inspectors,
-        inspect_time_s=inspect_time_s,
+        inspect_time_s=inspect_time_s, inspect_xy=inspect_xy,
         replen_faces=replen_faces, replen_store=replen_store,
         replen_place_s=replen_place_s, replen_dedicated=replen_dedicated,
         n_replenishers=n_replenishers, replen_shared_forklift=replen_shared_forklift,

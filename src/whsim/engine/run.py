@@ -62,6 +62,11 @@ class RunResult:
     forklifts: list[Worker] = field(default_factory=list)
     packers: list[Worker] = field(default_factory=list)  # dedicated packer agents (staging mode)
     inspectors: list[Worker] = field(default_factory=list)  # 入荷検品 agents
+    # 人を立たせた立ち位置マーカーの id (``Resources.markers``)。空 = マーカーの無い
+    # 図面、または誰も立たなかった。replay はここに載っていないマーカーだけを
+    # 「描かれているが動かない人」として出す（載っているものは本人が居るので、
+    # もう1人描くと同じ人を2回描くことになる）。
+    staffed_markers: list[str] = field(default_factory=list)
     # コンベア搬送: the goods themselves as replay tracks (carry -> belt -> pack),
     # capped at build.MAX_TOTE_TRACKS per run and confined to the replay window.
     # Empty for every model without a conveyor.
@@ -242,11 +247,19 @@ def run_once(
         env.process(putaway_source(world, rng))
     # Dedicated 入荷検品 agents inspect each inbound receipt before putaway.
     inspectors: list[Worker] = []
+    staffed_marks: list[str] = []
     if world.inbound_store is not None:
         for i in range(world.n_inspectors):
             ins = Worker(id=f"inspector-{i+1}", role="inspector")
             inspectors.append(ins)
-            env.process(inspector_agent(world, ins, world.fork_home))
+            # 図面に検品者の立ち位置が描かれていればそこに立つ。無ければ従来どおり
+            # 荷受けドック (``fork_home``)。
+            if world.inspect_xy:
+                at = world.inspect_xy[i % len(world.inspect_xy)]
+                staffed_marks.append(world.inspect_marks[i % len(world.inspect_marks)])
+            else:
+                at = world.fork_home
+            env.process(inspector_agent(world, ins, at))
     # Dedicated 補充要員(replenishers): drain the replenishment queue (top up pick
     # faces). When replenishment shares the forklift fleet, no dedicated agents are
     # spawned. They render as forklift tracks (putaway state) in the replay.
@@ -261,7 +274,10 @@ def run_once(
         for i in range(max(1, world.n_packers)):
             pk = Worker(id=f"packer-{i+1}", role="packer")
             packers.append(pk)
+            # ``pack_xy`` は図面の梱包者マーカー、無ければ従来どおり梱包台の位置。
             env.process(packer_agent(world, pk, world.pack_xy[i % len(world.pack_xy)]))
+            if world.pack_marks:
+                staffed_marks.append(world.pack_marks[i % len(world.pack_marks)])
     env.process(order_source(world, rng))
     # 時間分離運用 (mode_B): 周期でストッパーを開けて台の完成品をまとめて流す。
     # ``release_schedule`` 未指定 ⇒ プロセスそのものが立たない＝既定は1バイトも不変。
@@ -307,6 +323,7 @@ def run_once(
         unroutable_legs=max(0, unroutable),
         workers=world.workers, helpers=world.helpers, agvs=agvs, forklifts=forklifts,
         packers=packers, inspectors=inspectors, n_inspectors=world.n_inspectors,
+        staffed_markers=sorted(set(staffed_marks)),
         totes=world.totes,
         conveyor_capacity=sum(c.capacity for c in world.conveyors),
         n_conveyors=len(world.conveyors),

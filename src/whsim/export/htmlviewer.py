@@ -105,6 +105,28 @@ def _brand_names(model, brand) -> tuple[str, str, str]:
     return _get("company_name"), _get("client_name"), _get("footer_note")
 
 
+def _assumptions_html(kpis: dict | None, provenance_summary: str,
+                      assumptions, model) -> str:
+    """The 前提条件 block, shared word-for-word with the PPTX/PDF proposal.
+
+    WHY it is here at all: this viewer is a deliverable the salesperson MAILS to
+    the 荷主. A 危険側の前提 that reaches the deck but not the viewer is exactly the
+    failure the deck's 前提条件 slide exists to prevent. Rendered only for a run
+    that produced KPIs (an un-run model would print a row of 「—」 前提)."""
+    from ._data import _assumption_blocks
+
+    blocks = _assumption_blocks(kpis or {}, provenance_summary or "",
+                                assumptions, model=model)
+    if not kpis and assumptions is None:
+        return ""
+    items = "".join(
+        f'<li class="lv-{html.escape(b["level"])}">{html.escape(b["text"])}</li>'
+        for b in blocks
+    )
+    return ('<section class="section"><h2>前提条件</h2>'
+            f'<ul class="assumptions">{items}</ul></section>')
+
+
 def _kpi_cards_html(kpis: dict | None) -> str:
     """Big-number KPI cards + 95% CI note when a multi-rep ``ci`` block is present."""
     k = kpis or {}
@@ -192,6 +214,8 @@ def build_viewer_html(
     scorecard: dict | None = None,
     png_bytes: bytes | None = None,
     brand=None,
+    provenance_summary: str = "",
+    assumptions=None,
 ) -> str:
     """Assemble one self-contained, read-only proposal viewer HTML string.
 
@@ -199,6 +223,12 @@ def build_viewer_html(
     (a bare model still yields valid HTML with a 「実行結果がまだありません」 note).
     The output makes zero external requests — the PNG is inlined as a data URI and
     the replay is embedded JSON consumed by an inline canvas player.
+
+    ``assumptions`` takes the same 前提条件 data as the PPTX/PDF builders (string /
+    list / ``{"lines": …, "replace": …}``; ``危険側``/``注意`` levels render in colour),
+    defaulting to the model's ``settings.assumptions``. A 前提条件 section appears
+    whenever the viewer carries KPIs, so the mailed viewer states the same
+    assumptions as the deck it accompanies.
     """
     accent = _accent(model, brand)
     company, client, footer_note = _brand_names(model, brand)
@@ -218,6 +248,8 @@ def build_viewer_html(
         '<section class="section"><h2>採点表</h2>' + _scorecard_html(scorecard) + "</section>"
         if scorecard else ""
     )
+    assumptions_section = _assumptions_html(kpis, provenance_summary,
+                                            assumptions, model)
 
     # The player renders only when the replay carries geometry we can draw; its
     # JS is likewise omitted entirely so a player-free export has no dangling refs.
@@ -269,6 +301,7 @@ def build_viewer_html(
         kpi_section=kpi_section,
         png_section=png_section,
         scorecard_section=scorecard_section,
+        assumptions_section=assumptions_section,
         player_section=player_section,
         footer=footer_html,
         replay_json=replay_json,
@@ -519,6 +552,10 @@ table.scorecard tbody th {{ font-weight: 600; color: #0b1220; width: 22%; }}
   border: 1px solid #cfd9e4; }}
 #wh-time {{ flex: 1; min-width: 120px; accent-color: var(--accent); }}
 .clock {{ font-size: 12px; color: #3d4a60; font-variant-numeric: tabular-nums; min-width: 44px; }}
+ul.assumptions {{ margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.8;
+  color: #3d4a60; }}
+ul.assumptions li.lv-danger {{ color: #b02a2a; font-weight: 600; }}
+ul.assumptions li.lv-caution {{ color: #b56a00; font-weight: 600; }}
 footer.doc {{ margin-top: 24px; font-size: 11px; color: #8593a8; text-align: center; }}
 footer.doc .foot-note {{ margin-bottom: 6px; color: #3d4a60; }}
 </style>
@@ -535,6 +572,7 @@ footer.doc .foot-note {{ margin-bottom: 6px; color: #3d4a60; }}
 {png_section}
 {scorecard_section}
 {player_section}
+{assumptions_section}
 <footer class="doc">
 {footer}
 <div>本ビューアはシミュレーション結果に基づく試算です（読み取り専用・単一HTML）。</div>

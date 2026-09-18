@@ -5,6 +5,7 @@ the :mod:`whsim.export` package:
 
   * :mod:`whsim.export._data`  -- shared, render-agnostic data/row/tile builders
   * :mod:`whsim.export.fonts`  -- CJK font registration (reportlab)
+  * :mod:`whsim.export.textfit` -- text metrics (shrink-to-fit / pagination)
   * :mod:`whsim.export.pptx`   -- editable deck builder (python-pptx)
   * :mod:`whsim.export.pdf`    -- one-page A4 PDF builder (reportlab)
 
@@ -31,7 +32,9 @@ from whsim.export._data import (  # noqa: F401
     SUBTLE,
     WHITE,
     _SEV_COLOR,
+    _assumption_blocks,
     _assumptions_lines,
+    _cost_assumption_line,
     _currency_symbol,
     _date_str,
     _delta_str,
@@ -43,6 +46,7 @@ from whsim.export._data import (  # noqa: F401
     _headline_tiles,
     _is_ok,
     _methodology_footer,
+    _normalize_assumptions,
     _normalize_insights,
     _normalize_scenarios,
     _png_exists,
