@@ -1,0 +1,65 @@
+# cad2loc — 図面ごとの取り決めはすべてここに書く（コードには何もハードコードしない）。
+# 未指定のキーは既定値が使われる。まず既定のまま流し、report.json の
+# unclassified / ambiguous を見てレイヤ名を足していくのが早い。
+
+units:
+  # 図面単位 → メートルの係数。mm図面なら 0.001、m図面なら 1.0。
+  # "auto" は図面の最大辺が auto_mm_threshold を超えたら mm とみなす。
+  scale_to_m: 0.001
+  auto_mm_threshold: 2000.0
+
+origin:
+  # bbox_min = 図面の左下が (0,0) になるよう平行移動（契約：原点左下・x右・y上）
+  mode: bbox_min
+
+layers:
+  # レイヤ名のグロブ（大文字小文字・全角半角は無視）。上から ignore → rack → wall → zone
+  # の順で判定し、どれにも当たらない図形は report.json の unclassified に出る。
+  rack:
+    - "*rack*"
+    - "*棚*"
+    - "*ラック*"
+    - "S-RACK*"
+  wall:
+    - "*wall*"
+    - "*壁*"
+    - "*躯体*"
+  zone:
+    - "*zone*"
+    - "*エリア*"
+  ignore:
+    - "defpoints"
+    - "*dim*"
+    - "*寸法*"
+    - "*text*"
+    - "*文字*"
+    - "*通り芯*"
+
+# zone フィーチャの label（省略時はレイヤ名がそのまま入る）
+zone_labels:
+  ZONE_SHIP: "出荷バース"
+  ZONE_RECV: "入荷バース"
+
+rack_detect:
+  min_area_m2: 0.3      # これ未満の閉図形はラックとみなさない
+  max_area_m2: 2000.0   # これ超えは建屋外形などの誤検出
+  close_tolerance_m: 0.05  # 端点がこの距離以内なら「閉じている」とみなす
+  cluster:
+    # 閉図形が無く線分だけの図面向け。線分を等間隔サンプリング→DBSCAN→最小回転矩形。
+    enabled: true
+    eps_m: 0.7          # 同じラックとみなす点間距離（通路幅より十分小さく）
+    min_samples: 4
+    sample_step_m: 0.25
+    min_width_m: 0.15   # 短辺がこれ未満のクラスタは「ただの直線」として捨てる
+    dedupe_overlap: 0.5
+
+aisle_graph:
+  grid_spacing_m: 1.0     # 通路ノードの格子間隔
+  clearance_m: 0.35       # ラック・壁からの離隔（搬送体の半幅の目安）
+  envelope_margin_m: 2.0  # 壁が無い図面で、ラック外接矩形の外側に取る通路帯
+  emit_width: true        # edge に width_m（両側の最寄り障害物までの距離×2）を付ける
+  max_nodes: 20000        # 超えるとグリッドを自動的に粗くする（report に記録）
+  keep_main_component_only: true  # 主連結成分以外は出力せず report.isolated_nodes へ
+
+output:
+  coord_decimals: 4

@@ -1,0 +1,71 @@
+{
+  "template_id": "retail_dc",
+  "name": "小売DC・常温 (チェーン店向け・大規模)",
+  "description": "コンビニ・小売チェーン向けの常温DC。多頻度小口・方面別ウェーブピッキング、フォークによる補充。提案規模(~600間口)の大型レイアウト。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "resources.equipment.0.count",
+      "label": "フォーク台数",
+      "type": "int",
+      "unit": "台"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.peak_factor",
+      "label": "ピーク係数",
+      "type": "float",
+      "unit": "倍"
+    },
+    {
+      "path": "process.pick_strategy",
+      "label": "ピッキング方式",
+      "type": "choice",
+      "choices": [
+        {
+          "value": "discrete",
+          "label": "シングルオーダー"
+        },
+        {
+          "value": "batch",
+          "label": "マルチオーダー"
+        },
+        {
+          "value": "zone",
+          "label": "ゾーン（リレー）"
+        },
+        {
+          "value": "wave",
+          "label": "バッチ投入"
+        }
+      ]
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間",
+      "type": "float",
+      "unit": "時間",
+      "scale": 3600
+    }
+  ]
+}

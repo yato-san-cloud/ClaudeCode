@@ -1,0 +1,2441 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>whsim — 倉庫シミュレータ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style id="tokens-css">
+/* =============================================================================
+   whsim — Design System Tokens (Notion-derived)
+   倉庫シミュレータ UI / 物流営業が商談中にその場で触る前提
+   実装ハンドオフ用: 下記の CSS 変数をそのまま採用できます。
+   Tailwind の場合は theme.extend.colors / fontFamily に対応値を写してください。
+   ============================================================================= */
+
+:root {
+  /* ---- Color · Surface (面) -------------------------------------------------
+     ニアホワイト基調。彩度は限りなく0に近く、わずかに温かい。 */
+  --bg-app:        #FFFFFF;   /* アプリ最背面            */
+  --bg-sunken:     #FBFBFA;   /* サイドバー/沈んだ面     */
+  --bg-panel:      #F7F6F3;   /* パネル/カードの下地     */
+  --bg-hover:      #F1F0ED;   /* ホバー面                */
+  --bg-active:     #EAE9E4;   /* 押下/選択面             */
+  --bg-overlay:    rgba(247,246,243,0.72);
+
+  /* ---- Color · Ink (文字) ---------------------------------------------------
+     温かいニアブラック #37352F を基準に不透明度で階層化 */
+  --ink-primary:   #37352F;              /* 本文・見出し            */
+  --ink-secondary: rgba(55,53,47,0.65);  /* 補助テキスト            */
+  --ink-tertiary:  rgba(55,53,47,0.45);  /* ラベル/プレースホルダ   */
+  --ink-faint:     rgba(55,53,47,0.32);  /* 最弱・装飾              */
+  --ink-onAccent:  #FFFFFF;
+
+  /* ---- Color · Line (境界) --------------------------------------------------
+     極細ヘアライン。1px だが不透明度で軽く。 */
+  --line-hair:     rgba(55,53,47,0.09);  /* 既定の区切り            */
+  --line-soft:     rgba(55,53,47,0.06);  /* さらに弱い区切り        */
+  --line-strong:   rgba(55,53,47,0.16);  /* 入力枠/強調境界         */
+  --line-focus:    #2383E2;              /* フォーカスリング        */
+
+  /* ---- Color · Accent (Notion ブルー) --------------------------------------- */
+  --accent:        #2383E2;
+  --accent-hover:  #1A73CE;
+  --accent-press:  #1668BE;
+  --accent-tint:   #E7F1FB;   /* 淡い面                  */
+  --accent-tint-2: #D3E5F7;
+  --accent-ink:    #1A6BC0;   /* 淡面上のテキスト        */
+
+  /* ---- Color · Semantic (判定/状態) -----------------------------------------
+     Notion のカラーチップ系を踏襲した落ち着いた緑/赤/黄。 */
+  --ok:        #2E7D55;   --ok-ink:   #1E5C3D;
+  --ok-tint:   #EBF3EE;   --ok-line:  #CBE3D5;
+  --warn:      #B7791F;   --warn-ink: #8A5A12;
+  --warn-tint: #FBF3E4;   --warn-line:#EFDFBE;
+  --bad:       #C4453F;   --bad-ink:  #97322E;
+  --bad-tint:  #FBECEB;   --bad-line: #F0CFCC;
+  --info:      var(--accent);
+  --info-tint: var(--accent-tint);
+
+  /* データ由来（プロベナンス）の信頼度バンド */
+  --prov-real: #2E7D55;   /* 実データ              */
+  --prov-est:  #B7791F;   /* 推定値                */
+
+  /* ---- Typography ----------------------------------------------------------- */
+  --font-sans: "Inter", "Noto Sans JP", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  --font-mono: "Roboto Mono", "SF Mono", ui-monospace, "JetBrains Mono",
+               "Courier New", monospace;
+  /* 数字は tabular-nums で桁を揃える */
+  --num: "Inter", "Roboto Mono", sans-serif;
+
+  --fs-display: 30px;  --lh-display: 1.18;  --ls-display: -0.02em;
+  --fs-title:   20px;  --lh-title:   1.3;   --ls-title:  -0.012em;
+  --fs-section: 15px;  --lh-section: 1.4;   --ls-section:-0.006em;
+  --fs-body:    14px;  --lh-body:    1.55;
+  --fs-sm:      13px;  --lh-sm:      1.5;
+  --fs-xs:      12px;  --lh-xs:      1.45;
+  --fs-micro:   11px;  --lh-micro:   1.4;   --ls-micro:   0.04em;
+
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semibold:600;
+  --fw-bold:    700;
+
+  /* KPI などの大きな等幅数字 */
+  --fs-metric:  28px;  --fs-metric-lg: 34px;
+
+  /* ---- Spacing (4px グリッド) ----------------------------------------------- */
+  --sp-1: 4px;   --sp-2: 8px;   --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 20px;  --sp-6: 24px;  --sp-8: 32px;  --sp-10: 40px;
+  --sp-12: 48px; --sp-16: 64px;
+
+  /* ---- Radius --------------------------------------------------------------- */
+  --r-xs: 4px;   --r-sm: 6px;   --r-md: 8px;
+  --r-lg: 12px;  --r-xl: 16px;  --r-pill: 999px;
+
+  /* ---- Shadow (控えめ) ------------------------------------------------------- */
+  --sh-xs:  0 1px 2px rgba(15,15,15,0.04);
+  --sh-sm:  0 1px 2px rgba(15,15,15,0.05), 0 2px 4px rgba(15,15,15,0.04);
+  --sh-md:  0 2px 4px rgba(15,15,15,0.05), 0 4px 12px rgba(15,15,15,0.06);
+  --sh-lg:  0 4px 12px rgba(15,15,15,0.07), 0 12px 28px rgba(15,15,15,0.09);
+  --sh-pop: 0 0 0 1px rgba(15,15,15,0.04), 0 6px 16px rgba(15,15,15,0.10),
+            0 14px 40px rgba(15,15,15,0.12);
+
+  /* ---- Motion --------------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 90ms;  --dur-2: 160ms;  --dur-3: 240ms;  --dur-4: 420ms;
+
+  /* ---- Layout --------------------------------------------------------------- */
+  --sidebar-w: 264px;
+  --header-h:  48px;
+  --kpibar-h:  84px;
+  --transport-h: 56px;
+  --maxw: 1080px;
+}
+
+/* Tweak hooks (Tweaks パネルから上書き) */
+:root {
+  --tw-accent-usage: 1;   /* 0=Notionブルーのみ / 1=淡い面を活用 */
+  --tw-kpi-density: 1;    /* 0=ミニマル / 1=詳細               */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-app);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* 数字を揃える基本クラス */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.mono { font-family: var(--font-mono); }
+
+/* アクセシブルなフォーカスリング */
+:focus-visible {
+  outline: 2px solid var(--line-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+::selection { background: var(--accent-tint-2); }
+
+/* 細いスクロールバー（Notion 風） */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(55,53,47,0.16);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(55,53,47,0.28); background-clip: padding-box; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+</style>
+<style id="app-css">
+/* =============================================================================
+   whsim — Component styles  (depends on tokens.css)
+   既存クラス/ID にマップ: header .sidebar .card .tabs .tab .panel .kpibar
+   .verdict .kpi #design #view2d #view3d #compare #export
+   ============================================================================= */
+
+/* ---- App shell ------------------------------------------------------------ */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  grid-template-rows: 1fr;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+.main {
+  display: grid;
+  grid-template-rows: var(--header-h) auto 1fr var(--kpibar-h) var(--transport-h);
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* =============================================================================
+   HEADER
+   ============================================================================= */
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--header-h);
+  padding: 0 var(--sp-4) 0 var(--sp-3);
+  border-bottom: 1px solid var(--line-hair);
+  background: var(--bg-app);
+  z-index: 5;
+}
+.header__crumbs { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.crumb {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-sm); color: var(--ink-secondary);
+  padding: 3px 6px; border-radius: var(--r-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.crumb--current { color: var(--ink-primary); font-weight: var(--fw-medium); }
+.crumb__sep { color: var(--ink-faint); font-size: var(--fs-sm); }
+.crumb__ico { width: 16px; height: 16px; display: grid; place-items: center; color: var(--ink-tertiary); }
+.header__spacer { flex: 1; }
+.header__meta { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--ink-tertiary); }
+.dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-tint); }
+
+/* provenance strip in header (実データ N% / 取り込み済み / テンプレ仮値) */
+.provbar { display: flex; align-items: center; gap: var(--sp-2); padding: 4px 10px;
+  border: 1px solid var(--line-hair); border-radius: var(--r-pill); background: var(--bg-sunken);
+  font-size: var(--fs-xs); color: var(--ink-secondary); max-width: 560px; }
+.provbar__seg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.provbar__seg b { color: var(--ink-primary); font-weight: var(--fw-semibold); }
+.provbar__sep { width: 1px; height: 14px; background: var(--line-hair); flex: none; }
+.provbar__templated { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* =============================================================================
+   SIDEBAR
+   ============================================================================= */
+.sidebar {
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line-hair);
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden;
+}
+.sidebar__head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+}
+.brand {
+  display: flex; align-items: center; gap: 9px;
+  font-weight: var(--fw-semibold); font-size: var(--fs-section);
+  letter-spacing: var(--ls-section); color: var(--ink-primary);
+}
+.brand__mark {
+  width: 22px; height: 22px; border-radius: var(--r-sm);
+  background: var(--ink-primary); color: #fff;
+  display: grid; place-items: center; font-weight: 700; font-size: 12px;
+  letter-spacing: 0;
+}
+.brand__sub { font-size: var(--fs-micro); color: var(--ink-tertiary); font-weight: var(--fw-regular); }
+
+.sidebar__scroll { flex: 1; overflow-y: auto; padding: var(--sp-2) var(--sp-2) var(--sp-4); }
+
+.side-sect { margin-top: var(--sp-4); }
+.side-sect__label {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 var(--sp-2) var(--sp-1) var(--sp-2);
+  font-size: var(--fs-micro); font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-micro); text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+.side-sect__num {
+  margin-left: auto; width: 16px; height: 16px; border-radius: 5px;
+  background: var(--bg-active); color: var(--ink-secondary);
+  display: grid; place-items: center; font-size: 10px; font-weight: 700;
+  text-transform: none; letter-spacing: 0;
+}
+.side-sect__step {
+  width: 17px; height: 17px; border-radius: 50%;
+  background: var(--ink-primary); color: #fff;
+  display: grid; place-items: center; font-size: 10px; font-weight: 700;
+  text-transform: none; letter-spacing: 0; flex: none;
+}
+.side-sect__opt {
+  margin-left: 6px; font-size: 10px; font-weight: var(--fw-semibold);
+  color: var(--ink-tertiary); border: 1px solid var(--line-hair);
+  border-radius: var(--r-pill); padding: 0 6px; text-transform: none; letter-spacing: 0;
+}
+.cad-btn { width: 100%; justify-content: center; margin-left: 0; }
+.apply-btn { margin: 4px 0 0 8px; }
+
+/* project picker row */
+.proj {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 7px var(--sp-2); border-radius: var(--r-sm);
+  cursor: pointer; transition: background var(--dur-1) var(--ease);
+}
+.proj:hover { background: var(--bg-hover); }
+.proj__ico { width: 18px; height: 18px; color: var(--ink-secondary); flex: none; }
+.proj__name { font-size: var(--fs-sm); font-weight: var(--fw-medium); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj__chev { color: var(--ink-tertiary); }
+
+/* key fields (キー項目5つ) */
+.field { padding: var(--sp-2) var(--sp-2) 10px; border-radius: var(--r-md); }
+.field + .field { margin-top: 2px; }
+.field__top { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: 7px; }
+.field__label { font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--ink-primary); }
+.field__hint  { font-size: var(--fs-micro); color: var(--ink-tertiary); margin-left: auto; }
+.field__hint--tmpl { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px;
+  border-radius: var(--r-pill); background: var(--warn-tint); color: var(--warn-ink); font-weight: var(--fw-semibold); }
+.field__hint--tmpl::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prov-est); }
+.field__row { display: flex; align-items: center; gap: var(--sp-2); }
+
+.stepper {
+  display: flex; align-items: center; gap: 2px;
+  background: var(--bg-app); border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm); padding: 2px; height: 34px;
+  flex: 1; transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
+}
+.stepper:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.stepper__btn {
+  width: 26px; height: 26px; border: none; background: transparent;
+  border-radius: var(--r-xs); color: var(--ink-secondary);
+  display: grid; place-items: center; font-size: 15px; line-height: 1;
+}
+.stepper__btn:hover { background: var(--bg-hover); color: var(--ink-primary); }
+.stepper__val {
+  flex: 1; text-align: center; border: none; background: transparent;
+  font-size: var(--fs-body); font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums; -moz-appearance: textfield;
+}
+.stepper__val:focus { outline: none; }
+.stepper__val::-webkit-outer-spin-button,
+.stepper__val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.field__unit { font-size: var(--fs-xs); color: var(--ink-tertiary); flex: none; min-width: 30px; }
+
+/* segmented control (自動化レベル等) */
+.seg { display: flex; gap: 3px; background: var(--bg-active); padding: 3px; border-radius: var(--r-sm); width: 100%; }
+.seg__opt {
+  flex: 1; border: none; background: transparent; border-radius: var(--r-xs);
+  padding: 6px 4px; font-size: var(--fs-xs); font-weight: var(--fw-medium);
+  color: var(--ink-secondary); transition: all var(--dur-1) var(--ease);
+}
+.seg__opt[aria-pressed="true"] { background: var(--bg-app); color: var(--ink-primary); box-shadow: var(--sh-xs); }
+.seg__opt:hover:not([aria-pressed="true"]) { color: var(--ink-primary); }
+
+/* select (ピッキング方式) */
+.selectwrap { position: relative; width: 100%; }
+.select {
+  width: 100%; height: 34px; padding: 0 30px 0 11px;
+  border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  background: var(--bg-app); font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  color: var(--ink-primary); -webkit-appearance: none; appearance: none; cursor: pointer;
+  transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
+}
+.select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.selectwrap__chev { position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--ink-tertiary); pointer-events: none; }
+
+/* prov chip — テンプレ仮値 variant */
+.prov--tmpl { background: var(--warn-tint); color: var(--warn-ink); }
+.prov--tmpl .prov__dot { background: var(--prov-est); }
+.slider { width: 100%; margin: 4px 0 2px; }
+.slider input[type=range]{ -webkit-appearance:none; width:100%; height:4px; border-radius:3px;
+  background: linear-gradient(var(--accent),var(--accent)) 0/var(--pct,50%) 100% no-repeat, var(--bg-active); }
+.slider input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:16px;height:16px;border-radius:50%;
+  background:#fff;border:1px solid var(--line-strong); box-shadow: var(--sh-sm); cursor:pointer; }
+.slider input[type=range]::-webkit-slider-thumb:hover{ border-color: var(--accent); }
+.slider__scale{ display:flex; justify-content:space-between; font-size:var(--fs-micro); color:var(--ink-tertiary); margin-top:3px; }
+
+/* drop zone (取り込み) */
+.dropzone {
+  margin: 0 var(--sp-2); padding: var(--sp-4) var(--sp-3);
+  border: 1.5px dashed var(--line-strong); border-radius: var(--r-md);
+  background: var(--bg-app); text-align: center; cursor: pointer;
+  transition: all var(--dur-2) var(--ease);
+}
+.dropzone:hover, .dropzone.is-over { border-color: var(--accent); background: var(--accent-tint); }
+.dropzone__ico { color: var(--ink-tertiary); margin-bottom: 6px; }
+.dropzone.is-over .dropzone__ico { color: var(--accent); }
+.dropzone__title { font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.dropzone__hint { font-size: var(--fs-micro); color: var(--ink-tertiary); margin-top: 3px; }
+
+.import-file {
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin: 6px var(--sp-2) 0; padding: 7px var(--sp-2);
+  background: var(--bg-app); border: 1px solid var(--line-hair);
+  border-radius: var(--r-sm);
+}
+.import-file__ico { color: var(--ok); flex: none; }
+.import-file__name { font-size: var(--fs-xs); font-weight: var(--fw-medium); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.import-file__rows { font-size: var(--fs-micro); color: var(--ink-tertiary); font-variant-numeric: tabular-nums; }
+
+/* run button (実行) */
+.sidebar__foot { padding: var(--sp-3); border-top: 1px solid var(--line-hair); background: var(--bg-sunken); }
+.btn-run {
+  width: 100%; height: 40px; border: none; border-radius: var(--r-md);
+  background: var(--accent); color: #fff; font-weight: var(--fw-semibold);
+  font-size: var(--fs-body); display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  box-shadow: var(--sh-sm); transition: all var(--dur-2) var(--ease);
+}
+.btn-run:hover { background: var(--accent-hover); }
+.btn-run:active { background: var(--accent-press); transform: translateY(0.5px); }
+.btn-run:disabled { background: var(--bg-active); color: var(--ink-tertiary); box-shadow: none; cursor: default; }
+.btn-run__kbd { margin-left: 4px; font-size: var(--fs-micro); opacity: .8; }
+.btn-run.is-running { background: var(--accent-press); }
+.run-meta { display:flex; justify-content:space-between; margin-top: 8px; font-size: var(--fs-micro); color: var(--ink-tertiary); }
+
+/* =============================================================================
+   VERDICT BANNER (.verdict)
+   ============================================================================= */
+.verdict {
+  display: flex; align-items: center; gap: var(--sp-3);
+  margin: var(--sp-4) var(--sp-6) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-lg); border: 1px solid;
+  animation: rise var(--dur-4) var(--ease-out) both;
+}
+.verdict--ok   { background: var(--ok-tint);   border-color: var(--ok-line); }
+.verdict--warn { background: var(--warn-tint); border-color: var(--warn-line); }
+.verdict--bad  { background: var(--bad-tint);  border-color: var(--bad-line); }
+.verdict__badge {
+  width: 38px; height: 38px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; color: #fff;
+}
+.verdict--ok   .verdict__badge { background: var(--ok); }
+.verdict--warn .verdict__badge { background: var(--warn); }
+.verdict--bad  .verdict__badge { background: var(--bad); }
+.verdict__body { flex: 1; min-width: 0; }
+.verdict__title { font-size: var(--fs-title); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
+.verdict--ok   .verdict__title { color: var(--ok-ink); }
+.verdict--warn .verdict__title { color: var(--warn-ink); }
+.verdict--bad  .verdict__title { color: var(--bad-ink); }
+.verdict__desc { font-size: var(--fs-sm); color: var(--ink-secondary); margin-top: 2px; }
+.verdict__aside { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.stability { display: flex; align-items: center; gap: var(--sp-2); }
+.stability__label { font-size: var(--fs-xs); color: var(--ink-secondary); }
+.stability__bars { display: flex; gap: 3px; align-items: flex-end; height: 18px; }
+.stability__bar { width: 5px; border-radius: 2px; background: var(--ok); opacity: .28; }
+.stability__bar.on { opacity: 1; }
+.stability__val { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--ok-ink); }
+
+/* =============================================================================
+   CONTENT region (tabs + panel)
+   ============================================================================= */
+.content { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+/* tabs (.tabs .tab) */
+.tabs {
+  display: flex; align-items: center; gap: 2px;
+  padding: var(--sp-3) var(--sp-6) 0;
+  border-bottom: 1px solid var(--line-hair);
+  background: var(--bg-app);
+}
+.tab {
+  position: relative; border: none; background: transparent;
+  padding: 8px 12px 12px; font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  color: var(--ink-secondary); display: flex; align-items: center; gap: 7px;
+  border-radius: var(--r-sm) var(--r-sm) 0 0; transition: color var(--dur-1) var(--ease);
+}
+.tab:hover { color: var(--ink-primary); background: var(--bg-hover); }
+.tab[aria-selected="true"] { color: var(--ink-primary); font-weight: var(--fw-semibold); }
+.tab[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px;
+  background: var(--ink-primary); border-radius: 2px;
+}
+.tab__ico { color: currentColor; opacity: .8; }
+.tab__badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 999px;
+  background: var(--accent-tint); color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+.tab-aside { margin-left: auto; display: flex; align-items: center; gap: 8px; padding-bottom: 8px; }
+.tab-aside__label { font-size: var(--fs-xs); color: var(--ink-tertiary); }
+.select--sm { height: 30px; font-size: var(--fs-xs); padding: 0 28px 0 10px; }
+
+/* panel (.panel) scroll area */
+.panel { flex: 1; overflow-y: auto; padding: var(--sp-6); min-height: 0; }
+.panel__inner { max-width: var(--maxw); margin: 0 auto; }
+
+.section-h { display: flex; align-items: baseline; gap: var(--sp-3); margin: 0 0 var(--sp-3); }
+.section-h__title { font-size: var(--fs-section); font-weight: var(--fw-semibold); letter-spacing: var(--ls-section); }
+.section-h__sub { font-size: var(--fs-xs); color: var(--ink-tertiary); }
+.section-h__act { margin-left: auto; display: flex; gap: var(--sp-2); }
+
+/* generic card (.card) */
+.card {
+  background: var(--bg-app); border: 1px solid var(--line-hair);
+  border-radius: var(--r-lg); box-shadow: var(--sh-xs);
+}
+.card--pad { padding: var(--sp-4); }
+
+/* =============================================================================
+   KPI BAR (.kpibar .kpi)
+   ============================================================================= */
+.kpibar {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  gap: 0; height: var(--kpibar-h); align-items: stretch;
+  border-top: 1px solid var(--line-hair); background: var(--bg-app);
+  padding: 0 var(--sp-4);
+}
+.kpi {
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  padding: 0 var(--sp-4); border-right: 1px solid var(--line-hair);
+  min-width: 0; position: relative;
+}
+.kpi:last-child { border-right: none; }
+.kpi--warn .kpi__val { color: var(--warn-ink); }
+.kpi__sub { font-size: var(--fs-micro); color: var(--ink-tertiary); }
+.kpi__val--text { font-size: 21px; }
+.kpi__label { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--ink-secondary); }
+.kpi__val { font-size: var(--fs-metric); font-weight: var(--fw-semibold); letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; line-height: 1.05; color: var(--ink-primary); }
+.kpi__val small { font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--ink-tertiary); margin-left: 3px; }
+.kpi__delta { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums; }
+.kpi__delta--up { color: var(--ok); }
+.kpi__delta--down { color: var(--bad); }
+.kpi__delta--good-down { color: var(--ok); }
+/* p5-p95 band */
+.band { height: 6px; border-radius: 3px; background: var(--bg-active); position: relative; margin-top: 5px; overflow: hidden; }
+.band__fill { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, transparent, var(--accent-tint-2) 18%, var(--accent) 50%, var(--accent-tint-2) 82%, transparent); border-radius: 3px; }
+.band__mid { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--accent); border-radius: 2px; }
+.kpi__band-cap { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-tertiary); font-variant-numeric: tabular-nums; margin-top: 2px; }
+:root[data-kpi-density="0"] .kpi__band-cap,
+:root[data-kpi-density="0"] .band { display: none; }
+
+/* =============================================================================
+   TRANSPORT (再生バー)
+   ============================================================================= */
+.transport {
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: var(--transport-h); padding: 0 var(--sp-4);
+  border-top: 1px solid var(--line-hair); background: var(--bg-sunken);
+}
+.tp-btn { width: 32px; height: 32px; border: 1px solid var(--line-hair); background: var(--bg-app);
+  border-radius: var(--r-sm); display: grid; place-items: center; color: var(--ink-secondary); transition: all var(--dur-1) var(--ease); }
+.tp-btn:hover { background: var(--bg-hover); color: var(--ink-primary); }
+.tp-play { width: 36px; height: 36px; background: var(--ink-primary); color: #fff; border: none; }
+.tp-play:hover { background: #000; color: #fff; }
+.tp-time { font-size: var(--fs-xs); color: var(--ink-secondary); font-variant-numeric: tabular-nums; min-width: 92px; }
+.tp-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-active); position: relative; cursor: pointer; }
+.tp-track__fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+.tp-track__head { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 13px; height: 13px;
+  background: #fff; border: 1px solid var(--line-strong); border-radius: 50%; box-shadow: var(--sh-sm); }
+.tp-ticks { position: absolute; inset: 0; pointer-events: none; }
+.tp-tick { position: absolute; top: -5px; width: 1px; height: 16px; background: var(--line-strong); }
+.tp-speed { display: flex; gap: 2px; background: var(--bg-active); padding: 2px; border-radius: var(--r-sm); }
+.tp-speed button { border: none; background: transparent; font-size: var(--fs-micro); font-weight: var(--fw-semibold);
+  padding: 4px 7px; border-radius: var(--r-xs); color: var(--ink-secondary); font-variant-numeric: tabular-nums; }
+.tp-speed button[aria-pressed="true"] { background: var(--bg-app); color: var(--ink-primary); box-shadow: var(--sh-xs); }
+
+/* =============================================================================
+   DESIGN tab (#design) — sub-tools
+   ============================================================================= */
+.subtools { display: flex; gap: 2px; background: var(--bg-panel); padding: 3px; border-radius: var(--r-md);
+  margin-bottom: var(--sp-4); width: fit-content; }
+.subtool { border: none; background: transparent; padding: 7px 13px; border-radius: var(--r-sm);
+  font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--ink-secondary); display: flex; align-items: center; gap: 6px;
+  transition: all var(--dur-1) var(--ease); }
+.subtool[aria-pressed="true"] { background: var(--bg-app); color: var(--ink-primary); box-shadow: var(--sh-xs); font-weight: var(--fw-semibold); }
+.subtool:hover:not([aria-pressed="true"]) { color: var(--ink-primary); }
+
+.design-grid { display: grid; grid-template-columns: 1fr 280px; gap: var(--sp-4); align-items: start; }
+@media (max-width: 1180px){ .design-grid { grid-template-columns: 1fr; } }
+
+/* warehouse layout canvas */
+.wh-canvas {
+  position: relative; aspect-ratio: 16/10; border-radius: var(--r-lg);
+  background:
+    linear-gradient(var(--line-soft) 1px, transparent 1px) 0 0/100% 28px,
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px) 0 0/28px 100%,
+    var(--bg-app);
+  border: 1px solid var(--line-hair); overflow: hidden;
+}
+.wh-zone { position: absolute; border-radius: var(--r-sm); border: 1px solid; display: flex; align-items: flex-start;
+  padding: 7px 9px; font-size: var(--fs-micro); font-weight: var(--fw-semibold); }
+.wh-zone__tag { background: rgba(255,255,255,.7); padding: 1px 5px; border-radius: var(--r-xs); }
+.wh-rack { position: absolute; background: repeating-linear-gradient(90deg, var(--ink-faint) 0 2px, transparent 2px 7px);
+  border-radius: 2px; opacity: .55; }
+.wh-aisle-flow { position: absolute; height: 2px; background: var(--accent); opacity: .7; border-radius: 2px; }
+.wh-node { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: var(--sh-xs); transform: translate(-50%,-50%); }
+
+/* legend / inspector */
+.inspector { display: flex; flex-direction: column; gap: var(--sp-3); }
+.kv { display: flex; flex-direction: column; gap: 9px; }
+.kv__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.kv__k { font-size: var(--fs-sm); color: var(--ink-secondary); }
+.kv__v { font-size: var(--fs-sm); font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* =============================================================================
+   PROVENANCE chip
+   ============================================================================= */
+.prov { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 6px;
+  border-radius: var(--r-pill); font-size: var(--fs-micro); font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums; }
+.prov--real { background: var(--ok-tint); color: var(--ok-ink); }
+.prov--est  { background: var(--warn-tint); color: var(--warn-ink); }
+.prov__dot { width: 6px; height: 6px; border-radius: 50%; }
+.prov--real .prov__dot { background: var(--prov-real); }
+.prov--est  .prov__dot { background: var(--prov-est); }
+
+/* =============================================================================
+   PROCESS STRIP (工程ストリップ)
+   ============================================================================= */
+.pstrip { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 2px; }
+.pstep { position: relative; flex: 1; min-width: 96px; padding: var(--sp-3) var(--sp-3);
+  display: flex; flex-direction: column; gap: 6px; }
+.pstep:not(:last-child)::after { content: ""; position: absolute; right: -1px; top: 14px; bottom: 14px; width: 1px; background: var(--line-hair); }
+.pstep__top { display: flex; align-items: center; gap: 7px; }
+.pstep__ico { width: 24px; height: 24px; border-radius: var(--r-sm); display: grid; place-items: center;
+  background: var(--bg-panel); color: var(--ink-secondary); }
+.pstep.is-active .pstep__ico { background: var(--accent); color: #fff; }
+.pstep.is-bottleneck .pstep__ico { background: var(--warn); color: #fff; }
+.pstep__name { font-size: var(--fs-xs); font-weight: var(--fw-medium); }
+.pstep__meter { height: 5px; border-radius: 3px; background: var(--bg-active); overflow: hidden; }
+.pstep__meter b { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.pstep.is-bottleneck .pstep__meter b { background: var(--warn); }
+.pstep__val { font-size: var(--fs-micro); color: var(--ink-tertiary); font-variant-numeric: tabular-nums; }
+
+/* =============================================================================
+   2D view (#view2d)
+   ============================================================================= */
+.sim2d { position: relative; aspect-ratio: 16/9; border-radius: var(--r-lg); overflow: hidden;
+  border: 1px solid var(--line-hair); background: var(--bg-app); }
+.sim2d__grid { position: absolute; inset: 0;
+  background: linear-gradient(var(--line-soft) 1px, transparent 1px) 0 0/100% 32px,
+              linear-gradient(90deg, var(--line-soft) 1px, transparent 1px) 0 0/32px 100%; }
+.agent { position: absolute; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%,-50%);
+  transition: left .25s linear, top .25s linear; box-shadow: var(--sh-xs); border: 1.5px solid #fff; }
+.agent--wait  { background: #9B9A95; }              /* 待機 = グレー */
+.agent--move  { background: var(--accent); }        /* 移動 = ブルー */
+.agent--pick  { background: var(--ok); }            /* ピック = グリーン */
+.agent--carry { background: #6940A5; }              /* 運搬 = パープル */
+.agent--pack  { background: var(--bad); }           /* 梱包 = レッド */
+.rackbar { position: absolute; background: var(--bg-panel); border: 1px solid var(--line-hair); border-radius: 2px; }
+.heat { position: absolute; border-radius: 50%; filter: blur(11px); opacity: .35; pointer-events: none; }
+
+/* =============================================================================
+   3D view (#view3d)
+   ============================================================================= */
+.view3d-hero { position: relative; aspect-ratio: 16/9; border-radius: var(--r-lg); overflow: hidden;
+  border: 1px solid var(--line-hair);
+  background: radial-gradient(120% 80% at 50% 0%, #fbfbfa, #f1f0ec); }
+
+/* =============================================================================
+   COMPARE table (#compare)
+   ============================================================================= */
+.ctable { width: 100%; border-collapse: separate; border-spacing: 0; }
+.ctable th, .ctable td { padding: 13px var(--sp-4); text-align: left; border-bottom: 1px solid var(--line-hair); }
+.ctable thead th { font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--ink-tertiary);
+  text-transform: none; position: sticky; top: 0; background: var(--bg-app); }
+.ctable td.num, .ctable th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ctable tbody tr:hover { background: var(--bg-sunken); }
+.ctable__metric { font-weight: var(--fw-medium); }
+.ctable__metric small { display: block; font-size: var(--fs-micro); color: var(--ink-tertiary); font-weight: 400; margin-top: 1px; }
+.ctable__cur { color: var(--ink-secondary); font-variant-numeric: tabular-nums; }
+.ctable__new { font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.delta-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.delta-pill--good { background: var(--ok-tint); color: var(--ok-ink); }
+.delta-pill--bad  { background: var(--bad-tint); color: var(--bad-ink); }
+.delta-pill--flat { background: var(--bg-panel); color: var(--ink-tertiary); }
+
+/* =============================================================================
+   EXPORT (#export) + PROPOSAL (提案PNG)
+   ============================================================================= */
+.export-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: var(--sp-3); }
+.export-card { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); cursor: pointer;
+  transition: all var(--dur-2) var(--ease); }
+.export-card:hover { box-shadow: var(--sh-md); transform: translateY(-1px); border-color: var(--line-strong); }
+.export-card__ico { width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--bg-panel);
+  display: grid; place-items: center; color: var(--ink-secondary); }
+.export-card__title { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.export-card__desc { font-size: var(--fs-xs); color: var(--ink-tertiary); }
+
+.proposal { display: grid; grid-template-columns: 1fr 300px; gap: var(--sp-5); align-items: start; }
+@media (max-width: 1100px){ .proposal { grid-template-columns: 1fr; } }
+.proposal__paper { aspect-ratio: 16/10.5; border-radius: var(--r-lg); border: 1px solid var(--line-hair);
+  box-shadow: var(--sh-lg); background: #fff; padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* =============================================================================
+   PLACEHOLDER (画像未投入)
+   ============================================================================= */
+.ph { display: grid; place-items: center; border-radius: var(--r-md);
+  background: repeating-linear-gradient(45deg, var(--bg-panel) 0 10px, var(--bg-sunken) 10px 20px);
+  border: 1px solid var(--line-hair); color: var(--ink-tertiary); }
+.ph__txt { font-family: var(--font-mono); font-size: var(--fs-xs); background: rgba(255,255,255,.75);
+  padding: 3px 8px; border-radius: var(--r-xs); }
+
+/* =============================================================================
+   STATES (空 / 実行中 / エラー)
+   ============================================================================= */
+.empty { display: grid; place-items: center; height: 100%; padding: var(--sp-8); }
+.empty__inner { max-width: 420px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
+.empty__art { width: 96px; height: 96px; border-radius: var(--r-xl); background: var(--bg-panel);
+  display: grid; place-items: center; color: var(--ink-faint); }
+.empty__title { font-size: var(--fs-title); font-weight: var(--fw-semibold); letter-spacing: var(--ls-title); }
+.empty__desc { font-size: var(--fs-sm); color: var(--ink-secondary); }
+.empty__steps { display: flex; flex-direction: column; gap: var(--sp-2); width: 100%; margin-top: var(--sp-2); text-align: left; }
+.empty__step { display: flex; align-items: center; gap: var(--sp-3); padding: 11px var(--sp-3);
+  border: 1px solid var(--line-hair); border-radius: var(--r-md); background: var(--bg-app); }
+.empty__step-n { width: 22px; height: 22px; border-radius: 50%; background: var(--bg-active);
+  display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700; color: var(--ink-secondary); flex: none; }
+.empty__step-t { font-size: var(--fs-sm); }
+.empty__step-t small { display: block; color: var(--ink-tertiary); font-size: var(--fs-micro); }
+
+/* running overlay */
+.running { display: grid; place-items: center; height: 100%; padding: var(--sp-8); }
+.running__inner { width: min(460px,100%); display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); text-align: center; }
+.running__title { font-size: var(--fs-section); font-weight: var(--fw-semibold); }
+.running__sub { font-size: var(--fs-sm); color: var(--ink-secondary); }
+.run-progress { width: 100%; height: 6px; border-radius: 3px; background: var(--bg-active); overflow: hidden; }
+.run-progress b { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .3s var(--ease); }
+.run-log { width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: var(--sp-2); }
+.run-log__row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--ink-tertiary); }
+.run-log__row.done { color: var(--ink-secondary); }
+.run-log__row.active { color: var(--ink-primary); font-weight: var(--fw-medium); }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* error banner */
+.errbox { display: flex; gap: var(--sp-3); padding: var(--sp-4); background: var(--bad-tint); border: 1px solid var(--bad-line);
+  border-radius: var(--r-lg); align-items: flex-start; }
+.errbox__ico { color: var(--bad); flex: none; }
+.errbox__title { font-size: var(--fs-section); font-weight: var(--fw-semibold); color: var(--bad-ink); }
+.errbox__desc { font-size: var(--fs-sm); color: var(--ink-secondary); margin-top: 3px; }
+.errbox__row { display: flex; align-items: center; gap: var(--sp-2); margin-top: 8px; padding: 8px 10px;
+  background: rgba(255,255,255,.6); border-radius: var(--r-sm); font-size: var(--fs-xs); }
+.errbox__actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
+
+/* =============================================================================
+   BUTTONS (shared)
+   ============================================================================= */
+.btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: var(--r-sm);
+  font-size: var(--fs-sm); font-weight: var(--fw-medium); border: 1px solid var(--line-strong);
+  background: var(--bg-app); color: var(--ink-primary); transition: all var(--dur-1) var(--ease); }
+.btn:hover { background: var(--bg-hover); }
+.btn--ghost { border-color: transparent; background: transparent; color: var(--ink-secondary); }
+.btn--ghost:hover { background: var(--bg-hover); color: var(--ink-primary); }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn--primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn--sm { padding: 5px 10px; font-size: var(--fs-xs); }
+
+/* tag/pill */
+.tag { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: var(--r-pill);
+  font-size: var(--fs-micro); font-weight: var(--fw-semibold); background: var(--bg-panel); color: var(--ink-secondary); }
+
+/* utility */
+.row { display: flex; align-items: center; gap: var(--sp-3); }
+.col { display: flex; flex-direction: column; }
+.muted { color: var(--ink-tertiary); }
+.grow { flex: 1; }
+.stack-3 > * + * { margin-top: var(--sp-3); }
+.stack-4 > * + * { margin-top: var(--sp-4); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.fade-in { animation: fade var(--dur-3) var(--ease) both; }
+
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" data-src="lib.jsx">
+/* lib.jsx — icons + scenario data, exported to window */
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ---- Icon set (Feather/Lucide-style, 1.6 stroke) ------------------------- */
+const PATHS = {
+  box:        '<path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5"/><path d="M12 13v8"/>',
+  upload:     '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
+  play:       '<path d="m6 4 14 8-14 8Z"/>',
+  pause:      '<path d="M7 4h3v16H7zM14 4h3v16h-3z"/>',
+  skipBack:   '<path d="M18 5 8 12l10 7zM6 5v14"/>',
+  skipFwd:    '<path d="M6 5l10 7-10 7zM18 5v14"/>',
+  check:      '<path d="M20 6 9 17l-5-5"/>',
+  checkCircle:'<path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><path d="m22 4-10 10-3-3"/>',
+  alert:      '<path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/>',
+  alertCircle:'<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  layout:     '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+  cpu:        '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>',
+  frame:      '<path d="M22 3H2v18h20zM2 9h20M2 15h20M8 3v18M16 3v18"/>',
+  flow:       '<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M9 6h6a3 3 0 0 1 3 3v6"/>',
+  route:      '<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h6a3 3 0 0 0 3-3V8"/>',
+  film:       '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/>',
+  cube:       '<path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  image:      '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
+  columns:    '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/>',
+  download:   '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 21H3"/>',
+  chevDown:   '<path d="m6 9 6 6 6-6"/>',
+  chevRight:  '<path d="m9 6 6 6-6 6"/>',
+  folder:     '<path d="M4 5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-7l-2-2H4Z"/>',
+  file:       '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
+  plus:       '<path d="M12 5v14M5 12h14"/>',
+  minus:      '<path d="M5 12h14"/>',
+  users:      '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11"/>',
+  clock:      '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  zap:        '<path d="M13 2 3 14h7l-1 8 10-12h-7z"/>',
+  gauge:      '<path d="M12 14 8 9"/><circle cx="12" cy="13" r="9"/><path d="M12 4v1M21 13h-1M4 13H3"/>',
+  trend:      '<path d="m3 17 6-6 4 4 8-8"/><path d="M17 7h4v4"/>',
+  refresh:    '<path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>',
+  settings:   '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 0 1-4 0v-.1A1.6 1.6 0 0 0 6.6 19l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 13.4H3a2 2 0 0 1 0-4h.1A1.6 1.6 0 0 0 4.6 6.6l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9 3.6V3a2 2 0 0 1 4 0v.1A1.6 1.6 0 0 0 17.4 5l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0 1.1 2.7H21a2 2 0 0 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z"/>',
+  truck:      '<path d="M14 7h4l3 3v5h-2"/><path d="M2 7h12v8H2zM2 15h3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>',
+  inbox:      '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5 5 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3-7z"/>',
+  archive:    '<rect x="3" y="3" width="18" height="5" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+  shuffle:    '<path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>',
+  package:    '<path d="m7.5 4.3 9 5.2M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>',
+  copy:       '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  share:      '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
+  link:       '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+  sparkle:    '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2 2M16 16l2 2M18 6l-2 2M8 16l-2 2"/>',
+  database:   '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  grip:       '<circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/>',
+};
+function Icon({ name, size = 18, stroke = 1.6, className = '', style }) {
+  return (
+    <svg className={className} style={style} width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round"
+      dangerouslySetInnerHTML={{ __html: PATHS[name] || '' }} aria-hidden="true" />
+  );
+}
+
+/* ---- Scenario data --------------------------------------------------------
+   元設計(whsim)の語彙・実値に準拠。専門用語は元設計どおり残しつつ、
+   結論と信頼度が前面に出る構成にする。 */
+const SCENARIO = {
+  project: '新規倉庫プラン',
+  runId: 'run_0001',
+  // プロベナンス: 実データ何% / 取り込み済み / 仮値の項目
+  provenance: {
+    realPct: 0,
+    imported: 'なし',
+    templated: ['基本情報','レイアウト','ロケーション','商品マスタ','オペレーション','人員','設備','出荷','入荷データ','実行条件'],
+  },
+  importHint: '商品マスタ / 出荷 / 入荷 …（足りない分は仮値で補完）',
+  // キー項目（元設計どおり）
+  fields: [
+    { id: 'pickers', label: 'ピッカー人数', unit: '名',   value: 6,   step: 1,   min: 1, max: 40,  prov: 0 },
+    { id: 'orders',  label: '出荷オーダー', unit: '件/時', value: 120, step: 10,  min: 0, max: 600, prov: 0 },
+    { id: 'method',  label: 'ピッキング方式', kind: 'select', value: 0, opts: ['都度ピック','トータルピック','マルチオーダー','ゾーンピック'], prov: 0 },
+    { id: 'hours',   label: '稼働時間',     unit: '時間', value: 8,   step: 1,   min: 1, max: 24,  prov: 0 },
+    { id: 'speed',   label: '歩行速度',     unit: 'm/s',  value: 1.2, step: 0.1, min: 0.5, max: 2.0, dec: 1, prov: 0 },
+  ],
+  // 判定（元設計の文言に準拠）
+  verdict: {
+    state: 'ok',
+    title: '対応可能',
+    desc: 'ピッキング工程の稼働率 45% で需要をさばけます。10回中10回が安定処理でした。',
+    stability: 5, stabilityLabel: '100%', stabilityNote: '10回検証',
+  },
+  // 下部KPIバー（元設計の主要指標）
+  kpis: [
+    { id: 'throughput', label: 'スループット', icon: 'box', value: 120, unit: '件/時',
+      band: { p5: 112, p50: 120, p95: 125 }, delta: null },
+    { id: 'shipped', label: '出荷完了', icon: 'truck', value: '961', sub: '/ 965', unit: '件',
+      delta: null, note: '達成率 99.6%' },
+    { id: 'bottleneck', label: 'ボトルネック', icon: 'gauge', text: 'ピッキング', unit: '稼働 45%',
+      tone: 'warn' },
+    { id: 'leadtime', label: '処理時間 中央値/最悪', icon: 'clock', text: '2 / 4', unit: '分' },
+    { id: 'walk', label: '1件あたり歩行', icon: 'route', value: 89, unit: 'm' },
+    { id: 'cost', label: '1件あたりコスト', icon: 'package', value: '¥165.1', raw: true },
+  ],
+  // 詳細KPI（比較タブ等で使用）
+  kpiDetail: [
+    { label: 'ピッカー稼働率', value: '45%', sub: '6名' },
+    { label: '棚台稼働率',   value: '44%', sub: '3台' },
+    { label: '月間コスト',   value: '¥3,960,000' },
+    { label: '安定度',       value: '100%', sub: '10回検証' },
+  ],
+  process: [
+    { id: 'in',   name: '入荷',   icon: 'truck',   load: 38, prov: 'est' },
+    { id: 'put',  name: '格納',   icon: 'archive', load: 52, prov: 'est' },
+    { id: 'repl', name: '補充',   icon: 'refresh', load: 41, prov: 'est' },
+    { id: 'pick', name: 'ピッキング', icon: 'inbox', load: 45, prov: 'est', bottleneck: true },
+    { id: 'sort', name: '仕分け', icon: 'shuffle', load: 33, prov: 'est' },
+    { id: 'pack', name: '梱包',   icon: 'package', load: 29, prov: 'est' },
+    { id: 'out',  name: '出荷',   icon: 'truck',   load: 31, prov: 'est' },
+  ],
+  // 比較（現行↔提案）。元設計のKPIを軸に。
+  compare: [
+    { metric: 'スループット',   note: '1時間あたり処理数', cur: '96',  neu: '120', unit: '件/時', delta: +25, good: true },
+    { metric: '出荷完了率',     note: '当日締切まで',     cur: '92.4', neu: '99.6', unit: '%',   delta: +8,  good: true },
+    { metric: '処理時間(中央値)', note: 'オーダー1件',     cur: '3',    neu: '2',   unit: '分',   delta: -33, good: true },
+    { metric: '1件あたり歩行',  note: 'ピッカー移動距離', cur: '118',  neu: '89',  unit: 'm',   delta: -25, good: true },
+    { metric: '1件あたりコスト', note: '人件費ベース',     cur: '198',  neu: '165', unit: '円',   delta: -17, good: true },
+    { metric: '安定度',         note: '10回試算の安定率', cur: '中',   neu: '高',  unit: '',    delta: 0,  good: true, qualitative: true },
+  ],
+  // 2D 凡例（元設計どおり）
+  agentLegend: [
+    { id: 'wait',  name: '待機', cls: 'wait' },
+    { id: 'move',  name: '移動', cls: 'move' },
+    { id: 'pick',  name: 'ピック', cls: 'pick' },
+    { id: 'carry', name: '運搬', cls: 'carry' },
+    { id: 'pack',  name: '梱包', cls: 'pack' },
+  ],
+  // 3D表現プリセット
+  render3d: ['ナチュラル', 'ワイヤー', 'ヒートマップ'],
+};
+
+Object.assign(window, { Icon, PATHS, SCENARIO,
+  useState, useEffect, useRef, useCallback });
+
+</script>
+
+<script type="text/babel" data-src="tweaks-panel.jsx">
+
+/* BEGIN USAGE */
+// tweaks-panel.jsx
+// Reusable Tweaks shell + form-control helpers.
+// Exports (to window): useTweaks, TweaksPanel, TweakSection, TweakRow, TweakSlider,
+//   TweakToggle, TweakRadio, TweakSelect, TweakText, TweakNumber, TweakColor, TweakButton.
+//
+// Owns the host protocol (listens for __activate_edit_mode / __deactivate_edit_mode,
+// posts __edit_mode_available / __edit_mode_set_keys / __edit_mode_dismissed) so
+// individual prototypes don't re-roll it. Ships a consistent set of controls so you
+// don't hand-draw <input type="range">, segmented radios, steppers, etc.
+//
+// Usage (in an HTML file that loads React + Babel):
+//
+//   const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+//     "primaryColor": "#D97757",
+//     "palette": ["#D97757", "#29261b", "#f6f4ef"],
+//     "fontSize": 16,
+//     "density": "regular",
+//     "dark": false
+//   }/*EDITMODE-END*/;
+//
+//   function App() {
+//     const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+//     return (
+//       <div style={{ fontSize: t.fontSize, color: t.primaryColor }}>
+//         Hello
+//         <TweaksPanel>
+//           <TweakSection label="Typography" />
+//           <TweakSlider label="Font size" value={t.fontSize} min={10} max={32} unit="px"
+//                        onChange={(v) => setTweak('fontSize', v)} />
+//           <TweakRadio  label="Density" value={t.density}
+//                        options={['compact', 'regular', 'comfy']}
+//                        onChange={(v) => setTweak('density', v)} />
+//           <TweakSection label="Theme" />
+//           <TweakColor  label="Primary" value={t.primaryColor}
+//                        options={['#D97757', '#2A6FDB', '#1F8A5B', '#7A5AE0']}
+//                        onChange={(v) => setTweak('primaryColor', v)} />
+//           <TweakColor  label="Palette" value={t.palette}
+//                        options={[['#D97757', '#29261b', '#f6f4ef'],
+//                                  ['#475569', '#0f172a', '#f1f5f9']]}
+//                        onChange={(v) => setTweak('palette', v)} />
+//           <TweakToggle label="Dark mode" value={t.dark}
+//                        onChange={(v) => setTweak('dark', v)} />
+//         </TweaksPanel>
+//       </div>
+//     );
+//   }
+//
+// TweakRadio is the segmented control for 2–3 short options (auto-falls-back to
+// TweakSelect past ~16/~10 chars per label); reach for TweakSelect directly when
+// options are many or long. For color tweaks always curate 3-4 options rather than
+// a free picker; an option can also be a whole 2–5 color palette (the stored value
+// is the array). The Tweak* controls are a floor, not a ceiling — build custom
+// controls inside the panel if a tweak calls for UI they don't cover.
+/* END USAGE */
+// ─────────────────────────────────────────────────────────────────────────────
+
+const __TWEAKS_STYLE = `
+  .twk-panel{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:280px;
+    max-height:calc(100vh - 32px);display:flex;flex-direction:column;
+    transform:scale(var(--dc-inv-zoom,1));transform-origin:bottom right;
+    background:rgba(250,249,247,.78);color:#29261b;
+    -webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);
+    border:.5px solid rgba(255,255,255,.6);border-radius:14px;
+    box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 40px rgba(0,0,0,.18);
+    font:11.5px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+  .twk-hd{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 8px 10px 14px;cursor:move;user-select:none}
+  .twk-hd b{font-size:12px;font-weight:600;letter-spacing:.01em}
+  .twk-x{appearance:none;border:0;background:transparent;color:rgba(41,38,27,.55);
+    width:22px;height:22px;border-radius:6px;cursor:default;font-size:13px;line-height:1}
+  .twk-x:hover{background:rgba(0,0,0,.06);color:#29261b}
+  .twk-body{padding:2px 14px 14px;display:flex;flex-direction:column;gap:10px;
+    overflow-y:auto;overflow-x:hidden;min-height:0;
+    scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.15) transparent}
+  .twk-body::-webkit-scrollbar{width:8px}
+  .twk-body::-webkit-scrollbar-track{background:transparent;margin:2px}
+  .twk-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.15);border-radius:4px;
+    border:2px solid transparent;background-clip:content-box}
+  .twk-body::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.25);
+    border:2px solid transparent;background-clip:content-box}
+  .twk-row{display:flex;flex-direction:column;gap:5px}
+  .twk-row-h{flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+  .twk-lbl{display:flex;justify-content:space-between;align-items:baseline;
+    color:rgba(41,38,27,.72)}
+  .twk-lbl>span:first-child{font-weight:500}
+  .twk-val{color:rgba(41,38,27,.5);font-variant-numeric:tabular-nums}
+
+  .twk-sect{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:rgba(41,38,27,.45);padding:10px 0 0}
+  .twk-sect:first-child{padding-top:0}
+
+  .twk-field{appearance:none;box-sizing:border-box;width:100%;min-width:0;height:26px;padding:0 8px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:7px;
+    background:rgba(255,255,255,.6);color:inherit;font:inherit;outline:none}
+  .twk-field:focus{border-color:rgba(0,0,0,.25);background:rgba(255,255,255,.85)}
+  select.twk-field{padding-right:22px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='rgba(0,0,0,.5)' d='M0 0h10L5 6z'/></svg>");
+    background-repeat:no-repeat;background-position:right 8px center}
+
+  .twk-slider{appearance:none;-webkit-appearance:none;width:100%;height:4px;margin:6px 0;
+    border-radius:999px;background:rgba(0,0,0,.12);outline:none}
+  .twk-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:14px;height:14px;border-radius:50%;background:#fff;
+    border:.5px solid rgba(0,0,0,.12);box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:default}
+  .twk-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+    background:#fff;border:.5px solid rgba(0,0,0,.12);box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:default}
+
+  .twk-seg{position:relative;display:flex;padding:2px;border-radius:8px;
+    background:rgba(0,0,0,.06);user-select:none}
+  .twk-seg-thumb{position:absolute;top:2px;bottom:2px;border-radius:6px;
+    background:rgba(255,255,255,.9);box-shadow:0 1px 2px rgba(0,0,0,.12);
+    transition:left .15s cubic-bezier(.3,.7,.4,1),width .15s}
+  .twk-seg.dragging .twk-seg-thumb{transition:none}
+  .twk-seg button{appearance:none;position:relative;z-index:1;flex:1;border:0;
+    background:transparent;color:inherit;font:inherit;font-weight:500;min-height:22px;
+    border-radius:6px;cursor:default;padding:4px 6px;line-height:1.2;
+    overflow-wrap:anywhere}
+
+  .twk-toggle{position:relative;width:32px;height:18px;border:0;border-radius:999px;
+    background:rgba(0,0,0,.15);transition:background .15s;cursor:default;padding:0}
+  .twk-toggle[data-on="1"]{background:#34c759}
+  .twk-toggle i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+  .twk-toggle[data-on="1"] i{transform:translateX(14px)}
+
+  .twk-num{display:flex;align-items:center;box-sizing:border-box;min-width:0;height:26px;padding:0 0 0 8px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:7px;background:rgba(255,255,255,.6)}
+  .twk-num-lbl{font-weight:500;color:rgba(41,38,27,.6);cursor:ew-resize;
+    user-select:none;padding-right:8px}
+  .twk-num input{flex:1;min-width:0;height:100%;border:0;background:transparent;
+    font:inherit;font-variant-numeric:tabular-nums;text-align:right;padding:0 8px 0 0;
+    outline:none;color:inherit;-moz-appearance:textfield}
+  .twk-num input::-webkit-inner-spin-button,.twk-num input::-webkit-outer-spin-button{
+    -webkit-appearance:none;margin:0}
+  .twk-num-unit{padding-right:8px;color:rgba(41,38,27,.45)}
+
+  .twk-btn{appearance:none;height:26px;padding:0 12px;border:0;border-radius:7px;
+    background:rgba(0,0,0,.78);color:#fff;font:inherit;font-weight:500;cursor:default}
+  .twk-btn:hover{background:rgba(0,0,0,.88)}
+  .twk-btn.secondary{background:rgba(0,0,0,.06);color:inherit}
+  .twk-btn.secondary:hover{background:rgba(0,0,0,.1)}
+
+  .twk-swatch{appearance:none;-webkit-appearance:none;width:56px;height:22px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:6px;padding:0;cursor:default;
+    background:transparent;flex-shrink:0}
+  .twk-swatch::-webkit-color-swatch-wrapper{padding:0}
+  .twk-swatch::-webkit-color-swatch{border:0;border-radius:5.5px}
+  .twk-swatch::-moz-color-swatch{border:0;border-radius:5.5px}
+
+  .twk-chips{display:flex;gap:6px}
+  .twk-chip{position:relative;appearance:none;flex:1;min-width:0;height:46px;
+    padding:0;border:0;border-radius:6px;overflow:hidden;cursor:default;
+    box-shadow:0 0 0 .5px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.06);
+    transition:transform .12s cubic-bezier(.3,.7,.4,1),box-shadow .12s}
+  .twk-chip:hover{transform:translateY(-1px);
+    box-shadow:0 0 0 .5px rgba(0,0,0,.18),0 4px 10px rgba(0,0,0,.12)}
+  .twk-chip[data-on="1"]{box-shadow:0 0 0 1.5px rgba(0,0,0,.85),
+    0 2px 6px rgba(0,0,0,.15)}
+  .twk-chip>span{position:absolute;top:0;bottom:0;right:0;width:34%;
+    display:flex;flex-direction:column;box-shadow:-1px 0 0 rgba(0,0,0,.1)}
+  .twk-chip>span>i{flex:1;box-shadow:0 -1px 0 rgba(0,0,0,.1)}
+  .twk-chip>span>i:first-child{box-shadow:none}
+  .twk-chip svg{position:absolute;top:6px;left:6px;width:13px;height:13px;
+    filter:drop-shadow(0 1px 1px rgba(0,0,0,.3))}
+`;
+
+// ── useTweaks ───────────────────────────────────────────────────────────────
+// Single source of truth for tweak values. setTweak persists via the host
+// (__edit_mode_set_keys → host rewrites the EDITMODE block on disk).
+function useTweaks(defaults) {
+  const [values, setValues] = React.useState(defaults);
+  // Accepts either setTweak('key', value) or setTweak({ key: value, ... }) so a
+  // useState-style call doesn't write a "[object Object]" key into the persisted
+  // JSON block.
+  const setTweak = React.useCallback((keyOrEdits, val) => {
+    const edits = typeof keyOrEdits === 'object' && keyOrEdits !== null
+      ? keyOrEdits : { [keyOrEdits]: val };
+    setValues((prev) => ({ ...prev, ...edits }));
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits }, '*');
+    // Same-window signal so in-page listeners (deck-stage rail thumbnails)
+    // can react — the parent message only reaches the host, not peers.
+    window.dispatchEvent(new CustomEvent('tweakchange', { detail: edits }));
+  }, []);
+  return [values, setTweak];
+}
+
+// ── TweaksPanel ─────────────────────────────────────────────────────────────
+// Floating shell. Registers the protocol listener BEFORE announcing
+// availability — if the announce ran first, the host's activate could land
+// before our handler exists and the toolbar toggle would silently no-op.
+// The close button posts __edit_mode_dismissed so the host's toolbar toggle
+// flips off in lockstep; the host echoes __deactivate_edit_mode back which
+// is what actually hides the panel.
+function TweaksPanel({ title = 'Tweaks', children }) {
+  const [open, setOpen] = React.useState(false);
+  const dragRef = React.useRef(null);
+  const offsetRef = React.useRef({ x: 16, y: 16 });
+  const PAD = 16;
+
+  const clampToViewport = React.useCallback(() => {
+    const panel = dragRef.current;
+    if (!panel) return;
+    const w = panel.offsetWidth, h = panel.offsetHeight;
+    const maxRight = Math.max(PAD, window.innerWidth - w - PAD);
+    const maxBottom = Math.max(PAD, window.innerHeight - h - PAD);
+    offsetRef.current = {
+      x: Math.min(maxRight, Math.max(PAD, offsetRef.current.x)),
+      y: Math.min(maxBottom, Math.max(PAD, offsetRef.current.y)),
+    };
+    panel.style.right = offsetRef.current.x + 'px';
+    panel.style.bottom = offsetRef.current.y + 'px';
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    clampToViewport();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', clampToViewport);
+      return () => window.removeEventListener('resize', clampToViewport);
+    }
+    const ro = new ResizeObserver(clampToViewport);
+    ro.observe(document.documentElement);
+    return () => ro.disconnect();
+  }, [open, clampToViewport]);
+
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      const t = e?.data?.type;
+      if (t === '__activate_edit_mode') setOpen(true);
+      else if (t === '__deactivate_edit_mode') setOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const dismiss = () => {
+    setOpen(false);
+    window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
+  };
+
+  const onDragStart = (e) => {
+    const panel = dragRef.current;
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY;
+    const startRight = window.innerWidth - r.right;
+    const startBottom = window.innerHeight - r.bottom;
+    const move = (ev) => {
+      offsetRef.current = {
+        x: startRight - (ev.clientX - sx),
+        y: startBottom - (ev.clientY - sy),
+      };
+      clampToViewport();
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  if (!open) return null;
+  return (
+    <>
+      <style>{__TWEAKS_STYLE}</style>
+      <div ref={dragRef} className="twk-panel" data-omelette-chrome=""
+           style={{ right: offsetRef.current.x, bottom: offsetRef.current.y }}>
+        <div className="twk-hd" onMouseDown={onDragStart}>
+          <b>{title}</b>
+          <button className="twk-x" aria-label="Close tweaks"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={dismiss}>✕</button>
+        </div>
+        <div className="twk-body">
+          {children}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Layout helpers ──────────────────────────────────────────────────────────
+
+function TweakSection({ label, children }) {
+  return (
+    <>
+      <div className="twk-sect">{label}</div>
+      {children}
+    </>
+  );
+}
+
+function TweakRow({ label, value, children, inline = false }) {
+  return (
+    <div className={inline ? 'twk-row twk-row-h' : 'twk-row'}>
+      <div className="twk-lbl">
+        <span>{label}</span>
+        {value != null && <span className="twk-val">{value}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ── Controls ────────────────────────────────────────────────────────────────
+
+function TweakSlider({ label, value, min = 0, max = 100, step = 1, unit = '', onChange }) {
+  return (
+    <TweakRow label={label} value={`${value}${unit}`}>
+      <input type="range" className="twk-slider" min={min} max={max} step={step}
+             value={value} onChange={(e) => onChange(Number(e.target.value))} />
+    </TweakRow>
+  );
+}
+
+function TweakToggle({ label, value, onChange }) {
+  return (
+    <div className="twk-row twk-row-h">
+      <div className="twk-lbl"><span>{label}</span></div>
+      <button type="button" className="twk-toggle" data-on={value ? '1' : '0'}
+              role="switch" aria-checked={!!value}
+              onClick={() => onChange(!value)}><i /></button>
+    </div>
+  );
+}
+
+function TweakRadio({ label, value, options, onChange }) {
+  const trackRef = React.useRef(null);
+  const [dragging, setDragging] = React.useState(false);
+  // The active value is read by pointer-move handlers attached for the lifetime
+  // of a drag — ref it so a stale closure doesn't fire onChange for every move.
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+
+  // Segments wrap mid-word once per-segment width runs out. The track is
+  // ~248px (280 panel − 28 body pad − 4 seg pad), each button loses 12px
+  // to its own padding, and 11.5px system-ui averages ~6.3px/char — so 2
+  // options fit ~16 chars each, 3 fit ~10. Past that (or >3 options), fall
+  // back to a dropdown rather than wrap.
+  const labelLen = (o) => String(typeof o === 'object' ? o.label : o).length;
+  const maxLen = options.reduce((m, o) => Math.max(m, labelLen(o)), 0);
+  const fitsAsSegments = maxLen <= ({ 2: 16, 3: 10 }[options.length] ?? 0);
+  if (!fitsAsSegments) {
+    // <select> emits strings — map back to the original option value so the
+    // fallback stays type-preserving (numbers, booleans) like the segment path.
+    const resolve = (s) => {
+      const m = options.find((o) => String(typeof o === 'object' ? o.value : o) === s);
+      return m === undefined ? s : typeof m === 'object' ? m.value : m;
+    };
+    return <TweakSelect label={label} value={value} options={options}
+                        onChange={(s) => onChange(resolve(s))} />;
+  }
+  const opts = options.map((o) => (typeof o === 'object' ? o : { value: o, label: o }));
+  const idx = Math.max(0, opts.findIndex((o) => o.value === value));
+  const n = opts.length;
+
+  const segAt = (clientX) => {
+    const r = trackRef.current.getBoundingClientRect();
+    const inner = r.width - 4;
+    const i = Math.floor(((clientX - r.left - 2) / inner) * n);
+    return opts[Math.max(0, Math.min(n - 1, i))].value;
+  };
+
+  const onPointerDown = (e) => {
+    setDragging(true);
+    const v0 = segAt(e.clientX);
+    if (v0 !== valueRef.current) onChange(v0);
+    const move = (ev) => {
+      if (!trackRef.current) return;
+      const v = segAt(ev.clientX);
+      if (v !== valueRef.current) onChange(v);
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <TweakRow label={label}>
+      <div ref={trackRef} role="radiogroup" onPointerDown={onPointerDown}
+           className={dragging ? 'twk-seg dragging' : 'twk-seg'}>
+        <div className="twk-seg-thumb"
+             style={{ left: `calc(2px + ${idx} * (100% - 4px) / ${n})`,
+                      width: `calc((100% - 4px) / ${n})` }} />
+        {opts.map((o) => (
+          <button key={o.value} type="button" role="radio" aria-checked={o.value === value}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </TweakRow>
+  );
+}
+
+function TweakSelect({ label, value, options, onChange }) {
+  return (
+    <TweakRow label={label}>
+      <select className="twk-field" value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => {
+          const v = typeof o === 'object' ? o.value : o;
+          const l = typeof o === 'object' ? o.label : o;
+          return <option key={v} value={v}>{l}</option>;
+        })}
+      </select>
+    </TweakRow>
+  );
+}
+
+function TweakText({ label, value, placeholder, onChange }) {
+  return (
+    <TweakRow label={label}>
+      <input className="twk-field" type="text" value={value} placeholder={placeholder}
+             onChange={(e) => onChange(e.target.value)} />
+    </TweakRow>
+  );
+}
+
+function TweakNumber({ label, value, min, max, step = 1, unit = '', onChange }) {
+  const clamp = (n) => {
+    if (min != null && n < min) return min;
+    if (max != null && n > max) return max;
+    return n;
+  };
+  const startRef = React.useRef({ x: 0, val: 0 });
+  const onScrubStart = (e) => {
+    e.preventDefault();
+    startRef.current = { x: e.clientX, val: value };
+    const decimals = (String(step).split('.')[1] || '').length;
+    const move = (ev) => {
+      const dx = ev.clientX - startRef.current.x;
+      const raw = startRef.current.val + dx * step;
+      const snapped = Math.round(raw / step) * step;
+      onChange(clamp(Number(snapped.toFixed(decimals))));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <div className="twk-num">
+      <span className="twk-num-lbl" onPointerDown={onScrubStart}>{label}</span>
+      <input type="number" value={value} min={min} max={max} step={step}
+             onChange={(e) => onChange(clamp(Number(e.target.value)))} />
+      {unit && <span className="twk-num-unit">{unit}</span>}
+    </div>
+  );
+}
+
+// Relative-luminance contrast pick — checkmarks drawn over a swatch need to
+// read on both #111 and #fafafa without per-option configuration. Hex input
+// only (#rgb / #rrggbb); named or rgb()/hsl() colors fall through to "light".
+function __twkIsLight(hex) {
+  const h = String(hex).replace('#', '');
+  const x = h.length === 3 ? h.replace(/./g, (c) => c + c) : h.padEnd(6, '0');
+  const n = parseInt(x.slice(0, 6), 16);
+  if (Number.isNaN(n)) return true;
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return r * 299 + g * 587 + b * 114 > 148000;
+}
+
+const __TwkCheck = ({ light }) => (
+  <svg viewBox="0 0 14 14" aria-hidden="true">
+    <path d="M3 7.2 5.8 10 11 4.2" fill="none" strokeWidth="2.2"
+          strokeLinecap="round" strokeLinejoin="round"
+          stroke={light ? 'rgba(0,0,0,.78)' : '#fff'} />
+  </svg>
+);
+
+// TweakColor — curated color/palette picker. Each option is either a single
+// hex string or an array of 1-5 hex strings; the card adapts — a lone color
+// renders solid, a palette renders colors[0] as the hero (left ~2/3) with the
+// rest stacked in a sharp column on the right. onChange emits the
+// option in the shape it was passed (string stays string, array stays array).
+// Without options it falls back to the native color input for back-compat.
+function TweakColor({ label, value, options, onChange }) {
+  if (!options || !options.length) {
+    return (
+      <div className="twk-row twk-row-h">
+        <div className="twk-lbl"><span>{label}</span></div>
+        <input type="color" className="twk-swatch" value={value}
+               onChange={(e) => onChange(e.target.value)} />
+      </div>
+    );
+  }
+  // Native <input type=color> emits lowercase hex per the HTML spec, so
+  // compare case-insensitively. String() guards JSON.stringify(undefined),
+  // which returns the primitive undefined (no .toLowerCase).
+  const key = (o) => String(JSON.stringify(o)).toLowerCase();
+  const cur = key(value);
+  return (
+    <TweakRow label={label}>
+      <div className="twk-chips" role="radiogroup">
+        {options.map((o, i) => {
+          const colors = Array.isArray(o) ? o : [o];
+          const [hero, ...rest] = colors;
+          const sup = rest.slice(0, 4);
+          const on = key(o) === cur;
+          return (
+            <button key={i} type="button" className="twk-chip" role="radio"
+                    aria-checked={on} data-on={on ? '1' : '0'}
+                    aria-label={colors.join(', ')} title={colors.join(' · ')}
+                    style={{ background: hero }}
+                    onClick={() => onChange(o)}>
+              {sup.length > 0 && (
+                <span>
+                  {sup.map((c, j) => <i key={j} style={{ background: c }} />)}
+                </span>
+              )}
+              {on && <__TwkCheck light={__twkIsLight(hero)} />}
+            </button>
+          );
+        })}
+      </div>
+    </TweakRow>
+  );
+}
+
+function TweakButton({ label, onClick, secondary = false }) {
+  return (
+    <button type="button" className={secondary ? 'twk-btn secondary' : 'twk-btn'}
+            onClick={onClick}>{label}</button>
+  );
+}
+
+Object.assign(window, {
+  useTweaks, TweaksPanel, TweakSection, TweakRow,
+  TweakSlider, TweakToggle, TweakRadio, TweakSelect,
+  TweakText, TweakNumber, TweakColor, TweakButton,
+});
+
+</script>
+
+<script type="text/babel" data-src="sidebar.jsx">
+/* sidebar.jsx — Header + Sidebar (operation flow) */
+
+function Header({ tabLabel }) {
+  const p = SCENARIO.provenance;
+  return (
+    <header className="header">
+      <div className="header__crumbs">
+        <span className="crumb"><span className="crumb__ico"><Icon name="folder" size={15} /></span>プロジェクト</span>
+        <span className="crumb__sep"><Icon name="chevRight" size={13} /></span>
+        <span className="crumb crumb--current">{SCENARIO.project}</span>
+        <span className="crumb__sep"><Icon name="chevRight" size={13} /></span>
+        <span className="crumb">{tabLabel}</span>
+      </div>
+      <span className="header__spacer" />
+      <div className="provbar" title="いまの数字がどれだけ実データに基づくか">
+        <span className="provbar__seg"><ProvChip pct={p.realPct} /></span>
+        <span className="provbar__sep" />
+        <span className="provbar__seg">取り込み済み <b>{p.imported}</b></span>
+        <span className="provbar__sep" />
+        <span className="provbar__seg provbar__templated">テンプレ仮値 <b>{p.templated.length}項目</b></span>
+      </div>
+      <button className="btn btn--ghost btn--sm" aria-label="共有"><Icon name="share" size={15} />共有</button>
+      <button className="btn btn--primary btn--sm"><Icon name="download" size={15} />提案PNG</button>
+    </header>
+  );
+}
+
+function ProvChip({ pct }) {
+  // pct===0 → 仮値（テンプレ）, <75 → 推定込み, >=75 → 実データ
+  if (pct === 0) {
+    return (
+      <span className="prov prov--tmpl" title="テンプレートの仮値です。データを取り込むと精度が上がります">
+        <span className="prov__dot" />実データ 0%
+      </span>
+    );
+  }
+  const real = pct >= 75;
+  return (
+    <span className={'prov ' + (real ? 'prov--real' : 'prov--est')} title={real ? '実データに基づく値' : '一部を推定で補完'}>
+      <span className="prov__dot" />
+      {real ? '実データ' : '推定込み'} {pct}%
+    </span>
+  );
+}
+
+function Stepper({ value, step, min, max, unit, dec, onChange }) {
+  const round = (v) => dec ? Math.round(v * Math.pow(10, dec)) / Math.pow(10, dec) : v;
+  const set = (v) => onChange(round(Math.max(min, Math.min(max, v))));
+  const disp = dec ? value.toFixed(dec) : value;
+  return (
+    <div className="field__row">
+      <div className="stepper">
+        <button className="stepper__btn" onClick={() => set(value - step)} aria-label="減らす"><Icon name="minus" size={14} /></button>
+        <input className="stepper__val tnum" type="number" value={disp} step={step}
+          onChange={(e) => set(parseFloat(e.target.value || '0'))} aria-label="値" />
+        <button className="stepper__btn" onClick={() => set(value + step)} aria-label="増やす"><Icon name="plus" size={14} /></button>
+      </div>
+      {unit && <span className="field__unit">{unit}</span>}
+    </div>
+  );
+}
+
+function Field({ f, value, onChange }) {
+  return (
+    <div className="field">
+      <div className="field__top">
+        <span className="field__label">{f.label}</span>
+        <span className="field__hint field__hint--tmpl">仮値</span>
+      </div>
+      {(!f.kind) && (
+        <Stepper value={value} step={f.step} min={f.min} max={f.max} unit={f.unit} dec={f.dec} onChange={onChange} />
+      )}
+      {f.kind === 'select' && (
+        <div className="selectwrap">
+          <select className="select" value={value} onChange={(e) => onChange(parseInt(e.target.value, 10))} aria-label={f.label}>
+            {f.opts.map((o, i) => <option key={o} value={i}>{o}</option>)}
+          </select>
+          <span className="selectwrap__chev"><Icon name="chevDown" size={14} /></span>
+        </div>
+      )}
+      {f.kind === 'slider' && (
+        <div className="slider">
+          <input type="range" min="0" max="100" value={value}
+            style={{ '--pct': value + '%' }}
+            onChange={(e) => onChange(parseInt(e.target.value, 10))} aria-label={f.label} />
+          <div className="slider__scale">{f.marks.map((m) => <span key={m}>{m}</span>)}</div>
+        </div>
+      )}
+      {f.kind === 'seg' && (
+        <div className="seg" role="group" aria-label={f.label}>
+          {f.opts.map((o, i) => (
+            <button key={o} className="seg__opt" aria-pressed={value === i} onClick={() => onChange(i)}>{o}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropZone({ file, onImport }) {
+  const [over, setOver] = useState(false);
+  if (file) {
+    return (
+      <div>
+        <div className="import-file">
+          <span className="import-file__ico"><Icon name="checkCircle" size={17} /></span>
+          <span className="import-file__name">{file.name}</span>
+          <span className="import-file__rows tnum">{file.rows.toLocaleString()}行</span>
+        </div>
+        <button className="btn btn--ghost btn--sm cad-btn" style={{ marginTop: 6 }}>
+          <Icon name="frame" size={14} />CAD図面(DXF)を取込
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className={'dropzone' + (over ? ' is-over' : '')} role="button" tabIndex={0}
+        onClick={onImport} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onImport()}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); onImport(); }}>
+        <div className="dropzone__ico"><Icon name="archive" size={22} /></div>
+        <div className="dropzone__title">ZIP をドラッグ&ドロップ</div>
+        <div className="dropzone__hint">{SCENARIO.importHint}</div>
+      </div>
+      <button className="btn btn--ghost btn--sm cad-btn" style={{ marginTop: 6 }} onClick={onImport}>
+        <Icon name="frame" size={14} />CAD図面(DXF)を取込
+      </button>
+    </div>
+  );
+}
+
+function Sidebar({ fields, setField, file, onImport, onApply, onRun, status, canRun }) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar__head">
+        <div className="brand">
+          <span className="brand__mark">wh</span>
+          <span className="col">
+            whsim
+            <span className="brand__sub">倉庫シミュレータ</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="sidebar__scroll">
+        <div className="side-sect">
+          <div className="side-sect__label"><span className="side-sect__step">1</span>プロジェクト</div>
+          <div className="proj">
+            <span className="proj__ico"><Icon name="box" size={16} /></span>
+            <span className="proj__name">{SCENARIO.project}</span>
+            <span className="proj__chev"><Icon name="chevDown" size={14} /></span>
+          </div>
+        </div>
+
+        <div className="side-sect">
+          <div className="side-sect__label"><span className="side-sect__step">2</span>顧客データ取り込み<span className="side-sect__opt">任意</span></div>
+          <DropZone file={file} onImport={onImport} />
+        </div>
+
+        <div className="side-sect">
+          <div className="side-sect__label"><span className="side-sect__step">3</span>キー項目<span className="side-sect__num">5</span></div>
+          {fields.map((f) => (
+            <Field key={f.id} f={f} value={f.value} onChange={(v) => setField(f.id, v)} />
+          ))}
+          <button className="btn btn--ghost btn--sm apply-btn" onClick={onApply}>
+            <Icon name="refresh" size={14} />反映
+          </button>
+        </div>
+      </div>
+
+      <div className="sidebar__foot">
+        <button className={'btn-run' + (status === 'running' ? ' is-running' : '')}
+          onClick={onRun} disabled={!canRun || status === 'running'}>
+          {status === 'running'
+            ? (<><span className="spinner" style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.4)' }} />計算中…</>)
+            : (<><Icon name="play" size={16} stroke={2} />シミュレーション実行<span className="btn-run__kbd">⌘↵</span></>)}
+        </button>
+        <div className="run-meta">
+          {status === 'results'
+            ? (<><span className="row" style={{ gap: 5 }}><Icon name="check" size={12} style={{ color: 'var(--ok)' }} />完了</span><span className="mono">{SCENARIO.runId}</span></>)
+            : (<><span>所要 約8秒</span><span>50回試算</span></>)}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+Object.assign(window, { Header, Sidebar, ProvChip, Field });
+
+</script>
+
+<script type="text/babel" data-src="bars.jsx">
+/* bars.jsx — VerdictBanner, KpiBar, TransportBar, ProcessStrip */
+
+function VerdictBanner({ v }) {
+  const iconName = v.state === 'ok' ? 'checkCircle' : v.state === 'bad' ? 'alertCircle' : 'alert';
+  return (
+    <div className={'verdict verdict--' + v.state} role="status">
+      <div className="verdict__badge"><Icon name={iconName} size={22} stroke={2} /></div>
+      <div className="verdict__body">
+        <div className="verdict__title">{v.title}</div>
+        <div className="verdict__desc">{v.desc}</div>
+      </div>
+      <div className="verdict__aside">
+        <div className="stability">
+          <span className="stability__label">安定度</span>
+          <span className="stability__bars" aria-hidden="true">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <span key={i} className={'stability__bar' + (i < v.stability ? ' on' : '')}
+                style={{ height: 6 + i * 3 }} />
+            ))}
+          </span>
+          <span className="stability__val">{v.stabilityLabel}</span>
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--ink-tertiary)' }}>{v.stabilityNote}</span>
+      </div>
+    </div>
+  );
+}
+
+function Band({ p5, p50, p95 }) {
+  const lo = p5, hi = p95;
+  const pos = ((p50 - lo) / (hi - lo)) * 100;
+  return (
+    <div>
+      <div className="band">
+        <div className="band__fill" style={{ left: '8%', right: '8%' }} />
+        <div className="band__mid" style={{ left: `calc(8% + ${pos * 0.84}%)` }} />
+      </div>
+      <div className="kpi__band-cap tnum">
+        <span>{p5.toLocaleString()}</span>
+        <span>ぶれ幅 (90%)</span>
+        <span>{p95.toLocaleString()}</span>
+      </div>
+    </div>
+  );
+}
+
+function Kpi({ k }) {
+  return (
+    <div className={'kpi' + (k.tone === 'warn' ? ' kpi--warn' : '')}>
+      <span className="kpi__label"><Icon name={k.icon} size={14} />{k.label}</span>
+      <div className={'kpi__val tnum' + (k.text ? ' kpi__val--text' : '')}>
+        {k.text
+          ? <span>{k.text}</span>
+          : (k.raw
+            ? <span>{k.value}</span>
+            : <span>{typeof k.value === 'number' ? k.value.toLocaleString() : k.value}</span>)}
+        {k.sub && <small style={{ marginLeft: 2 }}>{k.sub}</small>}
+        {k.unit && <small>{k.unit}</small>}
+      </div>
+      {k.band
+        ? <Band {...k.band} />
+        : (k.note ? <span className="kpi__sub">{k.note}</span> : null)}
+    </div>
+  );
+}
+
+function KpiBar({ kpis }) {
+  return (
+    <div className="kpibar">
+      {kpis.map((k) => <Kpi key={k.id} k={k} />)}
+    </div>
+  );
+}
+
+function TransportBar({ playing, setPlaying, t, setT, speed, setSpeed, duration }) {
+  const trackRef = useRef(null);
+  const pct = (t / duration) * 100;
+  // 元設計に合わせて「経過分」表示（1日の作業を分で）
+  const fmt = (s) => {
+    const mins = (s / duration) * (8 * 60); // 稼働8時間
+        return mins.toFixed(1);
+  };
+  const seek = (e) => {
+    const r = trackRef.current.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    setT(p * duration);
+  };
+  return (
+    <div className="transport">
+      <button className="tp-btn" onClick={() => setT(0)} aria-label="先頭へ"><Icon name="skipBack" size={15} /></button>
+      <button className="tp-btn tp-play" onClick={() => setPlaying(!playing)} aria-label={playing ? '一時停止' : '再生'}>
+        <Icon name={playing ? 'pause' : 'play'} size={16} stroke={2} />
+      </button>
+      <button className="tp-btn" onClick={() => setT(duration)} aria-label="末尾へ"><Icon name="skipFwd" size={15} /></button>
+      <span className="tp-time tnum">{fmt(t)} <span className="muted">分</span></span>
+      <div className="tp-track" ref={trackRef} onClick={seek} role="slider"
+        aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'ArrowRight') setT(Math.min(duration, t + 10)); if (e.key === 'ArrowLeft') setT(Math.max(0, t - 10)); }}>
+        <div className="tp-track__fill" style={{ width: pct + '%' }} />
+        <div className="tp-ticks">
+          {[25, 50, 75].map((p) => <span key={p} className="tp-tick" style={{ left: p + '%' }} />)}
+        </div>
+        <div className="tp-track__head" style={{ left: pct + '%' }} />
+      </div>
+      <span className="muted" style={{ fontSize: 11 }}>速度</span>
+      <div className="tp-speed" role="group" aria-label="再生速度">
+        {[1, 10, 60].map((s) => (
+          <button key={s} aria-pressed={speed === s} onClick={() => setSpeed(s)}>{s}×</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProcessStrip({ steps, activeId }) {
+  return (
+    <div className="card card--pad fade-in">
+      <div className="section-h">
+        <span className="section-h__title">工程ごとの稼働状況</span>
+        <span className="section-h__sub">ボトルネックは「ピッキング」（稼働 45%）</span>
+      </div>
+      <div className="pstrip">
+        {steps.map((s) => (
+          <div key={s.id} className={'pstep' + (s.bottleneck ? ' is-bottleneck' : '') + (s.id === activeId ? ' is-active' : '')}>
+            <div className="pstep__top">
+              <span className="pstep__ico"><Icon name={s.icon} size={15} /></span>
+              <span className="pstep__name">{s.name}</span>
+            </div>
+            <div className="pstep__meter"><b style={{ width: s.load + '%' }} /></div>
+            <span className="pstep__val tnum">稼働 {s.load}%{s.bottleneck ? ' · ボトルネック' : ''}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { VerdictBanner, KpiBar, TransportBar, ProcessStrip, Band, Kpi });
+
+</script>
+
+<script type="text/babel" data-src="tabs1.jsx">
+/* tabs1.jsx — Design tab (#design), 2D view (#view2d), 3D view (#view3d) */
+
+/* ----- DESIGN ------------------------------------------------------------- */
+const SUBTOOLS = [
+  { id: 'layout', name: 'レイアウト', icon: 'layout' },
+  { id: 'equip',  name: '設備',       icon: 'cpu' },
+  { id: 'frame',  name: '躯体',       icon: 'frame' },
+  { id: 'flow',   name: 'フロー',     icon: 'flow' },
+  { id: 'route',  name: '動線',       icon: 'route' },
+];
+
+const ZONES = [
+  { id: 'in',   label: '入荷',   x: 2,  y: 4,  w: 18, h: 30, tint: 'var(--accent-tint)',  line: 'var(--accent-tint-2)' },
+  { id: 'store',label: '保管',   x: 23, y: 4,  w: 44, h: 62, tint: 'var(--bg-sunken)',    line: 'var(--line-hair)' },
+  { id: 'pick', label: 'ピッキング', x: 23, y: 70, w: 44, h: 26, tint: 'var(--warn-tint)', line: 'var(--warn-line)' },
+  { id: 'pack', label: '梱包・出荷', x: 70, y: 4, w: 28, h: 92, tint: 'var(--ok-tint)',    line: 'var(--ok-line)' },
+];
+
+function WarehouseCanvas({ tool }) {
+  const racks = [];
+  for (let c = 0; c < 5; c++) {
+    racks.push({ x: 26 + c * 8, y: 8, w: 4.5, h: 54 });
+  }
+  const showFlow = tool === 'flow' || tool === 'route';
+  return (
+    <div className="wh-canvas" role="img" aria-label="倉庫レイアウトの俯瞰図">
+      {ZONES.map((z) => (
+        <div key={z.id} className="wh-zone"
+          style={{ left: z.x + '%', top: z.y + '%', width: z.w + '%', height: z.h + '%',
+            background: z.tint, borderColor: z.line }}>
+          <span className="wh-zone__tag">{z.label}</span>
+        </div>
+      ))}
+      {(tool === 'layout' || tool === 'frame' || tool === 'equip') && racks.map((r, i) => (
+        <div key={i} className="wh-rack" style={{ left: r.x + '%', top: r.y + '%', width: r.w + '%', height: r.h + '%' }} />
+      ))}
+      {showFlow && (
+        <React.Fragment>
+          <div className="wh-aisle-flow" style={{ left: '11%', top: '50%', width: '12%' }} />
+          <div className="wh-aisle-flow" style={{ left: '45%', top: '83%', width: '24%' }} />
+          <div className="wh-aisle-flow" style={{ left: '67%', top: '50%', width: '5%', transform: 'rotate(0deg)' }} />
+          <div className="wh-node" style={{ left: '11%', top: '50%' }} />
+          <div className="wh-node" style={{ left: '45%', top: '40%' }} />
+          <div className="wh-node" style={{ left: '45%', top: '83%' }} />
+          <div className="wh-node" style={{ left: '84%', top: '50%' }} />
+        </React.Fragment>
+      )}
+      {tool === 'equip' && (
+        <div style={{ position: 'absolute', left: '70%', top: '50%', width: '28%', height: '8%',
+          background: 'var(--accent)', opacity: .25, borderRadius: 4 }} title="コンベア" />
+      )}
+    </div>
+  );
+}
+
+function DesignTab() {
+  const [tool, setTool] = useState('layout');
+  const inspector = {
+    layout: [['保管エリア面積', '2,640 ㎡'], ['通路の本数', '5 本'], ['1通路の間口', '2.4 m'], ['ロケーション数', '4,800']],
+    equip:  [['コンベア', '梱包ライン 2本'], ['棚台', '3 台'], ['ピッキング方式', '都度ピック'], ['ハンディ端末', '6 台']],
+    frame:  [['天井高', '6.0 m'], ['柱スパン', '10.0 m'], ['床耐荷重', '3.5 t/㎡'], ['出入口', '4 か所']],
+    flow:   [['主動線', '入荷→保管→梱包'], ['交差点', '4 か所'], ['一方通行', '2 区間'], ['1件あたり歩行', '89 m']],
+    route:  [['ピッキング動線', 'S字巡回'], ['処理時間(中央値)', '2 分'], ['1件あたり歩行', '89 m'], ['すれ違い', '少ない']],
+  }[tool];
+  return (
+    <section id="design" className="fade-in">
+      <div className="subtools" role="tablist" aria-label="設計サブツール">
+        {SUBTOOLS.map((s) => (
+          <button key={s.id} className="subtool" role="tab" aria-pressed={tool === s.id} onClick={() => setTool(s.id)}>
+            <Icon name={s.icon} size={15} />{s.name}
+          </button>
+        ))}
+      </div>
+      <div className="design-grid">
+        <div className="stack-3">
+          <WarehouseCanvas tool={tool} />
+          <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <span className="tag"><Icon name="box" size={12} />保管 4,800 ロケ</span>
+            <span className="tag"><Icon name="users" size={12} />ピッカー 6 名</span>
+            <span className="tag"><Icon name="route" size={12} />1件あたり歩行 89 m</span>
+            <ProvChip pct={0} />
+          </div>
+        </div>
+        <div className="inspector">
+          <div className="card card--pad">
+            <div className="section-h"><span className="section-h__title">{SUBTOOLS.find((s) => s.id === tool).name}の設定</span></div>
+            <div className="kv">
+              {inspector.map(([k, v]) => (
+                <div key={k} className="kv__row"><span className="kv__k">{k}</span><span className="kv__v">{v}</span></div>
+              ))}
+            </div>
+          </div>
+          <div className="card card--pad" style={{ background: 'var(--bg-sunken)' }}>
+            <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+              <Icon name="sparkle" size={15} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>気づき</span>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-secondary)' }}>
+              ピッキング通路の稼働が45%とやや高めです。保管エリアを1通路ぶん広げると、処理時間をさらに短縮できます。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ----- 2D ----------------------------------------------------------------- */
+function View2D({ t, duration, steps, activeId }) {
+  const phase = (t / duration);
+  const agents = [];
+  const N = 14;
+  for (let i = 0; i < N; i++) {
+    const off = (i / N);
+    const cyc = (phase * 2.2 + off) % 1;
+    let x, y, state;
+    if (i % 6 === 0) { // 待機 (アイドル)
+      state = 'wait';
+      x = 14; y = 30 + (i % 3) * 12;
+    } else if (i % 7 === 0) { // 梱包・出荷
+      state = 'pack';
+      x = 74 + Math.sin(cyc * Math.PI) * 16;
+      y = 22 + cyc * 56;
+    } else { // ピッカー: 移動→ピック→運搬 を繰り返す
+      const lane = i % 5;
+      const seg = (cyc * 3) % 1;
+      const which = Math.floor(cyc * 3) % 3;
+      state = which === 0 ? 'move' : which === 1 ? 'pick' : 'carry';
+      const up = Math.floor(cyc * 5) % 2 === 0;
+      x = 28 + lane * 8 + Math.sin(cyc * 30) * 0.6;
+      y = up ? 12 + seg * 50 : 62 - seg * 50;
+    }
+    agents.push({ x, y, state, i });
+  }
+  return (
+    <section id="view2d" className="fade-in">
+      <div className="stack-3">
+        <div className="sim2d">
+          <div className="sim2d__grid" />
+          {ZONES.map((z) => (
+            <div key={z.id} className="wh-zone" style={{ left: z.x + '%', top: z.y + '%', width: z.w + '%', height: z.h + '%',
+              background: z.tint, borderColor: z.line, opacity: .85 }}>
+              <span className="wh-zone__tag">{z.label}</span>
+            </div>
+          ))}
+          {[0, 1, 2, 3, 4].map((c) => (
+            <div key={c} className="rackbar" style={{ left: (26 + c * 8) + '%', top: '12%', width: '4.5%', height: '50%' }} />
+          ))}
+          {/* heat at bottleneck (ピッキング) */}
+          <div className="heat" style={{ left: '38%', top: '78%', width: 120, height: 80, background: 'var(--warn)' }} />
+          {agents.map((a) => (
+            <div key={a.i} className={'agent agent--' + a.state}
+              style={{ left: a.x + '%', top: a.y + '%' }} />
+          ))}
+        </div>
+        <div className="row" style={{ flexWrap: 'wrap', gap: 14 }}>
+          {SCENARIO.agentLegend.map((g) => (
+            <span key={g.id} className="row" style={{ gap: 6, fontSize: 12, color: 'var(--ink-secondary)' }}>
+              <span className={'agent agent--' + g.cls} style={{ position: 'static', transform: 'none' }} />{g.name}
+            </span>
+          ))}
+          <span className="grow" />
+          <span className="tag" style={{ background: 'var(--warn-tint)', color: 'var(--warn-ink)' }}>
+            <Icon name="alert" size={12} />色の濃い領域＝混雑ポイント</span>
+        </div>
+        <ProcessStrip steps={steps} activeId={activeId} />
+      </div>
+    </section>
+  );
+}
+
+/* ----- 3D ----------------------------------------------------------------- */
+function View3D({ steps, activeId, mode }) {
+  return (
+    <section id="view3d" className="fade-in">
+      <div className="stack-3">
+        <div className="view3d-hero">
+          <div className="ph" style={{ position: 'absolute', inset: 16 }}>
+            <div className="col" style={{ alignItems: 'center', gap: 10 }}>
+              <Icon name="cube" size={34} />
+              <span className="ph__txt">3D ウォークスルー（{mode || 'ナチュラル'}・レンダリング領域）</span>
+              <span style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>マウスドラッグで視点移動・スクロールでズーム</span>
+            </div>
+          </div>
+          <div style={{ position: 'absolute', left: 16, top: 16 }} className="row">
+            <span className="tag" style={{ background: '#fff' }}><Icon name="cube" size={12} />等角ビュー</span>
+            <span className="tag" style={{ background: '#fff' }}>棚 5列 · 6.0m</span>
+            <span className="tag" style={{ background: '#fff' }}>表現：{mode || 'ナチュラル'}</span>
+          </div>
+        </div>
+        <ProcessStrip steps={steps} activeId={activeId} />
+      </div>
+    </section>
+  );
+}
+
+Object.assign(window, { DesignTab, View2D, View3D, ZONES });
+
+</script>
+
+<script type="text/babel" data-src="tabs2.jsx">
+/* tabs2.jsx — Proposal (提案PNG), Compare (#compare), Export (#export), states */
+
+/* ----- PROPOSAL ----------------------------------------------------------- */
+function Proposal() {
+  const v = SCENARIO.verdict;
+  return (
+    <section className="fade-in">
+      <div className="proposal">
+        <div className="proposal__paper">
+          <div className="row">
+            <span className="brand__mark" style={{ width: 26, height: 26 }}>wh</span>
+            <div className="col">
+              <span style={{ fontSize: 16, fontWeight: 700 }}>倉庫オペレーション提案</span>
+              <span style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>{SCENARIO.project} ・ ピッキング増強の検討</span>
+            </div>
+            <span className="grow" />
+            <span className="tag" style={{ background: 'var(--ok-tint)', color: 'var(--ok-ink)' }}>
+              <Icon name="check" size={12} />対応可能</span>
+          </div>
+          <div className="verdict verdict--ok" style={{ margin: 0 }}>
+            <div className="verdict__badge"><Icon name="checkCircle" size={20} stroke={2} /></div>
+            <div className="verdict__body">
+              <div className="verdict__title" style={{ fontSize: 17 }}>{v.title}</div>
+              <div className="verdict__desc">{v.desc}</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {SCENARIO.kpis.filter((k) => k.band || k.value).slice(0, 4).map((k) => (
+              <div key={k.id} className="card card--pad" style={{ padding: 14 }}>
+                <span className="kpi__label"><Icon name={k.icon} size={13} />{k.label}</span>
+                <div className="kpi__val tnum" style={{ fontSize: 24, marginTop: 4 }}>
+                  {typeof k.value === 'number' ? k.value.toLocaleString() : k.value}<small>{k.unit}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+          <span className="grow" />
+          <div className="row" style={{ borderTop: '1px solid var(--line-hair)', paddingTop: 12 }}>
+            <ProvChip pct={0} />
+            <span className="grow" />
+            <span style={{ fontSize: 11, color: 'var(--ink-tertiary)' }}>whsim で作成 · run_0001</span>
+          </div>
+        </div>
+        <div className="inspector">
+          <div className="card card--pad">
+            <div className="section-h"><span className="section-h__title">書き出し</span></div>
+            <div className="stack-3">
+              <button className="btn btn--primary" style={{ width: '100%', justifyContent: 'center' }}>
+                <Icon name="image" size={15} />PNG（商談用 1枚）</button>
+              <button className="btn" style={{ width: '100%', justifyContent: 'center' }}>
+                <Icon name="copy" size={15} />画像をコピー</button>
+              <div className="row" style={{ gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--ink-secondary)' }}>サイズ</span>
+                <div className="seg" style={{ flex: 1 }}>
+                  <button className="seg__opt" aria-pressed={false}>16:9</button>
+                  <button className="seg__opt" aria-pressed={true}>A4</button>
+                  <button className="seg__opt" aria-pressed={false}>正方形</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="card card--pad" style={{ background: 'var(--bg-sunken)' }}>
+            <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+              <Icon name="sparkle" size={15} style={{ color: 'var(--accent)' }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>そのまま渡せます</span>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-secondary)' }}>
+              専門用語を省き、結論と数字だけにまとめた1枚です。お客様にそのまま共有できます。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ----- COMPARE ------------------------------------------------------------ */
+function DeltaPill({ delta, good, qualitative }) {
+  if (qualitative) return <span className="delta-pill delta-pill--good"><Icon name="trend" size={12} />改善</span>;
+  if (delta === 0) return <span className="delta-pill delta-pill--flat">±0</span>;
+  const cls = good ? 'delta-pill--good' : 'delta-pill--bad';
+  return (
+    <span className={'delta-pill ' + cls}>
+      <Icon name="trend" size={12} style={{ transform: delta < 0 ? 'scaleY(-1)' : 'none' }} />
+      {delta > 0 ? '+' : ''}{delta}%
+    </span>
+  );
+}
+
+function Compare() {
+  return (
+    <section id="compare" className="fade-in">
+      <div className="section-h">
+        <span className="section-h__title">現行と提案の比較</span>
+        <span className="section-h__sub">緑＝改善する項目</span>
+        <span className="section-h__act"><ProvChip pct={0} /></span>
+      </div>
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="ctable">
+          <thead>
+            <tr>
+              <th>項目</th>
+              <th className="num">現行</th>
+              <th className="num">提案後</th>
+              <th className="num">変化</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SCENARIO.compare.map((r) => (
+              <tr key={r.metric}>
+                <td className="ctable__metric">{r.metric}<small>{r.note}</small></td>
+                <td className="num ctable__cur">{r.cur}{r.unit && <span className="muted" style={{ fontSize: 11 }}> {r.unit}</span>}</td>
+                <td className="num ctable__new">{r.neu}{r.unit && <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> {r.unit}</span>}</td>
+                <td className="num"><DeltaPill delta={r.delta} good={r.good} qualitative={r.qualitative} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
+        ※ 数字はテンプレ仮値をもとに50回試算した中央値です。顧客データを取り込むと精度が上がります。
+      </p>
+    </section>
+  );
+}
+
+/* ----- EXPORT ------------------------------------------------------------- */
+const EXPORTS = [
+  { icon: 'image', title: '提案PNG（1枚）', desc: '結論と数字だけの商談用ビジュアル' },
+  { icon: 'file',  title: 'PDFレポート',     desc: '前提・比較・工程まで含む詳細版' },
+  { icon: 'film',  title: '2D動画（MP4）',   desc: '1日の動きを15秒に圧縮した動画' },
+  { icon: 'database', title: 'データ（CSV）', desc: '試算結果の生データを書き出し' },
+  { icon: 'link',  title: '共有リンク',       desc: '閲覧専用URL・パスワード付き' },
+  { icon: 'cube',  title: '3Dシーン',         desc: '等角ビューを画像連番で出力' },
+];
+function Export() {
+  return (
+    <section id="export" className="fade-in">
+      <div className="section-h">
+        <span className="section-h__title">書き出し</span>
+        <span className="section-h__sub">用途に合わせて選べます</span>
+      </div>
+      <div className="export-grid">
+        {EXPORTS.map((e) => (
+          <div key={e.title} className="card export-card" role="button" tabIndex={0}>
+            <div className="export-card__ico"><Icon name={e.icon} size={18} /></div>
+            <div className="col" style={{ gap: 3 }}>
+              <span className="export-card__title">{e.title}</span>
+              <span className="export-card__desc">{e.desc}</span>
+            </div>
+            <div className="row" style={{ color: 'var(--accent)', fontSize: 12, fontWeight: 600, gap: 5 }}>
+              <Icon name="download" size={13} />書き出す
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/* ----- STATES ------------------------------------------------------------- */
+function EmptyState({ onRun }) {
+  const steps = [
+    ['顧客データを取り込む（任意）', 'ZIP / CAD図面をドロップ。足りない分は仮値で補完'],
+    ['キー項目を5つ入れる', 'ピッカー人数・出荷オーダーなど'],
+    ['シミュレーション実行', '約8秒・50回試算で結論と数字が出ます'],
+  ];
+  return (
+    <div className="empty">
+      <div className="empty__inner">
+        <div className="empty__art"><Icon name="box" size={40} /></div>
+        <div>
+          <div className="empty__title">倉庫モデルを組み立てましょう</div>
+          <div className="empty__desc">入力は簡単、計算は本格的。データがなくても仮値ですぐに試せます。</div>
+        </div>
+        <div className="empty__steps">
+          {steps.map(([t, s], i) => (
+            <div key={i} className="empty__step">
+              <span className="empty__step-n">{i + 1}</span>
+              <span className="empty__step-t">{t}<small>{s}</small></span>
+            </div>
+          ))}
+        </div>
+        <button className="btn btn--primary" onClick={onRun} style={{ marginTop: 4 }}>
+          <Icon name="play" size={15} />サンプルで試す
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const RUN_LOG = ['仮値テンプレを読み込み', '工程モデルを構築', '50回の試算を実行', 'ボトルネックを判定', '結果をまとめる'];
+function RunningState({ progress }) {
+  const stepIdx = Math.min(RUN_LOG.length - 1, Math.floor(progress / 20));
+  return (
+    <div className="running">
+      <div className="running__inner">
+        <div className="spinner" style={{ width: 26, height: 26, borderWidth: 3 }} />
+        <div>
+          <div className="running__title">シミュレーション中…</div>
+          <div className="running__sub">1日ぶんの倉庫の動きを再現しています</div>
+        </div>
+        <div className="run-progress"><b style={{ width: progress + '%' }} /></div>
+        <div className="run-log">
+          {RUN_LOG.map((l, i) => (
+            <div key={i} className={'run-log__row ' + (i < stepIdx ? 'done' : i === stepIdx ? 'active' : '')}>
+              {i < stepIdx ? <Icon name="check" size={14} style={{ color: 'var(--ok)' }} />
+                : i === stepIdx ? <span className="spinner" /> : <span style={{ width: 14, height: 14, display: 'inline-block', borderRadius: '50%', border: '2px solid var(--line-strong)' }} />}
+              {l}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ onRetry }) {
+  return (
+    <div className="panel"><div className="panel__inner">
+      <div className="errbox">
+        <span className="errbox__ico"><Icon name="alertCircle" size={22} /></span>
+        <div className="grow">
+          <div className="errbox__title">取り込んだデータに不足があります</div>
+          <div className="errbox__desc">出荷データの「出荷日」列が読み取れませんでした。他の項目は仮値で補完して進められます。</div>
+          <div className="errbox__row">
+            <Icon name="file" size={14} style={{ color: 'var(--ink-tertiary)' }} />
+            <span className="mono" style={{ fontSize: 12 }}>顧客データ_2025.zip</span>
+            <span className="grow" />
+            <span className="tag" style={{ background: 'var(--bad-tint)', color: 'var(--bad-ink)' }}>列「出荷日」が空</span>
+          </div>
+          <div className="errbox__actions">
+            <button className="btn btn--primary btn--sm" onClick={onRetry}><Icon name="refresh" size={14} />列を指定して再取り込み</button>
+            <button className="btn btn--sm">仮値で進める</button>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  );
+}
+
+Object.assign(window, { Proposal, Compare, Export, EmptyState, RunningState, ErrorState, DeltaPill });
+
+</script>
+
+<script type="text/babel" data-src="app.jsx">
+/* app.jsx — App shell + state machine (empty / running / results / error) */
+
+const TABS = [
+  { id: 'design',  name: '設計',     icon: 'layout' },
+  { id: 'view2d',  name: '2D アニメーション', icon: 'film' },
+  { id: 'view3d',  name: '3D',       icon: 'cube' },
+  { id: 'proposal',name: '提案PNG',  icon: 'image' },
+  { id: 'compare', name: '比較',     icon: 'columns' },
+  { id: 'export',  name: 'エクスポート', icon: 'download' },
+];
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "#2383E2",
+  "accentUsage": "面を活用",
+  "kpiDensity": "詳細"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [status, setStatus] = useState('results'); // empty | running | results | error
+  const [tab, setTab] = useState('design');
+  const [fields, setFields] = useState(SCENARIO.fields.map((f) => ({ ...f })));
+  const [file, setFile] = useState(null); // 初期は取り込みなし（実データ 0%）
+  const [render3d, setRender3d] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  // transport
+  const [playing, setPlaying] = useState(false);
+  const [t, setT] = useState(() => parseFloat(localStorage.getItem('whsim.t') || '0'));
+  const [speed, setSpeed] = useState(1);
+  const duration = 840; // 14h * 60 (営業 06:00–20:00)
+  const raf = useRef(0);
+
+  useEffect(() => { localStorage.setItem('whsim.t', String(t)); }, [t]);
+
+  // playback loop
+  useEffect(() => {
+    if (!playing || status !== 'results') return;
+    let last = performance.now();
+    const tick = (now) => {
+      const dt = (now - last) / 1000; last = now;
+      setT((prev) => {
+        const nv = prev + dt * speed * 14; // compress day
+        if (nv >= duration) { setPlaying(false); return duration; }
+        return nv;
+      });
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf.current);
+  }, [playing, speed, status]);
+
+  // running progress
+  useEffect(() => {
+    if (status !== 'running') return;
+    setProgress(0);
+    const iv = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 100) { clearInterval(iv); setTimeout(() => setStatus('results'), 250); return 100; }
+        return p + 4;
+      });
+    }, 90);
+    return () => clearInterval(iv);
+  }, [status]);
+
+  const setField = (id, value) => setFields((fs) => fs.map((f) => f.id === id ? { ...f, value } : f));
+  const run = useCallback(() => { setStatus('running'); }, []);
+  const apply = useCallback(() => { setStatus('running'); }, []);
+
+  // apply tweaks to document root
+  useEffect(() => {
+    const r = document.documentElement;
+    r.style.setProperty('--accent', tw.accent);
+    r.setAttribute('data-kpi-density', tw.kpiDensity === 'ミニマル' ? '0' : '1');
+    // accentUsage: ミニマル → mute tinted surfaces toward neutral
+    if (tw.accentUsage === 'ブルーのみ') {
+      r.style.setProperty('--accent-tint', '#F1F0ED');
+      r.style.setProperty('--accent-tint-2', '#EAE9E4');
+    } else {
+      r.style.removeProperty('--accent-tint');
+      r.style.removeProperty('--accent-tint-2');
+    }
+  }, [tw]);
+
+  // keyboard: cmd/ctrl+enter to run, space to play
+  useEffect(() => {
+    const h = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+      if (e.key === ' ' && status === 'results' && !/INPUT|TEXTAREA/.test(e.target.tagName)) {
+        e.preventDefault(); setPlaying((p) => !p);
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [run, status]);
+
+  // active process step follows transport
+  const activeStep = (() => {
+    const order = SCENARIO.process;
+    const idx = Math.floor((t / duration) * order.length) % order.length;
+    return order[idx].id;
+  })();
+
+  const tabLabel = TABS.find((x) => x.id === tab).name;
+  const showResults = status === 'results';
+
+  const renderMain = () => {
+    if (status === 'empty') return <div className="content"><EmptyState onRun={run} /></div>;
+    if (status === 'running') return <div className="content"><RunningState progress={progress} /></div>;
+    if (status === 'error') return (
+      <div className="content">
+        <div className="tabs" role="tablist">{TABS.map(renderTabBtn)}</div>
+        <ErrorState onRetry={() => setStatus('results')} />
+      </div>
+    );
+    return (
+      <div className="content">
+        <div className="tabs" role="tablist" aria-label="ビュー切り替え">
+          {TABS.map(renderTabBtn)}
+          {tab === 'view3d' && (
+            <div className="tab-aside">
+              <span className="tab-aside__label">3D表現</span>
+              <div className="selectwrap" style={{ width: 130 }}>
+                <select className="select select--sm" value={render3d} onChange={(e) => setRender3d(parseInt(e.target.value, 10))} aria-label="3D表現">
+                  {SCENARIO.render3d.map((o, i) => <option key={o} value={i}>{o}</option>)}
+                </select>
+                <span className="selectwrap__chev"><Icon name="chevDown" size={14} /></span>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="panel"><div className="panel__inner">
+          {tab === 'design'   && <DesignTab />}
+          {tab === 'view2d'   && <View2D t={t} duration={duration} steps={SCENARIO.process} activeId={activeStep} />}
+          {tab === 'view3d'   && <View3D steps={SCENARIO.process} activeId={activeStep} mode={SCENARIO.render3d[render3d]} />}
+          {tab === 'proposal' && <Proposal />}
+          {tab === 'compare'  && <Compare />}
+          {tab === 'export'   && <Export />}
+        </div></div>
+      </div>
+    );
+  };
+
+  function renderTabBtn(x) {
+    return (
+      <button key={x.id} className="tab" role="tab" aria-selected={tab === x.id} onClick={() => setTab(x.id)}>
+        <span className="tab__ico"><Icon name={x.icon} size={15} /></span>{x.name}
+      </button>
+    );
+  }
+
+  return (
+    <div className="app">
+      <Sidebar fields={fields} setField={setField} file={file}
+        onImport={() => setFile({ name: '顧客データ_2025.zip', rows: 184523 })} onApply={apply} onRun={run} status={status} canRun={true} />
+      <div className="main">
+        <Header tabLabel={tabLabel} />
+        {showResults && <VerdictBanner v={SCENARIO.verdict} />}
+        {renderMain()}
+        {showResults
+          ? <KpiBar kpis={SCENARIO.kpis} />
+          : <div className="kpibar" style={{ alignItems: 'center', justifyContent: 'center', color: 'var(--ink-tertiary)', fontSize: 13, gridAutoFlow: 'row' }}>実行すると、ここに結論の数字が並びます</div>}
+        {showResults
+          ? <TransportBar playing={playing} setPlaying={setPlaying} t={t} setT={setT} speed={speed} setSpeed={setSpeed} duration={duration} />
+          : <div className="transport" style={{ color: 'var(--ink-faint)', fontSize: 12, justifyContent: 'center' }}>再生バー</div>}
+      </div>
+      <DevStateSwitch status={status} setStatus={setStatus} />
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="アクセント" />
+        <TweakColor label="アクセント色" value={tw.accent}
+          options={['#2383E2', '#0B6E99', '#37352F', '#6940A5']}
+          onChange={(v) => setTweak('accent', v)} />
+        <TweakRadio label="使い方" value={tw.accentUsage}
+          options={['ブルーのみ', '面を活用']}
+          onChange={(v) => setTweak('accentUsage', v)} />
+        <TweakSection label="KPIカード" />
+        <TweakRadio label="情報量" value={tw.kpiDensity}
+          options={['ミニマル', '詳細']}
+          onChange={(v) => setTweak('kpiDensity', v)} />
+      </TweaksPanel>
+    </div>
+  );
+}
+
+/* small floating state switcher for the demo (空/実行中/エラー/結果) */
+function DevStateSwitch({ status, setStatus }) {
+  const opts = [['results', '結果'], ['empty', '空'], ['running', '実行中'], ['error', 'エラー']];
+  return (
+    <div style={{ position: 'fixed', right: 16, bottom: 150, zIndex: 40,
+      display: 'flex', gap: 3, background: 'var(--bg-app)', border: '1px solid var(--line-hair)',
+      borderRadius: 'var(--r-md)', padding: 4, boxShadow: 'var(--sh-md)' }}>
+      <span style={{ fontSize: 10, color: 'var(--ink-tertiary)', alignSelf: 'center', padding: '0 6px', fontWeight: 600 }}>状態</span>
+      {opts.map(([id, label]) => (
+        <button key={id} onClick={() => setStatus(id)} aria-pressed={status === id}
+          style={{ border: 'none', borderRadius: 5, padding: '5px 9px', fontSize: 12, fontWeight: 600,
+            background: status === id ? 'var(--ink-primary)' : 'transparent',
+            color: status === id ? '#fff' : 'var(--ink-secondary)' }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+</script>
+</body>
+</html>

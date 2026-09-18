@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whsim.local/schema/orders.schema.json",
+  "title": "orders.json (WHSIM_CONTRACTS v1.0 §2)",
+  "description": "Order line array. Contract: {order_id, loc_id, qty, ready_t?}",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["order_id", "loc_id", "qty"],
+    "additionalProperties": false,
+    "properties": {
+      "order_id": {"type": "string", "minLength": 1},
+      "loc_id": {"type": "string", "minLength": 1},
+      "qty": {"type": "number"},
+      "ready_t": {"type": "number", "minimum": 0}
+    }
+  }
+}

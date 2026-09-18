@@ -1,0 +1,150 @@
+{
+ "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+ "description": "whsim レイアウト・ヒートマップ (Power BI / Deneb 用 Vega-Lite spec)。1 rect = 間口1つ。データは whsim の GET /api/projects/{name}/layout.csv (間口1行) をそのまま Power BI に取り込み、Deneb の dataset にバインドする。■Y軸の向き: whsim のモデル座標は メートル・原点は倉庫の左下・y は上向き (render/png2d は昇順 ylim + origin='lower'、Web の 2D キャンバス render2d.js は canvas の y が下向きなので Y=(y)=>h-oy-y*sc と明示的に反転している)。Vega-Lite の quantitative y スケールは既定で range=[height,0] = 値が大きいほど上なので、この spec では reverse も reflectY も不要 = 提案PNG・3Dビューと同じ向きで描かれる。GeoJSON (layout.geojson) を geoshape + projection identity で描く場合だけは、identity 投影が data y をそのまま画面 y (下向き) に写すため 'reflectY': true が必要。■列の対応: x,y = 矩形の左下角(m) / w,d = 幅・奥行(m) / x2,y2 は transform で計算する。数値列が文字列として渡っても壊れないよう toNumber() を通している。■色: 既定は lines (出荷行数)。stock / picks に変えるときは color と tooltip の field を差し替える。■縦横比: width/height は倉庫の bounds (width:depth) に合わせて調整すること (Vega-Lite にアスペクト固定は無い)。■行数の上限: Deneb は Power BI の custom visual なので既定のデータ点上限 30,000 行。間口数がこれを超える倉庫は、per-level ではなく grouped モード (段を畳む) か、エリア/通路でフィルタしてから渡す。■未検証: この spec は実際の Power BI Desktop では未検証 (この環境に Power BI が無い)。JSON妥当性・スキーマ・列参照のみ自動テストで担保している (tests/test_geoexport.py)。 未計測(メトリクス null)の間口は灰色で描画する（Vega-Lite は不正な color の行をマークごと落とすため、条件色で拾う — 実測0とは色で区別される）。",
+ "width": 760,
+ "height": 380,
+ "data": {
+  "name": "dataset"
+ },
+ "transform": [
+  {
+   "calculate": "toNumber(datum.x)",
+   "as": "x0_m"
+  },
+  {
+   "calculate": "toNumber(datum.y)",
+   "as": "y0_m"
+  },
+  {
+   "calculate": "toNumber(datum.x) + toNumber(datum.w)",
+   "as": "x1_m"
+  },
+  {
+   "calculate": "toNumber(datum.y) + toNumber(datum.d)",
+   "as": "y1_m"
+  },
+  {
+   "calculate": "isValid(datum.lines) && datum.lines !== '' ? toNumber(datum.lines) : null",
+   "as": "metric"
+  }
+ ],
+ "mark": {
+  "type": "rect",
+  "stroke": "#ffffff",
+  "strokeWidth": 0.25,
+  "tooltip": true,
+  "invalid": null
+ },
+ "encoding": {
+  "x": {
+   "field": "x0_m",
+   "type": "quantitative",
+   "scale": {
+    "zero": false,
+    "nice": false
+   },
+   "axis": {
+    "title": "X (m)",
+    "grid": false,
+    "tickMinStep": 5
+   }
+  },
+  "x2": {
+   "field": "x1_m"
+  },
+  "y": {
+   "field": "y0_m",
+   "type": "quantitative",
+   "scale": {
+    "zero": false,
+    "nice": false
+   },
+   "axis": {
+    "title": "Y (m)",
+    "grid": false,
+    "tickMinStep": 5
+   }
+  },
+  "y2": {
+   "field": "y1_m"
+  },
+  "color": {
+   "condition": {
+    "test": "!isValid(datum.metric)",
+    "value": "#d9d9d9"
+   },
+   "field": "metric",
+   "type": "quantitative",
+   "scale": {
+    "scheme": "yelloworangered"
+   },
+   "legend": {
+    "title": "出荷行数"
+   }
+  },
+  "tooltip": [
+   {
+    "field": "location_id",
+    "type": "nominal",
+    "title": "間口"
+   },
+   {
+    "field": "level",
+    "type": "ordinal",
+    "title": "段"
+   },
+   {
+    "field": "area",
+    "type": "nominal",
+    "title": "エリア"
+   },
+   {
+    "field": "rack_no",
+    "type": "nominal",
+    "title": "棚"
+   },
+   {
+    "field": "aisle",
+    "type": "nominal",
+    "title": "通路"
+   },
+   {
+    "field": "metric",
+    "type": "quantitative",
+    "title": "出荷行数"
+   }
+  ]
+ },
+ "config": {
+  "view": {
+   "stroke": null
+  },
+  "axis": {
+   "labelFontSize": 10,
+   "titleFontSize": 11
+  }
+ },
+ "usermeta": {
+  "whsim": {
+   "source": "GET /api/projects/{name}/layout.csv",
+   "dataset_columns": [
+    "location_id",
+    "x",
+    "y",
+    "w",
+    "d",
+    "level",
+    "area",
+    "rack_no",
+    "aisle",
+    "lines",
+    "picks",
+    "stock"
+   ],
+   "y_axis": "model y is UP (origin bottom-left); a plain quantitative scale already draws it that way — no reverse / reflectY here",
+   "geoshape_note": "layout.geojson via geoshape + projection {type: identity, reflectY: true}",
+   "row_limit": 30000,
+   "verified_in_power_bi": false
+  }
+ }
+}

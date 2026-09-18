@@ -1,0 +1,311 @@
+// pickrate.js — ③設計「生産性試算」: 解析的(動作時間)なピッキング生産性.
+// SLC流のステップ②: レイアウト幾何(MapMaker距離) × 動作時間で、オーダー/マルチ/
+// トータルの生産性を DES なしで即比較する。重厚なシミュレーション(④検証)の前に、
+// 「どの作業方式が速いか」をこの場で当てる。EN comments / JA UI.
+import { esc, api } from './util.js';
+import * as echarts from 'echarts';
+// 採用は ④検証「作業方法比較」と同じ 5軸 work 辞書・同じ書込みパス・同じ検証を使う
+// （方式ごとの work は workcompare.js の WORK_PRESETS = サーバの
+// whsim.workmethod.METHOD_PRESETS の写しが唯一の口。ここで別に捏造しない）。
+import { WORK_PRESETS } from './workcompare.js';
+import { applyEdits } from './adopt.js';
+
+const fmt = (n, d = 0) => (n == null || isNaN(n) ? '—'
+  : Number(n).toLocaleString('ja-JP', { minimumFractionDigits: d, maximumFractionDigits: d }));
+const yen = (n) => (n == null || isNaN(n) ? '—' : '¥' + Math.round(n).toLocaleString('ja-JP'));
+const reduceMotion = () => matchMedia('(prefers-reduced-motion:reduce)').matches;
+function tok(name, fb) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fb;
+}
+
+const METHOD_C = { discrete: '#9aa4b0', multi: '#1f78b4', zone: '#33a02c', total: '#e6550d' };
+
+// editable motion-time standards (query params to GET /pickrate).
+const FIELDS = [
+  { key: 'walk_speed_mps', label: '歩行速度', unit: 'm/s', def: 1.2, step: 0.1 },
+  { key: 'handle_s_per_line', label: '手扱い/行', unit: '秒', def: 6, step: 0.5 },
+  { key: 'sort_s_per_line', label: '仕分け/行', unit: '秒', def: 4, step: 0.5 },
+  { key: 'labour_cost_per_hour', label: '人件費', unit: '円/h', def: 2000, step: 100 },
+];
+
+function injectStyle() {
+  if (document.getElementById('pr-style')) return;
+  const s = document.createElement('style');
+  s.id = 'pr-style';
+  s.textContent = `
+  .pr{display:flex;flex-direction:column;gap:14px;width:100%;padding:4px 2px 24px}
+  .pr-head h2{margin:0 0 2px;font-size:18px;color:var(--ink-primary)}
+  .pr-head .sub{font-size:12px;color:var(--ink-tertiary)}
+  .pr-geo{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--ink-secondary);
+    background:var(--bg-sunken);border:1px solid var(--line-hair);border-radius:10px;padding:8px 12px}
+  .pr-geo b{color:var(--ink-primary);font-variant-numeric:tabular-nums}
+  .pr-knobs{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+  .pr-knob{display:flex;flex-direction:column;gap:3px}
+  .pr-knob label{font-size:11px;color:var(--ink-tertiary)}
+  .pr-knob input{width:96px;padding:6px 8px;border:1px solid var(--line-hair);border-radius:8px;
+    background:var(--bg-app);color:var(--ink-primary);font:inherit;font-size:14px;text-align:right}
+  .pr-knob input:focus{outline:none;border-color:var(--accent,#16C0DE)}
+  /* 結論が先: the recommendation and the two things you can do about it sit
+     directly under the title, above the evidence (chart + table). */
+  .pr-verdict{display:flex;gap:14px;align-items:center;flex-wrap:wrap;
+    padding:12px 14px;border-radius:11px;border:1px solid var(--accent,#16C0DE);
+    background:color-mix(in srgb,var(--accent,#16C0DE) 12%,transparent);color:var(--ink-primary);font-size:13.5px;font-weight:600}
+  .pr-verdict .t{flex:1 1 320px;line-height:1.5}
+  .pr-verdict .a{display:flex;gap:8px;flex-wrap:wrap;flex:0 0 auto}
+  .pr-chart{width:100%;height:300px;background:var(--bg-panel);border:1px solid var(--line-hair);border-radius:12px}
+  .pr-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .pr-tbl th,.pr-tbl td{padding:8px 10px;border-bottom:1px solid var(--line-hair);text-align:right;font-variant-numeric:tabular-nums}
+  .pr-tbl th{color:var(--ink-secondary);font-weight:700;text-align:right;border-bottom:2px solid var(--line-hair);
+    vertical-align:bottom;white-space:nowrap}
+  /* Which direction is "good" is not obvious for a column called 移動 m/件 —
+     say it once in the header instead of in a paragraph under the table. */
+  .pr-tbl th i{font-style:normal;font-weight:700;font-size:11px;color:var(--ink-tertiary)}
+  .pr-tbl td.l,.pr-tbl th.l{text-align:left;white-space:nowrap}
+  .pr-tbl td.a,.pr-tbl th.a{text-align:right;white-space:nowrap}
+  .pr-tbl tr.best{background:color-mix(in srgb,var(--accent,#16C0DE) 10%,transparent)}
+  .pr-adopt{padding:5px 11px;border-radius:8px;border:1px solid var(--line-strong,rgba(120,140,170,.32));
+    background:transparent;color:var(--ink-secondary);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+  .pr-adopt:hover{border-color:var(--accent,#16C0DE);color:var(--accent,#16C0DE)}
+  .pr-tbl tr.best .pr-adopt{border-color:var(--accent,#16C0DE);color:var(--accent,#16C0DE);font-weight:700}
+  .pr-adv{border:1px solid var(--line-hair);border-radius:11px;background:var(--bg-sunken);padding:8px 12px}
+  .pr-adv>summary{cursor:pointer;font-size:12.5px;color:var(--ink-secondary);font-weight:600;list-style:revert}
+  .pr-adv[open]>summary{margin-bottom:10px}
+  .pr-dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  .pr-tag{font-size:10px;font-weight:700;color:#fff;border-radius:999px;padding:1px 7px;margin-left:6px}
+  .pr-empty{padding:16px;border:1px dashed var(--line-strong);border-radius:12px;background:var(--bg-panel);
+    color:var(--ink-secondary);font-size:13px}
+  .pr-btn{padding:8px 14px;border-radius:9px;border:1px solid var(--accent,#16C0DE);
+    background:color-mix(in srgb,var(--accent,#16C0DE) 14%,transparent);color:var(--accent,#16C0DE);font-weight:700;cursor:pointer;font:inherit}
+  .pr-btn.primary{background:var(--accent,#16C0DE);color:var(--ink-onAccent,#04222c);border:none}
+  `;
+  document.head.appendChild(s);
+}
+
+export function mountPickrate(el, opts = {}) {
+  injectStyle();
+  const getProject = opts.getProject || (() => null);
+  const toast = opts.toast || (() => {});
+  const root = document.createElement('div');
+  root.className = 'pr';
+  el.innerHTML = '';
+  el.appendChild(root);
+
+  let chart = null;
+  let ro = null;
+  let data = null;
+  let debounce = 0;
+  const knob = {};
+  FIELDS.forEach((f) => { knob[f.key] = f.def; });
+
+  function disposeChart() { if (chart) { try { chart.dispose(); } catch (_) { /* noop */ } chart = null; } }
+
+  async function load() {
+    const name = getProject();
+    if (!name) { renderEmpty('プロジェクトを開くと、レイアウトから生産性を試算します。'); return; }
+    const q = FIELDS.map((f) => `${f.key}=${encodeURIComponent(knob[f.key])}`).join('&');
+    try {
+      data = await api(`/api/projects/${encodeURIComponent(name)}/pickrate?${q}`);
+      render();
+    } catch (e) {
+      renderEmpty('試算に失敗しました: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  function renderEmpty(msg) {
+    disposeChart();
+    root.innerHTML = `<div class="pr-head"><h2>生産性試算</h2>
+      <div class="sub">MapMaker距離×動作時間で、シングル/マルチ/トータルを解析（実行不要）</div></div>
+      <div class="pr-empty">${esc(msg)}</div>`;
+  }
+
+  function scatterOption() {
+    const ink = tok('--ink-primary', '#222'), line = tok('--line-hair', '#ddd');
+    const ink2 = tok('--ink-secondary', '#556');
+    const ms = data.methods;
+    return {
+      animation: !reduceMotion(),
+      grid: { left: 58, right: 22, top: 22, bottom: 46 },
+      tooltip: {
+        trigger: 'item',
+        formatter: (d) => {
+          const m = ms[d.dataIndex];
+          return `<b>${m.label}</b><br>移動 ${m.travel_per_order_m} m/件<br>`
+            + `仕分け ${m.sort_per_order_s} 秒/件<br>生産性 ${m.lines_per_hour} 行/h<br>`
+            + `¥${m.cost_per_order}/件`;
+        },
+      },
+      // Both axes are "less is better", and neither name said so — a scatter with
+      // unsigned axes makes the reader guess which corner wins. 左下＝速くて安い.
+      xAxis: { name: '← 移動 m/件（少ないほど良い）', nameLocation: 'middle', nameGap: 28,
+        nameTextStyle: { color: ink2, fontSize: 11 },
+        axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink2 },
+        splitLine: { lineStyle: { color: line, opacity: 0.4 } } },
+      yAxis: { name: '← 仕分け 秒/件（少ないほど良い）', nameLocation: 'middle', nameGap: 42,
+        nameTextStyle: { color: ink2, fontSize: 11 },
+        axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink2 },
+        splitLine: { lineStyle: { color: line, opacity: 0.4 } } },
+      series: [{
+        type: 'scatter',
+        symbolSize: (val) => Math.max(16, Math.min(60, 900 / Math.max(1, val[2]))),
+        data: ms.map((m) => ({
+          value: [m.travel_per_order_m, m.sort_per_order_s, m.cost_per_order],
+          itemStyle: {
+            color: METHOD_C[m.id] || '#888',
+            borderColor: m.id === data.recommend_id ? '#fff' : 'transparent',
+            borderWidth: m.id === data.recommend_id ? 3 : 0,
+          },
+          label: { show: true, formatter: m.label.replace(/（.*/, ''), position: 'top',
+            color: ink, fontSize: 11 },
+        })),
+      }],
+    };
+  }
+
+  function render() {
+    disposeChart();
+    const g = data.geometry;
+    const knobs = FIELDS.map((f) => `<div class="pr-knob"><label>${f.label}(${f.unit})</label>
+      <input type="number" step="${f.step}" data-k="${f.key}" value="${knob[f.key]}"/></div>`).join('');
+    const rows = data.methods.map((m) => {
+      const best = m.id === data.recommend_id;
+      return `<tr class="${best ? 'best' : ''}">
+        <td class="l"><span class="pr-dot" style="background:${METHOD_C[m.id] || '#888'}"></span>${esc(m.label)}${best ? '<span class="pr-tag" style="background:var(--accent,#16C0DE)">推奨</span>' : ''}</td>
+        <td>${fmt(m.lines_per_hour, 1)}</td>
+        <td>${fmt(m.orders_per_hour, 1)}</td>
+        <td>${fmt(m.travel_per_order_m, 1)}</td>
+        <td>${fmt(m.sort_per_order_s, 1)}</td>
+        <td>${yen(m.cost_per_order)}</td>
+        <td>${fmt(m.pickers)}</td>
+        <td class="a"><button type="button" class="pr-adopt" data-adopt="${esc(m.id)}">この方式で設計 →</button></td>
+      </tr>`;
+    }).join('');
+    const rec = (data.methods || []).find((m) => m.id === data.recommend_id);
+    root.innerHTML =
+      `<div class="pr-head"><h2>生産性試算 <span style="font-size:12px;font-weight:500;color:var(--ink-tertiary)">解析的・動作時間ベース</span></h2>
+        <div class="sub">レイアウトの幾何(MapMaker距離)×動作時間で全作業方式を即比較。重厚なDESは④検証で。</div></div>
+      ${data.has_layout ? '' : '<div class="pr-empty">保管エリア(棚)がまだ無いので床全面で概算しています。③設計でレイアウトを作るとより正確になります。</div>'}
+      <div class="pr-verdict">
+        <div class="t">${esc(data.verdict)}</div>
+        <div class="a">
+          ${rec ? `<button class="pr-btn" data-adopt="${esc(rec.id)}">この方式で設計 →</button>` : ''}
+          <button class="pr-btn primary" data-act="verify">DESで裏取り →</button>
+        </div>
+      </div>
+      <div class="pr-geo">
+        <span>ピック面積 <b>${fmt(g.pick_area_m2)}</b> ㎡</span>
+        <span>搬出距離 <b>${fmt(g.depot_dist_m, 1)}</b> m</span>
+        <span>平均 <b>${fmt(g.lines_per_order, 2)}</b> 行/オーダー</span>
+        <span>出荷 <b>${fmt(g.daily_pick_lines)}</b> 行/日</span>
+      </div>
+      <div class="pr-chart" data-chart></div>
+      <div style="overflow-x:auto"><table class="pr-tbl">
+        <thead><tr><th class="l">作業方式</th>
+          <th title="多いほど良い">行/h <i>↑</i></th><th title="多いほど良い">件/h <i>↑</i></th>
+          <th title="少ないほど良い">移動 m/件 <i>↓</i></th><th title="少ないほど良い">仕分け 秒/件 <i>↓</i></th>
+          <th title="少ないほど良い">¥/件 <i>↓</i></th><th title="少ないほど良い">必要人数 <i>↓</i></th>
+          <th class="a">採用</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="sub" style="font-size:11px;color:var(--ink-tertiary)">↑ 大きいほど良い ／ ↓ 小さいほど良い。<b style="color:var(--accent,#16C0DE)">推奨</b>行は解析的に最速の方式です。</div>
+      <details class="pr-adv"><summary>動作時間の前提を調整する（歩行速度・手扱い・仕分け・人件費）</summary>
+        <div class="pr-knobs">${knobs}</div>
+        <div class="sub" style="font-size:11px;color:var(--ink-tertiary);margin-top:8px">移動=√(面積×ピック数)の巡回近似＋搬出往復。バブル小=¥/件小。値は④検証のDESで裏取りします。</div>
+      </details>`;
+    wire();
+    const node = root.querySelector('[data-chart]');
+    chart = echarts.init(node, null, { renderer: 'canvas' });
+    chart.setOption(scatterOption());
+    if (!ro && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => { if (chart) chart.resize(); });
+      ro.observe(node);
+    }
+  }
+
+  function wire() {
+    root.querySelectorAll('input[data-k]').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        const k = inp.dataset.k; const v = parseFloat(inp.value);
+        if (!isNaN(v)) knob[k] = v;
+        clearTimeout(debounce);
+        debounce = setTimeout(load, 280);
+      });
+    });
+    root.querySelectorAll('[data-adopt]').forEach((b) => {
+      b.addEventListener('click', () => applyMethod(b.dataset.adopt));
+    });
+    const verify = root.querySelector('[data-act=verify]');
+    if (verify) verify.addEventListener('click', () => verifyWithDES());
+  }
+
+  // baton to ④検証「作業方法比較」: hand the analytic recommendation over so the
+  // DES comparison highlights it and reconciles 解析推奨 vs DES推奨.
+  function verifyWithDES() {
+    if (!data) return;
+    const rec = (data.methods || []).find((m) => m.id === data.recommend_id);
+    if (!rec) return;
+    document.dispatchEvent(new CustomEvent('whsim:workcompare-focus',
+      { detail: { id: rec.id, label: rec.label } }));
+  }
+
+  // 採用: write the chosen method's work axes onto the pick stage (POST /apply).
+  // Same verb, same label and the same per-row placement as ④検証「作業方法比較」 —
+  // the reader adopts a method the same way wherever the comparison is shown, and
+  // it is ANY row, not only the recommended one (a recommendation you cannot
+  // overrule is a verdict, not advice).
+  //
+  // 3つの点で ④ と同じでなければならない（どれか1つ欠けると「押しても何も起きない
+  // 嘘ボタン」になる）:
+  //   1. 書くのは `process.stages.{pick}.work` に **辞書ごと**。5軸のうち1軸だけを
+  //      `…work.orders_per_trip` で狙うと、work が null の工程では丸ごと skip される。
+  //   2. stage index は決め打ちせずモデルから id=="pick" を探す。
+  //   3. 応答の applied/skipped を検証してから成功と言う（adopt.js）。
+  async function applyMethod(id) {
+    const name = getProject();
+    if (!name || !data) return;
+    const rec = (data.methods || []).find((m) => m.id === id);
+    if (!rec) return;
+    // 5-axis work dict: the same catalogue ④ adopts from (server METHOD_PRESETS
+    // mirror), with the two axes THIS screen actually estimated on top — the
+    // table's まとめ数/採り方 and the model's must be the same numbers.
+    const preset = WORK_PRESETS[rec.id];
+    if (!preset) { toast('方式が見つかりません。', 'error'); return; }
+    const work = { ...preset };
+    if (rec.orders_per_trip != null) work.orders_per_trip = rec.orders_per_trip;
+    if (rec.consolidation) work.consolidation = rec.consolidation;
+    try {
+      const idx = await pickStageIndex(name);
+      if (idx < 0) { toast('ピッキング工程が見つかりませんでした。', 'error'); return; }
+      await applyEdits(name, { [`process.stages.${idx}.work`]: work });
+      toast(`「${rec.label}」をピッキング工程に反映しました。`, 'ok');
+      // The model on disk changed: re-open so 採点表・原価・設計 pick it up.
+      document.dispatchEvent(new CustomEvent('whsim:model-changed',
+        { detail: { nav: 'design' } }));
+    } catch (e) {
+      toast('採用できませんでした: ' + (e && e.message ? e.message : e), 'error');
+    }
+  }
+
+  // Resolve the ピッキング工程's index from the model (never hard-code 2 — a
+  // reordered or extended flow silently wrote onto the wrong stage).
+  async function pickStageIndex(name) {
+    try {
+      const full = await api(`/api/projects/${encodeURIComponent(name)}/full`);
+      const stages = (full && full.process && full.process.stages) || [];
+      return stages.findIndex((s) => s && s.id === 'pick');
+    } catch (_e) {
+      return -1;
+    }
+  }
+
+  load();
+
+  return {
+    dispose() {
+      disposeChart();
+      if (ro) { ro.disconnect(); ro = null; }
+      el.innerHTML = '';
+    },
+    refresh() { load(); },
+  };
+}

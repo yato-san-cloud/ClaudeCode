@@ -1,0 +1,6 @@
+# log-forge はナイーブ壁時計が契約 (WHSIM_CONTRACTS §3/§5: t0 はローカル壁時計、
+# Excel エポックも tz を持たない)。aware datetime に「直す」と契約違反になるため
+# DTZ 系はこのツール配下で無効化する。
+extend = "../../pyproject.toml"
+[lint]
+ignore = ["DTZ001", "DTZ005", "DTZ006", "DTZ007"]

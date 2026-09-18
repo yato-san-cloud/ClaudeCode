@@ -1,0 +1,7757 @@
+{
+  "meta": {
+    "schema_version": "0.1",
+    "name": "Apparel logistics / zone picking",
+    "units": {
+      "length": "m",
+      "time": "s",
+      "weight": "kg"
+    }
+  },
+  "layout": {
+    "bounds": {
+      "width": 80.0,
+      "depth": 45.0
+    },
+    "zones": [
+      {
+        "id": "packing",
+        "type": "packing",
+        "x": 0,
+        "y": 12,
+        "w": 14,
+        "h": 20,
+        "color": "#9ecae1"
+      },
+      {
+        "id": "shipping",
+        "type": "shipping",
+        "x": 0,
+        "y": 0,
+        "w": 14,
+        "h": 12,
+        "color": "#c7e9c0"
+      },
+      {
+        "id": "receiving",
+        "type": "receiving",
+        "x": 0,
+        "y": 32,
+        "w": 14,
+        "h": 13,
+        "color": "#fdd0a2"
+      },
+      {
+        "id": "storage",
+        "type": "storage",
+        "x": 16,
+        "y": 1,
+        "w": 63,
+        "h": 43,
+        "color": "#d9d9d9",
+        "rack": {
+          "col_spacing": 3.0,
+          "row_spacing": 2.0,
+          "margin": 1.5
+        }
+      }
+    ]
+  },
+  "locations": [
+    {
+      "id": "L0000",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0000",
+      "qty": 40
+    },
+    {
+      "id": "L0001",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0001",
+      "qty": 40
+    },
+    {
+      "id": "L0002",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0002",
+      "qty": 40
+    },
+    {
+      "id": "L0003",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0003",
+      "qty": 40
+    },
+    {
+      "id": "L0004",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0004",
+      "qty": 40
+    },
+    {
+      "id": "L0005",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0005",
+      "qty": 40
+    },
+    {
+      "id": "L0006",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0006",
+      "qty": 40
+    },
+    {
+      "id": "L0007",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0007",
+      "qty": 40
+    },
+    {
+      "id": "L0008",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0008",
+      "qty": 40
+    },
+    {
+      "id": "L0009",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0009",
+      "qty": 40
+    },
+    {
+      "id": "L0010",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0010",
+      "qty": 40
+    },
+    {
+      "id": "L0011",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0011",
+      "qty": 40
+    },
+    {
+      "id": "L0012",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0012",
+      "qty": 40
+    },
+    {
+      "id": "L0013",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0013",
+      "qty": 40
+    },
+    {
+      "id": "L0014",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0014",
+      "qty": 40
+    },
+    {
+      "id": "L0015",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0015",
+      "qty": 40
+    },
+    {
+      "id": "L0016",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0016",
+      "qty": 40
+    },
+    {
+      "id": "L0017",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0017",
+      "qty": 40
+    },
+    {
+      "id": "L0018",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0018",
+      "qty": 40
+    },
+    {
+      "id": "L0019",
+      "zone": "storage",
+      "x": 18.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0019",
+      "qty": 40
+    },
+    {
+      "id": "L0020",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0020",
+      "qty": 40
+    },
+    {
+      "id": "L0021",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0021",
+      "qty": 40
+    },
+    {
+      "id": "L0022",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0022",
+      "qty": 40
+    },
+    {
+      "id": "L0023",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0023",
+      "qty": 40
+    },
+    {
+      "id": "L0024",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0024",
+      "qty": 40
+    },
+    {
+      "id": "L0025",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0025",
+      "qty": 40
+    },
+    {
+      "id": "L0026",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0026",
+      "qty": 40
+    },
+    {
+      "id": "L0027",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0027",
+      "qty": 40
+    },
+    {
+      "id": "L0028",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0028",
+      "qty": 40
+    },
+    {
+      "id": "L0029",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0029",
+      "qty": 40
+    },
+    {
+      "id": "L0030",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0030",
+      "qty": 40
+    },
+    {
+      "id": "L0031",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0031",
+      "qty": 40
+    },
+    {
+      "id": "L0032",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0032",
+      "qty": 40
+    },
+    {
+      "id": "L0033",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0033",
+      "qty": 40
+    },
+    {
+      "id": "L0034",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0034",
+      "qty": 40
+    },
+    {
+      "id": "L0035",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0035",
+      "qty": 40
+    },
+    {
+      "id": "L0036",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0036",
+      "qty": 40
+    },
+    {
+      "id": "L0037",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0037",
+      "qty": 40
+    },
+    {
+      "id": "L0038",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0038",
+      "qty": 40
+    },
+    {
+      "id": "L0039",
+      "zone": "storage",
+      "x": 21.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0039",
+      "qty": 40
+    },
+    {
+      "id": "L0040",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0040",
+      "qty": 40
+    },
+    {
+      "id": "L0041",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0041",
+      "qty": 40
+    },
+    {
+      "id": "L0042",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0042",
+      "qty": 40
+    },
+    {
+      "id": "L0043",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0043",
+      "qty": 40
+    },
+    {
+      "id": "L0044",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0044",
+      "qty": 40
+    },
+    {
+      "id": "L0045",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0045",
+      "qty": 40
+    },
+    {
+      "id": "L0046",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0046",
+      "qty": 40
+    },
+    {
+      "id": "L0047",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0047",
+      "qty": 40
+    },
+    {
+      "id": "L0048",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0048",
+      "qty": 40
+    },
+    {
+      "id": "L0049",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0049",
+      "qty": 40
+    },
+    {
+      "id": "L0050",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0050",
+      "qty": 40
+    },
+    {
+      "id": "L0051",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0051",
+      "qty": 40
+    },
+    {
+      "id": "L0052",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0052",
+      "qty": 40
+    },
+    {
+      "id": "L0053",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0053",
+      "qty": 40
+    },
+    {
+      "id": "L0054",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0054",
+      "qty": 40
+    },
+    {
+      "id": "L0055",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0055",
+      "qty": 40
+    },
+    {
+      "id": "L0056",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0056",
+      "qty": 40
+    },
+    {
+      "id": "L0057",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0057",
+      "qty": 40
+    },
+    {
+      "id": "L0058",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0058",
+      "qty": 40
+    },
+    {
+      "id": "L0059",
+      "zone": "storage",
+      "x": 24.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0059",
+      "qty": 40
+    },
+    {
+      "id": "L0060",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0060",
+      "qty": 40
+    },
+    {
+      "id": "L0061",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0061",
+      "qty": 40
+    },
+    {
+      "id": "L0062",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0062",
+      "qty": 40
+    },
+    {
+      "id": "L0063",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0063",
+      "qty": 40
+    },
+    {
+      "id": "L0064",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0064",
+      "qty": 40
+    },
+    {
+      "id": "L0065",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0065",
+      "qty": 40
+    },
+    {
+      "id": "L0066",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0066",
+      "qty": 40
+    },
+    {
+      "id": "L0067",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0067",
+      "qty": 40
+    },
+    {
+      "id": "L0068",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0068",
+      "qty": 40
+    },
+    {
+      "id": "L0069",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0069",
+      "qty": 40
+    },
+    {
+      "id": "L0070",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0070",
+      "qty": 40
+    },
+    {
+      "id": "L0071",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0071",
+      "qty": 40
+    },
+    {
+      "id": "L0072",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0072",
+      "qty": 40
+    },
+    {
+      "id": "L0073",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0073",
+      "qty": 40
+    },
+    {
+      "id": "L0074",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0074",
+      "qty": 40
+    },
+    {
+      "id": "L0075",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0075",
+      "qty": 40
+    },
+    {
+      "id": "L0076",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0076",
+      "qty": 40
+    },
+    {
+      "id": "L0077",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0077",
+      "qty": 40
+    },
+    {
+      "id": "L0078",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0078",
+      "qty": 40
+    },
+    {
+      "id": "L0079",
+      "zone": "storage",
+      "x": 27.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0079",
+      "qty": 40
+    },
+    {
+      "id": "L0080",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0080",
+      "qty": 40
+    },
+    {
+      "id": "L0081",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0081",
+      "qty": 40
+    },
+    {
+      "id": "L0082",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0082",
+      "qty": 40
+    },
+    {
+      "id": "L0083",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0083",
+      "qty": 40
+    },
+    {
+      "id": "L0084",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0084",
+      "qty": 40
+    },
+    {
+      "id": "L0085",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0085",
+      "qty": 40
+    },
+    {
+      "id": "L0086",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0086",
+      "qty": 40
+    },
+    {
+      "id": "L0087",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0087",
+      "qty": 40
+    },
+    {
+      "id": "L0088",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0088",
+      "qty": 40
+    },
+    {
+      "id": "L0089",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0089",
+      "qty": 40
+    },
+    {
+      "id": "L0090",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0090",
+      "qty": 40
+    },
+    {
+      "id": "L0091",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0091",
+      "qty": 40
+    },
+    {
+      "id": "L0092",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0092",
+      "qty": 40
+    },
+    {
+      "id": "L0093",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0093",
+      "qty": 40
+    },
+    {
+      "id": "L0094",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0094",
+      "qty": 40
+    },
+    {
+      "id": "L0095",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0095",
+      "qty": 40
+    },
+    {
+      "id": "L0096",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0096",
+      "qty": 40
+    },
+    {
+      "id": "L0097",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0097",
+      "qty": 40
+    },
+    {
+      "id": "L0098",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0098",
+      "qty": 40
+    },
+    {
+      "id": "L0099",
+      "zone": "storage",
+      "x": 30.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0099",
+      "qty": 40
+    },
+    {
+      "id": "L0100",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0100",
+      "qty": 40
+    },
+    {
+      "id": "L0101",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0101",
+      "qty": 40
+    },
+    {
+      "id": "L0102",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0102",
+      "qty": 40
+    },
+    {
+      "id": "L0103",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0103",
+      "qty": 40
+    },
+    {
+      "id": "L0104",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0104",
+      "qty": 40
+    },
+    {
+      "id": "L0105",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0105",
+      "qty": 40
+    },
+    {
+      "id": "L0106",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0106",
+      "qty": 40
+    },
+    {
+      "id": "L0107",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0107",
+      "qty": 40
+    },
+    {
+      "id": "L0108",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0108",
+      "qty": 40
+    },
+    {
+      "id": "L0109",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0109",
+      "qty": 40
+    },
+    {
+      "id": "L0110",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0110",
+      "qty": 40
+    },
+    {
+      "id": "L0111",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0111",
+      "qty": 40
+    },
+    {
+      "id": "L0112",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0112",
+      "qty": 40
+    },
+    {
+      "id": "L0113",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0113",
+      "qty": 40
+    },
+    {
+      "id": "L0114",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0114",
+      "qty": 40
+    },
+    {
+      "id": "L0115",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0115",
+      "qty": 40
+    },
+    {
+      "id": "L0116",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0116",
+      "qty": 40
+    },
+    {
+      "id": "L0117",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0117",
+      "qty": 40
+    },
+    {
+      "id": "L0118",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0118",
+      "qty": 40
+    },
+    {
+      "id": "L0119",
+      "zone": "storage",
+      "x": 33.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0119",
+      "qty": 40
+    },
+    {
+      "id": "L0120",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0120",
+      "qty": 40
+    },
+    {
+      "id": "L0121",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0121",
+      "qty": 40
+    },
+    {
+      "id": "L0122",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0122",
+      "qty": 40
+    },
+    {
+      "id": "L0123",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0123",
+      "qty": 40
+    },
+    {
+      "id": "L0124",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0124",
+      "qty": 40
+    },
+    {
+      "id": "L0125",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0125",
+      "qty": 40
+    },
+    {
+      "id": "L0126",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0126",
+      "qty": 40
+    },
+    {
+      "id": "L0127",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0127",
+      "qty": 40
+    },
+    {
+      "id": "L0128",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0128",
+      "qty": 40
+    },
+    {
+      "id": "L0129",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0129",
+      "qty": 40
+    },
+    {
+      "id": "L0130",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0130",
+      "qty": 40
+    },
+    {
+      "id": "L0131",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0131",
+      "qty": 40
+    },
+    {
+      "id": "L0132",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0132",
+      "qty": 40
+    },
+    {
+      "id": "L0133",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0133",
+      "qty": 40
+    },
+    {
+      "id": "L0134",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0134",
+      "qty": 40
+    },
+    {
+      "id": "L0135",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0135",
+      "qty": 40
+    },
+    {
+      "id": "L0136",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0136",
+      "qty": 40
+    },
+    {
+      "id": "L0137",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0137",
+      "qty": 40
+    },
+    {
+      "id": "L0138",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0138",
+      "qty": 40
+    },
+    {
+      "id": "L0139",
+      "zone": "storage",
+      "x": 36.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0139",
+      "qty": 40
+    },
+    {
+      "id": "L0140",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0140",
+      "qty": 40
+    },
+    {
+      "id": "L0141",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0141",
+      "qty": 40
+    },
+    {
+      "id": "L0142",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0142",
+      "qty": 40
+    },
+    {
+      "id": "L0143",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0143",
+      "qty": 40
+    },
+    {
+      "id": "L0144",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0144",
+      "qty": 40
+    },
+    {
+      "id": "L0145",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0145",
+      "qty": 40
+    },
+    {
+      "id": "L0146",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0146",
+      "qty": 40
+    },
+    {
+      "id": "L0147",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0147",
+      "qty": 40
+    },
+    {
+      "id": "L0148",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0148",
+      "qty": 40
+    },
+    {
+      "id": "L0149",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0149",
+      "qty": 40
+    },
+    {
+      "id": "L0150",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0150",
+      "qty": 40
+    },
+    {
+      "id": "L0151",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0151",
+      "qty": 40
+    },
+    {
+      "id": "L0152",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0152",
+      "qty": 40
+    },
+    {
+      "id": "L0153",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0153",
+      "qty": 40
+    },
+    {
+      "id": "L0154",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0154",
+      "qty": 40
+    },
+    {
+      "id": "L0155",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0155",
+      "qty": 40
+    },
+    {
+      "id": "L0156",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0156",
+      "qty": 40
+    },
+    {
+      "id": "L0157",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0157",
+      "qty": 40
+    },
+    {
+      "id": "L0158",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0158",
+      "qty": 40
+    },
+    {
+      "id": "L0159",
+      "zone": "storage",
+      "x": 39.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0159",
+      "qty": 40
+    },
+    {
+      "id": "L0160",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0160",
+      "qty": 40
+    },
+    {
+      "id": "L0161",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0161",
+      "qty": 40
+    },
+    {
+      "id": "L0162",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0162",
+      "qty": 40
+    },
+    {
+      "id": "L0163",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0163",
+      "qty": 40
+    },
+    {
+      "id": "L0164",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0164",
+      "qty": 40
+    },
+    {
+      "id": "L0165",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0165",
+      "qty": 40
+    },
+    {
+      "id": "L0166",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0166",
+      "qty": 40
+    },
+    {
+      "id": "L0167",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0167",
+      "qty": 40
+    },
+    {
+      "id": "L0168",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0168",
+      "qty": 40
+    },
+    {
+      "id": "L0169",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0169",
+      "qty": 40
+    },
+    {
+      "id": "L0170",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0170",
+      "qty": 40
+    },
+    {
+      "id": "L0171",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0171",
+      "qty": 40
+    },
+    {
+      "id": "L0172",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0172",
+      "qty": 40
+    },
+    {
+      "id": "L0173",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0173",
+      "qty": 40
+    },
+    {
+      "id": "L0174",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0174",
+      "qty": 40
+    },
+    {
+      "id": "L0175",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0175",
+      "qty": 40
+    },
+    {
+      "id": "L0176",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0176",
+      "qty": 40
+    },
+    {
+      "id": "L0177",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0177",
+      "qty": 40
+    },
+    {
+      "id": "L0178",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0178",
+      "qty": 40
+    },
+    {
+      "id": "L0179",
+      "zone": "storage",
+      "x": 42.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0179",
+      "qty": 40
+    },
+    {
+      "id": "L0180",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0180",
+      "qty": 40
+    },
+    {
+      "id": "L0181",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0181",
+      "qty": 40
+    },
+    {
+      "id": "L0182",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0182",
+      "qty": 40
+    },
+    {
+      "id": "L0183",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0183",
+      "qty": 40
+    },
+    {
+      "id": "L0184",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0184",
+      "qty": 40
+    },
+    {
+      "id": "L0185",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0185",
+      "qty": 40
+    },
+    {
+      "id": "L0186",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0186",
+      "qty": 40
+    },
+    {
+      "id": "L0187",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0187",
+      "qty": 40
+    },
+    {
+      "id": "L0188",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0188",
+      "qty": 40
+    },
+    {
+      "id": "L0189",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0189",
+      "qty": 40
+    },
+    {
+      "id": "L0190",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0190",
+      "qty": 40
+    },
+    {
+      "id": "L0191",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0191",
+      "qty": 40
+    },
+    {
+      "id": "L0192",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0192",
+      "qty": 40
+    },
+    {
+      "id": "L0193",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0193",
+      "qty": 40
+    },
+    {
+      "id": "L0194",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0194",
+      "qty": 40
+    },
+    {
+      "id": "L0195",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0195",
+      "qty": 40
+    },
+    {
+      "id": "L0196",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0196",
+      "qty": 40
+    },
+    {
+      "id": "L0197",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0197",
+      "qty": 40
+    },
+    {
+      "id": "L0198",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0198",
+      "qty": 40
+    },
+    {
+      "id": "L0199",
+      "zone": "storage",
+      "x": 45.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0199",
+      "qty": 40
+    },
+    {
+      "id": "L0200",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0200",
+      "qty": 40
+    },
+    {
+      "id": "L0201",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0201",
+      "qty": 40
+    },
+    {
+      "id": "L0202",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0202",
+      "qty": 40
+    },
+    {
+      "id": "L0203",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0203",
+      "qty": 40
+    },
+    {
+      "id": "L0204",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0204",
+      "qty": 40
+    },
+    {
+      "id": "L0205",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0205",
+      "qty": 40
+    },
+    {
+      "id": "L0206",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0206",
+      "qty": 40
+    },
+    {
+      "id": "L0207",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0207",
+      "qty": 40
+    },
+    {
+      "id": "L0208",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0208",
+      "qty": 40
+    },
+    {
+      "id": "L0209",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0209",
+      "qty": 40
+    },
+    {
+      "id": "L0210",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0210",
+      "qty": 40
+    },
+    {
+      "id": "L0211",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0211",
+      "qty": 40
+    },
+    {
+      "id": "L0212",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0212",
+      "qty": 40
+    },
+    {
+      "id": "L0213",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0213",
+      "qty": 40
+    },
+    {
+      "id": "L0214",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0214",
+      "qty": 40
+    },
+    {
+      "id": "L0215",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0215",
+      "qty": 40
+    },
+    {
+      "id": "L0216",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0216",
+      "qty": 40
+    },
+    {
+      "id": "L0217",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0217",
+      "qty": 40
+    },
+    {
+      "id": "L0218",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0218",
+      "qty": 40
+    },
+    {
+      "id": "L0219",
+      "zone": "storage",
+      "x": 48.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0219",
+      "qty": 40
+    },
+    {
+      "id": "L0220",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0220",
+      "qty": 40
+    },
+    {
+      "id": "L0221",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0221",
+      "qty": 40
+    },
+    {
+      "id": "L0222",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0222",
+      "qty": 40
+    },
+    {
+      "id": "L0223",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0223",
+      "qty": 40
+    },
+    {
+      "id": "L0224",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0224",
+      "qty": 40
+    },
+    {
+      "id": "L0225",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0225",
+      "qty": 40
+    },
+    {
+      "id": "L0226",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0226",
+      "qty": 40
+    },
+    {
+      "id": "L0227",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0227",
+      "qty": 40
+    },
+    {
+      "id": "L0228",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0228",
+      "qty": 40
+    },
+    {
+      "id": "L0229",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0229",
+      "qty": 40
+    },
+    {
+      "id": "L0230",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0230",
+      "qty": 40
+    },
+    {
+      "id": "L0231",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0231",
+      "qty": 40
+    },
+    {
+      "id": "L0232",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0232",
+      "qty": 40
+    },
+    {
+      "id": "L0233",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0233",
+      "qty": 40
+    },
+    {
+      "id": "L0234",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0234",
+      "qty": 40
+    },
+    {
+      "id": "L0235",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0235",
+      "qty": 40
+    },
+    {
+      "id": "L0236",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0236",
+      "qty": 40
+    },
+    {
+      "id": "L0237",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0237",
+      "qty": 40
+    },
+    {
+      "id": "L0238",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0238",
+      "qty": 40
+    },
+    {
+      "id": "L0239",
+      "zone": "storage",
+      "x": 51.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0239",
+      "qty": 40
+    },
+    {
+      "id": "L0240",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0240",
+      "qty": 40
+    },
+    {
+      "id": "L0241",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0241",
+      "qty": 40
+    },
+    {
+      "id": "L0242",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0242",
+      "qty": 40
+    },
+    {
+      "id": "L0243",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0243",
+      "qty": 40
+    },
+    {
+      "id": "L0244",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0244",
+      "qty": 40
+    },
+    {
+      "id": "L0245",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0245",
+      "qty": 40
+    },
+    {
+      "id": "L0246",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0246",
+      "qty": 40
+    },
+    {
+      "id": "L0247",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0247",
+      "qty": 40
+    },
+    {
+      "id": "L0248",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0248",
+      "qty": 40
+    },
+    {
+      "id": "L0249",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0249",
+      "qty": 40
+    },
+    {
+      "id": "L0250",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0250",
+      "qty": 40
+    },
+    {
+      "id": "L0251",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0251",
+      "qty": 40
+    },
+    {
+      "id": "L0252",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0252",
+      "qty": 40
+    },
+    {
+      "id": "L0253",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0253",
+      "qty": 40
+    },
+    {
+      "id": "L0254",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0254",
+      "qty": 40
+    },
+    {
+      "id": "L0255",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0255",
+      "qty": 40
+    },
+    {
+      "id": "L0256",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0256",
+      "qty": 40
+    },
+    {
+      "id": "L0257",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0257",
+      "qty": 40
+    },
+    {
+      "id": "L0258",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0258",
+      "qty": 40
+    },
+    {
+      "id": "L0259",
+      "zone": "storage",
+      "x": 54.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0259",
+      "qty": 40
+    },
+    {
+      "id": "L0260",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0260",
+      "qty": 40
+    },
+    {
+      "id": "L0261",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0261",
+      "qty": 40
+    },
+    {
+      "id": "L0262",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0262",
+      "qty": 40
+    },
+    {
+      "id": "L0263",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0263",
+      "qty": 40
+    },
+    {
+      "id": "L0264",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0264",
+      "qty": 40
+    },
+    {
+      "id": "L0265",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0265",
+      "qty": 40
+    },
+    {
+      "id": "L0266",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0266",
+      "qty": 40
+    },
+    {
+      "id": "L0267",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0267",
+      "qty": 40
+    },
+    {
+      "id": "L0268",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0268",
+      "qty": 40
+    },
+    {
+      "id": "L0269",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0269",
+      "qty": 40
+    },
+    {
+      "id": "L0270",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0270",
+      "qty": 40
+    },
+    {
+      "id": "L0271",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0271",
+      "qty": 40
+    },
+    {
+      "id": "L0272",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0272",
+      "qty": 40
+    },
+    {
+      "id": "L0273",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0273",
+      "qty": 40
+    },
+    {
+      "id": "L0274",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0274",
+      "qty": 40
+    },
+    {
+      "id": "L0275",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0275",
+      "qty": 40
+    },
+    {
+      "id": "L0276",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0276",
+      "qty": 40
+    },
+    {
+      "id": "L0277",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0277",
+      "qty": 40
+    },
+    {
+      "id": "L0278",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0278",
+      "qty": 40
+    },
+    {
+      "id": "L0279",
+      "zone": "storage",
+      "x": 57.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0279",
+      "qty": 40
+    },
+    {
+      "id": "L0280",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0280",
+      "qty": 40
+    },
+    {
+      "id": "L0281",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0281",
+      "qty": 40
+    },
+    {
+      "id": "L0282",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0282",
+      "qty": 40
+    },
+    {
+      "id": "L0283",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0283",
+      "qty": 40
+    },
+    {
+      "id": "L0284",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0284",
+      "qty": 40
+    },
+    {
+      "id": "L0285",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0285",
+      "qty": 40
+    },
+    {
+      "id": "L0286",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0286",
+      "qty": 40
+    },
+    {
+      "id": "L0287",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0287",
+      "qty": 40
+    },
+    {
+      "id": "L0288",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0288",
+      "qty": 40
+    },
+    {
+      "id": "L0289",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0289",
+      "qty": 40
+    },
+    {
+      "id": "L0290",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0290",
+      "qty": 40
+    },
+    {
+      "id": "L0291",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0291",
+      "qty": 40
+    },
+    {
+      "id": "L0292",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0292",
+      "qty": 40
+    },
+    {
+      "id": "L0293",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0293",
+      "qty": 40
+    },
+    {
+      "id": "L0294",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0294",
+      "qty": 40
+    },
+    {
+      "id": "L0295",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0295",
+      "qty": 40
+    },
+    {
+      "id": "L0296",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0296",
+      "qty": 40
+    },
+    {
+      "id": "L0297",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0297",
+      "qty": 40
+    },
+    {
+      "id": "L0298",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0298",
+      "qty": 40
+    },
+    {
+      "id": "L0299",
+      "zone": "storage",
+      "x": 60.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0299",
+      "qty": 40
+    },
+    {
+      "id": "L0300",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0300",
+      "qty": 40
+    },
+    {
+      "id": "L0301",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0301",
+      "qty": 40
+    },
+    {
+      "id": "L0302",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0302",
+      "qty": 40
+    },
+    {
+      "id": "L0303",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0303",
+      "qty": 40
+    },
+    {
+      "id": "L0304",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0304",
+      "qty": 40
+    },
+    {
+      "id": "L0305",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0305",
+      "qty": 40
+    },
+    {
+      "id": "L0306",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0306",
+      "qty": 40
+    },
+    {
+      "id": "L0307",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0307",
+      "qty": 40
+    },
+    {
+      "id": "L0308",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0308",
+      "qty": 40
+    },
+    {
+      "id": "L0309",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0309",
+      "qty": 40
+    },
+    {
+      "id": "L0310",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0310",
+      "qty": 40
+    },
+    {
+      "id": "L0311",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0311",
+      "qty": 40
+    },
+    {
+      "id": "L0312",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0312",
+      "qty": 40
+    },
+    {
+      "id": "L0313",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0313",
+      "qty": 40
+    },
+    {
+      "id": "L0314",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0314",
+      "qty": 40
+    },
+    {
+      "id": "L0315",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0315",
+      "qty": 40
+    },
+    {
+      "id": "L0316",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0316",
+      "qty": 40
+    },
+    {
+      "id": "L0317",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0317",
+      "qty": 40
+    },
+    {
+      "id": "L0318",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0318",
+      "qty": 40
+    },
+    {
+      "id": "L0319",
+      "zone": "storage",
+      "x": 63.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0319",
+      "qty": 40
+    },
+    {
+      "id": "L0320",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0320",
+      "qty": 40
+    },
+    {
+      "id": "L0321",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0321",
+      "qty": 40
+    },
+    {
+      "id": "L0322",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0322",
+      "qty": 40
+    },
+    {
+      "id": "L0323",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0323",
+      "qty": 40
+    },
+    {
+      "id": "L0324",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0324",
+      "qty": 40
+    },
+    {
+      "id": "L0325",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0325",
+      "qty": 40
+    },
+    {
+      "id": "L0326",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0326",
+      "qty": 40
+    },
+    {
+      "id": "L0327",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0327",
+      "qty": 40
+    },
+    {
+      "id": "L0328",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0328",
+      "qty": 40
+    },
+    {
+      "id": "L0329",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0329",
+      "qty": 40
+    },
+    {
+      "id": "L0330",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0330",
+      "qty": 40
+    },
+    {
+      "id": "L0331",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0331",
+      "qty": 40
+    },
+    {
+      "id": "L0332",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0332",
+      "qty": 40
+    },
+    {
+      "id": "L0333",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0333",
+      "qty": 40
+    },
+    {
+      "id": "L0334",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0334",
+      "qty": 40
+    },
+    {
+      "id": "L0335",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0335",
+      "qty": 40
+    },
+    {
+      "id": "L0336",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0336",
+      "qty": 40
+    },
+    {
+      "id": "L0337",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0337",
+      "qty": 40
+    },
+    {
+      "id": "L0338",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0338",
+      "qty": 40
+    },
+    {
+      "id": "L0339",
+      "zone": "storage",
+      "x": 66.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0339",
+      "qty": 40
+    },
+    {
+      "id": "L0340",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0340",
+      "qty": 40
+    },
+    {
+      "id": "L0341",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0341",
+      "qty": 40
+    },
+    {
+      "id": "L0342",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0342",
+      "qty": 40
+    },
+    {
+      "id": "L0343",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0343",
+      "qty": 40
+    },
+    {
+      "id": "L0344",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0344",
+      "qty": 40
+    },
+    {
+      "id": "L0345",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0345",
+      "qty": 40
+    },
+    {
+      "id": "L0346",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0346",
+      "qty": 40
+    },
+    {
+      "id": "L0347",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0347",
+      "qty": 40
+    },
+    {
+      "id": "L0348",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0348",
+      "qty": 40
+    },
+    {
+      "id": "L0349",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0349",
+      "qty": 40
+    },
+    {
+      "id": "L0350",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0350",
+      "qty": 40
+    },
+    {
+      "id": "L0351",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0351",
+      "qty": 40
+    },
+    {
+      "id": "L0352",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0352",
+      "qty": 40
+    },
+    {
+      "id": "L0353",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0353",
+      "qty": 40
+    },
+    {
+      "id": "L0354",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0354",
+      "qty": 40
+    },
+    {
+      "id": "L0355",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0355",
+      "qty": 40
+    },
+    {
+      "id": "L0356",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0356",
+      "qty": 40
+    },
+    {
+      "id": "L0357",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0357",
+      "qty": 40
+    },
+    {
+      "id": "L0358",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0358",
+      "qty": 40
+    },
+    {
+      "id": "L0359",
+      "zone": "storage",
+      "x": 69.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0359",
+      "qty": 40
+    },
+    {
+      "id": "L0360",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0360",
+      "qty": 40
+    },
+    {
+      "id": "L0361",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0361",
+      "qty": 40
+    },
+    {
+      "id": "L0362",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0362",
+      "qty": 40
+    },
+    {
+      "id": "L0363",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0363",
+      "qty": 40
+    },
+    {
+      "id": "L0364",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0364",
+      "qty": 40
+    },
+    {
+      "id": "L0365",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0365",
+      "qty": 40
+    },
+    {
+      "id": "L0366",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0366",
+      "qty": 40
+    },
+    {
+      "id": "L0367",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0367",
+      "qty": 40
+    },
+    {
+      "id": "L0368",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0368",
+      "qty": 40
+    },
+    {
+      "id": "L0369",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0369",
+      "qty": 40
+    },
+    {
+      "id": "L0370",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0370",
+      "qty": 40
+    },
+    {
+      "id": "L0371",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0371",
+      "qty": 40
+    },
+    {
+      "id": "L0372",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0372",
+      "qty": 40
+    },
+    {
+      "id": "L0373",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0373",
+      "qty": 40
+    },
+    {
+      "id": "L0374",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0374",
+      "qty": 40
+    },
+    {
+      "id": "L0375",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0375",
+      "qty": 40
+    },
+    {
+      "id": "L0376",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0376",
+      "qty": 40
+    },
+    {
+      "id": "L0377",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0377",
+      "qty": 40
+    },
+    {
+      "id": "L0378",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0378",
+      "qty": 40
+    },
+    {
+      "id": "L0379",
+      "zone": "storage",
+      "x": 72.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0379",
+      "qty": 40
+    },
+    {
+      "id": "L0380",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 3.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0380",
+      "qty": 40
+    },
+    {
+      "id": "L0381",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 5.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0381",
+      "qty": 40
+    },
+    {
+      "id": "L0382",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 7.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0382",
+      "qty": 40
+    },
+    {
+      "id": "L0383",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 9.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0383",
+      "qty": 40
+    },
+    {
+      "id": "L0384",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 11.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0384",
+      "qty": 40
+    },
+    {
+      "id": "L0385",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 13.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0385",
+      "qty": 40
+    },
+    {
+      "id": "L0386",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 15.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0386",
+      "qty": 40
+    },
+    {
+      "id": "L0387",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 17.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0387",
+      "qty": 40
+    },
+    {
+      "id": "L0388",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 19.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0388",
+      "qty": 40
+    },
+    {
+      "id": "L0389",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 21.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0389",
+      "qty": 40
+    },
+    {
+      "id": "L0390",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 23.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0390",
+      "qty": 40
+    },
+    {
+      "id": "L0391",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 25.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0391",
+      "qty": 40
+    },
+    {
+      "id": "L0392",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 27.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0392",
+      "qty": 40
+    },
+    {
+      "id": "L0393",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 29.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0393",
+      "qty": 40
+    },
+    {
+      "id": "L0394",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 31.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0394",
+      "qty": 40
+    },
+    {
+      "id": "L0395",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 33.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0395",
+      "qty": 40
+    },
+    {
+      "id": "L0396",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 35.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0396",
+      "qty": 40
+    },
+    {
+      "id": "L0397",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 37.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0397",
+      "qty": 40
+    },
+    {
+      "id": "L0398",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 39.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0398",
+      "qty": 40
+    },
+    {
+      "id": "L0399",
+      "zone": "storage",
+      "x": 75.0,
+      "y": 41.0,
+      "type": "bin",
+      "capacity": 60,
+      "sku": "SKU0399",
+      "qty": 40
+    }
+  ],
+  "items": [
+    {
+      "sku": "SKU0000",
+      "name": "Item 0",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0000"
+    },
+    {
+      "sku": "SKU0001",
+      "name": "Item 1",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0001"
+    },
+    {
+      "sku": "SKU0002",
+      "name": "Item 2",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0002"
+    },
+    {
+      "sku": "SKU0003",
+      "name": "Item 3",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0003"
+    },
+    {
+      "sku": "SKU0004",
+      "name": "Item 4",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0004"
+    },
+    {
+      "sku": "SKU0005",
+      "name": "Item 5",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0005"
+    },
+    {
+      "sku": "SKU0006",
+      "name": "Item 6",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0006"
+    },
+    {
+      "sku": "SKU0007",
+      "name": "Item 7",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0007"
+    },
+    {
+      "sku": "SKU0008",
+      "name": "Item 8",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0008"
+    },
+    {
+      "sku": "SKU0009",
+      "name": "Item 9",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0009"
+    },
+    {
+      "sku": "SKU0010",
+      "name": "Item 10",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0010"
+    },
+    {
+      "sku": "SKU0011",
+      "name": "Item 11",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0011"
+    },
+    {
+      "sku": "SKU0012",
+      "name": "Item 12",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0012"
+    },
+    {
+      "sku": "SKU0013",
+      "name": "Item 13",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0013"
+    },
+    {
+      "sku": "SKU0014",
+      "name": "Item 14",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0014"
+    },
+    {
+      "sku": "SKU0015",
+      "name": "Item 15",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0015"
+    },
+    {
+      "sku": "SKU0016",
+      "name": "Item 16",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0016"
+    },
+    {
+      "sku": "SKU0017",
+      "name": "Item 17",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0017"
+    },
+    {
+      "sku": "SKU0018",
+      "name": "Item 18",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0018"
+    },
+    {
+      "sku": "SKU0019",
+      "name": "Item 19",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0019"
+    },
+    {
+      "sku": "SKU0020",
+      "name": "Item 20",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0020"
+    },
+    {
+      "sku": "SKU0021",
+      "name": "Item 21",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0021"
+    },
+    {
+      "sku": "SKU0022",
+      "name": "Item 22",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0022"
+    },
+    {
+      "sku": "SKU0023",
+      "name": "Item 23",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0023"
+    },
+    {
+      "sku": "SKU0024",
+      "name": "Item 24",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0024"
+    },
+    {
+      "sku": "SKU0025",
+      "name": "Item 25",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0025"
+    },
+    {
+      "sku": "SKU0026",
+      "name": "Item 26",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0026"
+    },
+    {
+      "sku": "SKU0027",
+      "name": "Item 27",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0027"
+    },
+    {
+      "sku": "SKU0028",
+      "name": "Item 28",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0028"
+    },
+    {
+      "sku": "SKU0029",
+      "name": "Item 29",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0029"
+    },
+    {
+      "sku": "SKU0030",
+      "name": "Item 30",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0030"
+    },
+    {
+      "sku": "SKU0031",
+      "name": "Item 31",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0031"
+    },
+    {
+      "sku": "SKU0032",
+      "name": "Item 32",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0032"
+    },
+    {
+      "sku": "SKU0033",
+      "name": "Item 33",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0033"
+    },
+    {
+      "sku": "SKU0034",
+      "name": "Item 34",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0034"
+    },
+    {
+      "sku": "SKU0035",
+      "name": "Item 35",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0035"
+    },
+    {
+      "sku": "SKU0036",
+      "name": "Item 36",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0036"
+    },
+    {
+      "sku": "SKU0037",
+      "name": "Item 37",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0037"
+    },
+    {
+      "sku": "SKU0038",
+      "name": "Item 38",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0038"
+    },
+    {
+      "sku": "SKU0039",
+      "name": "Item 39",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0039"
+    },
+    {
+      "sku": "SKU0040",
+      "name": "Item 40",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0040"
+    },
+    {
+      "sku": "SKU0041",
+      "name": "Item 41",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0041"
+    },
+    {
+      "sku": "SKU0042",
+      "name": "Item 42",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0042"
+    },
+    {
+      "sku": "SKU0043",
+      "name": "Item 43",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0043"
+    },
+    {
+      "sku": "SKU0044",
+      "name": "Item 44",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0044"
+    },
+    {
+      "sku": "SKU0045",
+      "name": "Item 45",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0045"
+    },
+    {
+      "sku": "SKU0046",
+      "name": "Item 46",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0046"
+    },
+    {
+      "sku": "SKU0047",
+      "name": "Item 47",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0047"
+    },
+    {
+      "sku": "SKU0048",
+      "name": "Item 48",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0048"
+    },
+    {
+      "sku": "SKU0049",
+      "name": "Item 49",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0049"
+    },
+    {
+      "sku": "SKU0050",
+      "name": "Item 50",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0050"
+    },
+    {
+      "sku": "SKU0051",
+      "name": "Item 51",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0051"
+    },
+    {
+      "sku": "SKU0052",
+      "name": "Item 52",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0052"
+    },
+    {
+      "sku": "SKU0053",
+      "name": "Item 53",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0053"
+    },
+    {
+      "sku": "SKU0054",
+      "name": "Item 54",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0054"
+    },
+    {
+      "sku": "SKU0055",
+      "name": "Item 55",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0055"
+    },
+    {
+      "sku": "SKU0056",
+      "name": "Item 56",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0056"
+    },
+    {
+      "sku": "SKU0057",
+      "name": "Item 57",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0057"
+    },
+    {
+      "sku": "SKU0058",
+      "name": "Item 58",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0058"
+    },
+    {
+      "sku": "SKU0059",
+      "name": "Item 59",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0059"
+    },
+    {
+      "sku": "SKU0060",
+      "name": "Item 60",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0060"
+    },
+    {
+      "sku": "SKU0061",
+      "name": "Item 61",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0061"
+    },
+    {
+      "sku": "SKU0062",
+      "name": "Item 62",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0062"
+    },
+    {
+      "sku": "SKU0063",
+      "name": "Item 63",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0063"
+    },
+    {
+      "sku": "SKU0064",
+      "name": "Item 64",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0064"
+    },
+    {
+      "sku": "SKU0065",
+      "name": "Item 65",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0065"
+    },
+    {
+      "sku": "SKU0066",
+      "name": "Item 66",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0066"
+    },
+    {
+      "sku": "SKU0067",
+      "name": "Item 67",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0067"
+    },
+    {
+      "sku": "SKU0068",
+      "name": "Item 68",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0068"
+    },
+    {
+      "sku": "SKU0069",
+      "name": "Item 69",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0069"
+    },
+    {
+      "sku": "SKU0070",
+      "name": "Item 70",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0070"
+    },
+    {
+      "sku": "SKU0071",
+      "name": "Item 71",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0071"
+    },
+    {
+      "sku": "SKU0072",
+      "name": "Item 72",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0072"
+    },
+    {
+      "sku": "SKU0073",
+      "name": "Item 73",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0073"
+    },
+    {
+      "sku": "SKU0074",
+      "name": "Item 74",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0074"
+    },
+    {
+      "sku": "SKU0075",
+      "name": "Item 75",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0075"
+    },
+    {
+      "sku": "SKU0076",
+      "name": "Item 76",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0076"
+    },
+    {
+      "sku": "SKU0077",
+      "name": "Item 77",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0077"
+    },
+    {
+      "sku": "SKU0078",
+      "name": "Item 78",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0078"
+    },
+    {
+      "sku": "SKU0079",
+      "name": "Item 79",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0079"
+    },
+    {
+      "sku": "SKU0080",
+      "name": "Item 80",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0080"
+    },
+    {
+      "sku": "SKU0081",
+      "name": "Item 81",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0081"
+    },
+    {
+      "sku": "SKU0082",
+      "name": "Item 82",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0082"
+    },
+    {
+      "sku": "SKU0083",
+      "name": "Item 83",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0083"
+    },
+    {
+      "sku": "SKU0084",
+      "name": "Item 84",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0084"
+    },
+    {
+      "sku": "SKU0085",
+      "name": "Item 85",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0085"
+    },
+    {
+      "sku": "SKU0086",
+      "name": "Item 86",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0086"
+    },
+    {
+      "sku": "SKU0087",
+      "name": "Item 87",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0087"
+    },
+    {
+      "sku": "SKU0088",
+      "name": "Item 88",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0088"
+    },
+    {
+      "sku": "SKU0089",
+      "name": "Item 89",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0089"
+    },
+    {
+      "sku": "SKU0090",
+      "name": "Item 90",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0090"
+    },
+    {
+      "sku": "SKU0091",
+      "name": "Item 91",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0091"
+    },
+    {
+      "sku": "SKU0092",
+      "name": "Item 92",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0092"
+    },
+    {
+      "sku": "SKU0093",
+      "name": "Item 93",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0093"
+    },
+    {
+      "sku": "SKU0094",
+      "name": "Item 94",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0094"
+    },
+    {
+      "sku": "SKU0095",
+      "name": "Item 95",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0095"
+    },
+    {
+      "sku": "SKU0096",
+      "name": "Item 96",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0096"
+    },
+    {
+      "sku": "SKU0097",
+      "name": "Item 97",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0097"
+    },
+    {
+      "sku": "SKU0098",
+      "name": "Item 98",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0098"
+    },
+    {
+      "sku": "SKU0099",
+      "name": "Item 99",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0099"
+    },
+    {
+      "sku": "SKU0100",
+      "name": "Item 100",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0100"
+    },
+    {
+      "sku": "SKU0101",
+      "name": "Item 101",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0101"
+    },
+    {
+      "sku": "SKU0102",
+      "name": "Item 102",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0102"
+    },
+    {
+      "sku": "SKU0103",
+      "name": "Item 103",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0103"
+    },
+    {
+      "sku": "SKU0104",
+      "name": "Item 104",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0104"
+    },
+    {
+      "sku": "SKU0105",
+      "name": "Item 105",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0105"
+    },
+    {
+      "sku": "SKU0106",
+      "name": "Item 106",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0106"
+    },
+    {
+      "sku": "SKU0107",
+      "name": "Item 107",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0107"
+    },
+    {
+      "sku": "SKU0108",
+      "name": "Item 108",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0108"
+    },
+    {
+      "sku": "SKU0109",
+      "name": "Item 109",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0109"
+    },
+    {
+      "sku": "SKU0110",
+      "name": "Item 110",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0110"
+    },
+    {
+      "sku": "SKU0111",
+      "name": "Item 111",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0111"
+    },
+    {
+      "sku": "SKU0112",
+      "name": "Item 112",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0112"
+    },
+    {
+      "sku": "SKU0113",
+      "name": "Item 113",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0113"
+    },
+    {
+      "sku": "SKU0114",
+      "name": "Item 114",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0114"
+    },
+    {
+      "sku": "SKU0115",
+      "name": "Item 115",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0115"
+    },
+    {
+      "sku": "SKU0116",
+      "name": "Item 116",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0116"
+    },
+    {
+      "sku": "SKU0117",
+      "name": "Item 117",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0117"
+    },
+    {
+      "sku": "SKU0118",
+      "name": "Item 118",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0118"
+    },
+    {
+      "sku": "SKU0119",
+      "name": "Item 119",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0119"
+    },
+    {
+      "sku": "SKU0120",
+      "name": "Item 120",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0120"
+    },
+    {
+      "sku": "SKU0121",
+      "name": "Item 121",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0121"
+    },
+    {
+      "sku": "SKU0122",
+      "name": "Item 122",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0122"
+    },
+    {
+      "sku": "SKU0123",
+      "name": "Item 123",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0123"
+    },
+    {
+      "sku": "SKU0124",
+      "name": "Item 124",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0124"
+    },
+    {
+      "sku": "SKU0125",
+      "name": "Item 125",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0125"
+    },
+    {
+      "sku": "SKU0126",
+      "name": "Item 126",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0126"
+    },
+    {
+      "sku": "SKU0127",
+      "name": "Item 127",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0127"
+    },
+    {
+      "sku": "SKU0128",
+      "name": "Item 128",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0128"
+    },
+    {
+      "sku": "SKU0129",
+      "name": "Item 129",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0129"
+    },
+    {
+      "sku": "SKU0130",
+      "name": "Item 130",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0130"
+    },
+    {
+      "sku": "SKU0131",
+      "name": "Item 131",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0131"
+    },
+    {
+      "sku": "SKU0132",
+      "name": "Item 132",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0132"
+    },
+    {
+      "sku": "SKU0133",
+      "name": "Item 133",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0133"
+    },
+    {
+      "sku": "SKU0134",
+      "name": "Item 134",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0134"
+    },
+    {
+      "sku": "SKU0135",
+      "name": "Item 135",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0135"
+    },
+    {
+      "sku": "SKU0136",
+      "name": "Item 136",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0136"
+    },
+    {
+      "sku": "SKU0137",
+      "name": "Item 137",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0137"
+    },
+    {
+      "sku": "SKU0138",
+      "name": "Item 138",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0138"
+    },
+    {
+      "sku": "SKU0139",
+      "name": "Item 139",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0139"
+    },
+    {
+      "sku": "SKU0140",
+      "name": "Item 140",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0140"
+    },
+    {
+      "sku": "SKU0141",
+      "name": "Item 141",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0141"
+    },
+    {
+      "sku": "SKU0142",
+      "name": "Item 142",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0142"
+    },
+    {
+      "sku": "SKU0143",
+      "name": "Item 143",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0143"
+    },
+    {
+      "sku": "SKU0144",
+      "name": "Item 144",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0144"
+    },
+    {
+      "sku": "SKU0145",
+      "name": "Item 145",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0145"
+    },
+    {
+      "sku": "SKU0146",
+      "name": "Item 146",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0146"
+    },
+    {
+      "sku": "SKU0147",
+      "name": "Item 147",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0147"
+    },
+    {
+      "sku": "SKU0148",
+      "name": "Item 148",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0148"
+    },
+    {
+      "sku": "SKU0149",
+      "name": "Item 149",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0149"
+    },
+    {
+      "sku": "SKU0150",
+      "name": "Item 150",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0150"
+    },
+    {
+      "sku": "SKU0151",
+      "name": "Item 151",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0151"
+    },
+    {
+      "sku": "SKU0152",
+      "name": "Item 152",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0152"
+    },
+    {
+      "sku": "SKU0153",
+      "name": "Item 153",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0153"
+    },
+    {
+      "sku": "SKU0154",
+      "name": "Item 154",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0154"
+    },
+    {
+      "sku": "SKU0155",
+      "name": "Item 155",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0155"
+    },
+    {
+      "sku": "SKU0156",
+      "name": "Item 156",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0156"
+    },
+    {
+      "sku": "SKU0157",
+      "name": "Item 157",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0157"
+    },
+    {
+      "sku": "SKU0158",
+      "name": "Item 158",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0158"
+    },
+    {
+      "sku": "SKU0159",
+      "name": "Item 159",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0159"
+    },
+    {
+      "sku": "SKU0160",
+      "name": "Item 160",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0160"
+    },
+    {
+      "sku": "SKU0161",
+      "name": "Item 161",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0161"
+    },
+    {
+      "sku": "SKU0162",
+      "name": "Item 162",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0162"
+    },
+    {
+      "sku": "SKU0163",
+      "name": "Item 163",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0163"
+    },
+    {
+      "sku": "SKU0164",
+      "name": "Item 164",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0164"
+    },
+    {
+      "sku": "SKU0165",
+      "name": "Item 165",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0165"
+    },
+    {
+      "sku": "SKU0166",
+      "name": "Item 166",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0166"
+    },
+    {
+      "sku": "SKU0167",
+      "name": "Item 167",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0167"
+    },
+    {
+      "sku": "SKU0168",
+      "name": "Item 168",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0168"
+    },
+    {
+      "sku": "SKU0169",
+      "name": "Item 169",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0169"
+    },
+    {
+      "sku": "SKU0170",
+      "name": "Item 170",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0170"
+    },
+    {
+      "sku": "SKU0171",
+      "name": "Item 171",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0171"
+    },
+    {
+      "sku": "SKU0172",
+      "name": "Item 172",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0172"
+    },
+    {
+      "sku": "SKU0173",
+      "name": "Item 173",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0173"
+    },
+    {
+      "sku": "SKU0174",
+      "name": "Item 174",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0174"
+    },
+    {
+      "sku": "SKU0175",
+      "name": "Item 175",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0175"
+    },
+    {
+      "sku": "SKU0176",
+      "name": "Item 176",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0176"
+    },
+    {
+      "sku": "SKU0177",
+      "name": "Item 177",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0177"
+    },
+    {
+      "sku": "SKU0178",
+      "name": "Item 178",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0178"
+    },
+    {
+      "sku": "SKU0179",
+      "name": "Item 179",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0179"
+    },
+    {
+      "sku": "SKU0180",
+      "name": "Item 180",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0180"
+    },
+    {
+      "sku": "SKU0181",
+      "name": "Item 181",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0181"
+    },
+    {
+      "sku": "SKU0182",
+      "name": "Item 182",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0182"
+    },
+    {
+      "sku": "SKU0183",
+      "name": "Item 183",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0183"
+    },
+    {
+      "sku": "SKU0184",
+      "name": "Item 184",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0184"
+    },
+    {
+      "sku": "SKU0185",
+      "name": "Item 185",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0185"
+    },
+    {
+      "sku": "SKU0186",
+      "name": "Item 186",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0186"
+    },
+    {
+      "sku": "SKU0187",
+      "name": "Item 187",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0187"
+    },
+    {
+      "sku": "SKU0188",
+      "name": "Item 188",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0188"
+    },
+    {
+      "sku": "SKU0189",
+      "name": "Item 189",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0189"
+    },
+    {
+      "sku": "SKU0190",
+      "name": "Item 190",
+      "abc_class": "A",
+      "pick_freq": 6.0,
+      "ts_per_unit": 1.0,
+      "case_qty": 6,
+      "default_location": "L0190"
+    },
+    {
+      "sku": "SKU0191",
+      "name": "Item 191",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0191"
+    },
+    {
+      "sku": "SKU0192",
+      "name": "Item 192",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0192"
+    },
+    {
+      "sku": "SKU0193",
+      "name": "Item 193",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0193"
+    },
+    {
+      "sku": "SKU0194",
+      "name": "Item 194",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0194"
+    },
+    {
+      "sku": "SKU0195",
+      "name": "Item 195",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0195"
+    },
+    {
+      "sku": "SKU0196",
+      "name": "Item 196",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0196"
+    },
+    {
+      "sku": "SKU0197",
+      "name": "Item 197",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0197"
+    },
+    {
+      "sku": "SKU0198",
+      "name": "Item 198",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0198"
+    },
+    {
+      "sku": "SKU0199",
+      "name": "Item 199",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0199"
+    },
+    {
+      "sku": "SKU0200",
+      "name": "Item 200",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0200"
+    },
+    {
+      "sku": "SKU0201",
+      "name": "Item 201",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0201"
+    },
+    {
+      "sku": "SKU0202",
+      "name": "Item 202",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0202"
+    },
+    {
+      "sku": "SKU0203",
+      "name": "Item 203",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0203"
+    },
+    {
+      "sku": "SKU0204",
+      "name": "Item 204",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0204"
+    },
+    {
+      "sku": "SKU0205",
+      "name": "Item 205",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0205"
+    },
+    {
+      "sku": "SKU0206",
+      "name": "Item 206",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0206"
+    },
+    {
+      "sku": "SKU0207",
+      "name": "Item 207",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0207"
+    },
+    {
+      "sku": "SKU0208",
+      "name": "Item 208",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0208"
+    },
+    {
+      "sku": "SKU0209",
+      "name": "Item 209",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0209"
+    },
+    {
+      "sku": "SKU0210",
+      "name": "Item 210",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0210"
+    },
+    {
+      "sku": "SKU0211",
+      "name": "Item 211",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0211"
+    },
+    {
+      "sku": "SKU0212",
+      "name": "Item 212",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0212"
+    },
+    {
+      "sku": "SKU0213",
+      "name": "Item 213",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0213"
+    },
+    {
+      "sku": "SKU0214",
+      "name": "Item 214",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0214"
+    },
+    {
+      "sku": "SKU0215",
+      "name": "Item 215",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0215"
+    },
+    {
+      "sku": "SKU0216",
+      "name": "Item 216",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0216"
+    },
+    {
+      "sku": "SKU0217",
+      "name": "Item 217",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0217"
+    },
+    {
+      "sku": "SKU0218",
+      "name": "Item 218",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0218"
+    },
+    {
+      "sku": "SKU0219",
+      "name": "Item 219",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0219"
+    },
+    {
+      "sku": "SKU0220",
+      "name": "Item 220",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0220"
+    },
+    {
+      "sku": "SKU0221",
+      "name": "Item 221",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0221"
+    },
+    {
+      "sku": "SKU0222",
+      "name": "Item 222",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0222"
+    },
+    {
+      "sku": "SKU0223",
+      "name": "Item 223",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0223"
+    },
+    {
+      "sku": "SKU0224",
+      "name": "Item 224",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0224"
+    },
+    {
+      "sku": "SKU0225",
+      "name": "Item 225",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0225"
+    },
+    {
+      "sku": "SKU0226",
+      "name": "Item 226",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0226"
+    },
+    {
+      "sku": "SKU0227",
+      "name": "Item 227",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0227"
+    },
+    {
+      "sku": "SKU0228",
+      "name": "Item 228",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0228"
+    },
+    {
+      "sku": "SKU0229",
+      "name": "Item 229",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0229"
+    },
+    {
+      "sku": "SKU0230",
+      "name": "Item 230",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0230"
+    },
+    {
+      "sku": "SKU0231",
+      "name": "Item 231",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0231"
+    },
+    {
+      "sku": "SKU0232",
+      "name": "Item 232",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0232"
+    },
+    {
+      "sku": "SKU0233",
+      "name": "Item 233",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0233"
+    },
+    {
+      "sku": "SKU0234",
+      "name": "Item 234",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0234"
+    },
+    {
+      "sku": "SKU0235",
+      "name": "Item 235",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0235"
+    },
+    {
+      "sku": "SKU0236",
+      "name": "Item 236",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0236"
+    },
+    {
+      "sku": "SKU0237",
+      "name": "Item 237",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0237"
+    },
+    {
+      "sku": "SKU0238",
+      "name": "Item 238",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0238"
+    },
+    {
+      "sku": "SKU0239",
+      "name": "Item 239",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0239"
+    },
+    {
+      "sku": "SKU0240",
+      "name": "Item 240",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0240"
+    },
+    {
+      "sku": "SKU0241",
+      "name": "Item 241",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0241"
+    },
+    {
+      "sku": "SKU0242",
+      "name": "Item 242",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0242"
+    },
+    {
+      "sku": "SKU0243",
+      "name": "Item 243",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0243"
+    },
+    {
+      "sku": "SKU0244",
+      "name": "Item 244",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0244"
+    },
+    {
+      "sku": "SKU0245",
+      "name": "Item 245",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0245"
+    },
+    {
+      "sku": "SKU0246",
+      "name": "Item 246",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0246"
+    },
+    {
+      "sku": "SKU0247",
+      "name": "Item 247",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0247"
+    },
+    {
+      "sku": "SKU0248",
+      "name": "Item 248",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0248"
+    },
+    {
+      "sku": "SKU0249",
+      "name": "Item 249",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0249"
+    },
+    {
+      "sku": "SKU0250",
+      "name": "Item 250",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0250"
+    },
+    {
+      "sku": "SKU0251",
+      "name": "Item 251",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0251"
+    },
+    {
+      "sku": "SKU0252",
+      "name": "Item 252",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0252"
+    },
+    {
+      "sku": "SKU0253",
+      "name": "Item 253",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0253"
+    },
+    {
+      "sku": "SKU0254",
+      "name": "Item 254",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0254"
+    },
+    {
+      "sku": "SKU0255",
+      "name": "Item 255",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0255"
+    },
+    {
+      "sku": "SKU0256",
+      "name": "Item 256",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0256"
+    },
+    {
+      "sku": "SKU0257",
+      "name": "Item 257",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0257"
+    },
+    {
+      "sku": "SKU0258",
+      "name": "Item 258",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0258"
+    },
+    {
+      "sku": "SKU0259",
+      "name": "Item 259",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0259"
+    },
+    {
+      "sku": "SKU0260",
+      "name": "Item 260",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0260"
+    },
+    {
+      "sku": "SKU0261",
+      "name": "Item 261",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0261"
+    },
+    {
+      "sku": "SKU0262",
+      "name": "Item 262",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0262"
+    },
+    {
+      "sku": "SKU0263",
+      "name": "Item 263",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0263"
+    },
+    {
+      "sku": "SKU0264",
+      "name": "Item 264",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0264"
+    },
+    {
+      "sku": "SKU0265",
+      "name": "Item 265",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0265"
+    },
+    {
+      "sku": "SKU0266",
+      "name": "Item 266",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0266"
+    },
+    {
+      "sku": "SKU0267",
+      "name": "Item 267",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0267"
+    },
+    {
+      "sku": "SKU0268",
+      "name": "Item 268",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0268"
+    },
+    {
+      "sku": "SKU0269",
+      "name": "Item 269",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0269"
+    },
+    {
+      "sku": "SKU0270",
+      "name": "Item 270",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0270"
+    },
+    {
+      "sku": "SKU0271",
+      "name": "Item 271",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0271"
+    },
+    {
+      "sku": "SKU0272",
+      "name": "Item 272",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0272"
+    },
+    {
+      "sku": "SKU0273",
+      "name": "Item 273",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0273"
+    },
+    {
+      "sku": "SKU0274",
+      "name": "Item 274",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0274"
+    },
+    {
+      "sku": "SKU0275",
+      "name": "Item 275",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0275"
+    },
+    {
+      "sku": "SKU0276",
+      "name": "Item 276",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0276"
+    },
+    {
+      "sku": "SKU0277",
+      "name": "Item 277",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0277"
+    },
+    {
+      "sku": "SKU0278",
+      "name": "Item 278",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0278"
+    },
+    {
+      "sku": "SKU0279",
+      "name": "Item 279",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0279"
+    },
+    {
+      "sku": "SKU0280",
+      "name": "Item 280",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0280"
+    },
+    {
+      "sku": "SKU0281",
+      "name": "Item 281",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0281"
+    },
+    {
+      "sku": "SKU0282",
+      "name": "Item 282",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0282"
+    },
+    {
+      "sku": "SKU0283",
+      "name": "Item 283",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0283"
+    },
+    {
+      "sku": "SKU0284",
+      "name": "Item 284",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0284"
+    },
+    {
+      "sku": "SKU0285",
+      "name": "Item 285",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0285"
+    },
+    {
+      "sku": "SKU0286",
+      "name": "Item 286",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0286"
+    },
+    {
+      "sku": "SKU0287",
+      "name": "Item 287",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0287"
+    },
+    {
+      "sku": "SKU0288",
+      "name": "Item 288",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0288"
+    },
+    {
+      "sku": "SKU0289",
+      "name": "Item 289",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0289"
+    },
+    {
+      "sku": "SKU0290",
+      "name": "Item 290",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0290"
+    },
+    {
+      "sku": "SKU0291",
+      "name": "Item 291",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0291"
+    },
+    {
+      "sku": "SKU0292",
+      "name": "Item 292",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0292"
+    },
+    {
+      "sku": "SKU0293",
+      "name": "Item 293",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0293"
+    },
+    {
+      "sku": "SKU0294",
+      "name": "Item 294",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0294"
+    },
+    {
+      "sku": "SKU0295",
+      "name": "Item 295",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0295"
+    },
+    {
+      "sku": "SKU0296",
+      "name": "Item 296",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0296"
+    },
+    {
+      "sku": "SKU0297",
+      "name": "Item 297",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0297"
+    },
+    {
+      "sku": "SKU0298",
+      "name": "Item 298",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0298"
+    },
+    {
+      "sku": "SKU0299",
+      "name": "Item 299",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0299"
+    },
+    {
+      "sku": "SKU0300",
+      "name": "Item 300",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0300"
+    },
+    {
+      "sku": "SKU0301",
+      "name": "Item 301",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0301"
+    },
+    {
+      "sku": "SKU0302",
+      "name": "Item 302",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0302"
+    },
+    {
+      "sku": "SKU0303",
+      "name": "Item 303",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0303"
+    },
+    {
+      "sku": "SKU0304",
+      "name": "Item 304",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0304"
+    },
+    {
+      "sku": "SKU0305",
+      "name": "Item 305",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0305"
+    },
+    {
+      "sku": "SKU0306",
+      "name": "Item 306",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0306"
+    },
+    {
+      "sku": "SKU0307",
+      "name": "Item 307",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0307"
+    },
+    {
+      "sku": "SKU0308",
+      "name": "Item 308",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0308"
+    },
+    {
+      "sku": "SKU0309",
+      "name": "Item 309",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0309"
+    },
+    {
+      "sku": "SKU0310",
+      "name": "Item 310",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0310"
+    },
+    {
+      "sku": "SKU0311",
+      "name": "Item 311",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0311"
+    },
+    {
+      "sku": "SKU0312",
+      "name": "Item 312",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0312"
+    },
+    {
+      "sku": "SKU0313",
+      "name": "Item 313",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0313"
+    },
+    {
+      "sku": "SKU0314",
+      "name": "Item 314",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0314"
+    },
+    {
+      "sku": "SKU0315",
+      "name": "Item 315",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0315"
+    },
+    {
+      "sku": "SKU0316",
+      "name": "Item 316",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0316"
+    },
+    {
+      "sku": "SKU0317",
+      "name": "Item 317",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0317"
+    },
+    {
+      "sku": "SKU0318",
+      "name": "Item 318",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0318"
+    },
+    {
+      "sku": "SKU0319",
+      "name": "Item 319",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0319"
+    },
+    {
+      "sku": "SKU0320",
+      "name": "Item 320",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0320"
+    },
+    {
+      "sku": "SKU0321",
+      "name": "Item 321",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0321"
+    },
+    {
+      "sku": "SKU0322",
+      "name": "Item 322",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0322"
+    },
+    {
+      "sku": "SKU0323",
+      "name": "Item 323",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0323"
+    },
+    {
+      "sku": "SKU0324",
+      "name": "Item 324",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0324"
+    },
+    {
+      "sku": "SKU0325",
+      "name": "Item 325",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0325"
+    },
+    {
+      "sku": "SKU0326",
+      "name": "Item 326",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0326"
+    },
+    {
+      "sku": "SKU0327",
+      "name": "Item 327",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0327"
+    },
+    {
+      "sku": "SKU0328",
+      "name": "Item 328",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0328"
+    },
+    {
+      "sku": "SKU0329",
+      "name": "Item 329",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0329"
+    },
+    {
+      "sku": "SKU0330",
+      "name": "Item 330",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0330"
+    },
+    {
+      "sku": "SKU0331",
+      "name": "Item 331",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0331"
+    },
+    {
+      "sku": "SKU0332",
+      "name": "Item 332",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0332"
+    },
+    {
+      "sku": "SKU0333",
+      "name": "Item 333",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0333"
+    },
+    {
+      "sku": "SKU0334",
+      "name": "Item 334",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0334"
+    },
+    {
+      "sku": "SKU0335",
+      "name": "Item 335",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0335"
+    },
+    {
+      "sku": "SKU0336",
+      "name": "Item 336",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0336"
+    },
+    {
+      "sku": "SKU0337",
+      "name": "Item 337",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0337"
+    },
+    {
+      "sku": "SKU0338",
+      "name": "Item 338",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0338"
+    },
+    {
+      "sku": "SKU0339",
+      "name": "Item 339",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0339"
+    },
+    {
+      "sku": "SKU0340",
+      "name": "Item 340",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0340"
+    },
+    {
+      "sku": "SKU0341",
+      "name": "Item 341",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0341"
+    },
+    {
+      "sku": "SKU0342",
+      "name": "Item 342",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0342"
+    },
+    {
+      "sku": "SKU0343",
+      "name": "Item 343",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0343"
+    },
+    {
+      "sku": "SKU0344",
+      "name": "Item 344",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0344"
+    },
+    {
+      "sku": "SKU0345",
+      "name": "Item 345",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0345"
+    },
+    {
+      "sku": "SKU0346",
+      "name": "Item 346",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0346"
+    },
+    {
+      "sku": "SKU0347",
+      "name": "Item 347",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0347"
+    },
+    {
+      "sku": "SKU0348",
+      "name": "Item 348",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0348"
+    },
+    {
+      "sku": "SKU0349",
+      "name": "Item 349",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0349"
+    },
+    {
+      "sku": "SKU0350",
+      "name": "Item 350",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0350"
+    },
+    {
+      "sku": "SKU0351",
+      "name": "Item 351",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0351"
+    },
+    {
+      "sku": "SKU0352",
+      "name": "Item 352",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0352"
+    },
+    {
+      "sku": "SKU0353",
+      "name": "Item 353",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0353"
+    },
+    {
+      "sku": "SKU0354",
+      "name": "Item 354",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0354"
+    },
+    {
+      "sku": "SKU0355",
+      "name": "Item 355",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0355"
+    },
+    {
+      "sku": "SKU0356",
+      "name": "Item 356",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0356"
+    },
+    {
+      "sku": "SKU0357",
+      "name": "Item 357",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0357"
+    },
+    {
+      "sku": "SKU0358",
+      "name": "Item 358",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0358"
+    },
+    {
+      "sku": "SKU0359",
+      "name": "Item 359",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0359"
+    },
+    {
+      "sku": "SKU0360",
+      "name": "Item 360",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0360"
+    },
+    {
+      "sku": "SKU0361",
+      "name": "Item 361",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0361"
+    },
+    {
+      "sku": "SKU0362",
+      "name": "Item 362",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0362"
+    },
+    {
+      "sku": "SKU0363",
+      "name": "Item 363",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0363"
+    },
+    {
+      "sku": "SKU0364",
+      "name": "Item 364",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0364"
+    },
+    {
+      "sku": "SKU0365",
+      "name": "Item 365",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0365"
+    },
+    {
+      "sku": "SKU0366",
+      "name": "Item 366",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0366"
+    },
+    {
+      "sku": "SKU0367",
+      "name": "Item 367",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0367"
+    },
+    {
+      "sku": "SKU0368",
+      "name": "Item 368",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0368"
+    },
+    {
+      "sku": "SKU0369",
+      "name": "Item 369",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0369"
+    },
+    {
+      "sku": "SKU0370",
+      "name": "Item 370",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0370"
+    },
+    {
+      "sku": "SKU0371",
+      "name": "Item 371",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0371"
+    },
+    {
+      "sku": "SKU0372",
+      "name": "Item 372",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0372"
+    },
+    {
+      "sku": "SKU0373",
+      "name": "Item 373",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0373"
+    },
+    {
+      "sku": "SKU0374",
+      "name": "Item 374",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0374"
+    },
+    {
+      "sku": "SKU0375",
+      "name": "Item 375",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0375"
+    },
+    {
+      "sku": "SKU0376",
+      "name": "Item 376",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0376"
+    },
+    {
+      "sku": "SKU0377",
+      "name": "Item 377",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0377"
+    },
+    {
+      "sku": "SKU0378",
+      "name": "Item 378",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0378"
+    },
+    {
+      "sku": "SKU0379",
+      "name": "Item 379",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0379"
+    },
+    {
+      "sku": "SKU0380",
+      "name": "Item 380",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0380"
+    },
+    {
+      "sku": "SKU0381",
+      "name": "Item 381",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0381"
+    },
+    {
+      "sku": "SKU0382",
+      "name": "Item 382",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0382"
+    },
+    {
+      "sku": "SKU0383",
+      "name": "Item 383",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0383"
+    },
+    {
+      "sku": "SKU0384",
+      "name": "Item 384",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0384"
+    },
+    {
+      "sku": "SKU0385",
+      "name": "Item 385",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0385"
+    },
+    {
+      "sku": "SKU0386",
+      "name": "Item 386",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0386"
+    },
+    {
+      "sku": "SKU0387",
+      "name": "Item 387",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0387"
+    },
+    {
+      "sku": "SKU0388",
+      "name": "Item 388",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0388"
+    },
+    {
+      "sku": "SKU0389",
+      "name": "Item 389",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0389"
+    },
+    {
+      "sku": "SKU0390",
+      "name": "Item 390",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0390"
+    },
+    {
+      "sku": "SKU0391",
+      "name": "Item 391",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0391"
+    },
+    {
+      "sku": "SKU0392",
+      "name": "Item 392",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0392"
+    },
+    {
+      "sku": "SKU0393",
+      "name": "Item 393",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0393"
+    },
+    {
+      "sku": "SKU0394",
+      "name": "Item 394",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0394"
+    },
+    {
+      "sku": "SKU0395",
+      "name": "Item 395",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0395"
+    },
+    {
+      "sku": "SKU0396",
+      "name": "Item 396",
+      "abc_class": "B",
+      "pick_freq": 2.5,
+      "ts_per_unit": 1.3,
+      "case_qty": 6,
+      "default_location": "L0396"
+    },
+    {
+      "sku": "SKU0397",
+      "name": "Item 397",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0397"
+    },
+    {
+      "sku": "SKU0398",
+      "name": "Item 398",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0398"
+    },
+    {
+      "sku": "SKU0399",
+      "name": "Item 399",
+      "abc_class": "C",
+      "pick_freq": 1.0,
+      "ts_per_unit": 1.6,
+      "case_qty": 6,
+      "default_location": "L0399"
+    }
+  ],
+  "process": {
+    "flow": [
+      "receive",
+      "putaway",
+      "pick",
+      "pack",
+      "ship"
+    ],
+    "stages": [
+      {
+        "id": "receive",
+        "label": "入荷",
+        "method": "manual",
+        "zone": "receiving"
+      },
+      {
+        "id": "putaway",
+        "label": "格納",
+        "method": "manual",
+        "zone": "storage"
+      },
+      {
+        "id": "pick",
+        "label": "ピッキング",
+        "method": "manual",
+        "zone": "storage"
+      },
+      {
+        "id": "pack",
+        "label": "梱包",
+        "method": "manual",
+        "zone": "packing"
+      },
+      {
+        "id": "ship",
+        "label": "出荷",
+        "method": "manual",
+        "zone": "shipping"
+      }
+    ],
+    "pick_strategy": "zone",
+    "routing_policy": "s_shape",
+    "batch_size": 4,
+    "walk_speed_mps": 1.2,
+    "pack_time_s": 50.0
+  },
+  "resources": {
+    "workers": [
+      {
+        "id": "pickers",
+        "role": "picker",
+        "count": 10,
+        "speed_mps": 1.2,
+        "labour_rate_per_hr": 1900.0
+      }
+    ],
+    "equipment": [],
+    "stations": [
+      {
+        "id": "pack",
+        "zone": "packing",
+        "x": 6.0,
+        "y": 22.0,
+        "count": 4
+      }
+    ]
+  },
+  "orders": {
+    "outbound": [],
+    "inbound": [],
+    "profile": {
+      "arrival": "poisson",
+      "rate_per_hr": 200.0,
+      "lines_per_order_mean": 1.8,
+      "peak_factor": 1.0
+    }
+  },
+  "simulation": {
+    "duration_s": 28800.0,
+    "warmup_s": 0.0,
+    "random_seed": 7,
+    "replications": 1,
+    "heatmap_grid_m": 1.0,
+    "shift_hours_per_day": 8.0,
+    "work_days_per_month": 22
+  },
+  "settings": {
+    "currency": "¥",
+    "labor_cost_per_hour": 1900.0,
+    "working_hours_per_day": 8.0,
+    "working_days_per_month": 24.0,
+    "agv_cost_per_month": 80000.0
+  }
+}

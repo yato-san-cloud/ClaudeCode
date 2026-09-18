@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://whsim.invalid/schema/layout.schema.json",
+  "title": "layout.geojson (WHSIM_CONTRACTS v1.0 §1)",
+  "description": "契約から起こしたスキーマ。座標系は平面直交・メートル・原点左下（meta.crs = local-meters）。契約が明示していない追加プロパティは許容する（契約の変更ではなく上位互換）。",
+  "type": "object",
+  "required": ["type", "features", "meta"],
+  "properties": {
+    "type": {"const": "FeatureCollection"},
+    "meta": {
+      "type": "object",
+      "required": ["crs"],
+      "properties": {
+        "crs": {"const": "local-meters"}
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/feature"}
+    }
+  },
+  "$defs": {
+    "position": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "prefixItems": [{"type": "number"}, {"type": "number"}],
+      "items": {"type": "number"}
+    },
+    "linearRing": {
+      "type": "array",
+      "minItems": 4,
+      "items": {"$ref": "#/$defs/position"}
+    },
+    "polygonGeometry": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {"const": "Polygon"},
+        "coordinates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/linearRing"}
+        }
+      }
+    },
+    "pointGeometry": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {"const": "Point"},
+        "coordinates": {"$ref": "#/$defs/position"}
+      }
+    },
+    "lineStringGeometry": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": {"const": "LineString"},
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/position"}
+        }
+      }
+    },
+    "rackFeature": {
+      "type": "object",
+      "required": ["type", "geometry", "properties"],
+      "properties": {
+        "type": {"const": "Feature"},
+        "geometry": {"$ref": "#/$defs/polygonGeometry"},
+        "properties": {
+          "type": "object",
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": {"const": "rack"},
+            "id": {"type": "string", "minLength": 1},
+            "label": {"type": "string"}
+          }
+        }
+      }
+    },
+    "zoneFeature": {
+      "type": "object",
+      "required": ["type", "geometry", "properties"],
+      "properties": {
+        "type": {"const": "Feature"},
+        "geometry": {"$ref": "#/$defs/polygonGeometry"},
+        "properties": {
+          "type": "object",
+          "required": ["kind", "id", "label"],
+          "properties": {
+            "kind": {"const": "zone"},
+            "id": {"type": "string", "minLength": 1},
+            "label": {"type": "string"}
+          }
+        }
+      }
+    },
+    "nodeFeature": {
+      "type": "object",
+      "required": ["type", "geometry", "properties"],
+      "properties": {
+        "type": {"const": "Feature"},
+        "geometry": {"$ref": "#/$defs/pointGeometry"},
+        "properties": {
+          "type": "object",
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": {"const": "node"},
+            "id": {"type": "string", "minLength": 1},
+            "loc_id": {"type": "string"}
+          }
+        }
+      }
+    },
+    "edgeFeature": {
+      "type": "object",
+      "required": ["type", "geometry", "properties"],
+      "properties": {
+        "type": {"const": "Feature"},
+        "geometry": {"$ref": "#/$defs/lineStringGeometry"},
+        "properties": {
+          "type": "object",
+          "required": ["kind", "id", "from", "to"],
+          "properties": {
+            "kind": {"const": "edge"},
+            "id": {"type": "string", "minLength": 1},
+            "from": {"type": "string", "minLength": 1},
+            "to": {"type": "string", "minLength": 1},
+            "width_m": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "feature": {
+      "type": "object",
+      "required": ["type", "geometry", "properties"],
+      "properties": {
+        "type": {"const": "Feature"},
+        "properties": {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {"enum": ["rack", "node", "edge", "zone"]}
+          }
+        }
+      },
+      "oneOf": [
+        {"$ref": "#/$defs/rackFeature"},
+        {"$ref": "#/$defs/nodeFeature"},
+        {"$ref": "#/$defs/edgeFeature"},
+        {"$ref": "#/$defs/zoneFeature"}
+      ]
+    }
+  }
+}

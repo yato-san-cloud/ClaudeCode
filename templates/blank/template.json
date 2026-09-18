@@ -1,0 +1,172 @@
+{
+  "meta": {
+    "schema_version": "0.1",
+    "project_id": "",
+    "name": "",
+    "units": {
+      "length": "m",
+      "time": "s",
+      "weight": "kg"
+    }
+  },
+  "layout": {
+    "bounds": {
+      "width": 40.0,
+      "depth": 24.0
+    },
+    "zones": [
+      {
+        "id": "receiving",
+        "type": "receiving",
+        "x": 2.0,
+        "y": 2.0,
+        "w": 12.0,
+        "h": 6.0,
+        "color": null,
+        "rack": null,
+        "shelves": []
+      },
+      {
+        "id": "storage",
+        "type": "storage",
+        "x": 2.0,
+        "y": 9.0,
+        "w": 36.0,
+        "h": 10.0,
+        "color": null,
+        "rack": null,
+        "shelves": []
+      },
+      {
+        "id": "packing",
+        "type": "packing",
+        "x": 2.0,
+        "y": 20.0,
+        "w": 8.0,
+        "h": 3.0,
+        "color": null,
+        "rack": null,
+        "shelves": []
+      },
+      {
+        "id": "shipping",
+        "type": "shipping",
+        "x": 12.0,
+        "y": 20.0,
+        "w": 10.0,
+        "h": 3.0,
+        "color": null,
+        "rack": null,
+        "shelves": []
+      }
+    ],
+    "walls": [],
+    "doors": []
+  },
+  "locations": [],
+  "items": [],
+  "process": {
+    "flow": [
+      "receive",
+      "putaway",
+      "pick",
+      "pack",
+      "ship"
+    ],
+    "stages": [
+      {
+        "id": "receive",
+        "label": "入荷",
+        "method": "manual",
+        "zone": "receiving",
+        "work": null
+      },
+      {
+        "id": "putaway",
+        "label": "格納",
+        "method": "manual",
+        "zone": "storage",
+        "work": null
+      },
+      {
+        "id": "pick",
+        "label": "ピッキング",
+        "method": "manual",
+        "zone": "picking",
+        "work": null
+      },
+      {
+        "id": "pack",
+        "label": "梱包",
+        "method": "manual",
+        "zone": "packing",
+        "work": null
+      },
+      {
+        "id": "ship",
+        "label": "出荷",
+        "method": "manual",
+        "zone": "shipping",
+        "work": null
+      }
+    ],
+    "pick_strategy": "discrete",
+    "routing_policy": "nearest",
+    "batch_size": 1,
+    "walk_speed_mps": 1.2,
+    "pack_time_s": 40.0,
+    "sort_time_s": 6.0
+  },
+  "resources": {
+    "workers": [
+      {
+        "id": "pickers",
+        "role": "picker",
+        "count": 6,
+        "speed_mps": 1.2,
+        "labour_rate_per_hr": 2200.0
+      }
+    ],
+    "equipment": [],
+    "conveyors": [],
+    "stations": [
+      {
+        "id": "pack",
+        "zone": "packing",
+        "x": 6.0,
+        "y": 21.0,
+        "count": 2
+      }
+    ]
+  },
+  "orders": {
+    "outbound": [],
+    "inbound": [],
+    "profile": {
+      "arrival": "poisson",
+      "rate_per_hr": 0.0,
+      "lines_per_order_mean": 3.0,
+      "peak_factor": 1.0
+    }
+  },
+  "simulation": {
+    "duration_s": 28800.0,
+    "warmup_s": 0.0,
+    "random_seed": 42,
+    "replications": 1,
+    "heatmap_grid_m": 1.0,
+    "currency": "¥",
+    "amortize_capex_months": 36,
+    "work_days_per_month": 25,
+    "shift_hours_per_day": 8.0
+  },
+  "settings": {
+    "currency": "¥",
+    "labor_cost_per_hour": 2000.0,
+    "working_hours_per_day": 8.0,
+    "working_days_per_month": 22.0,
+    "agv_cost_per_month": 80000.0
+  },
+  "routes": [],
+  "distance_overrides": {}
+}

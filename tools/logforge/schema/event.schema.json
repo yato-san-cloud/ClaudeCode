@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://whsim.local/schema/event.schema.json",
+  "title": "one line of events.jsonl (WHSIM_CONTRACTS v1.0 §3)",
+  "description": "JSONL: one event per line. Core type set is fixed by the contract; extension types must be prefixed x_ so they can never be confused with the core set.",
+  "type": "object",
+  "required": ["t", "type"],
+  "additionalProperties": false,
+  "properties": {
+    "t": {"type": "number", "minimum": 0},
+    "type": {
+      "anyOf": [
+        {
+          "enum": [
+            "task_assign",
+            "move_start",
+            "move_end",
+            "wait_start",
+            "wait_end",
+            "pick_start",
+            "pick_end",
+            "load",
+            "unload"
+          ]
+        },
+        {"type": "string", "pattern": "^x_[a-z0-9_]+$"}
+      ]
+    },
+    "actorId": {"type": "string", "minLength": 1},
+    "from": {"type": "string", "minLength": 1},
+    "to": {"type": "string", "minLength": 1},
+    "meta": {"type": "object"}
+  }
+}

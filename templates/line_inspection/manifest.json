@@ -1,0 +1,60 @@
+{
+  "template_id": "line_inspection",
+  "name": "ライン検品・引き込み梱包ライン",
+  "description": "仕分けシュートの下で無動力コンベア2列に載せ、コンベア上で検品を完結させる出荷ライン(ライン検品)。仕切りで検品前/検品後を区画し、検品済みは2段の駆動コンベア下段の本線へコンベア搬送。引き込みコンベア5ヶ所×両側で縦長の梱包ブース20台に分配し、停止線で検品済みを止めて完成品だけカーブから積み付けへ抜く。検品ライン移設や工程分離の検討に。",
+  "subtree_source": {
+    "meta": "interview",
+    "layout": "data",
+    "locations": "data",
+    "items": "data",
+    "process": "interview",
+    "resources": "interview",
+    "orders": "data",
+    "simulation": "interview"
+  },
+  "headline_fields": [
+    {
+      "path": "resources.workers.0.count",
+      "label": "ピッカー人数",
+      "type": "int",
+      "unit": "名"
+    },
+    {
+      "path": "resources.conveyors.0.speed_mps",
+      "label": "検品ライン速度",
+      "type": "float",
+      "unit": "m/s"
+    },
+    {
+      "path": "process.pack_time_s",
+      "label": "梱包時間",
+      "type": "float",
+      "unit": "秒/件"
+    },
+    {
+      "path": "orders.profile.rate_per_hr",
+      "label": "出荷オーダー",
+      "type": "float",
+      "unit": "件/時"
+    },
+    {
+      "path": "orders.profile.peak_factor",
+      "label": "ピーク係数",
+      "type": "float",
+      "unit": "倍"
+    },
+    {
+      "path": "process.batch_size",
+      "label": "バッチ数",
+      "type": "int",
+      "unit": "件/トリップ"
+    },
+    {
+      "path": "simulation.duration_s",
+      "label": "稼働時間",
+      "type": "float",
+      "unit": "時間",
+      "scale": 3600
+    }
+  ]
+}
