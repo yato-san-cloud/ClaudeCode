@@ -1904,7 +1904,7 @@ def estimate(model: WarehouseModel) -> dict:
         bottleneck = "picking"
     binding = stages[bottleneck]
 
-    return {
+    out = {
         "method": "analytic_mmc",
         "service_time_s": service_s,
         # Aisle-routed metres per order — directly comparable to the DES's
@@ -1951,3 +1951,11 @@ def estimate(model: WarehouseModel) -> dict:
         "pick_wait_mean_s": wq if math.isfinite(wq) else None,
         "overloaded": binding >= 1.0,
     }
+    # ADDITIVE disclosure, and CONDITIONAL on the key: AGV同士の通路干渉 is not
+    # mirrored (``_agv_interference`` carries the two rejected derivations and the
+    # measurements that rejected them). The key appears only when the flag is on,
+    # so the bundled catalogue — every template of which leaves it off — is
+    # byte-identical down to the JSON.
+    if agv_jam is not None:
+        out["agv_interference"] = agv_jam
+    return out

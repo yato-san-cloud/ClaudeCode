@@ -310,6 +310,9 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   CTA and マテリアルフロー「基礎物量を取込」 both consume it).
 - `cad.py` — tolerant DXF import (ezdxf) → bounds/walls/zones in meters (unit auto-detect).
 - `export_doc.py` — editable PPTX + PDF proposal (python-pptx / reportlab, CJK fonts).
+  前提条件は `assumptions=` で渡すデータ（`危険側`/`注意` は赤橙＋バッジ、既定は従来文で
+  出力1バイト同一）。テキスト枠は `export/textfit.py` で**書く前に測る**＝縮小→「（続き）」
+  スライド。**黙ってはみ出させない**（レイアウトに内容を削らせない）。
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
 - `web/static/js/view3d/props.js` + `web/static/concept.html` — **概念シーン**（提案前に
   「新しいやり方がどう動くか」だけを見せる台本）。DES を通さず replay を手書きし、

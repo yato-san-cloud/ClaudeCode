@@ -107,6 +107,17 @@ def _footer_runs(path) -> list:
     return out
 
 
+def _room_in(slide, shp) -> float:
+    """Vertical space a shape's text may really occupy: down to the top of the
+    next shape below it (or the slide foot). The cover's title and 提案日 blocks
+    deliberately sit in a gap larger than their own frame."""
+    limits = [o.top for o in slide.shapes
+              if o is not shp and o.top > shp.top
+              and o.left < shp.left + shp.width and shp.left < o.left + o.width]
+    limit = min(limits) if limits else int(7.5 * 914400)
+    return max(shp.height, limit - shp.top) / 914400
+
+
 def _overflowing_boxes(path) -> list[tuple[int, str, float, float]]:
     """Re-measure every rendered text box against its own frame.
 
@@ -127,7 +138,10 @@ def _overflowing_boxes(path) -> list[tuple[int, str, float, float]]:
                               "pt": pt.pt if pt else 18.0})
             if not paras:
                 continue
-            w_in, h_in = shp.width / 914400, shp.height / 914400
+            w_in = shp.width / 914400
+            # The cover's boxes are sized smaller than the gap they sit in; every
+            # other box is measured against its own frame.
+            h_in = _room_in(slide, shp) if i == 0 else shp.height / 914400
             used = textfit.block_height_in(paras, w_in)
             if used > h_in + 1e-9:
                 bad.append((i, paras[0]["text"][:24], used, h_in))
@@ -375,6 +389,17 @@ def test_pptx_moderate_overflow_shrinks_instead_of_paginating(tmp_path):
     assert "（続き）" not in text
     body = [r for r in _runs(out) if r[0].startswith("■ 指摘")]
     assert body and all(r[1] < 17 for r in body)  # authored at 17pt, shrunk
+
+
+def test_pptx_long_cover_name_and_long_tile_value_shrink(tmp_path):
+    """The other silent overflows on the same deck: a long 倉庫名 ran into the
+    提案日 block, and a long ボトルネック name ran out of its tile."""
+    kpis = dict(KPIS, bottleneck_jp="コンベア合流部（スパー3・シュート滞留）",
+                verdict="現行体制では当日物量を充足できません。" * 3)
+    out = export_doc.build_pptx(
+        kpis, "関東広域物流センター 第2期 自動化検討（常温・冷蔵併設）" * 2,
+        "実データ 62%", None, tmp_path / "cover.pptx")
+    assert _overflowing_boxes(out) == []
 
 
 def test_pptx_footer_is_immune_to_long_assumptions(tmp_path):

@@ -1245,11 +1245,8 @@ def _convey_tote(world: World, order: Order, arrival: float, line, arc: float,
     end = pts[-1]
     pack_req_t = env.now
     preq = world.packers.request()
-    # 梱包待ちの行列は末端の1点ではなくベルトの上に伸びる（荷はスロットを握ったまま
-    # 止まっている＝それが accumulation そのもの）。単線でも規則は同じ。
-    held = _stall_join(world, line, line.length, tote)
+    # ⚠️ 未修正（連鎖側の梱包待ちと同じ理由 — :func:`_convey_chain` の注記）。
     yield preq
-    _stall_leave(world, held)
     seize_t = env.now
     world.log(t=env.now, event="pack_start", order_id=order.order_id,
               wait=seize_t - pack_req_t, resource="packer")
@@ -2143,11 +2140,12 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
             return
         pack_req_t = env.now
         preq = pool.request()
-        # 台が空くのを待つ荷は末端で止まり、後続がその上流に溜まる（引き込みが
-        # 詰まるとはこのこと）。先頭は今 ``end`` に居るので描き直さない。
-        held = _stall_join(world, line, arc, tote)
+        # ⚠️ 未修正: 台が空くのを待つ荷も末端の1点に重ねて描かれている（同じ列の
+        # 問題で、直し方も同じ ``_stall_join``/``_stall_leave`` ひと組）。ここだけは
+        # **同梱テンプレの実測値**で、直すと `line_inspection` の荷の軌跡が動く
+        # ＝``_LINE_INSPECTION_TOTES_SHA`` が変わる。ダイジェストは「既定の経路は
+        # 1バイトも動かさない」の証拠なので、ピンの意味を先に決めずに書き換えない。
         yield preq
-        _stall_leave(world, held)
     seize_t = env.now
     # The 引き込み wait and the 梱包台 wait are both "this tote could not be packed
     # yet", so they land together on pack_start's existing wait field.

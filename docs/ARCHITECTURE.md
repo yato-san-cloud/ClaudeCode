@@ -119,7 +119,9 @@
 - **コンベア作図**：`png2d.belt_points/belt_length/belt_at/belt_band/belt_specs` が帯の純幾何（直線頂点の統合・マイター外形・弧長サンプル）。提案PNGは実幅0.6mの帯＋ローラー刻み＋進行方向の矢羽（`points[0]→points[-1]`）＋排出端記号＋設備タグ（長さ・速度）、凡例「コンベア」と右パネル「搬送設備」に諸元。`anim2d.py` は同じ幾何で帯を静止描画し、replayに `totes` があるときだけ荷物を軌跡で動かす（無ければ従来と1バイト同一）。コンベア無し＝出力不変、退化コンベア（1点/長さ0/NaN）は描かない＝never-blocks。
 
 ### エクスポート / Web / 横断
-- `export_doc.py`（PPTX+PDF）/ `web/app.py`（FastAPI ~50ルート、**最大ファイル**）/ `cli.py` / `project.py` / `notes.py` / `cody.py`。
+- `export_doc.py`（PPTX+PDF のファサード）→ `export/`：`_data.py`（描画非依存の行/タイル/**前提条件**）・`pptx.py`・`pdf.py`・`htmlviewer.py`・`textfit.py`。
+- **前提条件はデータ**：`export/_data.py:_assumption_blocks` が 方法論→出所→費用前提→呼び出し側の行 を返す。`build_pptx/build_pdf/build_viewer_html(assumptions=…)` は 文字列 / `[{"text","level"}]` / `{"lines":[…],"replace":True}` を受け、`level` に `危険側`/`注意` を付けた行は **赤/橙＋太字＋【危険側】バッジ** で前提条件スライドに出る（既定＝従来の固定文＝**出力1バイト同一**）。`None` のときは `model.settings.assumptions` を見る。**脚注（`_methodology_footer`）は短縮形で別物**——0.4inの帯に2行目は載らないので、前提が伸びても脚注は伸びない。
+- **はみ出しは作らない**（`export/textfit.py`）：PPTXのテキスト枠は溢れても黙って描かれるので、**書く前に測る**。固定枠（表紙/タイル/判定）は縮小のみ、本文（④推奨・⑤前提条件）は **縮小→それでも入らなければ「（続き）」スライドへ送る**。文字を落とさない＝**レイアウトが内容を決めない**。PDFは platypus が同じ契約（改ページ）を既に満たす。
 
 ### フロント（`app.js` から到達可能な ES modules）
 - シェル：`app.js`（bootstrap・`switchView`・2Dキャンバス・mount配線）。抽出済：`state.js`（共有`S`シングルトン）・`imports.js`（取込ハンドラ）・`projectmenu.js`。共有：`util.js`（`$`/`api`/`esc`）・`constants.js`（ラベル/色マップ）。

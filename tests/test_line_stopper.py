@@ -547,14 +547,30 @@ def test_the_window_share_is_disclosed_but_never_multiplied_into_the_capacity():
 
     「開放中は投入が止まるのだから能力はその分減る」は induction の話で、throughput
     の話ではない。窓が無い（出し切るまで）モデルには開示する数字も無い。
+
+    「掛けていない」の検査は**窓を動かしても能力が動かないこと**で採る（以前は
+    「ストッパー単独の答えと同じ」で採っていたが、完成品staging には別の天井
+    (`analytic._release_drain`＝周期あたりに置き場から出せる個数) が効くように
+    なったので、同値では窓の割合と staging の天井を区別できない）。排出天井は
+    **周期**にしか依らないので、窓長を倍にしても能力は1件も動かない — そして
+    棄却された積 `capacity × (1 − 窓の割合)` とは一致しない。
     """
     m = _line(gate=_ALL, junction_x=28.0, release={**_RELEASE, "period_s": 900.0,
                                                    "window_s": 300.0},
               staging={"capacity": 6})
+    wide = _line(gate=_ALL, junction_x=28.0, release={**_RELEASE, "period_s": 900.0,
+                                                      "window_s": 600.0},
+                 staging={"capacity": 6})
     plain = _line(gate=_ALL, junction_x=28.0)
     cv, base = analytic.estimate(m)["conveyor"], analytic.estimate(plain)["conveyor"]
+    cv_wide = analytic.estimate(wide)["conveyor"]
     assert cv["release_window_share"] == pytest.approx(1 / 3)
-    assert cv["capacity_per_hr"] == base["capacity_per_hr"]   # 掛けていない
+    assert cv_wide["release_window_share"] == pytest.approx(2 / 3)
+    # 窓を倍にしても能力は1件も動かない＝窓の割合は能力に掛かっていない
+    assert cv["capacity_per_hr"] == cv_wide["capacity_per_hr"]
+    # …そして棄却された積そのものでもない
+    assert cv["capacity_per_hr"] > base["capacity_per_hr"] * (
+        1.0 - cv["release_window_share"])
     drained = analytic.estimate(
         _line(gate=_ALL, junction_x=28.0,
               release={"period_s": 900.0, "stack_rate_per_hr": 280.0},
