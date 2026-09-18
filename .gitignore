@@ -22,3 +22,7 @@ examples/*.zip
 # Personal "my" samples — local-only project snapshots (may contain real
 # customer data); never committed.
 samples/
+
+# Python virtualenvs — rebuilt per container from pyproject.toml, never source
+.venv/
+venv/
