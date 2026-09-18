@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 
+from whsim import beltgeom
 from whsim.engine.navnet import NavNetwork
 from whsim.engine.routing import leg_cells
 from whsim.engine.run import RunResult
@@ -313,7 +314,6 @@ def _facing(model: WarehouseModel, mk) -> list[float] | None:
     belts = [(bid, pts) for bid, pts in belts if len(pts) >= 2]
     if not belts:
         return None
-    from whsim import beltgeom
     hit = beltgeom.nearest_path((mk.x, mk.y), belts)
     if hit is None or hit[1] > beltgeom.BENCH_REACH_M:
         return None

@@ -252,6 +252,40 @@ def test_a_line_with_no_staging_keeps_exactly_the_historical_answer():
     assert cv["capacity_per_hr"] >= k["throughput_per_hr"]
 
 
+def test_the_ceiling_lowers_the_capacity_claim_and_moves_nothing_else():
+    """天井は**自分の問いにだけ答える**（`_container_estimate` と同じ扱い）。
+
+    λ を天井で絞りたくなるが、**測ったら甘い側へ倒れた**: DES の梱包者は満杯の
+    置き場を待つ間も台を握ったままで `pack_done` の busy に数えられ、ピッカーも
+    投入待ちの前に拾う分は拾っている。だから絞ると解析だけが低く出る——実測48構成で
+    ピッカー最大 **−0.149**・梱包最大 **−0.67** 追加で甘い側（絞らなければ
+    ピッカーの既存のずれは最大 −0.157、絞ると −0.175 まで悪化）。甘い側に倒すのは
+    不変条件5が唯一禁じる向きなので、`capacity_per_hr` と `binding` 以外は
+    1つも動かさない。⚠️ その代わり `jams` は「ベルトと梱包台で詰まるか」しか
+    言っていない（天井だけを超えた需要では False のまま）。
+    """
+    def parts(cap):
+        m = _line(gate=_ALL, junction_x=28.0, n_spurs=2, benches=1, rate=300.0,
+                  pack_time=60.0,
+                  release={**_RELEASE, "period_s": 1200.0, "window_s": 240.0},
+                  staging={"capacity": cap}, duration=7200.0)
+        return analytic.estimate(m)
+
+    bound, roomy = parts(1), parts(400)
+    cv_b, cv_r = bound["conveyor"], roomy["conveyor"]
+    assert cv_b["capacity_per_hr"] < cv_r["capacity_per_hr"]     # 天井が効いている
+    assert cv_b["binding"] == "staging"
+    # …そして λ を絞るのに使う値は絞られていない ＝ 下流の稼働率は一切動かない
+    assert cv_b["capacity_throttle_per_hr"] == cv_r["capacity_per_hr"]
+    assert "capacity_throttle_per_hr" not in cv_r
+    for key in ("picker_utilization", "packer_utilization", "service_time_s",
+                "orders_per_trip", "bottleneck_utilization"):
+        assert bound[key] == roomy[key], key
+    # jams / 詰まり方も従来の答えのまま（天井はレートであってバッファではない）
+    for key in ("jams", "time_to_jam_s", "block_ratio_est", "buffer_slots"):
+        assert cv_b[key] == cv_r[key], key
+
+
 def test_the_stacking_crew_is_a_provable_ceiling_of_its_own():
     """積み付けを通らずに出て行く完成品は無い ⇒ ``stackers × stack_rate`` は上界。
 
@@ -284,9 +318,10 @@ def test_the_auto_cascade_lands_on_a_pull_line_here_and_errs_gloomy(pull):
     ここへは届かない」と書いていたが、**降りる機構が書かれた瞬間にそれは偽になる**
     （両方の鏡を使わずに `_conveyor_estimate` へ落ちるので、pull のラインに `auto` の
     水詰めが当たる）。方式で分岐して直すのではなく、**どちらに外れるかを測って書く**
-    のがここの主張: 実測144構成で pull 平均 +0.436・auto 平均 +0.289（＝辛い側）、
-    甘い側に出たのは各1/72 でしかも**方式に依らず同じ構成**——原因は方式ではなく
-    「ストッパーの列が本線のスロットを握る」ことで、そこは今も鏡が無い。
+    のがここの主張: 実測144構成で pull 平均 +0.396・auto 平均 +0.249（＝pull の方が
+    むしろ辛い側）、甘い側に出たのは各4/72 でしかも**方式に依らず同じ4構成**
+    （低需要×置き場小、最悪 −0.305）——原因は方式ではなく「満杯の置き場が梱包者を
+    止める背圧」と「ストッパーの列が本線のスロットを握る」ことで、そこは今も鏡が無い。
     """
     m = _line(gate=_ALL, junction_x=28.0, n_spurs=2, benches=1, rate=1800.0,
               pack_time=60.0, pull=pull,

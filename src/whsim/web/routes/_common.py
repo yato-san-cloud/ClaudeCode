@@ -236,8 +236,16 @@ def _proposal_extras(proj: Project, model, metrics: dict) -> dict:
         brand = _resolve_brand(proj, model)
     except Exception:  # noqa: BLE001 — brand is an enhancement, never required
         brand = None
+    # 前提条件 (assumptions slide): ``Settings.assumptions`` をそのまま渡す。
+    # ビルダ側は ``model`` からも読めるが、両方渡すのは「経路が1本しかない」ことを
+    # ここで明示するため — 空リストは None と同じ扱い（既定の文言のまま）。
+    try:
+        assumptions = list(getattr(model.settings, "assumptions", None) or []) or None
+    except Exception:  # noqa: BLE001 — a broken assumptions list must not sink the export
+        assumptions = None
     return {"scenarios": scenarios, "insights": insights,
-            "provenance": provenance, "storage": storage, "brand": brand}
+            "provenance": provenance, "storage": storage, "brand": brand,
+            "assumptions": assumptions, "model": model}
 
 
 def _resolve_brand(proj: Project, model) -> dict | None:
@@ -269,8 +277,20 @@ def _call_export(builder, kpis, model_name, prov, png, out, extras: dict):
                        insights=extras.get("insights"),
                        provenance=extras.get("provenance"),
                        storage=extras.get("storage"),
-                       brand=extras.get("brand"))
+                       brand=extras.get("brand"),
+                       model=extras.get("model"),
+                       assumptions=extras.get("assumptions"))
     except TypeError:
+        # 前提条件/モデルを取らないビルダ ⇒ 1段落として従来の引数で呼ぶ。
+        try:
+            return builder(kpis, model_name, prov, png, out,
+                           scenarios=extras.get("scenarios"),
+                           insights=extras.get("insights"),
+                           provenance=extras.get("provenance"),
+                           storage=extras.get("storage"),
+                           brand=extras.get("brand"))
+        except TypeError:
+            pass
         # Builder predates one of the optional params — retry without the newest
         # (brand/storage), then fall back to the original positional signature.
         try:

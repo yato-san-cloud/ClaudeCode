@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import math
+import time
 
 import pytest
 from test_line_mechanics import (  # the line fixtures live next door
@@ -34,6 +35,7 @@ from test_line_mechanics import (  # the line fixtures live next door
 )
 
 from whsim import analytic, kpis, templates
+from whsim.engine import build as build_mod
 from whsim.engine.build import build
 from whsim.engine.run import run_once
 from whsim.schema.model import Conveyor, Order, OrderLine, Station
@@ -134,6 +136,49 @@ def test_the_queue_grows_backward_one_load_per_pitch_and_that_sets_who_can_reach
     assert stp.reach_index(28.0) is None             # まだ届いていない
 
 
+def test_the_queue_can_only_hold_what_fits_in_front_of_the_gate():
+    """列の長さは**ゲートまでの区間**で決まる（純関数の上限）。
+
+    「1個/ピッチで上流へ伸びる」と言いながら上限が無かったので、列はベルトの
+    **総スロット数**（ゲートの下流ぶんも含む）まで飲み込めた。ゲートが 40m の本線の
+    10m にあれば、床は 11 個しか置けないのにエンジンは 40 個を吸収する＝サージに
+    対して 3.6 倍甘い。しかも溢れた分は ``arc_of`` が 0.0 に丸めるので、絵の上でも
+    全員が始端に重なる。
+    """
+    for gate_arc, pitch, want in ((30.0, 1.0, 31), (10.0, 1.0, 11),
+                                  (20.0, 2.0, 11), (0.0, 1.0, 1)):
+        world = build(_line(gate=_ALL, gate_arc=gate_arc, pitch=pitch,
+                            junction_x=28.0))
+        stp = next(c.stopper for c in world.conveyors if c.id == "T")
+        assert stp.capacity == want, (gate_arc, pitch, stp.capacity)
+        # ベルトの総スロット数より**必ず小さい**（ゲートの下流は列の場所ではない）
+        assert stp.capacity <= stp.line.capacity
+
+
+def test_the_queue_never_grows_past_what_fits_in_front_of_the_gate_in_a_run():
+    """…そして走らせても超えない（純関数の上限を run が守る）。
+
+    以前の版はここを**エンジンを走らせずに**手で ``stp.queue = [object()]*5`` と
+    置いて確かめていたので、実際の列が溢れても誰も気付けなかった。溢れた荷は
+    「列の外」で待ち、``stopper_backup`` として数える（＝本線の背圧はそのまま上流へ）。
+    """
+    m = _line(gate=_ALL, gate_arc=10.0, junction_x=1.0, rate=600.0,
+              pack_time=300.0, duration=2400.0)
+    res = run_once(m, seed=SEED)
+    world = build(m)
+    cap = next(c.stopper for c in world.conveyors if c.id == "T").capacity
+    assert cap == 11
+    holds = _events(res, "stopper_hold")
+    assert holds, "列ができていること"
+    assert max(e["queue"] for e in holds) <= cap
+    assert kpis.compute([res], m)["stopper_queue_peak"] <= cap
+    # 列に入れなかった荷は「入れなかった」と言う（黙って飲み込まない）
+    assert _events(res, "stopper_backup"), "溢れた荷が1件も記録されていない"
+    # 溢れた分を 0.0 m に積み上げていない = ゲートの位置に立つ荷は常に1つ
+    at_infeed = [e for e in holds if e["arc"] == 0.0]
+    assert len(at_infeed) <= len(holds) - len(at_infeed) or not at_infeed
+
+
 # 12件を2秒おきに投入し、梱包を1台・300秒にすると、1件だけが流れながら引き込まれて
 # 残り8件が列を作る（残りはまだラインの手前）。列の最大は8個 = 合流点が停止線から
 # 8ピッチ以内なら手が届き、それより上流なら永久に届かない — 決定論的な閾値。
@@ -191,8 +236,66 @@ def test_the_people_standing_at_the_stop_line_still_take_loads_off_it():
     描かれていれば居る）。誰も描かれていなければ ``stopper_take`` は1件も出ない。"""
     manned = run_once(_line(gate=_ALL, junction_x=6.0, stop_benches=2), seed=SEED)
     bare = run_once(_line(gate=_ALL, junction_x=6.0), seed=SEED)
-    assert len(_events(manned, "stopper_take")) > 0
+    takes = _events(manned, "stopper_take")
+    assert len(takes) > 0
     assert len(_events(bare, "stopper_take")) == 0
+    # …そして取った荷は**梱包される**。件数だけ数えていた間、「台を掴んだのに梱包
+    # せず積み付けへ出て行った荷」（＝その台は二度と空かない）も1件として通っていた。
+    packed = {e["order_id"] for e in _events(manned, "pack_start")}
+    assert all(e["order_id"] in packed for e in takes), \
+        "停止線の人が取ったのに梱包されていない荷がある＝台を掴んだまま出て行った"
+
+
+def test_no_bench_is_left_booked_when_the_run_ends():
+    """走り終わったとき、誰かが掴んだままの台が残っていない（資源の棚卸し）。
+
+    停止線の台を確保した荷が ``_stack_out`` 経由で出て行く経路には ``release`` が
+    1つも無かったので、窓ごとに1台ずつ台が死に、実測では 3台の停止線が 10,800 秒の
+    うち最初の 754 秒しか働かず（残り 93% は無人）、KPI も判定文も何も言わなかった。
+    「掴んだ人が居ない＝待ち行列も空」を run の終わりに確かめる。
+    """
+    m = _line(gate=_ALL, junction_x=20.0, stop_benches=3, benches=1,
+              release={"period_s": 240.0, "window_s": 10.0,
+                       "stack_rate_per_hr": 400.0, "board_time_s": 10.0,
+                       "load_kind": "packed"},
+              staging={"capacity": 40}, rate=90.0, pack_time=20.0, duration=3600.0)
+    res = run_once(m, seed=SEED)
+    takes = _events(res, "stopper_take")
+    assert len(takes) > 5, "停止線が働いていること（働いていなければ何も測れない）"
+    # 取った荷は全部 梱包へ進んでいる = 台は返っている
+    starts = {}
+    for e in _events(res, "pack_start"):
+        starts.setdefault(e["order_id"], []).append(e["t"])
+    orphan = [e for e in takes
+              if not any(t >= e["t"] - 1e-9 for t in starts.get(e["order_id"], []))]
+    assert orphan == [], f"台を掴んだまま出て行った荷: {[e['order_id'] for e in orphan]}"
+    # 停止線はシフトの終盤でも働いている（1台ずつ死んでいれば止まる）
+    assert takes[-1]["t"] > 0.5 * res.duration_s
+
+
+def test_a_released_load_is_not_stopped_by_the_stopper_it_was_released_through():
+    """リリースが本線へ載せた完成品は、**自分が出ていく窓の中で**出て行く。
+
+    ``_load_staging`` は窓の残り時間を見ずに載せていたので、``board_time_s`` を使い
+    切った瞬間に窓が閉じ、その完成品は自分が通るはずのストッパーの前で並び直して
+    いた——毎窓きっかり1個（実測 11/11・23/23 窓）。その1個は次の周期まで本線の
+    スロットを握り、``stopper_stops`` と ``stopper_queue_peak`` を押し上げる。
+    """
+    m = _line(gate=_ALL, junction_x=28.0, stop_benches=1,
+              release={"period_s": 300.0, "window_s": 60.0,
+                       "stack_rate_per_hr": 400.0, "board_time_s": 20.0,
+                       "load_kind": "packed"},
+              staging={"capacity": 8}, rate=360.0, pack_time=60.0, duration=3600.0)
+    res = run_once(m, seed=SEED)
+    boards = _events(res, "release_board")
+    assert len(boards) > 5, "完成品が本線へ載っていること"
+    boarded_at = {}
+    for e in boards:
+        boarded_at.setdefault(e["order_id"], []).append(e["t"])
+    requeued = [e for e in _events(res, "stopper_hold")
+                if any(t <= e["t"] + 1e-9 for t in boarded_at.get(e["order_id"], []))]
+    assert requeued == [], \
+        f"リリースで載せた荷が同じストッパーで並び直した: {len(requeued)} 件"
 
 
 def test_a_stopper_nobody_can_reach_and_nobody_releases_says_so_instead_of_hanging():
@@ -293,6 +396,46 @@ def test_a_window_that_drains_until_empty_still_closes():
         assert 0.0 <= c["t"] - o["t"] <= plan["period_s"] + 1e-9
 
 
+def test_the_trunk_occupancy_peak_is_measured_whenever_a_stopper_is_drawn():
+    """本線の占有ピークは**ストッパーが在れば**測れる — リリースの記帳には依らない。
+
+    以前は ``release_board`` イベントの ``occ`` の最大で測っていた。``release_board`` が
+    出るのは「台の完成品を本線へ載せた」ときだけなので、``bench_staging`` を書いて
+    いないリリース（載せる完成品が無い＝board が1件も出ない）では、本線が 40/40 で
+    埋まったまま **0** と報告していた。占有は帯の on/off が積分している階段関数
+    そのもので、「いつ覗いたか」で答えが変わってはいけない。
+    """
+    for staging in ({"capacity": 6}, None):
+        m = _line(gate=_ALL, junction_x=28.0, release=_RELEASE, staging=staging,
+                  rate=480.0, duration=3600.0)
+        k = kpis.compute([run_once(m, seed=SEED)], m)
+        trunk = k["conveyors"]["T"]
+        peak = k["stopper_trunk_occupancy_peak"]
+        # 帯ごとの占有積分の**使い回し**であること（3つ目の写しを持たない）
+        assert peak == trunk["peak_occupancy"] > 0, staging
+        assert peak <= trunk["capacity"]
+        if staging is None:
+            # 完成品を1個も載せていない＝昔の測り方の材料は空。それでも本線は埋まる。
+            assert k["stopper_released_loads"] == 0
+
+
+def test_the_unpacked_leak_warning_does_not_wait_for_a_window_to_close():
+    """未梱包の流出は**窓の記帳とは独立に**判定文へ出る。
+
+    ``stopper_windows`` は ``stopper_close`` しか数えない（開きっぱなしの窓は開放時間も
+    排出時間も未確定なので、その数え方は正しい）。地平線が最初の窓を切った run は
+    windows=0 になる — が、荷はその窓で実際に流れ出ている。警告を窓の記帳の中に
+    入れ子にしていたので、**流出が在るのに判定文が黙る**状態があった。判定文は営業が
+    読むもので、「未梱包の出荷を成果として売らない」がこのカウンタの存在理由そのもの。
+    """
+    m = _line(gate=_ALL, junction_x=6.0, release=_RELEASE,
+              staging={"capacity": 6}, duration=1000.0)
+    k = kpis.compute([run_once(m, seed=SEED)], m)
+    assert k["stopper_windows"] == 0      # 窓は開いたまま地平線で切れた
+    assert k["stopper_leaks"] > 0
+    assert "未梱包のまま流れ出た荷" in k["verdict"]
+
+
 def test_a_load_released_without_being_packed_is_not_sold_as_a_completed_order():
     """開放は前に居るものを全部流す — まだ梱包していない検品済みも含めて。
 
@@ -327,15 +470,49 @@ def test_a_full_staging_blocks_the_packer_and_that_back_pressure_is_the_point():
 
 
 def test_the_staging_peak_is_reported_per_bench_and_in_total():
-    res = run_once(_line(gate=_ALL, junction_x=28.0, n_spurs=2,
-                         release=_RELEASE, staging={"capacity": 6}), seed=SEED)
-    k = kpis.compute([res], None)
+    """帯ごとのピークと合計、そして**ピークの届く分母**。
+
+    以前ここは ``bench_staging_capacity == 6 * 3``（S1/S2/**C**）を固定していた。それが
+    バグの側だった: エンジンは連鎖の終端になる帯に**梱包台が1台も無くても**置き場を
+    1台分 invent して張る。カーブ C が受けるのは ``to_exit`` の荷だけで
+    ``_stage_finished`` には一生到達しないので、その 6 個は誰も使えない。分母に乗って
+    いる限り、実在の置き場が全部満杯で梱包が止まっている run でも
+    ``peak(12) < capacity(18)`` になり、ARCHITECTURE が「同じ表から読める」と言う
+    **天井の読み方が一度も成立しない**。分母は図面から読む（``capacity`` は梱包台1台
+    あたり × 図面の台数）ので、ここは S1/S2 の2台分＝12。エンジンの張った総数は
+    ``bench_staging_capacity_wired`` に並べて残すので、差は隠れない。
+    """
+    m = _line(gate=_ALL, junction_x=28.0, n_spurs=2,
+              release=_RELEASE, staging={"capacity": 6})
+    k = kpis.compute([run_once(m, seed=SEED)], m)
     per = {b: v["staging_peak"] for b, v in k["conveyors"].items()}
     assert per["S1"] > 0 and per["S2"] > 0
     assert per["E"] == 0 and per["T"] == 0        # 通過するだけの帯に置き場は無い
+    assert per["C"] == 0                          # カーブは完成品を受けない
     assert k["bench_staging_peak"] >= max(per.values())
     assert k["bench_staging_peak"] <= sum(per.values())
-    assert k["bench_staging_capacity"] == 6 * 3   # S1/S2/C の台数分
+    assert k["bench_staging_capacity"] == 6 * 2   # 梱包台 b1/b2 の分だけ
+    # エンジンが張った総数は並べて残す（今は C の invent 分を含む 6*3）。
+    assert k["bench_staging_capacity_wired"] >= k["bench_staging_capacity"]
+
+
+def test_a_saturated_staging_can_be_read_as_hitting_its_ceiling():
+    """天井の読み方（容器プールと同じ）が成立することの回帰。
+
+    置き場が全部満杯で梱包が止まっている run では ``peak == capacity`` が読め、余裕の
+    ある run では読めない。これが成り立たないと ``bench_staging_peak`` は「必要な置き場」
+    なのか「張った置き場」なのか外から区別できない＝提案に乗せられない。
+    """
+    def _k(cap):
+        m = _line(gate=_ALL, junction_x=28.0, n_spurs=2, release=_RELEASE,
+                  staging={"capacity": cap}, rate=480.0, pack_time=60.0)
+        return kpis.compute([run_once(m, seed=SEED)], m)
+
+    tight, roomy = _k(6), _k(500)
+    assert tight["bench_staging_blocks"] > 0      # 梱包者が満杯の置き場で止まった
+    assert tight["bench_staging_peak"] == tight["bench_staging_capacity"]
+    assert roomy["bench_staging_blocks"] == 0
+    assert roomy["bench_staging_peak"] < roomy["bench_staging_capacity"]
 
 
 def test_staging_with_no_way_to_release_it_is_not_wired_at_all():
@@ -349,26 +526,47 @@ def test_staging_with_no_way_to_release_it_is_not_wired_at_all():
 # ============================================== KPI: ピークは平均してはいけない
 
 
+# 回ごとにピークが**本当に動く**フィクスチャ。以前ここは置き場 6 個・rate 240 の
+# 飽和したラインで測っていて、どの回も同じ値（置き場は毎回 6/6、列は毎回 40/40）に
+# なっていた。max と mean が一致する標本の上では「max で集約する」という主張は
+# トートロジーで、実際 `_EXTREMUM_KEYS` を mean に書き換えても
+# `_PER_BELT_MAX_KEYS` から staging_peak を外しても全テストが通っていた。
+# 置き場を実質無制限にして天井を外すと水位が乱数で動くようになり、そこで初めて
+# max と mean は別の数字になる。
+_VARYING = dict(gate=_ALL, junction_x=28.0, n_spurs=2, release=_RELEASE,
+                staging={"capacity": 500}, rate=150.0, pack_time=60.0,
+                duration=7200.0)
+
+
 def test_the_peaks_aggregate_across_replications_as_the_maximum():
     """レンタル数量・置き場面積の根拠になる数字は**最大**で集約する。
 
     平均すると「どの回でも観測されなかった小さい値」を売ることになる。「いつ」は
     その最大を出した回から採る（時刻の平均はどの run でも何も起きていない瞬間）。
+    回ごとに値が動いていることを**先に**確かめる: 動かない標本では max も mean も
+    同じ答えを返すので、この主張は測れていない。
     """
-    m = _line(gate=_ALL, junction_x=28.0, release=_RELEASE, staging={"capacity": 6})
-    reps = [run_once(m, seed=s) for s in (1, 2, 3, 4)]
-    each = [kpis.compute([r], None) for r in reps]
-    agg = kpis.compute(reps, None)
+    m = _line(**_VARYING)
+    reps = [run_once(m, seed=s) for s in (1, 2, 3, 4, 5)]
+    each = [kpis.compute([r], m) for r in reps]
+    agg = kpis.compute(reps, m)
     for key in ("bench_staging_peak", "stopper_queue_peak",
                 "stopper_trunk_occupancy_peak"):
         vals = [k[key] for k in each]
+        assert len(set(vals)) > 1, (key, vals)   # 標本が退化していない
         assert agg[key] == max(vals), key
-        assert agg[key] > statistics_fmean(vals) - 1e-9
+        assert agg[key] > statistics_fmean(vals), key   # mean とは別の数字
         assert agg["spread"][key]["how"] == "max"
-    # 「いつ」はその回のもの
-    top = max(range(len(each)), key=lambda i: each[i]["bench_staging_peak"])
-    assert agg["bench_staging_peak_t"] == each[top]["bench_staging_peak_t"]
-    assert agg["spread"]["bench_staging_peak"]["replication"] == top + 1
+        assert agg["spread"][key]["mean"] == pytest.approx(statistics_fmean(vals))
+        assert agg["spread"][key]["min"] == min(vals)
+    # 「いつ」はその最大を出した**回のもの**。滞留ピークの最大は #1 ではない回から
+    # 出るので、「replication #1 をそのまま残す」実装ではこの等式が成り立たない。
+    top = max(range(len(each)), key=lambda i: each[i]["stopper_queue_peak"])
+    assert top > 0, [k["stopper_queue_peak"] for k in each]
+    assert agg["stopper_queue_peak_t"] == each[top]["stopper_queue_peak_t"]
+    assert agg["spread"]["stopper_queue_peak"]["replication"] == top + 1
+    top_b = max(range(len(each)), key=lambda i: each[i]["bench_staging_peak"])
+    assert agg["bench_staging_peak_t"] == each[top_b]["bench_staging_peak_t"]
 
 
 def statistics_fmean(xs):
@@ -376,11 +574,26 @@ def statistics_fmean(xs):
 
 
 def test_a_per_belt_staging_peak_is_a_maximum_too():
-    m = _line(gate=_ALL, junction_x=28.0, n_spurs=2, release=_RELEASE,
-              staging={"capacity": 6})
-    reps = [run_once(m, seed=s) for s in (1, 2, 3)]
-    each = [kpis.compute([r], None)["conveyors"]["S1"]["staging_peak"] for r in reps]
-    assert kpis.compute(reps, None)["conveyors"]["S1"]["staging_peak"] == max(each)
+    """帯ごとの ``staging_peak`` も max 集約 — 面積は帯ごとに買うから。
+
+    合計だけでは「この列の脇に何台置けるか」にならないので、帯ごとの答えが平均に
+    化けてはいけない。ここも回ごとに値が動くフィクスチャで測る: 以前は毎回同じ
+    6/6 を見ていて、mean に差し替えても通ってしまっていた。
+    """
+    m = _line(**_VARYING)
+    reps = [run_once(m, seed=s) for s in (1, 2, 3, 4, 5)]
+    each = [kpis.compute([r], m)["conveyors"] for r in reps]
+    merged = kpis.compute(reps, m)["conveyors"]
+    belts = [b for b in merged if any(r[b]["staging_peak"] for r in each)]
+    assert belts, "置き場のある帯が1本も無い"
+    varied = 0
+    for b in belts:
+        vals = [r[b]["staging_peak"] for r in each]
+        assert merged[b]["staging_peak"] == max(vals), (b, vals)
+        if len(set(vals)) > 1:
+            varied += 1
+            assert merged[b]["staging_peak"] > statistics_fmean(vals), (b, vals)
+    assert varied, [[r[b]["staging_peak"] for r in each] for b in belts]
 
 
 # ============================================== never-blocks: 壊れた記述
@@ -430,6 +643,75 @@ def test_a_staging_of_nothing_is_not_a_buffer(spec):
     assert world.bench_staging is None
     res = run_once(m, seed=SEED)          # まだ走る: 列も開放も生きている
     assert _events(res, "stopper_open")
+
+
+@pytest.mark.parametrize("spec", [
+    {"capacity": "nan"}, {"capacity": float("nan")},
+    {"capacity": "inf"}, {"capacity": float("inf")},
+    {"capacity": float("-inf")},
+])
+def test_a_staging_capacity_that_is_not_a_number_does_not_take_the_build_down(spec):
+    """``nan``/``inf`` も**書き間違い**（JSON はどちらも運べる）。
+
+    ``float()`` はどちらも受けるので ``> 0`` の検査を素通りし、最初の ``int()`` で
+    落ちる（``int(nan)`` は ValueError、``int(inf)`` は OverflowError）。つまり
+    ``build()`` 自体が例外を投げて**モデルが開けなくなる**＝不変条件2（never blocks）
+    の違反で、しかも壊れているのは1つのつまみだけ。有限でない数は数ではないので、
+    他の書き間違いと同じく既定へ落とす。
+    """
+    m = _line(gate=_ALL, junction_x=28.0, release=_RELEASE)
+    m.process.bench_staging = spec
+    world = build(m)                      # ← 以前はここで例外
+    assert world.bench_staging is None
+    assert _events(run_once(m, seed=SEED), "stopper_open")
+
+
+@pytest.mark.parametrize("bad", ["nan", float("nan"), "inf", float("inf")])
+def test_a_stacker_count_that_is_not_a_number_does_not_take_the_build_down(bad):
+    m = _line(gate=_ALL, junction_x=28.0, staging={"capacity": 4},
+              release={**_RELEASE, "stackers": bad})
+    world = build(m)                      # ← 以前はここで例外
+    assert world.stack_crew is None or world.stack_crew.capacity >= 1
+    assert _events(run_once(m, seed=SEED), "stopper_open")
+
+
+@pytest.mark.parametrize("window", [1200.0, "inf", float("inf"), 1e9])
+def test_the_window_can_never_outlast_its_own_period(window):
+    """**窓は必ず閉じる**（不変条件17）。周期より長い窓は周期に丸める。
+
+    丸めていたのは ``window_s == 0``（出し切るまで）の枝だけだったので、
+    ``window_s > period_s`` の図面では窓が重なり、``window_s`` が巨大だと
+    **開いたきり閉じない**（実測: 開放1回・閉鎖0回なのに ``stopper_open_share`` は
+    0.000 と読め、開けっ放しのラインを「開放率0」と報告していた）。
+    """
+    m = _line(gate=_ALL, junction_x=28.0, staging={"capacity": 6},
+              release={"period_s": 300.0, "window_s": window,
+                       "stack_rate_per_hr": 280.0, "load_kind": "packed"},
+              duration=1800.0)
+    assert build(m).release_schedule["window_s"] <= 300.0
+    res = run_once(m, seed=SEED)
+    opens = [e["t"] for e in _events(res, "stopper_open")]
+    closes = [e["t"] for e in _events(res, "stopper_close")]
+    assert opens and len(closes) >= len(opens) - 1, "開けたら閉める"
+    assert all(c - o <= 300.0 + 1e-6 for o, c in zip(opens, closes))
+
+
+def test_a_sub_second_period_is_a_typo_not_an_operation():
+    """``period_s`` にも下限が要る。人が荷を載せてストッパーを開け閉めする周期なので、
+    ミリ秒の周期は運用ではなく**タイプミス**。
+
+    下限が無かったとき、1時間のシフトが 36万回の窓＝72万イベントになり、45秒経っても
+    終わらなかった——``POST /run`` を同期で回している web app はそのまま固まる。
+    黙って機構を消すより、下限で走らせて数字を出す方が正直（never-blocks）。
+    """
+    m = _line(gate=_ALL, junction_x=28.0, staging={"capacity": 4},
+              release={**_RELEASE, "period_s": 0.001}, duration=3600.0)
+    plan = build(m).release_schedule
+    assert plan["period_s"] == build_mod.MIN_RELEASE_PERIOD_S == 1.0
+    t0 = time.perf_counter()
+    res = run_once(m, seed=SEED)
+    assert time.perf_counter() - t0 < 20.0, "下限が効いていない（窓が爆発している）"
+    assert len(_events(res, "stopper_open")) <= 3600
 
 
 def test_a_release_with_no_stack_rate_is_not_a_constraint():
@@ -662,7 +944,8 @@ def test_a_model_with_none_of_them_reports_every_new_kpi_as_zero():
                 "stopper_trunk_occupancy_peak", "stopper_induction_hold_s",
                 "stopper_induction_holds", "stopper_leaks",
                 "bench_staging_peak", "bench_staging_peak_t", "bench_staging_mean",
-                "bench_staging_capacity", "bench_staging_blocks",
+                "bench_staging_capacity", "bench_staging_capacity_wired",
+                "bench_staging_blocks",
                 "bench_staging_block_s", "stack_loads", "stack_busy_s",
                 "stack_utilization", "n_stackers"):
         assert k[key] == 0, key

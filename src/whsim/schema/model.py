@@ -745,6 +745,14 @@ class Settings(BaseModel):
     shift_plan: dict = Field(default_factory=dict)
     # 提案書ブランドテーマ: cover 宛先/自社名/アクセント/ロゴ for a client-ready export.
     brand: Brand = Field(default_factory=Brand)
+    # 提案書の前提条件 (assumptions slide). 1件 = ``{"text": "…", "level": …}``、
+    # ``level`` は ``"危険側"``/``"注意"``（``danger``/``unsafe``/``warn``/``caution``
+    # も可、未知は info）。``{"lines": [...], "replace": true}`` の形なら同梱の
+    # 人件費/AGV投資の1行を**差し替える**（テンプレの決め打ちが当てはまらない案件の方が
+    # 多い）。前提は**データであって定数ではない**: 案件ごとの危険側の仮定は、それを
+    # 置いた本人が提案書の前提条件に書けなければ意味が無い。
+    # 空 (既定) ＝ 従来の固定文言だけ＝出力は1バイトも変わらない。
+    assumptions: list[dict] = Field(default_factory=list)
     # 提案書の用語ガード (per-client wording guard). Shape — every key optional:
     #   {"forbidden": ["…"], "forbidden_regex": "…",
     #    "replacements": {"NG": "OK"}, "allow": ["…"]}

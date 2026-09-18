@@ -710,9 +710,9 @@ def _agv_interference(model: WarehouseModel, det: dict | None,
 
     **棄却②: 逆の極——全レグが共有廊下（完全直列化）**。台数に依らず
     ``1/trip_s`` で頭打ちという上界は、``ecommerce_xl`` で 19.9件/h と読む一方
-    実測は 379件/h＝**19倍辛い**。答えを破壊するので使えない。
+    実測は 124〜379件/h＝**6〜19倍辛い**。答えを破壊するので使えない。
 
-    一様分散は10倍甘く、完全直列化は19倍辛く、その間のどこかは**経路の形**で決まる。
+    一様分散は10倍甘く、完全直列化は6〜19倍辛く、その間のどこかは**経路の形**で決まる。
     だから「名乗る」。同じ扱いを既に受けているのが ``routing_policy``（不変条件5）。
 
     **名乗るときに開示する実測**（``ecommerce_xl``、ON/OFF 同一シード15構成）:
@@ -1079,12 +1079,15 @@ def _overflow_cascade(bank, upstream, lam: float, capacity: float,
 
     **測った**（合成144構成＝方式2×需要3×引き込み3×台数2×staging有無×周期2、8時間、
     2 seed、全構成にストッパー在り。``block_ratio_est`` 対 実測 ``conveyor_block_ratio``）:
-    pull で **平均 +0.436・範囲 −0.159〜+0.689**、auto で 平均 +0.289・範囲
-    −0.162〜+0.655。つまり **pull へ当てても辛い側**で、甘い側に出たのは各方式
-    1/72 構成だけ。しかもその1構成は **auto でも同じだけ甘い**（−0.162）ので、
-    原因は方式ではなく**ストッパーの列が本線のスロットを握ること**（この縦続は
-    列を持っていない）＝鏡の無い機構そのものである。方式で分岐しても直らないので
-    分岐は足さず、**何が起きているかを書く**。
+    pull で **平均 +0.396・範囲 −0.272〜+0.682**、auto で 平均 +0.249・範囲
+    −0.305〜+0.655。つまり **pull へ当てた方がむしろ辛い側**で、甘い側に出たのは
+    各方式 4/72 構成——しかも**同じ4構成が auto でも同じだけ甘い**（最悪 −0.305）ので、
+    原因は方式ではない。その4構成は全部「低需要 × 完成品staging 小」で、DES が
+    0.28〜0.38 ブロックしているのにこの縦続は 0.01〜0.08 としか読まない: 詰まらせて
+    いるのは**満杯の置き場が梱包者を止める背圧**であって引き込みの溢れではなく、
+    縦続はその背圧も**ストッパーの列が本線のスロットを握ること**も持っていない＝
+    鏡の無い機構そのものである。方式で分岐しても直らないので分岐は足さず、
+    **何が起きているかを書く**。
     """
     # A 引き込み with NO hands takes one load per slot and never gives it back, so
     # after the first minutes it is simply not part of the bank any more — which is
@@ -1288,12 +1291,16 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
 
     ``ceiling`` is an OPTIONAL extra rate the line cannot beat, in orders/second,
     contributed by a mechanism this function does not otherwise model — today only
-    the 完成品staging の排出天井 (:func:`_release_drain`). It enters exactly where a
-    belt stage would, so ``jams`` / ``time_to_jam_s`` / ``block_ratio_est`` are all
-    computed against the same ceiling rather than being patched afterwards (a cap
-    bolted on after the fact would say 「詰まらない」 and 「能力はこれだけ」 in the same
-    breath). ``inf`` — the default, and every model that authors no mechanism —
-    leaves this function byte-identical.
+    the 完成品staging の排出天井 (:func:`_release_drain`). It is **ADDITIVE and
+    deliberately one-way**: it lowers ``capacity_per_hr`` (the number a proposal
+    sells) and names ``binding``, and it changes nothing else — ``jams`` /
+    ``time_to_jam_s`` / ``block_ratio_est`` and the λ this oracle then hands the
+    picker all keep reading the belt-and-bench answer. Feeding it back was measured
+    and is rosier (see the comment at the return). ⚠️ そのぶん ``jams`` は
+    「ベルトと梱包台で詰まるか」しか言っていない: 天井だけを超えた需要では
+    ``capacity_per_hr`` < ``offered_per_hr`` なのに ``jams`` は False になりうる。
+    ``inf`` — the default, and every model that authors no mechanism — leaves this
+    function byte-identical.
     """
     line = _belt_stages(model)
     if line is None:
@@ -1322,11 +1329,6 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
             cap = r
             idx = i
             binding = str(min(stages[i], key=lambda cv: (_belt_rate(cv), str(cv.id))).id)
-    # A mechanism ceiling is not a belt, so it buffers NOTHING: everything drawn is
-    # still upstream of it (``idx`` unchanged ⇒ ``buffer_slots`` stays the whole
-    # line). It only lowers what the line passes.
-    if ceiling < cap:
-        cap, binding = ceiling, (ceiling_label or "ceiling")
     # Everything from the picker's hand-off up to and including the constraint is
     # buffer: it all starts empty and has to fill before the picker feels the jam.
     buffer_slots = sum(slots) if idx >= len(stages) else sum(slots[:idx + 1])
@@ -1352,7 +1354,7 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
         ratio = max((blocked / total) if total > 0.0 else 1.0, steady)
     else:
         ratio = steady
-    return {
+    out = {
         "jams": bool(jams),
         "time_to_jam_s": ttj,
         "capacity_per_hr": cap * 3600.0 if math.isfinite(cap) else None,
@@ -1362,6 +1364,25 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
         "buffer_slots": buffer_slots,
         "offered_per_hr": lam * 3600.0,
     }
+    if ceiling < cap:
+        # 天井は**能力の主張だけ**を下げる。``jams``/``time_to_jam_s``/
+        # ``block_ratio_est`` と λ のスロットリングは上の答え（ベルト段と梱包台）の
+        # ままで、そこには一切効かせない。理由は測ってある（``_release_drain`` と
+        # 同じ 48構成・2 seed・8時間）: 天井で λ を絞ると**ピッカーと梱包の稼働率が
+        # 実測より下**に落ちる。DES 側の梱包者は満杯の置き場を待つ間も**台を握った
+        # まま**で `pack_done` の busy に数えられ、ピッカーも投入待ちの前に拾う分は
+        # 拾っているので、絞った分だけこちらが低く出る——実測で ピッカー 最大
+        # **−0.149**・梱包 最大 **−0.67** 追加で甘い側へ倒れた（絞らなければ
+        # ピッカーの既存のずれは最大 −0.157 のまま、天井で −0.175 まで悪化した）。
+        # 甘い側に倒すのは不変条件5が唯一禁じる向きなので、``_container_estimate``
+        # と同じ扱いにする: **自分の問いにだけ答え、他の数字は1つも動かさない**。
+        out["capacity_per_hr"] = ceiling * 3600.0
+        out["binding"] = ceiling_label or "ceiling"
+        # ``estimate`` が λ を絞るのに使う値（＝絞りは今までどおり）。天井が効いた
+        # ときだけ出るので、同梱カタログはキーごと出ない＝バイト同一。
+        out["capacity_throttle_per_hr"] = (cap * 3600.0 if math.isfinite(cap)
+                                           else None)
+    return out
 
 
 # ライン運用の3機構 (不変条件17). All three are opt-in and OFF in every shipped
@@ -1543,6 +1564,19 @@ def _release_drain(model: WarehouseModel, line: dict, n_packers: int,
     * 残る +112% は天井が効かない（置き場が潤沢で μ_pack が縛る）構成で、そこの差は
       ストッパー自身の損失（``stopper_leaks``＝未梱包で流れ出る分）であって staging の
       話ではない——**そちらは今も鏡が無い**。
+
+    **天井は ADDITIVE で、他の数字を1つも動かさない**（``_container_estimate`` と同じ
+    扱い）。λ をこれで絞りたくなるが、**測ったら甘い側へ倒れた**: DES の梱包者は満杯の
+    置き場を待つ間も**台を握ったまま**で ``pack_done`` の busy に数えられ、ピッカーも
+    投入待ちの前に拾う分は拾っている。絞ると解析だけが低く出て、実測48構成で
+    ピッカー最大 **−0.149**・梱包最大 **−0.67** 追加で甘い側へ倒れた（絞らなければ
+    ピッカーの既存のずれは 46/48構成・最大 −0.157 のままで、天井を入れても
+    **0構成も悪化しない**＝完全に不活性）。だから ``capacity_per_hr`` と ``binding``
+    だけを動かす。⚠️ その代償に ``jams``/``time_to_jam_s``/``block_ratio_est`` は
+    「ベルトと梱包台で詰まるか」しか言っていない。
+    ⚠️ **降りた経路そのものがピッカーで甘い側**（46/48構成・最大 −0.157）なのは
+    この天井の前から在る穴で、原因はストッパー機構の損失（引かれずに流れ出る荷と
+    開放時の漏れ）を解析が数えていないこと——**そこは今も鏡が無い**。
 
     ``None`` — リリースも置き場も書かれていない、あるいは末端に手が1つも無い図面。
     """
@@ -1893,7 +1927,13 @@ def estimate(model: WarehouseModel) -> dict:
     conveyor = _line_estimate(model, lam, n_stations, pack_time,
                               model.simulation.duration_s)
     if conveyor is not None and conveyor["jams"] and conveyor["capacity_per_hr"]:
-        lam = min(lam, conveyor["capacity_per_hr"] / 3600.0)
+        # ``capacity_throttle_per_hr`` is present only where a mechanism CEILING
+        # lowered the headline capacity (完成品staging の排出天井). The throttle then
+        # keeps reading the belt-and-bench answer: throttling by the ceiling was
+        # measured and pushes picker/packer utilisation BELOW the run's — the one
+        # direction invariant 5 forbids. See ``_conveyor_estimate``'s return.
+        throttle = conveyor.get("capacity_throttle_per_hr")
+        lam = min(lam, (throttle or conveyor["capacity_per_hr"]) / 3600.0)
 
     # ゾーン picking walks a strict SERPENTINE by aisle column, no backtracking
     # (the engine's ``_route_order``), so every aisle it enters is run end to end

@@ -63,6 +63,12 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   停止線→ゲートは `resolve_stop_gates` (交差 or 1.5m 近接。受け渡し点では複数ベルトが
   数cm内にいるので**「線に向かってくるベルト」**でないとカーブを掴む。1本に2本なら
   上流を採り落とした方を名指しで警告、同距離は belt id で決める)。
+  **読めたものには置き場が要る**: 人は `Resources.markers`（位置だけ。員数は
+  `Station.count`/`WorkerGroup.count` のまま）、停止線/仕切りは `Layout.non_barriers`
+  （`walls` の隣＝**壁にしない**の宣言。経路を1mmも変えない）。置き場が無かった間、
+  両方とも**保存の瞬間に消えていた**（実案件22人の員数照合が生図面の数え直しになり、
+  仕切りは跡形も残らなかった）。エンジンは役割の合う人をそこに立たせ、replay は
+  誰も立たなかったマーカーを「描かれた人」として `workers[]` に出す。
   **インポータは `discharge_both` を決めない**(能力が倍になるつまみを名前から推測しない)。
   `racktypes.py` — 9 storage-equipment presets (incl. メザニン/移動ラック/
   ハンガー) with unit economics, served at `/api/racktypes` and mirrored into the
@@ -322,6 +328,11 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   出力1バイト同一）。テキスト枠は `export/textfit.py` で**書く前に測る**＝縮小→「（続き）」
   スライド。**黙ってはみ出させない**（レイアウトに内容を削らせない）。
 - `render/replay.py` — replay contract consumed by both the 2D canvas and 3D (three.js) views.
+  **止まっている荷は「列」**: 待たされたトートは止まった1点ではなく、止まる位置から
+  上流へ 1個/`tote_pitch_m` に描く（`beltgeom.queue_points`＝エンジンと同じ弧の歩き方。
+  以前は投入待ち21個が同じ座標に重なり、3Dを作る側が毎回間隔を引き直していた）。
+  **図面の人**（`Resources.markers`）は、キーフレーム1本の worker として出す
+  （エンジンが人を立たせたマーカーは本人が居るので出さない＝2回描かない）。
 - `web/static/js/view3d/props.js` + `web/static/concept.html` — **概念シーン**（提案前に
   「新しいやり方がどう動くか」だけを見せる台本）。DES を通さず replay を手書きし、
   レンダラだけ再利用する。追加は汎用プリミティブ `replay.props[]`（箱/円柱/平面＋

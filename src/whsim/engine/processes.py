@@ -1528,17 +1528,21 @@ def _hold_at_stopper(world: World, line, order: Order, kind: str, tote,
     """
     env = world.env
     stp = line.stopper
-    # 列が満杯: 入れるようになるまで、いま居る場所で待つ。
+    # 列が満杯: 入れるようになるまで、いま居る場所で待つ。開放が先に来たら
+    # **並ばずにそのまま通る**（開いているストッパーは列を作らない）。
     if len(stp.queue) >= stp.capacity:
-        waiting = _stall_join(world, line, -stp.pitch, tote, True)
-        t_full = env.now
-        while len(stp.queue) >= stp.capacity:
-            yield stp.room_ev(env)
-        _stall_leave(world, waiting)
+        # 入る前に**入れなかったこと**を書く: 列が二度と減らない図面では、この荷は
+        # 最後まで列の外で止まったままなので、待ち終わりに書くと「溢れた」事実が
+        # 1件も残らない（一番知りたい run で沈黙する）。
         world.log(t=env.now, event="stopper_backup", order_id=order.order_id,
                   resource="conveyor", conveyor=line.id, kind=kind,
-                  queue=len(stp.queue), capacity=stp.capacity,
-                  blocked=env.now - t_full)
+                  queue=len(stp.queue), capacity=stp.capacity)
+        waiting = _stall_join(world, line, -stp.pitch, tote, True)
+        while len(stp.queue) >= stp.capacity and not stp.is_open:
+            yield stp.room_ev(env) | stp.open_ev(env)
+        _stall_leave(world, waiting)
+        if stp.is_open:
+            return ("release",)
     held = _Held(order=order, kind=kind, at=env.now, event=env.event(), tote=tote)
     stp.queue.append(held)
     _stall_draw(world, line, stp.gate.arc, stp.queue, False)

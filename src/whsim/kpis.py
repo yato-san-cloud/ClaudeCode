@@ -63,7 +63,7 @@ _EXTREMUM_KEYS: dict[str, str] = {
     # 値になり、実際には溢れる置き場を売ることになる）。
     "bench_staging_peak": "max",                # 完成品仮置きの同時ピーク (合計)
     "stopper_queue_peak": "max",                # ストッパー前の滞留ピーク
-    "stopper_trunk_occupancy_peak": "max",      # 開放中の本線占有ピーク
+    "stopper_trunk_occupancy_peak": "max",      # 本線(ストッパーの立つ帯)の占有ピーク
     "stopper_leaks": "mean",                    # 未梱包のまま流出した荷 (欠陥カウンタ)
 }
 
@@ -455,6 +455,18 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
     stack_done = [e for e in res.events if e["event"] == "stack_done"]
     stack_busy = sum(float(e.get("busy", 0.0)) for e in stack_done)
     n_stackers = getattr(res, "n_stackers", 0)
+    # 帯ごとの読み出しはここで1回だけ作る: 本線の占有ピーク(下)はこの表が既に積分して
+    # いる階段関数そのもので、3つ目の写しを書かないため (invariant 11)。
+    per_belt = _per_belt(res, model, cv_on, cv_off, unmanned_ends, stage_puts)
+    # 本線 = ストッパーが立っているベルト。``stopper_*`` も ``release_board`` も帯の id を
+    # 運ぶので、**ストッパーが在れば**本線の名前が分かる — リリース予定の無い図面でも、
+    # 完成品を1個も載せなかった窓でも。以前はこれを ``release_board`` の ``occ`` の最大で
+    # 測っていて、``bench_staging`` の無いリリース（＝載せる完成品が無い＝boardが0件）で
+    # 本線が満杯のまま 0 を報告していた。占有ピークは「いつ測ったか」に依ってはいけない。
+    trunk_ids = ({str(e.get("conveyor", "")) for e in stop_moves}
+                 | {str(e.get("conveyor", "")) for e in stop_boards})
+    trunk_occ_peak = max((int(per_belt[b]["peak_occupancy"])
+                          for b in trunk_ids if b in per_belt), default=0)
 
     # --- 在庫補充連鎖 (DES-internal inventory & replenishment) ----------------
     # Populated only when replenishment was enabled (replenish_done / stockout_wait
@@ -604,8 +616,8 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "stopper_released_loads": len(stop_boards),
         "stopper_released_queue": sum(1 for e in stop_moves
                                       if e["event"] == "stopper_release"),
-        "stopper_trunk_occupancy_peak": max((int(e.get("occ", 0))
-                                             for e in stop_boards), default=0),
+        # 本線がどこまで埋まったか (0 = ストッパーの立っている帯が無い).
+        "stopper_trunk_occupancy_peak": trunk_occ_peak,
         "stopper_induction_hold_s": sum(float(e.get("blocked", 0.0))
                                         for e in stop_holds_i),
         "stopper_induction_holds": len(stop_holds_i),
@@ -618,7 +630,11 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "bench_staging_peak": stage_peak,
         "bench_staging_peak_t": stage_peak_t,
         "bench_staging_mean": stage_mean,
-        "bench_staging_capacity": getattr(res, "bench_staging_capacity", 0),
+        "bench_staging_capacity": _bench_staging_capacity(res, model),
+        # エンジンが張った置き場の総数。上の分母との差が「完成品の届かない置き場」＝
+        # 通過するだけの帯に invent された分で、差を隠さずに並べて出す。
+        "bench_staging_capacity_wired": max(
+            0, int(getattr(res, "bench_staging_capacity", 0) or 0)),
         "bench_staging_blocks": sum(1 for e in stage_puts
                                     if float(e.get("blocked", 0.0)) > 1e-6),
         "bench_staging_block_s": sum(float(e.get("blocked", 0.0))
@@ -642,8 +658,7 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "containers_in_use_peak_t": ct_peak_t,
         # ...and WHERE (per belt), which is the only read-out that points at the
         # 引き込み/本線 to fix rather than at "the conveyor".
-        "conveyors": _per_belt(res, model, cv_on, cv_off, unmanned_ends,
-                               stage_puts),
+        "conveyors": per_belt,
         "n_conveyors": getattr(res, "n_conveyors", 0),
         "consolidation": res.consolidation,
         "pick_method": res.pick_method,
@@ -692,6 +707,43 @@ def _one(res: RunResult, model: WarehouseModel | None = None) -> dict:
         "labour_rate_per_hr": rate,
         "currency": c["currency"],
     }
+
+
+def _bench_staging_capacity(res: RunResult, model: WarehouseModel | None) -> int:
+    """完成品staging の容量 — **完成品が実際に届く置き場**の分だけ。
+
+    ``bench_staging_peak == bench_staging_capacity`` は「天井に当たった＝この数は
+    答えではなく制約」という読み方（容器プールと同じ）で、そのためには分母がピークの
+    届く数でなければならない。エンジンが張る総数はそうではない: 連鎖の終端になる帯
+    には**梱包台が1台も無くても**置き場が1台分 invent されて張られる（カーブは
+    ``to_exit`` の荷しか受けないので ``_stage_finished`` に到達しない＝一生空のまま）。
+    その空の置き場が分母に乗っている限り、置き場が全部満杯で梱包が止まっている run でも
+    ``peak < capacity`` になり、**天井の読み方そのものが一度も成立しない**（実測:
+    実在2台が 6/6・6回の梱包停止なのに 12 ≠ 18）。
+
+    分母は図面から読む: スキーマの ``capacity`` は**梱包台1台あたり**なので、
+    「1台あたり × 図面の梱包台の台数」が現場が買う置き場の量になる。完成品が生まれる
+    のは梱包台だけなので、これは「受け取れる置き場」と同じ集合を数えている。
+    ``min`` で**エンジンが張った総数を超えない**ようにするのは、余り台（どの帯にも
+    属さない梱包台）が在る図面で図面側が多く出るため — 分母は常に「実際に在る置き場
+    以下」でなければ、また天井が読めなくなる。
+
+    never-blocks: 機構オフ（張られていない）なら 0、モデルを渡さないレガシー呼び出しや
+    壊れた記述では張られた総数をそのまま返す（歴史的な値のまま＝何も壊さない）。
+    """
+    wired = max(0, int(getattr(res, "bench_staging_capacity", 0) or 0))
+    if wired <= 0 or model is None:
+        return wired
+    try:
+        spec = getattr(model.process, "bench_staging", None) or {}
+        per_bench = max(0, int(float(spec.get("capacity", 0) or 0)))
+        benches = sum(max(0, int(st.count))
+                      for st in (model.resources.stations or []))
+    except Exception:      # noqa: BLE001 — a read-out must never break the KPIs
+        return wired
+    if per_bench <= 0 or benches <= 0:
+        return wired
+    return min(wired, per_bench * benches)
 
 
 def _level_series(points: list[tuple[float, int]],
@@ -1221,12 +1273,18 @@ def compute(results: list[RunResult], model: WarehouseModel | None = None) -> di
         agg["verdict"] += (
             f"。完成品リリースは {agg['stopper_windows']:.0f} 回・本線占有 {share:.0f}%"
             f"（検品済みの投入待ち 延べ {hold_min:.0f}分）")
-        if agg.get("stopper_leaks"):
-            seen = _reps_seen(agg, "stopper_leaks")
-            agg["verdict"] += (
-                f"。⚠ 開放時に未梱包のまま流れ出た荷 {_count(agg['stopper_leaks'])} 件"
-                f"{'・' + seen if seen else ''}"
-                "（周期を短くするか引き込みの人員を増やしてください）")
+    # 未梱包の流出は**窓の記帳とは独立に**鳴らす。``stopper_windows`` は閉じた窓しか
+    # 数えない（開きっぱなしの窓は開放時間も排出時間も未確定なので、それが正しい）が、
+    # 荷はその窓でも実際に流れ出ている。地平線で切れた1回目の窓だけの run は
+    # windows=0・leaks>0 になり、以前はそこで判定文が黙っていた——判定文は営業が読む
+    # もので、「未梱包の出荷を成果として売らない」がこのカウンタの存在理由そのもの。
+    # 流出が無ければ 0 ⇒ 何も足さない（判定文はバイト同一）。
+    if agg.get("stopper_leaks"):
+        seen = _reps_seen(agg, "stopper_leaks")
+        agg["verdict"] += (
+            f"。⚠ 開放時に未梱包のまま流れ出た荷 {_count(agg['stopper_leaks'])} 件"
+            f"{'・' + seen if seen else ''}"
+            "（周期を短くするか引き込みの人員を増やしてください）")
     # 完成品staging: ピークがそのまま「台の脇に何台分の置き場が要るか」。天井に当たって
     # いれば、その数は答えではなく制約なので、そう言う（容器プールと同じ読み方）。
     if agg.get("bench_staging_capacity"):
