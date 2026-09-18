@@ -533,6 +533,14 @@ def test_the_predicates_read_the_same_drawing_the_engine_wires():
               staging={"capacity": "六"}),
         _line(gate=_ALL, junction_x=28.0, release={"period_s": "毎時"},
               staging={"capacity": 6}),
+        # 停止線が1本も無い図面: リリースは張られるが、開けるストッパーが無いので
+        # 置き場は張られない（「流す手段が無いバッファは壁」）。ここを取り違えると、
+        # engine が何もしていない線に解析だけが背圧を価格する。
+        _line(gate=None, junction_x=28.0, release=_RELEASE,
+              staging={"capacity": 6}),
+        # 選択停止ゲート + リリース: build はこれもストッパーにするので置き場は張る。
+        _line(gate={"stop_states": ["inspected"]}, junction_x=28.0,
+              release=_RELEASE, staging={"capacity": 6}),
     ]
     for m in cases:
         world = build(m)
@@ -540,6 +548,27 @@ def test_the_predicates_read_the_same_drawing_the_engine_wires():
         assert ("stopper" in names) == bool(world.stoppers), m.process.release_schedule
         assert ("release_schedule" in names) == (world.release_schedule is not None)
         assert ("bench_staging" in names) == (world.bench_staging is not None)
+
+
+def test_a_gate_on_a_belt_the_flow_does_not_route_through_is_not_a_gate():
+    """述語は**エンジンが配線するベルト集合**を読む（不変条件11 / 13）。
+
+    `build` は `flowgraph.conveyor_ids_in_use` でベルトを絞ってから配線するので、
+    どの `flow_edge` も通さないベルトの停止線は engine にとって存在しない。解析が
+    `resources.conveyors` を丸ごと読んでいた間、そういう図面では**存在しない機構を
+    理由に降りていた**（`unmirrored: ["stopper"]`）——「片方にしか見えないベルト」で
+    両者が別の倉庫を計算する、あの形。
+    """
+    m = _line(gate=_ALL, junction_x=28.0)
+    m.process.flow_edges = [e for e in m.process.flow_edges
+                            if getattr(e, "equipment_ref", None) != "T"]
+    world = build(m)
+    assert world.stoppers == [] and all(c.gate is None for c in world.conveyors)
+    assert analytic._has_gate(m) is False
+    assert analytic._has_stopper(m) is False
+    assert analytic._unmirrored_line_mechanics(m) == []
+    cv = analytic.estimate(m)["conveyor"]
+    assert cv is None or "line_mechanics_mirrored" not in cv
 
 
 def test_the_window_share_is_disclosed_but_never_multiplied_into_the_capacity():

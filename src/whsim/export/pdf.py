@@ -61,6 +61,7 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
+    from reportlab.pdfbase.pdfmetrics import stringWidth
     from reportlab.platypus import (
         Image as RLImage,
         KeepTogether,
@@ -126,6 +127,27 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
         "tval", fontName=font, fontSize=15, leading=18, textColor=_rgb(INK),
         alignment=1,
     )
+    # Cell styles used ONLY for cells that do not fit their column (see _cell).
+    cell_l = ParagraphStyle("cell_l", fontName=font, fontSize=9, leading=11,
+                            textColor=_rgb(INK))
+    cell_r = ParagraphStyle("cell_r", parent=cell_l, alignment=2)
+    cell_s = ParagraphStyle("cell_s", parent=cell_l, fontSize=8, leading=10)
+
+    def _cell(text, width, style=cell_l):
+        """A table cell that wraps only when it has to.
+
+        A plain string is drawn straight over its neighbour when it is too wide
+        for its column — the PDF twin of the deck's silent overflow, and just as
+        invisible until a customer sees it. Cells are measured first (reportlab's
+        own metrics), and only the ones that would not fit become wrapping
+        Paragraphs, so everything that already fitted is written exactly as
+        before. `width` is the column width MINUS its padding."""
+        s = str(text)
+        try:
+            over = stringWidth(s, font, style.fontSize) > width
+        except Exception:  # noqa: BLE001 — metrics must never sink an export
+            over = len(s) * style.fontSize > width
+        return Paragraph(_xml_escape(s), style) if over else s
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(
@@ -226,7 +248,10 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
 
     # --- KPI detail table -----------------------------------------------------
     _section("③ 検証：KPI詳細")
-    data = [["指標", "値"]] + [list(r) for r in _detail_rows(kpis)]
+    kpi_w = (avail_w * 0.6 - 12, avail_w * 0.4 - 12)  # column minus L/R padding
+    data = [["指標", "値"]] + [
+        [_cell(r[0], kpi_w[0]), _cell(r[1], kpi_w[1], cell_r)]
+        for r in _detail_rows(kpis)]
     table = Table(data, colWidths=[avail_w * 0.6, avail_w * 0.4])
     table.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, -1), font),
@@ -250,9 +275,12 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
     if st is not None:
         header, srows, summary = st
         _section("③ 設計：保管設備の試算（間口・台数・坪数）")
-        sdata = [header] + srows
-        stbl = Table(sdata, colWidths=[avail_w * 0.32, avail_w * 0.17,
-                                       avail_w * 0.17, avail_w * 0.17, avail_w * 0.17])
+        scw = [avail_w * 0.32] + [avail_w * 0.17] * 4
+        sdata = [header] + [
+            [_cell(v, w - 12, cell_l if ci == 0 else cell_r)
+             for ci, (v, w) in enumerate(zip(row, scw))]
+            for row in srows]
+        stbl = Table(sdata, colWidths=scw)
         stbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -312,9 +340,11 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
             story.append(Paragraph(staff["batch_line"], body_style))
         story.append(Spacer(1, 1.5 * mm))
         # 工程フロー table (工程 / 区分 / 生産性 / 依存).
-        fdata = [staff["flow_header"]] + staff["flow_rows"]
-        ftbl = Table(fdata, colWidths=[avail_w * 0.27, avail_w * 0.16,
-                                       avail_w * 0.27, avail_w * 0.30])
+        fcw = [avail_w * 0.27, avail_w * 0.16, avail_w * 0.27, avail_w * 0.30]
+        fdata = [staff["flow_header"]] + [
+            [_cell(v, w - 12) for v, w in zip(row, fcw)]
+            for row in staff["flow_rows"]]
+        ftbl = Table(fdata, colWidths=fcw)
         ftbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -360,6 +390,10 @@ def build_pdf(kpis: dict, model_name: str, provenance_summary: str,
             rows_d.append(row)
         ncol = len(header)
         cw = [avail_w * 0.28] + [avail_w * 0.72 / (ncol - 1)] * (ncol - 1)
+        # A long シナリオ名 is caller data: wrap it rather than print it over the
+        # next column (padding here is LEFT 4 / RIGHT 6).
+        rows_d = [[_cell(v, w - 10, cell_s) for v, w in zip(row, cw)]
+                  for row in rows_d]
         stbl = Table(rows_d, colWidths=cw)
         stbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),

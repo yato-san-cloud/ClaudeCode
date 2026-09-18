@@ -167,7 +167,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
                       Inches(FOOTER_W), Inches(0.4))
         _para(tf, text, size=pt, color=SUBTLE, first=True)
 
-    def _fill(slide, paras, left, top, width, height, room=None):
+    def _fill(slide, paras, left, top, width, height, room=None, scale=None):
         """Write `paras` into a NEW box of the given geometry, shrunk to fit.
 
         Every free-text box on the deck goes through here: python-pptx writes
@@ -180,9 +180,12 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         `room` is the vertical space the text may actually occupy before it hits
         whatever sits below it, which is what "overflow" really means; it
         defaults to the box's own height, and is passed explicitly where a box
-        deliberately sits in a larger gap (the cover)."""
-        scale = textfit.fit_scale(paras, width / 914400,
-                                  (room if room is not None else height) / 914400)
+        deliberately sits in a larger gap (the cover). `scale` is measured here
+        unless the caller already measured it across several boxes."""
+        if scale is None:
+            scale = textfit.fit_scale(
+                paras, width / 914400,
+                (room if room is not None else height) / 914400)
         tf = _textbox(slide, left, top, width, height)
         for i, para in enumerate(paras):
             _para(tf, para["text"], size=para["pt"] * scale,
@@ -203,11 +206,7 @@ def build_pptx(kpis: dict, model_name: str, provenance_summary: str,
         for pi, page in enumerate(textfit.paginate(paras, w_in, h_in, scale)):
             slide = prs.slides.add_slide(blank)
             _header_band(slide, title if pi == 0 else f"{title}（続き）")
-            tf = _textbox(slide, left, top, width, height)
-            for i, para in enumerate(page):
-                _para(tf, para["text"], size=para["pt"] * scale,
-                      bold=para.get("bold", False),
-                      color=para.get("color", INK), first=(i == 0))
+            _fill(slide, page, left, top, width, height, scale=scale)
             if footer:
                 _footer(slide)
 

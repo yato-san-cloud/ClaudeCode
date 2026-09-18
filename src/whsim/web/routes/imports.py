@@ -95,6 +95,13 @@ async def api_import_mapcsv(name: str, file: UploadFile):
         md["layout"]["zones"] = res["zones"]
     if res.get("stations"):
         md.setdefault("resources", {})["stations"] = res["stations"]
+    # Map CSV は名前を持たないので今のところ人も非障壁も出てこないが、MapMaker の
+    # 2つの取込口が「読めたものをどこへ置くか」で食い違ってはいけない (置き場が
+    # ルートごとに違うと、次に名前付きの CSV が来たときに静かに落ちる)。
+    if res.get("markers"):
+        md.setdefault("resources", {})["markers"] = res["markers"]
+    if res.get("non_barriers"):
+        md["layout"]["non_barriers"] = res["non_barriers"]
     model = WarehouseModel.model_validate(md)
     design.materialize_racks(model)   # authored shelves -> location cells
     design.synthesize_items(model)    # ensure demand so the sim stays runnable
@@ -133,6 +140,16 @@ async def api_import_rmpm(name: str, file: UploadFile):
         md["layout"]["zones"] = res["zones"]
     if res.get("stations"):
         md.setdefault("resources", {})["stations"] = res["stations"]
+    # 立ち位置マーカー / 停止線・仕切り — 図面が言っていることを**保存する**。
+    # 読めているのに置き場が無かった間、両方とも保存の瞬間に消えていた: 22人
+    # (検品者2+梱包者20) の員数照合は生図面を数え直す羽目になり、仕切りに至っては
+    # 跡形も残らなかった (停止線だけがゲートとして間接的に生き延びていた)。
+    # 仕切りは **壁にしない** ので ``layout.walls`` ではなく ``layout.non_barriers`` へ
+    # ——経路を塞がないことが、この置き場そのものの意味 (不変条件18)。
+    if res.get("markers"):
+        md.setdefault("resources", {})["markers"] = res["markers"]
+    if res.get("non_barriers"):
+        md["layout"]["non_barriers"] = res["non_barriers"]
     gates: dict = {}
     if res.get("conveyors"):
         # The drawn belts REPLACE whatever the template guessed: once a real
@@ -179,6 +196,12 @@ async def api_import_rmpm(name: str, file: UploadFile):
             "stop_gates_dropped": int(gates.get("dropped", 0)),
             "load_kinds": list(gates.get("kinds") or []),
             "markers": len(res.get("markers", [])),
+            "non_barriers": len(res.get("non_barriers", [])),
+            # …and what actually LANDED in the saved model. 図面から読めた件数と
+            # モデルに入った件数は別の数字で、以前は後者が常に0だった —
+            # 員数照合(何人居るか)を生図面で数え直させていたのはこの差。
+            "markers_in_model": len(model.resources.markers),
+            "non_barriers_in_model": len(model.layout.non_barriers),
             "locations": len(model.locations),
             "warnings": warnings, "stats": res.get("stats", {})}
 

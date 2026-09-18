@@ -498,6 +498,14 @@ def test_the_near_miss_checks_survive_junk_geometry():
     assert not [k for k in kinds if k == "belt_not_wired"], \
         "degenerate geometry is not transport, so it is not a missing belt either"
 
+    # ...and a belt whose coordinates are not numbers at all costs the OTHER
+    # belts nothing — 取込は寛容 (不変条件3) applies to the checks too.
+    broken = _line(spur3n=[[26.5, 5.044], [26.5, 7.644]])
+    broken.resources.conveyors = [*broken.resources.conveyors,
+                                  Conveyor.model_construct(id="junk",
+                                                           points=[["x", "y"], [1, 2]])]
+    assert _only(broken, "spur_no_junction")["belt"] == "spur3n"
+
 
 def test_a_bench_standing_at_a_stop_line_belongs_to_it_not_to_nobody():
     """停止線の作業者 are not orphans (不変条件17's mechanism, read once).

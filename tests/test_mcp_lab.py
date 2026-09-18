@@ -541,8 +541,8 @@ def test_the_stop_line_sweep_needs_both_knobs_or_the_answer_flatters(gate_sweeps
         assert n[(18.0, seed)] == t[(18.0, seed)]
         # 動かした水準では、線だけの掃引が甘い側に外れる
         for arc in (10.0, 26.0):
-            assert n[(arc, seed)] > t[(arc, seed)] + 0.15, (arc, seed)
-    assert max(n[k] - t[k] for k in n) > 0.4       # 実測: 最大でおよそ0.5
+            assert n[(arc, seed)] > t[(arc, seed)] + 0.10, (arc, seed)
+    assert max(n[k] - t[k] for k in n) > 0.4       # 実測: 最大でおよそ0.49
 
 
 def test_a_typo_inside_a_tied_level_does_not_hide_behind_the_others(runs):

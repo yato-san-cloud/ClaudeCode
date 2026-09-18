@@ -192,7 +192,8 @@ sweep(base,
 ```
 
 返る `rows` は12行で、`params` は `{"台数±": "2台/引き込み"}` のように読める。
-実測（`duration_s=900`・需要3倍・seed 4本の平均）:
+実測（`line_inspection`・`duration_s=900`・`orders.profile.peak_factor=3.0`・
+seed 1〜4 の平均。数値は各runの `summary.json` からの転記）:
 
 | 台数± | 完了率 | 梱包稼働率 |
 |---|---|---|
@@ -334,9 +335,10 @@ print(json.dumps(L.verify_report('runs/reports/<report_id>'), ensure_ascii=False
   会話が返って来なくならないための歯止め。**連動軸は水準数で数える**ので、
   1つの実験変数がN本の編集でも上限の消費は1水準＝1。
 - 自由 dict のキー検査が見るのは **`apply_diff_and_run` の差分 / `sweep` の格子**
-  だけで、**基準シナリオの `edits`** は見ていない（そちらは検査の対象＝差分では
-  なく前提なので、焼かれた `model.json` と突き合わせる相手が無い）。基準に書いた
-  `container_pool.size` は今も黙って無視される — つまみは差分側に書くこと。
+  だけで、**基準シナリオの `edits`**（と `run_scenario` の `edits`）は見ていない。
+  基準側まで見にいくと既存の掃引の応答が変わってしまうため、今回は差分側に
+  限っている。基準に書いた `container_pool.size` は今も黙って無視されるので、
+  **つまみは差分側に書く**こと。
 - 正しい直し方は**スキーマ側で認識キーを宣言する**こと（`schema/model.py` の
   `Field(json_schema_extra={"recognized_keys": [...]})` のような単一の源）。
   今は `engine/build.py` の構文木から導出しているので、エンジンが

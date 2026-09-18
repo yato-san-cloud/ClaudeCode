@@ -328,13 +328,59 @@ def test_pdf_and_pptx_state_the_same_assumptions(tmp_path, monkeypatch):
         assert blk["text"] in pdf_text
 
 
-def test_pdf_escapes_markup_in_caller_text(tmp_path):
-    """reportlab parses its Paragraph text as markup — an ``&`` must not kill
-    the export (a 前提 is written by a human, not by us)."""
-    out = export_doc.build_pdf(
-        KPIS, "テスト倉庫", "", None, tmp_path / "esc.pdf",
-        assumptions=["A&B社の実績値を <参考> として用いた"])
+def _pdf_story(tmp_path, monkeypatch, **kw):
+    """Build a PDF and hand back the platypus story it was built from."""
+    captured = {}
+    from reportlab.platypus import SimpleDocTemplate
+    orig = SimpleDocTemplate.build
+
+    def _spy(self, story, *a, **kwargs):
+        captured["story"] = list(story)
+        return orig(self, story, *a, **kwargs)
+
+    monkeypatch.setattr(SimpleDocTemplate, "build", _spy)
+    export_doc.build_pdf(KPIS, "テスト倉庫", "実データ 62%", None,
+                         tmp_path / "s.pdf", **kw)
+    return captured["story"]
+
+
+def test_pdf_table_cell_wraps_only_when_it_must(tmp_path, monkeypatch):
+    """reportlab draws an over-wide cell straight over its neighbour — the PDF
+    twin of the deck's silent overflow. Long cells wrap; short ones are written
+    exactly as before (which is what keeps existing PDFs identical)."""
+    from reportlab.platypus import Paragraph, Table
+    long_name = "本社直轄・関東広域自動化案（AGV＋自動倉庫併設）" * 2
+    scen = [{"name": "現行", "kpis": KPIS},
+            {"name": long_name, "kpis": KPIS}]
+    story = _pdf_story(tmp_path, monkeypatch, scenarios=scen)
+    def _flat(value):
+        # reportlab rewraps a cell's content into nested tuples while building.
+        if isinstance(value, (list, tuple)):
+            return [x for v in value for x in _flat(v)]
+        return [value]
+
+    tables = [f for f in story if isinstance(f, Table)]
+    cells = [c for t in tables for row in t._cellvalues for c in _flat(row)]
+    assert any(isinstance(c, Paragraph) and long_name in c.text for c in cells), \
+        "the over-wide シナリオ名 was left as an unwrapped string"
+    # the KPI table's own short labels are untouched plain strings
+    assert any(c == "スループット (件/時)" for c in cells)
+
+
+def test_markup_characters_survive_and_do_not_break_the_export(tmp_path):
+    """A 前提 is authored prose: 「在庫 <200 件」 must keep its condition, and an
+    ``&`` must not kill reportlab's markup parser. Escaping happens per format,
+    never by deleting the author's characters."""
+    text = "在庫 <200 件 かつ A&B社の実測値を採用した"
+    assert [b["text"] for b in _assumption_blocks(KPIS, "", [text])][-1] == text
+    out = export_doc.build_pdf(KPIS, "テスト倉庫", "", None,
+                               tmp_path / "esc.pdf", assumptions=[text])
     assert out.is_file() and out.stat().st_size > 3_000
+    deck = export_doc.build_pptx(KPIS, "テスト倉庫", "", None,
+                                 tmp_path / "esc.pptx", assumptions=[text])
+    assert text in _all_text(deck)
+    html = build_viewer_html(WarehouseModel(), kpis=KPIS, assumptions=[text])
+    assert "&lt;200" in html and "A&amp;B社" in html  # escaped, not deleted
 
 
 def test_viewer_carries_the_same_assumptions():

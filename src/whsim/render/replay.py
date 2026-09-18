@@ -262,6 +262,67 @@ def _station_dict(s) -> dict:
     return out
 
 
+def _marker_workers(model: WarehouseModel, staffed=()) -> list[dict]:
+    """図面に描かれた立ち位置 (``Resources.markers``) を、**そこに立っている人**として出す。
+
+    Not a new block in the contract: a person is a ``workers[]`` entry with
+    keyframes, and one who never leaves their post is an entry with ONE keyframe
+    (the 3D already turns a worker with no displacement into a standing figure —
+    ``face`` is where they are turned toward). Inventing a ``markers[]`` block
+    instead would draw the same warehouse twice (不変条件16): the video rig had to
+    inject exactly these as "presentation-layer" people because the model did not
+    carry them, and the answer to that is to carry them, not to add a second way
+    of drawing a person.
+
+    ``staffed`` is the ids an AGENT is already standing at (``RunResult
+    .staffed_markers``): those people are simulated and have their own moving
+    track, so re-emitting them would put two people on one square metre.
+
+    Additive and guarded: a model with no markers returns ``[]`` — the replay is
+    byte-identical — and an old viewer just sees ordinary ``workers[]`` entries.
+    """
+    done = set(staffed or ())
+    out: list[dict] = []
+    for m in (getattr(model.resources, "markers", None) or []):
+        if m.id in done:
+            continue
+        w = {"id": m.id, "role": str(m.role or "worker"),
+             # 立ち止まっている人は向きを変位から導けないので、図面が「なぜそこに
+             # 立っているか」＝一番近いベルトの方を向かせる (`face` は replay 契約に
+             # 既にある)。近くに何も無ければ書かない＝ビューアの既定のまま。
+             "keyframes": [[0.0, round(float(m.x), 3), round(float(m.y), 3), "idle"]]}
+        if m.name:
+            w["name"] = m.name
+        face = _facing(model, m)
+        if face is not None:
+            w["face"] = face
+        out.append(w)
+    return out
+
+
+def _facing(model: WarehouseModel, mk) -> list[float] | None:
+    """Which way a drawn 立ち位置 is turned: toward the nearest belt within reach.
+
+    A 立ち位置 is drawn BESIDE the thing its person works at, so the nearest belt
+    path is what they face. Uses ``beltgeom`` (the one reader of belt geometry) and
+    returns ``None`` when nothing is near enough to claim, so nobody is turned
+    toward a conveyor on the other side of the building.
+    """
+    belts = [(c.id, [(float(p[0]), float(p[1])) for p in c.points if len(p) >= 2])
+             for c in model.resources.conveyors]
+    belts = [(bid, pts) for bid, pts in belts if len(pts) >= 2]
+    if not belts:
+        return None
+    from whsim import beltgeom
+    hit = beltgeom.nearest_path((mk.x, mk.y), belts)
+    if hit is None or hit[1] > beltgeom.BENCH_REACH_M:
+        return None
+    _bid, _gap, arc = hit
+    pts = dict(belts)[_bid]
+    xy = beltgeom.point_at(pts, arc)
+    return [round(xy[0], 3), round(xy[1], 3)]
+
+
 def _conveyor_dict(c) -> dict:
     """One belt for the replay contract (``elevation_m`` only when stated —
     same additive-and-guarded rule as the bench footprint above)."""
@@ -303,7 +364,10 @@ def build_layout_replay(model: WarehouseModel) -> dict:
                  "grid_m": model.simulation.heatmap_grid_m},
         "zones": zones, "racks": racks, "shelves": shelf_runs(model),
         "navnet": _nav.to_dict() if _nav.obstacles else None,
-        "stations": stations, "workers": [], "agvs": [], "forklifts": [],
+        # 走らせる前の図面にも人は描かれている（立ち位置マーカー）。誰も走っていない
+        # ので全員が「立っているだけの人」＝キーフレーム1本。
+        "stations": stations, "workers": _marker_workers(model),
+        "agvs": [], "forklifts": [],
         "conveyors": conveyors, "equipment": equipment, "walls": walls, "doors": doors,
         "routes": routes, "staging": None, "congestion": None, "series": [], "kpis": {},
     }
@@ -348,6 +412,11 @@ def build_replay(model: WarehouseModel, res: RunResult, kpis: dict) -> dict:
         for ins in getattr(res, "inspectors", [])
         if ins.keyframes
     ]
+    # …and the people the DRAWING says are there but this run gave no agent to
+    # (梱包台に立つ20人の梱包者など — エンジンは彼らを一人ずつ動かしてはいない)。
+    # 図面が置いた人を落とすと、動画側が「見せるためだけの人」を外から注入する
+    # ことになる（実際そうなっていた）。
+    workers += _marker_workers(model, getattr(res, "staffed_markers", ()))
     agvs = [
         {"id": a.id, "keyframes": a.keyframes}
         for a in res.agvs

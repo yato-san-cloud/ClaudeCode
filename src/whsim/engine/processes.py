@@ -1977,9 +1977,15 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
                     if (hops < max_hops and not to_exit) else [])
         if branches:
             i = 0
+            # 分岐待ちの列の席。起こされて再走査しても**手放さない**: 荷は1mmも動いて
+            # いないのに席を取り直すと、同じ瞬間に着いた後続の後ろへ回され、絵の上で
+            # 荷が本線を**後ろへ戻る**（ラインの上で起きてはいけないこと）。
+            stall = None
             while True:
                 arc_j = branches[i][0]
                 if arc_j > arc + 1e-9:
+                    _stall_leave(world, stall)   # 動く＝列から出る
+                    stall = None
                     yield from _ride_belt(world, line, arc, arc_j, tote)
                     arc = arc_j
                 # Every 引き込み hanging off THIS junction — a trunk is normally
@@ -2021,15 +2027,16 @@ def _convey_chain(world: World, order: Order, arrival: float, line, arc: float,
                 # 分岐で止まった荷は本線のスロットを握ったままここに立つ。後ろの荷も
                 # 同じ合流点で止まるので、列はこの arc から上流へ 1個/ピッチ で伸びる
                 # （本線が引き込み待ちで埋まる、その絵そのもの）。
-                held = _stall_join(world, line, arc, tote)
+                if stall is None:
+                    stall = _stall_join(world, line, arc, tote)
                 if stp is not None:
                     yield wake | stp.open_ev(env)
                 else:
                     yield wake
-                _stall_leave(world, held)
                 spur_wait += env.now - wait0
                 if stp is not None and stp.is_open:
                     break               # 開放 ⇒ 分岐を諦めて末端(カーブ)へ流れる
+            _stall_leave(world, stall)   # 分岐へ入る/先へ進む＝ここで列を出る
 
         if spur is not None:
             pack_wait += spur_wait

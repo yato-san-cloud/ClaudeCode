@@ -321,7 +321,10 @@ def _normalize_assumptions(assumptions) -> tuple[list[dict], bool]:
                 level = _assumption_level(item[1] if len(item) > 1 else "")
             else:
                 text, level = item, "info"
-            text = _strip_html(text)
+            # NOT _strip_html here: an assumption is authored prose, and
+            # 「在庫 <200 件」 must not lose its condition to a tag-stripper. Each
+            # renderer escapes for its own format instead.
+            text = str(text or "").strip()
             if text:
                 out.append({"text": text, "level": level})
     except TypeError:  # not iterable

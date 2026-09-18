@@ -698,7 +698,8 @@ def sweep(base_scenario: dict[str, Any] | str,
     paths = lab.write_sweep_table(sdir, manifest, rows, mets)
     ok = [r for r in rows if r["status"] == "ok"]
 
-    # 効かなかった編集（パス単位に畳む — 同じ格子は全ケースで同じパスを編集する）。
+    # 効かなかった編集（パス単位に畳む。連動軸は水準ごとに編集するパスが違い得るので、
+    # 「どのケースで起きたか」まで残す）。
     unapplied: dict[str, dict] = {}
     for r in rows:
         for u in r.get("unapplied_edits") or ():
@@ -733,17 +734,17 @@ def sweep(base_scenario: dict[str, Any] | str,
             "添字違いなど）。焼かれた model.json で確かめてください。")
 
     def row_out(r: dict) -> dict:
-        out = {"case": r["case"], "seed": r["seed"],
-               "params": _compact_params(r.get("params")),
-               "status": r["status"], "run_id": r.get("run_id"),
-               "kpis": r.get("kpis") or {},
-               "unapplied_edits": r.get("unapplied_edits") or [],
-               "error": r.get("error")}
+        o = {"case": r["case"], "seed": r["seed"],
+             "params": _compact_params(r.get("params")),
+             "status": r["status"], "run_id": r.get("run_id"),
+             "kpis": r.get("kpis") or {},
+             "unapplied_edits": r.get("unapplied_edits") or [],
+             "error": r.get("error")}
         if r.get("tied"):
             # 応答は水準名＋編集本数まで（全量は table.json の rows[].tied）。
-            out["tied"] = {k: {"name": v["name"], "edits": len(v["edits"])}
-                           for k, v in r["tied"].items()}
-        return out
+            o["tied"] = {k: {"name": v["name"], "edits": len(v["edits"])}
+                         for k, v in r["tied"].items()}
+        return o
 
     out = {
         "sweep_id": sweep_id,
@@ -942,6 +943,10 @@ INSTRUCTIONS = (
     "倉庫の離散事象シミュレータ whsim の実験装置。あなたは実験者、DESは装置です。\n"
     "run_scenario / apply_diff_and_run で実験し、compare_runs で比べ、query_events で"
     "根拠のログを確かめ、generate_report で記録します。\n"
+    "sweep の格子は既定で直積です。1つの実験変数が複数パスの編集になるとき"
+    "（引き込みごとの台数＝station N本、停止線の位置＝線とそこに立つ人）は、"
+    '軸を {"軸名": {"levels": [{"name": …, "edits": {パス: 値, …}}, …]}} と書いて'
+    "ください — 1水準がまとめて当たり、ケース数は水準数で数えます。\n"
     "返る数値は全て runs/<run_id>/ の成果物（events.jsonl→summary.json）由来です。"
     "成果物に無い数値を自分で作らないでください — レポートの照合(verify_report)で落ちます。"
 )

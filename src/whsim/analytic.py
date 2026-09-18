@@ -450,6 +450,47 @@ def _belt_rate(cv) -> float:
     return belt_speed(cv) / belt_pitch(cv)
 
 
+def _wired_belts(model: WarehouseModel) -> list:
+    """The belts ``engine.build`` actually wires — **the flow's answer, not the drawing's**.
+
+    Two filters, both of them the engine's own:
+
+    * degenerate entries (<2 points, or every point coincident) are not physical
+      transport, so ``build()`` skips them (never blocks);
+    * ``flowgraph.conveyor_ids_in_use`` gates the rest — 描いただけの設備は「物理的
+      事実」であって「設計の意思」ではない (不変条件13). ``None`` means no leg of the
+      flow takes goods by conveyor at all ⇒ **no belt runs**, which is an empty list
+      here.
+
+    Split out of :func:`_belt_stages` because the mechanism PREDICATES need the same
+    belt set: ``_has_gate``/``_has_stopper`` used to read ``resources.conveyors``
+    wholesale, so a 停止線 drawn on a belt **no ``flow_edge`` routes through** was a
+    stopper to this module and nothing at all to the engine — and the oracle then
+    DECLINED to mirror a mechanism the run does not have. That is the same
+    「片方にしか見えないベルト」 hazard the belt-access rule warns about: gate on the
+    flow in one place, read every drawn belt in the other, and the two end up
+    computing different warehouses (不変条件11).
+    """
+    belts = []
+    for cv in (model.resources.conveyors or []):
+        pts = [(float(p[0]), float(p[1])) for p in (cv.points or []) if len(p) >= 2]
+        if len(pts) >= 2 and sum(math.dist(pts[i - 1], pts[i])
+                                 for i in range(1, len(pts))) > 1e-9:
+            belts.append(cv)
+    if not belts:
+        return []
+
+    from whsim import flowgraph
+
+    try:
+        designed = flowgraph.conveyor_ids_in_use(model)
+    except Exception:          # noqa: BLE001 — a broken flow must not break the estimate
+        designed = set()
+    if designed is None:
+        return []              # drawing a belt is not designing one onto the flow
+    return [cv for cv in belts if str(cv.id) in designed] if designed else belts
+
+
 def _belt_stages(model: WarehouseModel):
     """The conveyor line the DESIGN commits to, as SERIAL stages.
 
@@ -477,14 +518,7 @@ def _belt_stages(model: WarehouseModel):
     are what ``linemech``'s three mechanism mirrors need, and re-deriving the
     chain a second time beside this one is exactly the drift invariant 11 forbids.
     """
-    # Degenerate entries (<2 points, or every point coincident) are not physical
-    # transport — build() skips them, so this must too (never blocks).
-    belts = []
-    for cv in (model.resources.conveyors or []):
-        pts = [(float(p[0]), float(p[1])) for p in (cv.points or []) if len(p) >= 2]
-        if len(pts) >= 2 and sum(math.dist(pts[i - 1], pts[i])
-                                 for i in range(1, len(pts))) > 1e-9:
-            belts.append(cv)
+    belts = _wired_belts(model)
     if not belts:
         return None
 
@@ -495,17 +529,6 @@ def _belt_stages(model: WarehouseModel):
             return fn(model) or set()
         except Exception:      # noqa: BLE001 — a broken flow must not break the estimate
             return set()
-
-    try:
-        designed = flowgraph.conveyor_ids_in_use(model)
-    except Exception:          # noqa: BLE001
-        designed = set()
-    if designed is None:
-        return None            # drawing a belt is not designing one onto the flow
-    if designed:
-        belts = [cv for cv in belts if str(cv.id) in designed]
-    if not belts:
-        return None
 
     by_id = {str(cv.id): cv for cv in belts}
     spur_ids = {r for r in refs(flowgraph.pack_conveyor_ids) if r in by_id}
@@ -695,7 +718,7 @@ def _agv_interference(model: WarehouseModel, det: dict | None,
     **名乗るときに開示する実測**（``ecommerce_xl``、ON/OFF 同一シード15構成）:
     通路待ちは AGV の busy の **1.5〜35.7%**、``agv_utilization`` の動きは
     **−0.025〜+0.044**（一致ピン 0.08 の半分以下・符号は両方向）、スループットは
-    **−2〜−30%**（台数が増えるほど効く）。⚠️ **能力側は映していない**ので、
+    **−2〜−34%**（台数が増えるほど効く）。⚠️ **能力側は映していない**ので、
     大きな船団では DES の方が出荷が少ない。稼働率については、自由走行の読みが実測の
     ``agv_utilization`` を 15/15 構成で下回らなかった（最小マージン +0.005）が、
     これは**測っただけで証明ではない**。
@@ -721,7 +744,7 @@ def _agv_interference(model: WarehouseModel, det: dict | None,
         "segments": segs,
         "measured_wait_share_of_busy": [0.015, 0.357],
         "measured_utilization_delta": [-0.025, 0.044],
-        "measured_throughput_delta": [-0.30, -0.02],
+        "measured_throughput_delta": [-0.34, -0.02],
     }
 
 
@@ -1047,6 +1070,21 @@ def _overflow_cascade(bank, upstream, lam: float, capacity: float,
     that is not free instead of waiting), so the water-filling profile above is the
     wrong shape; ``_line_estimate`` routes that case to ``linemech.pull`` before
     ``_conveyor_estimate`` is reached, and 停止線 likewise to ``linemech.gate``.
+
+    ⚠️ **その前提は「降りる機構が1つも書かれていない」ときだけ真**。物理ストッパー /
+    時間分離リリース / 完成品staging が書かれていると ``_line_estimate`` は**両方の鏡を
+    使わずに降りる**ので、``divert_policy`` が何であろうとここへ来る——つまり
+    **pull のラインにこの `auto` の水詰めが当たっている**。「pull は linemech が先に
+    取るので届かない」と書いてあったのは、その組み合わせが出来る前の話だった。
+
+    **測った**（合成144構成＝方式2×需要3×引き込み3×台数2×staging有無×周期2、8時間、
+    2 seed、全構成にストッパー在り。``block_ratio_est`` 対 実測 ``conveyor_block_ratio``）:
+    pull で **平均 +0.436・範囲 −0.159〜+0.689**、auto で 平均 +0.289・範囲
+    −0.162〜+0.655。つまり **pull へ当てても辛い側**で、甘い側に出たのは各方式
+    1/72 構成だけ。しかもその1構成は **auto でも同じだけ甘い**（−0.162）ので、
+    原因は方式ではなく**ストッパーの列が本線のスロットを握ること**（この縦続は
+    列を持っていない）＝鏡の無い機構そのものである。方式で分岐しても直らないので
+    分岐は足さず、**何が起きているかを書く**。
     """
     # A 引き込み with NO hands takes one load per slot and never gives it back, so
     # after the first minutes it is simply not part of the bank any more — which is
@@ -1332,26 +1370,81 @@ def _conveyor_estimate(model: WarehouseModel, lam: float, n_packers: int,
 # its 50 ms budget (the editor re-estimates while the mouse is still down) and the
 # catalogue byte-identical.
 
+def _gate_reading(cv) -> tuple[bool, bool] | None:
+    """``Conveyor.stop_gate`` → ``(mode:"all"か, pullableか)``、ゲートでなければ ``None``.
+
+    ``engine.build._resolve_gate`` の写し、**1本に集約した**もの。以前は「ゲートが
+    在るか」と「ストッパーか」が別々の緩い読みで、どちらも build と少しずつ違って
+    いた（``{"mode": "everything"}`` は build ではゲートではないのに在ると読み、
+    「選択停止＋リリース」は build では列が育つのにストッパーと読まなかった）。
+    写しである以上、一致は ``tests/test_line_stopper.py`` の parity テストが
+    固定する（不変条件11）。
+
+    * ``at_m`` が数でなければゲートではない（build は ``None`` を返す）。
+    * ``mode: "all"`` は**名前を1つも挙げなくてもゲート**（選り分けないのが物理
+      ストッパーの定義）。そうでなければ ``stop_states``/``pass_states`` のどちらかが
+      要る＝何も名指さないゲートはゲートではない（never-blocks: 既存モデルが事故で
+      ゲートを獲得しない）。
+    * ``pullable`` の既定は ``mode`` に従う（``build`` と同じ既定値）。
+    """
+    spec = getattr(cv, "stop_gate", None)
+    if not isinstance(spec, dict) or not spec:
+        return None
+    try:
+        float(spec.get("at_m", 0.0))
+    except (TypeError, ValueError):
+        return None
+    stop_all = str(spec.get("mode", "select") or "select").strip().lower() == "all"
+
+    def names(key: str) -> bool:
+        v = spec.get(key)
+        if isinstance(v, str):
+            return True                 # ``build._kind_set`` reads a str as ONE name
+        return isinstance(v, (list, tuple, set, frozenset)) and any(
+            str(x) for x in v)
+
+    if not (stop_all or names("stop_states") or names("pass_states")):
+        return None
+    return stop_all, bool(spec.get("pullable", stop_all))
+
+
+def _gated_belts(model: WarehouseModel) -> list:
+    """The belts that carry a 停止線 ``build`` would actually wire.
+
+    The cheap test comes FIRST — a model with no ``stop_gate`` dict anywhere (every
+    bundled template) returns before ``_wired_belts`` resolves the flow graph, so
+    the catalogue pays nothing for this. Once one is authored the flow's answer is
+    what counts: a gate on a belt no ``flow_edge`` routes through is not a gate,
+    because the engine never builds that belt.
+    """
+    if not any(isinstance(getattr(cv, "stop_gate", None), dict) and cv.stop_gate
+               for cv in (model.resources.conveyors or [])):
+        return []
+    return [cv for cv in _wired_belts(model) if _gate_reading(cv) is not None]
+
+
 def _has_gate(model: WarehouseModel) -> bool:
-    """Does any drawn belt carry a 停止線? (a dict is authored, ``None`` is not)"""
-    return any(isinstance(getattr(cv, "stop_gate", None), dict) and cv.stop_gate
-               for cv in (model.resources.conveyors or []))
+    """Does any WIRED belt carry a 停止線 ``build`` would actually resolve?"""
+    return bool(_gated_belts(model))
 
 
 def _has_stopper(model: WarehouseModel) -> bool:
-    """物理ストッパー（全部止まる停止線・引ける列）が書かれているか。
+    """列の育つ停止線（＝``build.Stopper``）が書かれているか。
 
-    ``engine.build._resolve_gate`` の同じ2つの読み: ``mode: "all"`` は選択性の無い
-    ストッパー、``pullable`` は「止まった荷を人が引ける列」。どちらも列が育つので、
-    停止線の閉形式（ゲートの手が唯一のサーバ）はもう当てはまらない。
+    ``engine.build`` の条件をそのまま読む: 停止線は ``mode: "all"``（選択性の無い
+    物理ストッパー）か ``pullable``（止まった荷を人が引ける列）か、**リリース
+    スケジュールが走っている**ときに ``Stopper`` になる。3つ目を落としていた間、
+    「選択停止ゲート＋時間分離リリース」の図面は engine では列が育ち周期で開くのに、
+    解析は ``stopper`` を名乗らなかった——降りる先は同じでも、**鏡の無い機構を
+    名前で数え落とす**のは不変条件11が禁じているドリフトそのもの。
     """
-    for cv in (model.resources.conveyors or []):
-        spec = getattr(cv, "stop_gate", None)
-        if not isinstance(spec, dict) or not spec:
-            continue
-        if str(spec.get("mode", "select") or "select").strip().lower() == "all":
-            return True
-        if spec.get("pullable"):
+    gated = _gated_belts(model)
+    if not gated:
+        return False
+    scheduled = _release_plan(model) is not None
+    for cv in gated:
+        stop_all, pullable = _gate_reading(cv)
+        if stop_all or pullable or scheduled:
             return True
     return False
 
@@ -1433,6 +1526,9 @@ def _release_drain(model: WarehouseModel, line: dict, n_packers: int,
     * ``per_hr`` は**較正値（上界ではない）**。上の break の議論は「drain がシミュ時間
       を消費しない」ときに厳密で、本線に空きが無くて待つ窓ではその間に梱包が進む分だけ
       甘くなる。窓長 × μ_pack の項を**落とした**読みで、実測でしか正当化できない。
+      ただし積み付け ``stack_per_hr`` との ``min`` だけは**証明できる**側（出て行った
+      完成品は全部 ``_stack_out`` を通る）——混ざっているので、能力に効く数字全体は
+      「上界ではない」と読むこと。
 
     **実測**（合成フィクスチャ 288構成＝周期3×置き場4×引き込み3×台数2×窓割合2×
     board 2、需要は全構成の天井を超える 3000件/h、8時間、2 seed 平均）:
@@ -1483,13 +1579,23 @@ def _release_drain(model: WarehouseModel, line: dict, n_packers: int,
     bound = per_cycle + window * (n_packers / pack_time_s)
     if plan["board_s"] > 0.0:
         bound = min(bound, per_cycle + window / plan["board_s"])
+    # 積み付け: 出て行った完成品は**全部** ``processes._stack_out`` を通り、そこの
+    # ``stack_crew`` は容量 ``stackers``・サービス ``3600/stack_rate_per_hr``。
+    # だから ``stackers × stack_rate_per_hr`` は**証明できる**上界（未梱包で流れ出た
+    # 荷も同じ口を通るので、実際にはこれより更に少ない）。書かれていなければ engine も
+    # 待たせないので制約ではない。
+    stack_per_hr = (plan["stackers"] * plan["stack_rate_per_hr"]
+                    if plan["stack_rate_per_hr"] > 0.0 else float("inf"))
+    per_hr = min(per_cycle / period * 3600.0, stack_per_hr)
     return {
-        "per_hr": per_cycle / period * 3600.0,
-        "bound_per_hr": bound / period * 3600.0,
+        "per_hr": per_hr,
+        "bound_per_hr": min(bound / period * 3600.0, stack_per_hr),
         "per_cycle": per_cycle,
         "staging_slots": room,
         "blocked_hands": hands,
         "period_s": period,
+        # ``inf`` は JSON に出せないので「制約ではない」は ``None`` で言う
+        "stack_per_hr": None if stack_per_hr == float("inf") else stack_per_hr,
         # 「上界」ではなく「較正値」であることを読む側に見せる (docstring と同じ主張)
         "calibrated": True,
     }
@@ -1516,15 +1622,17 @@ def _unmirrored_line_mechanics(model: WarehouseModel) -> list[str]:
     out = []
     if _has_stopper(model):
         out.append("stopper")
-    if _release_window(model) is not None:
+    if _release_plan(model) is not None:
         out.append("release_schedule")
-        spec = getattr(model.process, "bench_staging", None)
-        if isinstance(spec, dict) and spec:
-            try:
-                if float(spec.get("capacity", 0) or 0) > 0:
-                    out.append("bench_staging")
-            except (TypeError, ValueError):
-                pass
+        # ``build`` only hands out the 完成品staging Stores when a stopper exists to
+        # empty them (「流す手段が無いバッファは壁」), and with a release schedule
+        # authored EVERY drawn 停止線 becomes one — including a plain 選択停止ゲート,
+        # which is why the test is ``_has_gate`` and not ``_has_stopper``. A drawing
+        # with a schedule but no gate at all wires nothing, so declaring 置き場 there
+        # would name a mechanism the run does not have (and, since ``_release_drain``
+        # reads this list, would cap a line the engine never gates).
+        if _staging_capacity(model) > 0 and _has_gate(model):
+            out.append("bench_staging")
     return out
 
 
@@ -1598,7 +1706,7 @@ def _line_estimate(model: WarehouseModel, lam: float, n_stations: int,
     スループットより上**（平均 +472%・最悪 +1614%）だった——名乗ってさえいれば良い
     わけではない。staging の排出天井 (:func:`_release_drain`) はその1点だけを閉じる。
     staging を張っていない図面（ストッパー単独 / リリースのみ）では歴史的な答えは
-    実測の 1.01〜1.81倍で収まっており（48構成、甘い側に外れた構成は0）、天井は計算
+    実測の 1.01〜1.81倍で収まっており（64構成、甘い側に外れた構成は0）、天井は計算
     されないまま歴史的な数字がそのまま出る。
     """
     unmirrored = _unmirrored_line_mechanics(model)

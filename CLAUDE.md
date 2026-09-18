@@ -108,7 +108,15 @@ replay/MapMaker data contracts, and extension points — read it before a large 
   **測った上で映さない**と決めた（DES感度が稼働率0.013以下＝ピンの1/6、閉形式は
   オラクルを悪化させ甘い側へ倒した）→ `routing_policy`/`routing_policy_mirrored` で
   名乗るだけ。⚠️ `apparel`=s_shape / `food_chilled`=return を**既に**使っている。
-  AGV同士の干渉は未鏡写し。
+  **AGV同士の干渉も同じ扱い**（`analytic._agv_interference`）: 歩行側と同型の
+  「セル1つ＝M/M/1」を実装して測ったら上界/実測の待ちが **0.055〜0.17**（27構成）＝
+  甘い側に外れる上界は上界ではない。AGVのロックは**レグ丸ごと**を保持するので追従が
+  自己消滅せず直列化し、鍵はレグ中点の3m量子化なので交通が数個の鍵に集中する
+  （床の平均ρとホットな鍵のρが2桁違う。どれが熱いかは**経路探索**でしか分からず
+  解析は50ms予算で経路探索をしない）。逆の極（完全直列化 `1/trip_s`）は上界だが
+  6〜19倍辛く答えを破壊する ⇒ `agv_interference` キーで**名乗る**（ONのときだけ出る）。
+  開示する実測: 待ちはAGV busy の 1.5〜35.7%、`agv_utilization` は −0.025〜+0.044
+  （ピン0.08の内側）、スループットは −2〜−34%。⚠️ **能力側は映していない**。
 - `distances.py` — tolerant import of a measured shelf-to-shelf distance matrix (CSV/JSON).
   Pickers and AGVs are individual agents (AGV mode is a pipeline: AGV agents fetch totes →
   ready queue → pickers handle), emitting trajectory keyframes for replay. Batch/zone/wave

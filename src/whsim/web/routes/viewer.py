@@ -90,8 +90,11 @@ def api_export_viewer(name: str):
     except Exception:  # noqa: BLE001 — scorecard is optional, never blocks
         scorecard = None
 
+    # provenance travels WITH the assumptions block: 「実データ N%」 is part of what
+    # this proposal assumes, not decoration, so the mailed viewer carries it too.
     html_str = build_viewer_html(
-        model, replay=replay, kpis=kpis, scorecard=scorecard, png_bytes=png_bytes)
+        model, replay=replay, kpis=kpis, scorecard=scorecard, png_bytes=png_bytes,
+        provenance_summary=prov)
 
     headers = {
         "Content-Disposition": 'attachment; filename="proposal_viewer.html"',

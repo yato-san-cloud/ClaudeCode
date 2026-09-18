@@ -115,10 +115,10 @@ def _assumptions_html(kpis: dict | None, provenance_summary: str,
     that produced KPIs (an un-run model would print a row of 「—」 前提)."""
     from ._data import _assumption_blocks
 
-    blocks = _assumption_blocks(kpis or {}, provenance_summary or "",
-                                assumptions, model=model)
     if not kpis and assumptions is None:
         return ""
+    blocks = _assumption_blocks(kpis or {}, provenance_summary or "",
+                                assumptions, model=model)
     items = "".join(
         f'<li class="lv-{html.escape(b["level"])}">{html.escape(b["text"])}</li>'
         for b in blocks

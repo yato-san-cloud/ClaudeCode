@@ -277,7 +277,10 @@ def _drawn_belts(model) -> list[tuple[str, list[tuple[float, float]], object]]:
     out: list[tuple[str, list[tuple[float, float]], object]] = []
     for cv in (getattr(getattr(model, "resources", None), "conveyors", None) or []):
         raw = getattr(cv, "points", None) or []
-        pts = [(float(p[0]), float(p[1])) for p in raw if len(p) >= 2]
+        try:
+            pts = [(float(p[0]), float(p[1])) for p in raw if len(p) >= 2]
+        except (TypeError, ValueError):
+            continue        # one unreadable belt must not cost the other checks
         if len(pts) < 2:
             continue
         if sum(math.dist(pts[i - 1], pts[i]) for i in range(1, len(pts))) <= 1e-9:
